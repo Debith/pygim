@@ -63,6 +63,13 @@ class Factory(type):
         cls.__dict__[_py_name_mangling(cls.__name__, "map")][func.__name__] = func
         return func
 
+    def __getitem__(cls, key):
+        map = cls.__dict__[_py_name_mangling(cls.__name__, "map")]
+        try:
+            return map[key]
+        except KeyError:
+            raise FactoryMethodNotFoundException(list(map), key) from None
+
     def __new__(self, name, bases, attrs):
         new_class_name = f"{name.title().replace('_', '')}Factory"
 
@@ -70,7 +77,7 @@ class Factory(type):
             return Factory.__factories[new_class_name]
         except KeyError:
             attrs = {
-                _py_name_mangling(new_class_name, "map"): {},
+                _py_name_mangling(new_class_name, "map"): attrs,
                 "register": classmethod(self.__register),
                 }
 

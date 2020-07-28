@@ -6,12 +6,24 @@ ExampleFactory = create_factory("Example")
 
 @ExampleFactory.register
 def create_test_object():
-    return "Test"
+    return "Instance Object"
+
+
+def create_rock():
+    return "Rock"
+
+
+def create_paper():
+    return "Paper"
+
+
+def create_cannon():
+    return "Cannon"
 
 
 def test_create_object_via_function():
     actual_text = ExampleFactory.create_test_object()
-    if actual_text != "Test":
+    if actual_text != "Instance Object":
         assert False
 
 
@@ -40,7 +52,17 @@ def test_registered_methods_stay_with_factories_of_same_name():
     new_factory2 = create_factory('new')
     actual_text = new_factory2.create_test_object()
 
-    if actual_text != "Test":
+    if actual_text != "Instance Object":
+        assert False
+
+
+def test_creating_factory_with_object_map():
+    ObjectFactory = create_factory('objects', dict(rock=create_rock,
+                                                   paper=create_paper,
+                                                   cannon=create_cannon,
+                                                   ))
+
+    if ObjectFactory['rock']() != "Rock":
         assert False
 
 
