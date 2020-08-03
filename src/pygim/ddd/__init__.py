@@ -1,1 +1,1 @@
-from .factory import create_factory
+from .factory import create_factory, FactoryMethodRegisterationException
