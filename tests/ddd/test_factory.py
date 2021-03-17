@@ -26,15 +26,26 @@ def create_cannon():
     return "Cannon"
 
 
-@pytest.mark.parametrize('name,namespace,expected_name', [
-    ('namespace.test', Unset, "namespace.test"),
-    ('test', 'namespace', "namespace.test"),
-    ('namespace.middle.test', Unset, "namespace.middle.test"),
-    ('middle.test', "namespace", "namespace.middle.test"),
-    ('test', 'namespace.middle', "namespace.middle.test")
+class Shotgun:
+    """ Dangerous thing. """
+
+
+
+@pytest.mark.parametrize('name,namespace,enforced_type,expected_name', [
+    ('namespace.test', Unset, Unset, "namespace.test"),
+    ('test', 'namespace', Unset, "namespace.test"),
+    ('namespace.middle.test', Unset, Unset,"namespace.middle.test"),
+    ('middle.test', "namespace", Unset, "namespace.middle.test"),
+    ('test', 'namespace.middle', Unset, "namespace.middle.test"),
+    (None, 'namespace', Shotgun, "namespace.Shotgun"),
+    (None, Unset, Shotgun, "test_factory.Shotgun"),
 ])
-def test_valid_naming_combinations(name, namespace, expected_name):
-    if namespace is not Unset:
+def test_valid_naming_combinations(name, namespace, enforced_type, expected_name):
+    if enforced_type and namespace:
+        new_factory = Factory(name, namespace=namespace, enforced_type=enforced_type)
+    elif enforced_type is not Unset:
+        new_factory = Factory(name, enforced_type=enforced_type)
+    elif namespace is not Unset:
         new_factory = Factory(name, namespace=namespace)
     else:
         new_factory = Factory(name)
@@ -123,8 +134,23 @@ def test_creating_factory_with_object_map():
     assert results == ['Rock', 'Rock', 'Paper', 'Paper', 'Paper', 'Cannon', 'Cannon']
 
 
+def test_factory_with_enforced_type():
+    class MyFactory(Factory):
+        """ For automatic naming. """
+
+    class MyType:
+        """ Use this as name. """
+
+    my_factory = Factory(enforced_type=MyType)
+    my_factory2 = Factory["test_factory.MyType"]
+    my_factory3 = MyFactory(enforced_type=MyType)
+
+    assert id(my_factory) == id(my_factory2)
+    assert id(my_factory) != id(my_factory3)
+
+
 if __name__ == "__main__":
     from pygim.testing import run_tests
 
     # With coverage run, tests fail in meta.__call__ due to reload.
-    run_tests(__file__, factory, coverage=True)
+    run_tests(__file__, factory, coverage=False)
