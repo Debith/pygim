@@ -9,7 +9,7 @@ from pygim.system import factory
 object_factory = Factory('test.TestFactory')
 
 
-@object_factory.register
+@object_factory.register(override=True)  # Module reload forces this when running tests
 def create_test_object():
     return "Instance Object"
 
@@ -147,6 +147,19 @@ def test_factory_with_enforced_type():
 
     assert id(my_factory) == id(my_factory2)
     assert id(my_factory) != id(my_factory3)
+
+
+def test_caching_works():
+    name1 = factory.Name()
+    name2 = factory.Name()
+    name3 = factory.Name("test")
+    name4 = factory.Name("test")
+    name5 = factory.ValidName("test")
+
+    assert id(name1) == id(name2)
+    assert id(name3) == id(name4)
+    assert id(name1) != id(name4)
+    assert id(name4) == id(name5)
 
 
 if __name__ == "__main__":

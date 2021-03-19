@@ -2,6 +2,7 @@
 This contains a generic factory that works in open-closed principle.
 """
 
+from functools import partial
 from typing import MutableMapping, Mapping, Callable, Any, Union
 from collections import defaultdict as ddict
 import inspect
@@ -20,34 +21,43 @@ class NameMeta(type):
     def precache(cls, name, name_obj):
         cls._cache[name] = name_obj
 
+    def _create_sublcass_instance(self, *args, **kwargs):
+        try:
+            instance = super().__call__(*args, **kwargs)
+        except TypeError:
+            instance = super().__call__(*kwargs)
+        return instance
+
+    def _identify_and_create(self, name):
+        if isinstance(name, str):
+            name_obj = ValidName(name)
+        elif inspect.isroutine(name):
+            name_obj = ValidName(name.__name__)
+        elif inspect.isclass(name):
+            name_obj = ValidName(name.__name__)
+        else:
+            raise TypeError(f"Can't identify name for {self}")
+        return name_obj
+
     def __call__(self, name=None) -> Any:
-        if self is not Name:
-            try:
-                instance = super().__call__(name)
-            except TypeError:
-                instance = super().__call__()
-            self._cache[name] = instance
-            return instance
-
-        if isinstance(name, Name):
-            return name
-
-        if name is None or not name:
-            return self._cache['']
-
+        # Return the cached item immediately!
         try:
             return self._cache[name]
         except KeyError:
-            if isinstance(name, str):
-                name_obj = ValidName(name)
-            elif inspect.isroutine(name):
-                name_obj = ValidName(name.__name__)
-            elif inspect.isclass(name):
-                name_obj = ValidName(name.__name__)
-            else:
-                raise TypeError(f"Can't identify name for {self}")
-            return name_obj
+            pass
 
+        # Sometimes it is possible to call this function providing another
+        # name object. That can be returned back right away.
+        if isinstance(name, Name):
+            return name
+
+        if self is not Name:
+            instance = self._create_sublcass_instance(name)
+            self._cache[name] = instance
+            return instance
+
+        # Caching happens automatically when the subclass is created.
+        return self._identify_and_create(name)
 
 
 class Name(metaclass=NameMeta):
@@ -66,7 +76,7 @@ class NoName(Name):
         return ""
 
     def __hash__(self):
-        raise NotImplementedError("This name is empty and can't be")
+        return 0
 
     def __eq__(self, _):
         return False
@@ -152,8 +162,9 @@ class ValidName(Name):
     def has_namespace(self):
         return "." in self._name
 
-
-NameMeta.precache("", NoName())
+_no_name = NoName()
+NameMeta.precache("", _no_name)
+NameMeta.precache(None, _no_name)
 
 DEFAULT_NAMESPACE = Name('__main__')
 
@@ -181,36 +192,42 @@ class FactoryMeta(type):
             raise Exception()
         return factory_name
 
-
     def _register_factories(self, factory_callables, factory_instance):
         for name, factory_callable in factory_callables.items():
             if factory_instance._obj_type and not isinstance(factory_callable, factory_instance._obj_type):
                 raise Exception("Failed do the right thing!")
-            self._register_type(factory_callable, factory_instance, alias=name)
+            self._register_type(factory_callable, factory_instance, alias=name, alias_only=False)
 
     @staticmethod
-    def _to_dict(name, func, mapping):
+    def _to_dict(name: Name, func, mapping, override):
+        assert isinstance(name, Name)
         try:
             existing_func = mapping[name]
-            if id(existing_func) != id(func):
-                raise Exception('Override with new')
-        except KeyError:
-            mapping[str(name)] = func
+            if id(existing_func) == id(func):
+                return
 
-    def _register_type(self, func, factory_instance, *, alias=None):
-        func_name = Name(func)
-        if not func_name.startswith(_CREATE_PREFIX):
+            if not override:
+                raise FactoryMethodRegisterationException('Override with new')
+        except KeyError:
+            pass
+
+        mapping[name] = func
+
+    def _register_type(self, object_factory, factory_instance, *, alias=None, override=False, alias_only=True):
+        object_factory_name = Name(object_factory)
+        if inspect.isroutine(object_factory) and not object_factory_name.startswith(_CREATE_PREFIX):
             raise FactoryMethodRegisterationException('Fail')
 
-        self._to_dict(func_name.without_prefix, func, factory_instance._objects)
-        self._to_dict(func_name.with_prefix,    func, factory_instance._methods)
+        if not alias or alias and not alias_only:
+            self._to_dict(object_factory_name.without_prefix, object_factory, factory_instance._objects, override)
+            self._to_dict(object_factory_name.with_prefix,    object_factory, factory_instance._methods, override)
 
         if not alias:
             return
 
         alias = Name(alias)
-        if alias != func_name.without_prefix:
-            self._to_dict(alias, func, factory_instance._objects)
+        if alias != object_factory_name.without_prefix:
+            self._to_dict(alias, object_factory, factory_instance._objects, override)
 
     def __getitem__(self, factory_name):
         factory_name = Name(factory_name)
@@ -276,21 +293,30 @@ class Factory(metaclass=FactoryMeta):
     my_factory[object_name]()  # Creates an instance of MyObject class
     ```
     """
-    def register(self, func: Union[type, Callable], *, aliases=None):
-        self.__class__._register_type(func, self)
-        return func
+    def register(self, func=None, **kwargs):
+        """
+        Registers factory method into this factory. This function works also as a decorator.
+        """
+        def inner_func(func: Union[type, Callable], *, alias=None, override=False, alias_only=True):
+            self.__class__._register_type(func, self, alias=alias, override=override, alias_only=alias_only)
+            return func
+
+        if callable(func):
+            return inner_func(func, **kwargs)
+
+        return partial(inner_func, **kwargs)
 
     def __getattribute__(self, name: str) -> Any:
         try:
             return super().__getattribute__(name)
         except AttributeError:
             try:
-                return self._methods[name]
+                return self._methods[Name(name)]
             except KeyError:
                 raise AttributeError('Epic Fail')
 
     def __getitem__(self, key):
-        return self._objects[key]
+        return self._objects[Name(key)]
 
     def __repr__(self):
         return f'{self.__class__.__name__}("{self._name}")'  #pragma:nocover
