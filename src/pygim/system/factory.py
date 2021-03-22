@@ -2,8 +2,9 @@
 This contains a generic factory that works in open-closed principle.
 """
 
+from abc import ABCMeta, abstractmethod, abstractproperty
 from functools import partial
-from typing import MutableMapping, Mapping, Callable, Any, Union
+from typing import MutableMapping, Mapping, Callable, Any, Union, TypeVar, Text, Optional, Type
 from collections import defaultdict as ddict
 import inspect
 
@@ -12,10 +13,13 @@ from ..system.exceptions import FactoryMethodRegisterationException
 __all__ = ('Factory', 'FactoryMethodRegisterationException')
 
 _CREATE_PREFIX = "create_"
+N = TypeVar('N', bound='Name')
+FM = TypeVar('FM', bound="FactoryMeta")
+F = TypeVar('F', bound="Factory")
 
 
-class NameMeta(type):
-    _cache = {}
+class NameMeta(ABCMeta):
+    _cache: dict = {}
 
     @classmethod
     def precache(cls, name, name_obj):
@@ -28,7 +32,8 @@ class NameMeta(type):
             instance = super().__call__(*kwargs)
         return instance
 
-    def _identify_and_create(self, name):
+    def _identify_and_create(self, name: Text) -> N:
+        name_obj: Optional[Name] = None
         if isinstance(name, str):
             name_obj = ValidName(name)
         elif inspect.isroutine(name):
@@ -39,7 +44,7 @@ class NameMeta(type):
             raise TypeError(f"Can't identify name for {self}")
         return name_obj
 
-    def __call__(self, name=None) -> Any:
+    def __call__(self, name=None, *_, **kwargs) -> Any:
         # Return the cached item immediately!
         try:
             return self._cache[name]
@@ -62,6 +67,32 @@ class NameMeta(type):
 
 class Name(metaclass=NameMeta):
     """ Base class for everything. """
+    def __init__(self: N, *_):
+        """ """
+
+    @property
+    def namespace(self: N) -> N:
+        """ Returns the namespace from this name. """
+
+    def __or__(self: N, other: Union[Text, N]) -> N:
+        """ """
+
+    def __add__(self: N, other: Union[Text, N]) -> N:
+        """ """
+
+    def has_namespace(self: N) -> bool:
+        """ """
+
+    def startswith(self: N, text: Text) -> bool:
+        """ """
+
+    @property
+    def with_prefix(self: N) -> N:
+        """ """
+
+    @property
+    def without_prefix(self: N) -> N:
+        """ """
 
 
 class NoName(Name):
@@ -81,13 +112,13 @@ class NoName(Name):
     def __eq__(self, _):
         return False
 
-    def __add__(self, other):
+    def __add__(self, other: Union[Text, Name]):
         assert isinstance(other, (str, Name))
         if str(other):
             return Name(other)
         return self
 
-    def __or__(self, other):
+    def __or__(self, other: Union[Text, Name]):
         assert isinstance(other, (str, Name))
         return Name(other)
 
@@ -166,25 +197,24 @@ _no_name = NoName()
 NameMeta.precache("", _no_name)
 NameMeta.precache(None, _no_name)
 
-DEFAULT_NAMESPACE = Name('__main__')
-
+DEFAULT_NAMESPACE = Name('__main__')  #type: ignore
 
 class FactoryMeta(type):
-    __factories: MutableMapping[str, Any] = ddict(dict)
+    __factories: MutableMapping[Name, Any] = ddict(dict)
 
     @classmethod
-    def _resolve_factory_name(cls, name, qualname, enforced_type, kwargs):
+    def _resolve_factory_name(cls: Type[FM], name: Optional[Text], qualname: Optional[Text], enforced_type: Optional[Any], kwargs: MutableMapping) -> Name:
         """
         Resolve the factory name based on the given arguments. Namespace is included in the name.
         """
-        name = Name(name)
-        qualname = Name(qualname)
-        typename = Name(enforced_type)
-        module_name = Name(getattr(enforced_type, '__module__', None))
-        namespace = Name(kwargs.pop("namespace", None))
+        new_name: Name = Name(name)
+        new_qualname: Name = Name(qualname)
+        new_typename: Name = Name(enforced_type)
+        new_module_name: Name = Name(getattr(enforced_type, '__module__', None))
+        namespace: Name = Name(kwargs.pop("namespace", None))
 
-        partialname = qualname + typename + name
-        namespace = namespace | typename.namespace | module_name
+        partialname: Name = new_qualname + new_typename + new_name
+        namespace = namespace | new_typename.namespace | new_module_name
 
         factory_name = namespace + partialname
 
@@ -192,7 +222,7 @@ class FactoryMeta(type):
             raise Exception()
         return factory_name
 
-    def _register_factories(self, factory_callables, factory_instance):
+    def _register_factories(self: FM, factory_callables, factory_instance):
         for name, factory_callable in factory_callables.items():
             if factory_instance._obj_type and not isinstance(factory_callable, factory_instance._obj_type):
                 raise Exception("Failed do the right thing!")
@@ -213,7 +243,7 @@ class FactoryMeta(type):
 
         mapping[name] = func
 
-    def _register_type(self, object_factory, factory_instance, *, alias=None, override=False, alias_only=True):
+    def _register_type(self: FM, object_factory, factory_instance: F, *, alias=None, override=False, alias_only=True):
         object_factory_name = Name(object_factory)
         if inspect.isroutine(object_factory) and not object_factory_name.startswith(_CREATE_PREFIX):
             raise FactoryMethodRegisterationException('Fail')
@@ -229,11 +259,11 @@ class FactoryMeta(type):
         if alias != object_factory_name.without_prefix:
             self._to_dict(alias, object_factory, factory_instance._objects, override)
 
-    def __getitem__(self, factory_name):
+    def __getitem__(self: FM, factory_name: Union[Text, Name]):
         factory_name = Name(factory_name)
         return self.__factories[factory_name.namespace][factory_name]
 
-    def _acquire(self, factory_name: Name, enforced_type: Any, factory_callables: Mapping):
+    def _acquire(self: FM, factory_name: Name, enforced_type: Any, factory_callables: Mapping):
         """ Retrieve factory instance based on the name. """
         assert isinstance(factory_name, Name)
         assert not enforced_type or inspect.isclass(enforced_type), f"Enforced type must be class, got f{type(enforced_type)}"
@@ -252,11 +282,11 @@ class FactoryMeta(type):
 
         return factory
 
-    def __call__(self, name: str=None, enforced_type: Any = None, **kwargs: Any) -> Any:
+    def __call__(self: FM, name: Text = None, enforced_type: Any = None, *_, **kwargs: MutableMapping[str, Any]) -> Any:
         # TODO: Remove this when testing done.
         # if self is Factory:
-        qualname = None if self.__qualname__ == "Factory" else self.__qualname__
-        factory_name = self._resolve_factory_name(name, qualname, enforced_type, kwargs)
+        qualname: Optional[Text] = "" if self.__qualname__ == "Factory" else self.__qualname__
+        factory_name: Name = self._resolve_factory_name(name, qualname, enforced_type, kwargs)
         factory = self._acquire(factory_name, enforced_type, kwargs)
         return factory
 
@@ -293,7 +323,7 @@ class Factory(metaclass=FactoryMeta):
     my_factory[object_name]()  # Creates an instance of MyObject class
     ```
     """
-    def register(self, func=None, **kwargs):
+    def register(self: F, func: Optional[Union[Text, Callable]] = None, **kwargs: MutableMapping[str, Any]):
         """
         Registers factory method into this factory. This function works also as a decorator.
         """
@@ -306,17 +336,17 @@ class Factory(metaclass=FactoryMeta):
 
         return partial(inner_func, **kwargs)
 
-    def __getattribute__(self, name: str) -> Any:
+    def __getattribute__(self: F, name: Text) -> Any:
         try:
             return super().__getattribute__(name)
         except AttributeError:
             try:
-                return self._methods[Name(name)]
+                return self._methods[Name(name)]  # type: ignore
             except KeyError:
                 raise AttributeError('Epic Fail')
 
-    def __getitem__(self, key):
+    def __getitem__(self: F, key: Union[Text, Name]) -> Callable:
         return self._objects[Name(key)]
 
-    def __repr__(self):
+    def __repr__(self: F) -> Text:
         return f'{self.__class__.__name__}("{self._name}")'  #pragma:nocover
