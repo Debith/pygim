@@ -14,3 +14,7 @@ class NullClassFactoryMeta(CachedType):
     @classmethod
     def make_class(mcls, name, bases, attrs):
         return super().make_class(name, bases, attrs)
+
+
+class Test:
+    pass        

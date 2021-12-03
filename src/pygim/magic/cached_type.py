@@ -2,11 +2,12 @@
 This module implements cached type that can be used to manage singletons.
 """
 
-__all__ = ["CachedType"]
+__all__ = ["CachedTypeMeta", "CachedType", "create_cached_class"]
 
 from typing import Text, Any
 
-class CachedType(type):
+
+class CachedTypeMeta(type):
     __class_cache = dict()
     __instance_cache = dict()
     __instance_cache_active = dict()  # Some types are cached and some not.
@@ -50,3 +51,10 @@ class CachedType(type):
 
         if instance_cache:
             mcls.__instance_cache.clear()
+
+
+class CachedType(metaclass=CachedTypeMeta):
+    pass
+
+
+create_cached_class = CachedTypeMeta

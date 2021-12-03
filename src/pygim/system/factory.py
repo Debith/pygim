@@ -10,7 +10,7 @@ import inspect
 
 from ..system.exceptions import FactoryMethodRegisterationException
 
-__all__ = ('Factory', 'FactoryMethodRegisterationException')
+__all__ = ('Factory', 'FactoryMethodRegisterationException', 'Name')
 
 _CREATE_PREFIX = "create_"
 N = TypeVar('N', bound='Name')
