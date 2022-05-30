@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 """
 This module contains miscellenious utility functions that can't be fit anywhere else.
 """
@@ -38,12 +39,15 @@ def is_container(obj):
 
 def flatten(items):
     """ Flatten the nested arrays into single one.
+
     Example about list of lists.
     >>> list(flatten([[1, 2], [3, 4]]))
     [1, 2, 3, 4]
+
     Example of deeply nested irregular list:
     >>> list(flatten([[[1, 2]], [[[3]]], 4, 5, [[6, [7, 8]]]]))
     [1, 2, 3, 4, 5, 6, 7, 8]
+
     List of strings is handled properly too
     >>> list(flatten(["one", "two", ["three", "four"]]))
     ['one', 'two', 'three', 'four']

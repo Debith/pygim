@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 """
 This module imports all Domain Driven Design related modules.
 """
