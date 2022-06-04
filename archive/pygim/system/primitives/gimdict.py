@@ -31,7 +31,10 @@ class GimDict(UserDict):
     'nested dict'
     """
     def subset(self, filters, *, by=Target.KEY):
-        return self.__class__({f: self[f] for f in filters if f in self})
+        if Target(by) == Target.VALUE:
+            return self.__class__({f: self[f] for f in filters if f in self})
+        else:
+            return self.__class__({f: self[f] for f in filters if f in self})
 
     def _nested_access(self, key):
         value = self.data
