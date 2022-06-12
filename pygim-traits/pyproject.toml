@@ -3,9 +3,9 @@ requires = ["setuptools ~= 58.0", "cython ~= 0.29.0", "pdm-pep517"]
 build-backend = "pdm.pep517.api"
 
 [project]
-name = "pygim-common"
+name = "pygim-traits"
 version = "0.1.0"
-description = "Common features for pygim"
+description = "Traits library for pygim"
 readme = "README.rst"
 authors = [
   {email = "debith-dev@outlook.com"},
@@ -27,7 +27,8 @@ classifiers = [
   "Typing :: Typed",
 ]
 dependencies = [
-  "click"
+  "pygim-common",
+  "click",
 ]
 requires-python = ">=3.6, <4"
 
@@ -47,12 +48,12 @@ testpaths = [
 
 [tool.coverage.paths]
 source = [
-    "pygim-common",
+    "pygim-traits",
 ]
 
 [tool.pygim-common.commands]
 lint = "mypy ."
 test = "pytest"
 
-[project.scripts]
-pygim = "pygim.__main__:cli"
+[project.entry-points]
+#pygim = "pygim.__main__:cli"

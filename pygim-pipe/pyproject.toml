@@ -1,9 +1,0 @@
-[build-system]
-requires = ["setuptools ~= 58.0", "cython ~= 0.29.0"]
-
-[tool.pytest.ini_options]
-minversion = "6.0"
-addopts = "-ra -q"
-testpaths = [
-    "tests",
-]
