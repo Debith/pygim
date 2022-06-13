@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 """
 This module contains utilities to get profiling quickly.
 """

@@ -1,11 +1,16 @@
+# -*- coding: utf-8 -*-
 """
 
 """
 
+from dataclasses import dataclass
 from typing import TypeVar, Mapping
 from collections import UserDict
 
 from enum import Enum
+
+from ..utils.iterable import flatten
+from .string_list import StringList
 
 class Target(Enum):
     KEY = "key"
@@ -14,6 +19,39 @@ class Target(Enum):
 
 KT = TypeVar("KT")
 VT = TypeVar("VT")
+
+
+
+GimDictKey = StringList('GimDictKey', sep='.')
+
+
+"""
+
+# TODO: make cached
+@dataclass
+class GimDictKey:
+    _key: list
+
+    def __post_init__(self):
+        if isinstance(self._key, (set, tuple)):
+            self._key = list(self._key)
+
+        elif isinstance(self._key, str):
+            self._key = self._key.split('.')
+
+        elif not isinstance(self._key, list):
+            self._key = [str(self._key)]
+
+    def __repr__(self):
+        return f"<Key:{str(self._key)}>"
+
+    def __str__(self):
+        return ".".join(self._key)
+
+    def __add__(self, other):
+        assert isinstance(other, (GimDictKey, str))
+        return self.__class__(self._key + [str(other)])
+"""
 
 
 class GimDict(UserDict):
@@ -30,11 +68,8 @@ class GimDict(UserDict):
     >>> gim_dict["nested.hello"]
     'nested dict'
     """
-    def subset(self, filters, *, by=Target.KEY):
-        if Target(by) == Target.VALUE:
-            return self.__class__({f: self[f] for f in filters if f in self})
-        else:
-            return self.__class__({f: self[f] for f in filters if f in self})
+    def __and__(self, *filters):
+        return self.__class__({f: self[f] for f in flatten(filters) if f in self})
 
     def _nested_access(self, key):
         value = self.data

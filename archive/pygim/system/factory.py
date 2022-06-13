@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 """
 This contains a generic factory that works in open-closed principle.
 """
