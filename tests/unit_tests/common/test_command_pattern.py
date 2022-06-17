@@ -3,7 +3,7 @@
 from ast import Call
 import pytest
 
-from pygim.primitives.callable_list import Callable, Pipeline
+from pygim.primitives.callable_list import Callable
 from pygim.utils.iterable import flatten
 
 ############################################################
@@ -72,14 +72,14 @@ def f(): NotImplemented
     [(f, f, [f, f, [f, [f]], f, f], f, f), 'Callable(\n    Callable(f)\n    Callable(f)\n    Callable(\n        Callable(f)\n        Callable(f)\n        Callable(\n            Callable(f)\n            Callable(\n                Callable(f)))\n        Callable(f)\n        Callable(f))\n    Callable(f)\n    Callable(f))'],
 ])
 def test_reprs(func, expected_repr):
-    cmd1 = Callable(func, flatten=False)
+    cmd1 = Callable(func)
     if repr(cmd1) != expected_repr:
         assert False, f"{cmd1} != {expected_repr}"
 
 
 def test_flattened_calls():
     chain = [f, f, [f, [f, f]], f]
-    func2 = Pipeline(chain, flatten=True)
+    func2 = Pipeline(chain)
 
     a = [f() for f in func2]
     e = [c() for c in flatten(chain)]
@@ -97,7 +97,7 @@ def pf(arg):
 
 def test_nested_arg_call():
     chain = [pf, pf, [pf, [pf, pf]], pf]
-    func = Callable(chain, flatten=False)
+    func = Callable(chain)
 
     result = func(21)
     assert result == [42, 42, [42, [42, 42]], 42]
@@ -109,7 +109,6 @@ def test_functions_as_a_pipe():
 
     result = func(1)
     assert result == 16
-
 
 
 if __name__ == "__main__":

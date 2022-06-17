@@ -3,6 +3,7 @@
 
 """
 
+import dis
 import abc
 from ast import Call
 import typing as t
@@ -10,8 +11,28 @@ from dataclasses import dataclass
 from pygim.utils import iterable
 import enum
 import inspect
+from collections import namedtuple
+import types
 
 __all__ = ['Callable']
+
+
+class ObjectFactoryMeta(type):
+    def _is_base_class(self):
+        pass
+
+    def _is_sub_class(self):
+        pass
+
+    def _handle_base_class(self, *args, **kwargs):
+        pass
+
+    def _handle_sub_class(self, *args, **kwargs):
+        pass
+
+    def __call__(self, *args, **kwargs):
+        pass
+
 
 
 class Mode(enum.IntEnum):
@@ -20,67 +41,73 @@ class Mode(enum.IntEnum):
 
 
 def composite_pattern(component_name, abstract_methods=None):
-    class LeafBase:
-        pass
+    _component_meta_name = f"{component_name}ComponentMeta"
+    _component_name = f"{component_name}Component"
+    _composite_name = f"{component_name}Composite"
+    _leaf_name = f"{component_name}Leaf"
 
-    class CompositeBase:
-        pass
+    class _Meta:
+        def __new__(mcls, name, bases, attrs):
+            instance = super(ComponentMeta, mcls).__new__(mcls, name, bases, attrs)
+            return instance
 
-    class Component(abc.ABC):
-        method = abc.abstractmethod
+        @staticmethod
+        def _is_sub_class(cls):
+            return cls.__bases__ != (object, )
 
-    class SingleCallable(Callable):
-        """ Callable pattern.
+        def __call__(self, input_data, *args, **kwargs):
+            if self._is_sub_class(self):
+                return super(ComponentMeta, self).__call__(input_data, *args, **kwargs)
 
-        Args:
-            abc (_type_): _description_
-        """
-        def __init__(self, callable: Callable = None):
-            self._callable = callable
+            if isinstance(input_data, (tuple, set, list)):
+                return Composite(input_data, *args, **kwargs)
+            else:
+                return Leaf(input_data, *args, **kwargs)
 
-        def __call__(self, *args, **kwargs):
-            return self._callable(*args, **kwargs)
+    ComponentMeta = type(_component_meta_name, (type,), dict(_Meta.__dict__))
+
+    class _Component(metaclass=ComponentMeta):
+        def __init__(self, component):
+            assert all(isinstance(c, Component) for c in components)
+            self._component = component
+
+    class _LeafBase:
+        def __iter__(self):
+            yield self._component
+
+    class _CompositeBase:
+        def __init__(self, components):
+            self._components = components
 
         def __iter__(self):
-            yield self._callable
+            for c in self._components:
+                yield from c
 
-        @property
-        def name(self):
-            if not inspect.isfunction(self._callable):
-                # Class instances fall in this category
-                return self._callable.__class__.__name__
-            else:
-                try:
-                    return self._callable.__name__
-                except AttributeError:
-                    return "<lambda>"
+    Component = ComponentMeta(_component_name, (), dict(metaclass=ComponentMeta))
+    Leaf = ComponentMeta(_leaf_name, (Component, ), dict(_LeafBase.__dict__))
+    Composite = ComponentMeta(_composite_name, (Component, ), dict(_CompositeBase.__dict__))
 
+    ComponentMeta.__call__.__globals__["Leaf"] = Leaf
+    ComponentMeta.__call__.__globals__["Composite"] = Composite
+    ComponentMeta.__call__.__globals__["Component"] = Component
 
-        def __repr__(self):
-            return f"Callable({self.name})"
-
-    class MultiCallable(Callable):
-        """ Callable pattern.
-
-        Args:
-            abc (_type_): _description_
-        """
-        __call__ = abc.abstractmethod  # Provided by the metaclass
-        __iter__ = abc.abstractmethod  # Provided by the metaclass for pipeline
-
-        def __repr__(self):
-            # TODO: This is messy, find away to clean it up.
-            text = "\n".join([''] + [repr(c) for c in self._callables])
-            text = "\n".join([''] + [f'    {t}' for t in text.splitlines()[1:]])
-
-            return f"Callable({text})"
+    return Component, Leaf, Composite
 
 
-class CallableMetaMeta(type):
+Callable, CallableLeaf, CallableComposite = composite_pattern("Callable", abstract_methods=['__call__'])
+
+class MultiCallable(CallableComposite):  # type: ignore
     def __call__(self, *args, **kwargs):
-        return super().__call__(*args, **kwargs)
+        return [f(*args, **kwargs) for f in self]
 
 
+class SingleCallable(CallableLeaf):  # type: ignore
+    def __call__(self, *args, **kwargs):
+        return next(self.__iter__())(*args, **kwargs)
+
+
+
+'''
 class CallableMeta(abc.ABCMeta, metaclass=CallableMetaMeta):
     """ Factory meta-class for Callables. """
 
@@ -232,3 +259,8 @@ class MultiCallable(Callable):
     # def __iter__(self):
     #     for c in self._callables:
     #         yield from c
+
+
+
+
+'''
