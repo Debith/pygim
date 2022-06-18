@@ -5,7 +5,6 @@
 
 import dis
 import abc
-from ast import Call
 import typing as t
 from dataclasses import dataclass
 from pygim.utils import iterable
@@ -13,6 +12,7 @@ import enum
 import inspect
 from collections import namedtuple
 import types
+from pygim.magic.patch import transfer_ownership
 
 __all__ = ['Callable']
 
@@ -49,6 +49,9 @@ def composite_pattern(component_name, abstract_methods=None):
     class _Meta:
         def __new__(mcls, name, bases, attrs):
             instance = super(ComponentMeta, mcls).__new__(mcls, name, bases, attrs)
+            for attr in attrs.values():
+                if inspect.isroutine(attr):
+                    transfer_ownership(attr, instance)
             return instance
 
         @staticmethod
@@ -68,10 +71,13 @@ def composite_pattern(component_name, abstract_methods=None):
 
     class _Component(metaclass=ComponentMeta):
         def __init__(self, component):
-            assert all(isinstance(c, Component) for c in components)
+            assert all(isinstance(c, Component) for c in component)
             self._component = component
 
     class _LeafBase:
+        def __init__(self, component):
+            self._component = component
+
         def __iter__(self):
             yield self._component
 

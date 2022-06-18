@@ -13,6 +13,26 @@ import inspect
 
 from collections import OrderedDict
 
+_CO_OBJ_VARS = [
+    "co_argcount",
+    "co_kwonlyargcount",
+    "co_posonlyargcount",
+    "co_nlocals",
+    "co_stacksize",
+    "co_flags",
+    "co_code",
+    "co_consts",
+    "co_names",
+    "co_varnames",
+    "co_filename",
+    "co_name",
+    "co_firstlineno",
+    "co_lnotab",
+]
+
+if sys.version_info[:2] < (3, 8):
+    _CO_OBJ_VARS.remove("co_posonlyargcount")
+
 
 def _get_module_name(depth: int = 2):
     try:
@@ -21,32 +41,12 @@ def _get_module_name(depth: int = 2):
         return '__main__'
 
 
-def _clone_function(co):
-    trait = OrderedDict()
-
-    trait["co_argcount"] = co.co_argcount
-    trait["co_kwonlyargcount"] = co.co_kwonlyargcount
-    if sys.version_info[:2] >= (3, 8):
-        trait["co_posonlyargcount"] = co.co_posonlyargcount
-    trait["co_nlocals"] = co.co_nlocals
-    trait["co_stacksize"] = co.co_stacksize
-    trait["co_flags"] = co.co_flags
-    trait["co_code"] = co.co_code
-    trait["co_consts"] = co.co_consts
-    trait["co_names"] = co.co_names
-    trait["co_varnames"] = co.co_varnames
-    trait["co_filename"] = co.co_filename
-    trait["co_name"] = co.co_name
-    trait["co_firstlineno"] = co.co_firstlineno
-    trait["co_lnotab"] = co.co_lnotab
-
-    return trait
+def _extract_co_vars(co):
+    return {v: getattr(co, v) for v in _CO_OBJ_VARS}
 
 
 def _match_variable_names_with_target(code_obj, source_name: t.Text, target_name: t.Text):
-    new_co_vars = _clone_function(code_obj)
-
-    new_co_names = new_co_vars["co_names"]
+    new_co_names = code_obj["co_names"]
     items = []
     for co_name in new_co_names:
         if not co_name.startswith(f'_{source_name}__'):
@@ -54,11 +54,10 @@ def _match_variable_names_with_target(code_obj, source_name: t.Text, target_name
             continue
 
         items.append(f"_{target_name}__{co_name.split('__')[-1]}")
-        print(items)
 
-    new_co_vars["co_names"] = tuple(items)
+    code_obj["co_names"] = tuple(items)
 
-    return types.CodeType(*new_co_vars.values())
+    return types.CodeType(*code_obj.values())
 
 
 def transfer_ownership(source, target, name=None):
@@ -79,7 +78,7 @@ def transfer_ownership(source, target, name=None):
     assert inspect.isclass(target)
 
     name = name or source.__name__
-    code_obj = source.__code__
+    code_obj: t.Mapping[t.Text, t.Any] = _extract_co_vars(source.__code__)
 
     *start, class_name, func_name = source.__qualname__.split('.')
     new_code_obj = _match_variable_names_with_target(code_obj, class_name, target.__name__)
