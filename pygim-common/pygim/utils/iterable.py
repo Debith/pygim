@@ -5,6 +5,7 @@ This module contains miscellenious utility functions that can't be fit anywhere 
 
 from typing import Iterable, Callable, Any
 
+__all__ = ('split', 'flatten')
 
 def split(iterable: Iterable[Any], condition: Callable):
     """

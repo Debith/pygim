@@ -1,4 +1,4 @@
-    # -*- coding: utf-8 -*-
+# -*- coding: utf-8 -*-
 """
 
 """
@@ -17,87 +17,11 @@ from pygim.magic.patch import transfer_ownership
 __all__ = ['Callable']
 
 
-class ObjectFactoryMeta(type):
-    def _is_base_class(self):
-        pass
-
-    def _is_sub_class(self):
-        pass
-
-    def _handle_base_class(self, *args, **kwargs):
-        pass
-
-    def _handle_sub_class(self, *args, **kwargs):
-        pass
-
-    def __call__(self, *args, **kwargs):
-        pass
-
-
-
 class Mode(enum.IntEnum):
     INDEPENDENT = enum.auto()
     PIPELINE = enum.auto()
 
 
-def composite_pattern(component_name, abstract_methods=None):
-    _component_meta_name = f"{component_name}ComponentMeta"
-    _component_name = f"{component_name}Component"
-    _composite_name = f"{component_name}Composite"
-    _leaf_name = f"{component_name}Leaf"
-
-    class _Meta:
-        def __new__(mcls, name, bases, attrs):
-            instance = super(ComponentMeta, mcls).__new__(mcls, name, bases, attrs)
-            for attr in attrs.values():
-                if inspect.isroutine(attr):
-                    transfer_ownership(attr, instance)
-            return instance
-
-        @staticmethod
-        def _is_sub_class(cls):
-            return cls.__bases__ != (object, )
-
-        def __call__(self, input_data, *args, **kwargs):
-            if self._is_sub_class(self):
-                return super(ComponentMeta, self).__call__(input_data, *args, **kwargs)
-
-            if isinstance(input_data, (tuple, set, list)):
-                return Composite(input_data, *args, **kwargs)
-            else:
-                return Leaf(input_data, *args, **kwargs)
-
-    ComponentMeta = type(_component_meta_name, (type,), dict(_Meta.__dict__))
-
-    class _Component(metaclass=ComponentMeta):
-        def __init__(self, component):
-            assert all(isinstance(c, Component) for c in component)
-            self._component = component
-
-    class _LeafBase:
-        def __init__(self, component):
-            self._component = component
-
-        def __iter__(self):
-            yield self._component
-
-    class _CompositeBase:
-        def __init__(self, components):
-            self._components = components
-
-        def __iter__(self):
-            for c in self._components:
-                yield from c
-
-    Component = ComponentMeta(_component_name, (), dict(metaclass=ComponentMeta))
-    Leaf = ComponentMeta(_leaf_name, (Component, ), dict(_LeafBase.__dict__))
-    Composite = ComponentMeta(_composite_name, (Component, ), dict(_CompositeBase.__dict__))
-
-    ComponentMeta.__call__.__globals__["Leaf"] = Leaf
-    ComponentMeta.__call__.__globals__["Composite"] = Composite
-    ComponentMeta.__call__.__globals__["Component"] = Component
-
-    return Component, Leaf, Composite
 
 
 Callable, CallableLeaf, CallableComposite = composite_pattern("Callable", abstract_methods=['__call__'])
@@ -108,6 +32,20 @@ class MultiCallable(CallableComposite):  # type: ignore
 
 
 class SingleCallable(CallableLeaf):  # type: ignore
+    def __repr__(self):
+        return f"Callable({self.name})"
+
+    @property
+    def name(self):
+        if not inspect.isfunction(self._component):
+            # Class instances fall in this category
+            return self._component.__class__.__name__
+        else:
+            try:
+                return self._component.__name__
+            except AttributeError:
+                return "<lambda>"
+
     def __call__(self, *args, **kwargs):
         return next(self.__iter__())(*args, **kwargs)
 
