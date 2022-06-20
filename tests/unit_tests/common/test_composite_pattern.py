@@ -14,10 +14,12 @@ def test_creating_components_happen_through_the_component_class():
     TestComponent, TestLeaf, TestComposite = composite_pattern("Test")
 
     leaf = TestComponent("one")
-    composite = TestComponent(["many", "more"])
+    composite1 = TestComponent(["many", "more"])
+    composite2 = TestComponent([TestLeaf("many"), TestLeaf("more")])
 
     assert isinstance(leaf, TestLeaf)
-    assert isinstance(composite, TestComposite)
+    assert isinstance(composite1, TestComposite)
+    assert isinstance(composite2, TestComposite)
 
 
 def test_independent_classes_are_independent_even_if_the_name_is_same():
@@ -202,15 +204,13 @@ def test_comparing_occurs_between_own_subclasses_with_multiple_inheritance():
     class SubLeaf1(TestLeaf):
         pass
 
-    class SubLeaf2(TestLeaf):
+    try:
+        class SubLeaf2(TestLeaf):
+            pass
+    except TypeError:
         pass
-
-    s1 = SubLeaf1(1)
-    s2 = SubLeaf2(1)
-
-    assert s1 != s2
-
-
+    else:
+        assert False, "should throw!"
 
 
 def test_it_is_possible_to_add_new_components():
@@ -237,6 +237,15 @@ def test_it_is_possible_to_add_new_components():
     c.add(TestComposite([1 ,2]))
     assert list(c)[0] == list(c)[-1]
 
+
+def test_each_component_has_repr():
+    TestComponent, *_ = composite_pattern("Test")
+
+    leaf = TestComponent("one")
+    composite = TestComponent(["many", "more"])
+
+    assert repr(leaf) == "TestLeaf('one')"
+    assert repr(composite) == "TestComposite([TestLeaf('many'), TestLeaf('more')])"
 
 
 if __name__ == "__main__":
