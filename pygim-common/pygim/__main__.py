@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 """
 Command-Line Interface for Pygim
 """
@@ -12,8 +13,6 @@ def cli():
 @cli.command()
 def test():
     pass
-
-
 
 
 if __name__ == "__main__":

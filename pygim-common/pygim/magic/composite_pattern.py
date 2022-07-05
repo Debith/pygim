@@ -8,7 +8,23 @@ from dataclasses import dataclass
 from typing import Iterable
 from pygim import typing as t
 
-def composite_pattern(component_name):
+def generate_composite_pattern_classes(
+    component_name: t.Text,
+    operation_name: t.Text = "execute",
+    ):
+    """Generates three classes that can be used as composite pattern.
+
+    Args:
+        component_name (str): Name used for the pattern.
+
+    Raises:
+        TypeError: When attempting to do deep inheritance.
+
+    Returns:
+        Three classes new classes matching `component_name`. The
+        new classes are Component, Leaf, and Composite in that
+        order.
+    """
 
     #################################################################
 
@@ -56,9 +72,19 @@ def composite_pattern(component_name):
             instance = _create_recursively(components)
             return instance
 
+        def __setattr__(self, name, obj):
+            try:
+                LeafClass = self.__class__.__gimmicks__['Leaf']
+                ComponentClass = self.__class__.__gimmicks__['Component']
+                if getattr(ComponentClass, name) is abc.abstractmethod:
+                    abc.ABCMeta.__setattr__(LeafClass, name, obj.__get__(None, LeafClass))
+            except (AttributeError, KeyError):
+                abc.ABCMeta.__setattr__(self, name, obj)
+
         ComponentMeta = type(name, (abc.ABCMeta,), dict(
             __new__=__new__,
             __call__=__call__,
+            __setattr__=__setattr__,
             _is_base_class=staticmethod(_is_base_class),
             supports_composite_pattern=staticmethod(supports_composite_pattern),
             __gimmicks__=dict(),
@@ -68,23 +94,25 @@ def composite_pattern(component_name):
 
     #################################################################
 
-    def _create_component_class(name, *, meta_class):
+    def _create_component_class(name, op_name, *, meta_class):
         """
         Create component base class.
         """
-        Component = meta_class(name, (abc.ABC,), dict(
+        attrs = dict(
             __component=None,
             metaclass=meta_class,
             __annotations__={'__component': object},
             __gimmicks__ = dict(composite_pattern="Component"),
-            visit=abc.abstractmethod,
             __iter__=abc.abstractmethod,
-        ))
+            visit=abc.abstractmethod,
+        )
+        attrs[op_name] = abc.abstractmethod
+        Component = meta_class(name, (abc.ABC,), attrs)
         return dataclass(Component)
 
     #################################################################
 
-    def _create_leaf_class(name, *, base_class):
+    def _create_leaf_class(name, op_name, *, base_class):
         """
         Create component leaf class.
         """
@@ -103,19 +131,24 @@ def composite_pattern(component_name):
         def visit(self, callable):
             return callable(self.__component)
 
+        def op(self, *args, **kwargs):
+            return self.__component
+
         # __gimmicks__ is used to identify this leaf class and inheriting subclasses
-        Leaf = type(name, (base_class,), dict(
+        attrs = dict(
             __post_init__=__post_init__,
             __iter__=__iter__,
             __repr__=__repr__,
             __gimmicks__=dict(composite_pattern='Leaf'),
             visit=visit,
-        ))
+        )
+        attrs[op_name] = op
+        Leaf = type(name, (base_class,), attrs)
         return dataclass(Leaf)
 
     #################################################################
 
-    def _create_composite_class(name, *, base_class):
+    def _create_composite_class(name, op_name, *, base_class):
         """
         Create component composite class.
         """
@@ -133,26 +166,38 @@ def composite_pattern(component_name):
         def __len__(self):
             return len(self.__component)
 
+        def __getitem__(self, index: int):
+            return self.__component[index]
+
         def visit(self, callable):
             return [c.visit(callable) for c in self.__component]
 
-        def add(self, *components):
-            for c in components:
-                self.__component.append(self.__class__.__class__.__gimmicks__['Component'](c))
+        def append(self, component: Component):
+            self.__component.append(self.__class__.__class__.__gimmicks__['Component'](component))
+
+        def insert(self, index: int, component: Component):
+            self.__component.insert(index, self.__class__.__class__.__gimmicks__['Component'](component))
 
         def reset(self):
             self.__component = []
 
+        def op(self, *args, **kwargs):
+            return [getattr(c, op_name)(*args, **kwargs) for c in self.__component]
+
         # __gimmicks__ is used to identify this composite class and inheriting subclasses
-        Composite = type(name, (base_class,), dict(
+        attrs = dict(
             __post_init__=__post_init__,
             __iter__=__iter__,
             __repr__=__repr__,
+            __getitem__=__getitem__,
             __gimmicks__=dict(composite_pattern='Composite'),
-            add=add,
+            append=append,
+            insert=insert,
             visit=visit,
             reset=reset,
-        ))
+        )
+        attrs[op_name] = op
+        Composite = type(name, (base_class,), attrs)
         return dataclass(Composite)
 
     #################################################################
@@ -163,8 +208,8 @@ def composite_pattern(component_name):
     _leaf_name = f"{component_name}Leaf"
 
     ComponentMeta = _create_component_meta_class(_component_meta_name)
-    Component = _create_component_class(_component_name, meta_class=ComponentMeta)
-    Leaf = _create_leaf_class(_leaf_name, base_class=Component)
-    Composite = _create_composite_class(_composite_name, base_class=Component)
+    Component = _create_component_class(_component_name, operation_name, meta_class=ComponentMeta)
+    Leaf = _create_leaf_class(_leaf_name, operation_name, base_class=Component)
+    Composite = _create_composite_class(_composite_name, operation_name, base_class=Component)
 
     return Component, Leaf, Composite

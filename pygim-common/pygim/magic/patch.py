@@ -11,8 +11,6 @@ import typing as t
 import types
 import inspect
 
-from collections import OrderedDict
-
 _CO_OBJ_VARS = [
     "co_argcount",
     "co_kwonlyargcount",
