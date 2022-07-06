@@ -1,0 +1,58 @@
+[build-system]
+requires = ["setuptools ~= 58.0", "cython ~= 0.29.0", "pdm-pep517"]
+build-backend = "pdm.pep517.api"
+
+[project]
+name = "pygim-common"
+version = "0.1.0"
+description = "Common features for pygim"
+readme = "README.rst"
+requires-python = ">=3.6, <4"
+authors = [
+  {email = "debith-dev@outlook.com"},
+  {name = "Teppo Perä"}
+]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Intended Audience :: Developers",
+  "License :: OSI Approved :: MIT License",
+  "Framework :: Python Gimmicks (pygim)",
+  "Programming Language :: Python",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.7",
+  "Programming Language :: Python :: 3.8",
+  "Programming Language :: Python :: 3.9",
+  "Programming Language :: Python :: 3.10",
+  "Topic :: Software Development :: Libraries :: Python Modules",
+  "Topic :: Software Development :: Quality Assurance",
+  "Typing :: Typed",
+]
+dependencies = [
+  'click==8.1.3'
+]
+
+[project.optional-dependencies]
+dev = [
+  'pytest',
+  'pytest-xdist',
+  'mypy'
+]
+
+[tool.pytest.ini_options]
+minversion = "6.0"
+addopts = "-ra -q"
+testpaths = [
+    "tests",
+]
+
+[tool.coverage.paths]
+source = [
+    "pygim-common",
+]
+
+[tool.pygim-common.commands]
+lint = "mypy ."
+test = "pytest"
+
+[project.scripts]
+pygim = "pygim.__main__:cli"
