@@ -3,8 +3,9 @@
 """
 
 import hashlib
-import typing as t
 from functools import singledispatch
+
+import pygim.typing as t
 
 
 __all__ = ['sha256sum']
@@ -18,7 +19,8 @@ def sha256sum(obj: t.AnyStr, *, encoding: t.Text = 'utf-8'):
     '705cb95c164e32feec2aef56f70d73e064afe2e38d40e5189fc5f8cdc84a9eaf'
 
     Args:
-        s (str): String to be encoded.
+        obj (str):      String to be encoded.
+        encoding (str): Encoding used to convert string objects into bytes.
 
     Returns:
         Calculated SHA256 sum

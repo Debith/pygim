@@ -8,7 +8,7 @@ import gzip
 import pickle
 from typing import Any
 
-import pygim.kernel.typing_ext as t
+import pygim.typing as t
 
 __all__ = ("write_bytes", "pickle_and_compress", "decompress_and_unpickle")
 

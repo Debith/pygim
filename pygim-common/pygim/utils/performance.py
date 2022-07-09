@@ -11,7 +11,7 @@ import time
 __all__ = ("quick_timer", "quick_profile")
 
 @contextmanager
-def quick_timer(title="Code block"):
+def quick_timer(title="Code block", *, printer=print):
     """
     Use this function to quickly measure time on a code block.
 
@@ -27,7 +27,7 @@ def quick_timer(title="Code block"):
     start = time.time()
     yield
     end = time.time()
-    print(f"{title} executed in {end-start:.2f} seconds!")
+    printer(f"{title} executed in {end-start:.2f} seconds!")
 
 
 @contextmanager

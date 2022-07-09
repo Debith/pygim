@@ -3,7 +3,7 @@
 This module contains miscellenious utility functions that can't be fit anywhere else.
 """
 
-import pygim.kernel.typing_ext as t
+import pygim.typing as t
 from typing import Iterable, Callable, Any
 
 __all__ = ['split', 'is_container', 'flatten']

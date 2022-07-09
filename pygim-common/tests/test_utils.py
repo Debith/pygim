@@ -3,7 +3,11 @@
 
 from functools import singledispatch
 import pytest
-import pyximport; pyximport.install()
+
+try:
+    import pyximport; pyximport.install()
+except ImportError:
+    pass
 from pygim.utils import flatten, is_container, split
 
 @singledispatch
