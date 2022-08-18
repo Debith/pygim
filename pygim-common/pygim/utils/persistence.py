@@ -6,19 +6,24 @@ Useful tools to write something into disk.
 import pathlib
 import gzip
 import pickle
-from typing import Any
 
 import pygim.typing as t
 
 __all__ = ("write_bytes", "pickle_and_compress", "decompress_and_unpickle")
 
-def _drop_file_suffixes(p: pathlib.Path):
+def _drop_file_suffixes(p: pathlib.Path) -> pathlib.Path:
     while p.suffixes:
         p = p.with_suffix('')
     return p
 
 
-def write_bytes(filename: t.Union[t.Text, pathlib.Path], data: bytes, *, make_dirs:bool=False, suffix=".bin"):
+def write_bytes(
+        filename: t.Union[t.Text, pathlib.Path],
+        data: bytes,
+        *,
+        make_dirs: bool = False,
+        suffix: t.Text = ".bin",
+        ) -> None:
     """ Writes bytes into file.
 
     This function provides straight-forward means to write bytedata into a
@@ -44,12 +49,12 @@ def write_bytes(filename: t.Union[t.Text, pathlib.Path], data: bytes, *, make_di
 
 
 def pickle_and_compress(
-    obj: t.Any,
-    filename: t.Union[t.Text, pathlib.Path] = None,
-    *,
-    make_dirs: bool = False,
-    suffix=".pkl.zip",
-    ) -> bytes:
+        obj: t.Any,
+        filename: t.Union[t.Text, pathlib.Path] = None,
+        *,
+        make_dirs: bool = False,
+        suffix: t.Text = ".pkl.zip",
+        ) -> bytes:
     """ Writes pickled and compressed object into a file.
 
     Args:

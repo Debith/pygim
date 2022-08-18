@@ -1,25 +1,37 @@
 # -*- coding: utf-8 -*-
 """
-Command-Line Interface Application for Python Gimmicks.
+This module contains implementation of PathSet class.
 """
 
-import sys
+import shutil
 from pathlib import Path
 from dataclasses import dataclass
-import shutil
-import click
-import pygim.typing as t
+
 from pygim.utils import is_container
-
-__all__ = ['GimmicksCliApp']
-
-def _echo(msg, quiet):
-    if not quiet:
-        click.echo(msg)
+import pygim.typing as t
 
 
 @dataclass(frozen=True)
-class PathList:
+class PathSet:
+    """ This class encapsulates manipulation of multiple path objects at once.
+
+    Overview (further info in function docs):
+        - len(PathSet()) provides total number of files and directories read recursively.
+        - list(PathSet()) provides list of all Path objects in the list.
+        - bool(PathSet()) tells whether there is any Path objects in the list.
+        - repr(PathSet()) provides nice string representation of this object.
+        - PathSet() + PathSet() creates new object contains Path objects from both sets.
+        - PathSet().clone() creates identical copy of the list.
+        - PathSet().filter() generator that yields Path objects whose properties match the filters.
+        - PathSet().drop() generator that yields Path objects whose properties do NOT match the filters.
+        - PathSet().filtered() as above but returns a new PathSet object.
+        - PathSet().dirs() a shorthand for list of dirs.
+        - PathSet().files() a shorthand for list of files.
+        - PathSet().by_suffix() a shorthand for filtering by suffix(es).
+        - PathSet().delete_all() deletes all contained Path objects from the file-system.
+
+    TODO: This class could allow multiple different path types (not just pathlib.Path).
+    """
     _paths: t.Optional[t.FrozenSet[Path]] = None
     _pattern: str = "*"
 
@@ -86,7 +98,7 @@ class PathList:
 
     def __add__(self, other):
         assert isinstance(other, self.__class__)
-        return self.clone(list(self._paths) + list(other._paths))  # type: ignore
+        return self.clone(set(self._paths) | set(other._paths))  # type: ignore
 
     def delete_all(self):
         for p in self:
@@ -96,29 +108,6 @@ class PathList:
                 shutil.rmtree(p)
 
 
-@dataclass
-class GimmicksCliApp:
-    def clean_up(self, yes: bool, build_dirs: bool, pycache_dirs: bool, compiled_files: bool, quiet: bool, all: bool):
-        # TODO: clean up!
-        _echo(f"Starting clean up in `{Path.cwd()}`", quiet)
-        pth = PathList()
-        new = PathList([])
-        pycache_dirs = pycache_dirs or not build_dirs and not compiled_files
-
-        if all or build_dirs:
-            new += pth.dirs(name="build")
-
-        if all or pycache_dirs:
-            new += pth.dirs(name="__pycache__")
-
-        if all or compiled_files:
-            new += pth.files(suffix=(".c", ".so"))
-
-        if new and not yes:
-            print("\n".join([str(n) for n in new]))
-            response = input(f"Remove all {len(new)} files/folders (Y/N)? ")
-            if response == 'n':
-                sys.exit("No? Maybe next time...")
-            elif response == 'y':
-                new.delete_all()
-                _echo("Excellen! You never see them again!", quiet)
+if __name__ == '__main__':
+    import doctest
+    doctest.testmod()

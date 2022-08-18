@@ -1,6 +1,12 @@
-import cppimport.import_hook
+# -*- coding: utf-8 -*-
+"""
+This package contains various utilities.
 
-#from .iterable import *
+NOTE: All the utilities here must be standalone, therefore never should
+      import any modules outside from this package.
+"""
+
+from .iterable import *
 from .performance import *
 from .persistence import *
 from .security import *

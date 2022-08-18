@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 """
+This module contains security utilities.
 """
 
 import hashlib
@@ -12,7 +13,7 @@ __all__ = ['sha256sum']
 
 
 @singledispatch
-def sha256sum(obj: t.AnyStr, *, encoding: t.Text = 'utf-8'):
+def sha256sum(obj: t.AnyStr, *, encoding: t.Text = 'utf-8') -> t.NoReturn:
     """ Quickly get SHA256 sum for given string.
 
     >>> sha256sum("hello sha256!")

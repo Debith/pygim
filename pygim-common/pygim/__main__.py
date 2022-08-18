@@ -3,13 +3,10 @@
 Python Gimmicks Command-Line Interface.
 """
 
-import functools
 import click
-from pygim.cli.cliapp import GimmicksCliApp
+from pygim._cli.cliapp import GimmicksCliApp
 
-from pygim.cli import flag_opt
-
-
+from pygim._cli import flag_opt
 
 
 @click.group()
