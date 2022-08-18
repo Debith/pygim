@@ -4,37 +4,30 @@ This module contains miscellenious utility functions that can't be fit anywhere 
 """
 
 import pygim.typing as t
-from typing import Iterable, Callable, Any
 
-__all__ = ['split', 'is_container', 'flatten']
+__all__ = ('split', 'flatten', 'is_container')
 
 
-cpdef split(it: t.Iterable[Any], condition: t.Callable):
+def split(
+        iterable: t.Iterable[t.Any],
+        condition: t.Callable[[t.Any], bool],
+    ) -> t.Tuple[t.Iterable[t.Any], t.Iterable[t.Any]]:
     """
     Split a iterable object into two, based on given condition.
-
-    Args:
-        it (Iterable[Any]): Iterator to be split in two.
-        condition (Callable): Function decide the way of splitting.
-
-    Returns:
-        result (Tuple): Two lists where left side has values matching the
-                        condition and right side has the rest.
     """
+    left = []
+    right = []
 
-    cdef list left = []
-    cdef list right = []
-
-    for i in range(len(it)):
-        if condition(it[i]):
-            left.append(it[i])
+    for it in iterable:
+        if condition(it):
+            left.append(it)
         else:
-            right.append(it[i])
+            right.append(it)
 
     return left, right
 
 
-cpdef is_container(obj: t.Any):
+def is_container(obj: t.Any) -> bool:
     """ Checks whether the object is container or not.
 
     Container is considered an object, which includes other objects,
@@ -55,7 +48,7 @@ cpdef is_container(obj: t.Any):
     return isinstance(obj, memoryview)
 
 
-cpdef flatten(items: t.Iterable[t.Any]):
+def flatten(items: t.Iterable[t.Any]) -> t.Generator[t.Any, None, None]:
     """ Flatten the nested arrays into single one.
 
     Example about list of lists.
@@ -70,13 +63,9 @@ cpdef flatten(items: t.Iterable[t.Any]):
     >>> list(flatten(["one", "two", ["three", "four"]]))
     ['one', 'two', 'three', 'four']
     """
-    cdef list new_items = []
-
     for subitem in items:
         if is_container(subitem):
             for item in flatten(subitem):
-                new_items.append(item)
+                yield item
         else:
-            new_items.append(subitem)
-
-    return new_items
+            yield subitem
