@@ -79,6 +79,12 @@ def decompress_and_unpickle(obj: t.Union[bytes, pathlib.Path]) -> t.Any:
     Returns:
         (object): Object returned by this procedure.
     """
+    if isinstance(obj, str):
+        pth = pathlib.Path(obj)
+        if pth.is_file():
+            obj = pth
+
     if isinstance(obj, pathlib.Path):
         obj = obj.read_bytes()
+
     return pickle.loads(gzip.decompress(obj))

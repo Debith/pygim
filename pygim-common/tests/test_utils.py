@@ -5,10 +5,10 @@ from functools import singledispatch
 import pytest
 
 try:
-    import pyximport; pyximport.install()
+    from pygim.utils import flatten, is_container, split
 except ImportError:
-    pass
-from pygim.utils import flatten, is_container, split
+    import pyximport; pyximport.install()
+    from pygim.utils import flatten, is_container, split
 
 @singledispatch
 def equals(left: object, right):

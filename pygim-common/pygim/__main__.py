@@ -1,15 +1,15 @@
+# -*- coding: utf-8 -*-
 """
 Python Gimmicks Command-Line Interface.
 """
 
-import sys
-import pathlib
-import shutil
+import functools
 import click
+from pygim.cli.cliapp import GimmicksCliApp
 
-def _echo(msg, quiet):
-    if not quiet:
-        click.echo(msg)
+from pygim.cli import flag_opt
+
+
 
 
 @click.group()
@@ -25,22 +25,12 @@ def cli():
 
 
 @cli.command()
-@click.option("-d", "--dry-run", is_flag=True, default=False,
-              help="Just print items to be deleted.")
-@click.option("-q", "--quiet", is_flag=True, default=False,
-              help="Sssh! No output!")
-def remove_caches(dry_run, quiet):
-    """ Removes __cache__ folders in current workdir. """
-    if dry_run and quiet:
-        sys.exit("Can't be quiet and do dry run at the same time! Well, can... but it doesn't make sense.")
-
-    _echo(f"Starting clean up in `{pathlib.Path.cwd()}`", quiet)
-    del_msg = "Deleting" if not dry_run else "Would delete"
-
-    for fname in pathlib.Path.cwd().rglob("__pycache__"):
-        _echo(f"{del_msg} folder with its contents: {fname}", quiet)
-
-        if not dry_run:
-            shutil.rmtree(fname)
-
-    _echo("Clean up complete!", quiet)
+@flag_opt("-y", "--yes",            help="Confirm the action without prompting.")
+@flag_opt("-q", "--quiet",          help="Sssh! No output!")
+@flag_opt("-p", "--pycache-dirs",   help="Remove all __pycache__ folders.")
+@flag_opt("-b", "--build-dirs",     help="Remove any and all build folders.")
+@flag_opt("-c", "--compiled-files", help="Remove compiled files")
+@flag_opt("-a", "--all",            help="Remove all extra files or folders.")
+def clean_up(**kwargs):
+    """ Remove unnecessary files and folders related to Python. """
+    GimmicksCliApp().clean_up(**kwargs)
