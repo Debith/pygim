@@ -11,6 +11,9 @@ from pygim.utils import is_container
 import pygim.typing as t
 
 
+
+
+
 @dataclass(frozen=True)
 class PathSet:
     """ This class encapsulates manipulation of multiple path objects at once.
@@ -21,6 +24,7 @@ class PathSet:
         - bool(PathSet()) tells whether there is any Path objects in the list.
         - repr(PathSet()) provides nice string representation of this object.
         - PathSet() + PathSet() creates new object contains Path objects from both sets.
+        - PathSet.prefixed() create new PathSet with another path as prefix (e.g. folder+files).
         - PathSet().clone() creates identical copy of the list.
         - PathSet().filter() generator that yields Path objects whose properties match the filters.
         - PathSet().drop() generator that yields Path objects whose properties do NOT match the filters.
@@ -32,22 +36,42 @@ class PathSet:
 
     TODO: This class could allow multiple different path types (not just pathlib.Path).
     """
-    _paths: t.Optional[t.FrozenSet[Path]] = None
+    _paths: t.Optional[t.Iterable[Path]] = None
     _pattern: str = "*"
 
-    def __post_init__(self):
-        if self._paths is None:
+    def __post_init__(self) -> None:
+        paths: t.Optional[t.Iterable[Path]] = self._paths
+
+        if paths is None:
             super().__setattr__("_paths", Path.cwd())
 
-        if isinstance(self._paths, Path):
-            super().__setattr__("_paths", frozenset([fname for fname in self._paths.rglob(self._pattern)]))
+        # We just handled the optional part, let's make mypy happy.
+        assert paths is not None
 
-        if not isinstance(self._paths, frozenset):
-            super().__setattr__("_paths", frozenset(self._paths))
+        if isinstance(paths, Path):
+            super().__setattr__(
+                "_paths",
+                frozenset([fname for fname in paths.rglob(self._pattern)]),
+                )
 
-        assert all(isinstance(p, Path) for p in self._paths)
+        if not isinstance(paths, frozenset):
+            super().__setattr__("_paths", frozenset(paths))
 
-    def __len__(self):
+        assert all(isinstance(p, Path) for p in paths)
+
+    @classmethod
+    def prefixed(cls,  # type:ignore
+            paths: t.Iterable[t.PathLike],
+            *,
+            prefix: t.Optional[t.PathLike] = None,
+        ):
+        if prefix is None:
+            prefix = Path.cwd()
+        prefix = Path(prefix)  # Ensure pathlike object is Path.
+
+        return cls([prefix.joinpath(p) for p in paths])
+
+    def __len__(self) -> int:
         return len(self._paths)
 
     def __iter__(self):

@@ -3,8 +3,8 @@
 
 import pytest
 
-def test_single_path():
-    pass
+def test_single_path(temp_dir):
+    print(temp_dir)
 
 
 if __name__ == "__main__":
