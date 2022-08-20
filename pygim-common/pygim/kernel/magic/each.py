@@ -34,7 +34,7 @@ class EachMeta(type):
     def _handle_dynamic_type(self, kwargs):
         return DynamicEach(**kwargs)
 
-    def _handle_class(o, kwargs):
+    def _handle_class(self, o, kwargs):
         return StaticEach(o, **kwargs)
 
     def _handle_instance(self, iterable, kwargs):
