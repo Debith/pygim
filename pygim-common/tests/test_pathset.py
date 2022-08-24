@@ -20,8 +20,6 @@ def test_files(filled_temp_dir):
     print(filled_temp_dir)
 
 
-
-
-
 if __name__ == "__main__":
-    pytest.main([__file__])
+    from pygim.utils.testing import run_tests
+    run_tests(__file__, PathSet.__module__)

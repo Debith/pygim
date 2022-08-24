@@ -8,7 +8,6 @@ from pathlib import Path
 from dataclasses import dataclass
 
 from pygim.utils import is_container
-from .magic.each import Each
 import pygim.typing as t
 
 
@@ -36,8 +35,6 @@ class PathSet:
     """
     _paths: t.Optional[t.Iterable[Path]] = None
     _pattern: str = "*"
-
-    each = Each(Path)
 
     def __post_init__(self) -> None:
         paths: t.Optional[t.Iterable[Path]] = self._paths
