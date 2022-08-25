@@ -1,7 +1,9 @@
 import json
 import pickle
 from dataclasses import dataclass, asdict
-#from attrs import define, asdict
+import inspect
+
+__all__ = ["dumps"]
 
 class Callable:
     def __get__(self, __instance, __class):
@@ -38,16 +40,16 @@ class Serializer:
         setattr(self._class, self._serialize_name, Callable())
         setattr(self._class, self._deserialize_name, Callable())
 
-    def serialize(self, how=None):
+    def loads(self, how=None):
         if not how:
             return pickle.dumps(self._instance)
         result = getattr(self._class, self._serialize_name)()
         return self.serializers[how](result)
 
-    def deserialize(self, how):
+    def dumps(self, how):
         return getattr(self._class, self._deserialize_name)()
 
-import inspect
+
 
 def serializable(maybe_cls=None, **kwargs):
     def decorator(__class):
@@ -62,27 +64,16 @@ def serializable(maybe_cls=None, **kwargs):
         return decorator
 
 
-
-def serialize(obj, *, how=None):
+def dumps(obj, *, how=None):
     try:
         return obj.__serializer__.serialize(how)
     except AttributeError:
         if isinstance(obj, list):
-            return [serialize(o, how=how) for o in obj]
+            return [dumps(o, how=how) for o in obj]
 
 
-@serializable
-@dataclass
-class DeepTest:
-    value: int = 0
-
-
-@serializable
-@dataclass
-class Test:
-    another: DeepTest
-
-
-t = Test(DeepTest(100))
-print(serialize([t], how="json"))
-print(pickle.dumps([t]))
+def loads(obj, *, how=None):
+    try:
+        return obj.__serializer__.deserialize(how)
+    except AttributeError:
+        pass
