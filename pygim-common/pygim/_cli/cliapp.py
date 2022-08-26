@@ -42,5 +42,5 @@ class GimmicksCliApp:
             if response == 'n':
                 sys.exit("No? Maybe next time...")
             elif response == 'y':
-                new.delete_all()
+                new.FS.delete_all()
                 _echo("Excellent! You never see them again!", quiet)
