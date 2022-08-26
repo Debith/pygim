@@ -68,7 +68,7 @@ class PathSet:
         paths: Paths = self._paths
 
         if paths is None:
-            paths = Path.cwd()
+            paths = Path.cwd().resolve()
 
         # We just handled the optional part, let's make mypy happy.
         assert paths is not None

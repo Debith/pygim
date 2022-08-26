@@ -80,8 +80,8 @@ def test_current_working_dir(temp_dir):
     old_cwd = os.curdir
     os.chdir(temp_dir)
 
-    assert PathSet() == PathSet(temp_dir)
-    assert PathSet.prefixed(['readme.txt']) == PathSet.prefixed(['readme.txt'], prefix=temp_dir)
+    assert PathSet() == PathSet(Path(os.curdir).resolve())
+    assert PathSet.prefixed(['readme.txt']) == PathSet.prefixed(['readme.txt'], prefix=Path(os.curdir).resolve())
 
     os.chdir(old_cwd)
 
