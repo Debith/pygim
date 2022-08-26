@@ -59,7 +59,7 @@ def test_delete_all(filled_temp_dir):
     assert [f.is_file() for f in filled_temp_dir] == [False, False, False]
 
 
-def test_delete_all_with_folders(temp_dir):
+def x_test_delete_all_with_folders(temp_dir):
     sub_dir = temp_dir / "sub"
     sub_dir.mkdir()
     test_files = PathSet.prefixed(_FILES, prefix=temp_dir)

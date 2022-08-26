@@ -12,7 +12,4 @@ def temp_dir():
 
     assert __tdir.exists(), "DO NOT DELETE TEMP DIR!"
 
-    try:
-        tdir.cleanup()
-    except PermissionError:
-        pass  # FIXME: This happens in CI. Why this happens with temporary folders?
+    tdir.cleanup()
