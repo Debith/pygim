@@ -6,14 +6,27 @@ This module contains implementation of PathSet class.
 import shutil
 from pathlib import Path
 from dataclasses import dataclass
+from typing import Iterable
 
-from pygim.utils import is_container
+from pygim.utils import is_container, flatten
 import pygim.typing as t
 
 Paths = t.Collection[Path]
 MaybePaths = t.Optional[Paths]
 PathGenerator = t.Iterable[Path]
 PathFilters = t.Mapping[t.Text, t.Any]
+
+
+def _flatten_paths(paths: t.PathLikes) -> t.Iterator[Path]:
+    for path in flatten(paths):
+        path = Path(path)
+
+        if path.is_dir():
+            yield path
+            for p in _flatten_paths(path.glob("*")):
+                yield p
+        else:
+            yield path
 
 
 @dataclass
@@ -68,21 +81,14 @@ class PathSet:
         paths: Paths = self._paths
 
         if paths is None:
-            paths = Path.cwd().resolve()
+            paths = Path.cwd()
 
         # We just handled the optional part, let's make mypy happy.
         assert paths is not None
 
-        if isinstance(paths, Path):
-            super().__setattr__(
-                "_paths",
-                frozenset([fname for fname in paths.rglob(self._pattern)]),
-                )
-
-        if not isinstance(self._paths, frozenset):
-            super().__setattr__("_paths", frozenset(paths))
-
-        super().__setattr__("_paths", frozenset(Path(p) for p in self._paths))
+        super().__setattr__("_paths", frozenset(_flatten_paths([paths])))
+        assert all([isinstance(p, Path) for p in self._paths])
+        assert isinstance(self._paths, frozenset)
 
     @classmethod
     def prefixed(cls,  # type:ignore
@@ -123,7 +129,9 @@ class PathSet:
             PathSet: New Pathset collection.
         """
         paths = self._paths if paths is None else paths
-        return self.__class__(frozenset(paths))  # type: ignore # Types are managed in constructor.
+        instance = self.__class__([])  # type: ignore # Types are managed in constructor.
+        super(self.__class__, instance).__setattr__("_paths", frozenset(Path(p) for p in paths))
+        return instance
 
     def filter(self, **filters: PathFilters) -> PathGenerator:
         """ Filter paths based on their properties, where those matching filters are kept.

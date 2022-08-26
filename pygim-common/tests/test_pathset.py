@@ -33,6 +33,8 @@ def test_basics(filled_temp_dir):
 
 def test_cloning_with_override(filled_temp_dir):
     assert filled_temp_dir.clone([]) == PathSet([])
+    assert filled_temp_dir.clone(['readme.txt']) == PathSet(['readme.txt'])
+
 
 
 def test_adding(filled_temp_dir):
@@ -66,9 +68,9 @@ def test_delete_all_with_folders(temp_dir):
     [p.touch() for p in test_files + sub_files]
 
     paths = PathSet(temp_dir)
-    assert len(paths.dirs()) == 1
+    assert len(paths.dirs()) == 2
     assert len(paths.files()) == 6
-    assert len(paths) == 7
+    assert len(paths) == 8
 
     paths.FS.delete_all()
 
@@ -80,8 +82,13 @@ def test_current_working_dir(temp_dir):
     old_cwd = os.curdir
     os.chdir(temp_dir)
 
-    assert PathSet() == PathSet(Path(os.curdir).resolve())
-    assert PathSet.prefixed(['readme.txt']) == PathSet.prefixed(['readme.txt'], prefix=Path(os.curdir).resolve())
+    _cur_dir = Path(os.curdir).resolve()
+    assert list(PathSet())[0].name == list(PathSet(_cur_dir))[0].name
+
+    actual_path = list(PathSet.prefixed(['readme.txt']))[0]
+    expected_path = list(PathSet.prefixed(['readme.txt'], prefix=_cur_dir))[0]
+
+    assert actual_path.parts[-2:] == expected_path.parts[-2:]
 
     os.chdir(old_cwd)
 
@@ -121,4 +128,4 @@ def test_dropped_files_based_on_filter(filled_temp_dir):
 
 if __name__ == "__main__":
     from pygim.utils.testing import run_tests
-    run_tests(__file__, PathSet.__module__, coverage=True)
+    run_tests(__file__, PathSet.__module__, coverage=False)
