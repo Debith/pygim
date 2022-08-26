@@ -10,7 +10,6 @@ def temp_dir():
 
     yield __tdir
 
-    __tdir.mkdir(exist_ok=True, parents=True)  # If tests removed, recreate.
+    assert __tdir.exists(), "DO NOT DELETE TEMP DIR!"
     tdir.cleanup()
-
     assert not __tdir.exists()

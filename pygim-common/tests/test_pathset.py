@@ -67,10 +67,10 @@ def test_delete_all_with_folders(temp_dir):
 
     [p.touch() for p in test_files + sub_files]
 
-    paths = PathSet(temp_dir)
-    assert len(paths.dirs()) == 2
+    paths = PathSet(temp_dir).dropped(name=temp_dir.name)
+    assert len(paths.dirs()) == 1
     assert len(paths.files()) == 6
-    assert len(paths) == 8
+    assert len(paths) == 7
 
     paths.FS.delete_all()
 
