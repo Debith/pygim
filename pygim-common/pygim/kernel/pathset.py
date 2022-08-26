@@ -10,6 +10,10 @@ from dataclasses import dataclass
 from pygim.utils import is_container
 import pygim.typing as t
 
+Paths = t.Collection[Path]
+MaybePaths = t.Optional[Paths]
+PathGenerator = t.Iterable[Path]
+PathFilters = t.Mapping[t.Text, t.Any]
 
 @dataclass(frozen=True)
 class PathSet:
@@ -20,6 +24,7 @@ class PathSet:
         - list(PathSet()) provides list of all Path objects in the list.
         - bool(PathSet()) tells whether there is any Path objects in the list.
         - repr(PathSet()) provides nice string representation of this object.
+        - PathSet.prefixed()
         - PathSet() + PathSet() creates new object contains Path objects from both sets.
         - PathSet.prefixed() create new PathSet with another path as prefix (e.g. folder+files).
         - PathSet().clone() creates identical copy of the list.
@@ -33,11 +38,11 @@ class PathSet:
 
     TODO: This class could allow multiple different path types (not just pathlib.Path).
     """
-    _paths: t.Optional[t.Iterable[Path]] = None
+    _paths: Paths = None  # type: ignore    # this is invariant
     _pattern: str = "*"
 
     def __post_init__(self) -> None:
-        paths: t.Optional[t.Iterable[Path]] = self._paths
+        paths: Paths = self._paths
 
         if paths is None:
             super().__setattr__("_paths", Path.cwd())
@@ -58,9 +63,9 @@ class PathSet:
 
     @classmethod
     def prefixed(cls,  # type:ignore
-            paths: t.Iterable[t.PathLike],
+            paths: t.Collection[t.PathLike],
             *,
-            prefix: t.Optional[t.PathLike] = None,
+            prefix: t.MaybePathLike = None,
         ):
         if prefix is None:
             prefix = Path.cwd()
@@ -69,21 +74,27 @@ class PathSet:
         return cls([prefix.joinpath(p) for p in paths])
 
     def __len__(self) -> int:
+        assert self._paths is not None
         return len(self._paths)
 
-    def __iter__(self):
+    def __iter__(self) -> t.PathLikes:
+        assert self._paths is not None
         yield from self._paths
 
-    def __bool__(self):
+    def __bool__(self) -> bool:
+        assert self._paths is not None
         return bool(self._paths)
 
-    def __repr__(self):
+    def __repr__(self) -> t.Text:  # pragma: no cover
+        assert self._paths is not None
         return f"{self.__class__.__name__}({list(self._paths)})"
 
-    def clone(self, paths):
+    def clone(self, paths: t.MaybePathLikes = None) -> "PathSet":
+        paths = self._paths or paths
+        assert isinstance(paths, t.Collection)
         return self.__class__(frozenset(paths))
 
-    def filter(self, **filters):
+    def filter(self, **filters: PathFilters) -> PathGenerator:
         for p in self._paths:
             for func, value in filters.items():
                 value = value if is_container(value) else [value]
@@ -94,7 +105,7 @@ class PathSet:
                     yield p
                     break
 
-    def drop(self, **filters):
+    def drop(self, **filters: PathFilters) -> PathGenerator:
         for p in self._paths:
             for func, value in filters.items():
                 value = value if is_container(value) else [value]

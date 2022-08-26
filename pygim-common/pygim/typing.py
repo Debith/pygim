@@ -24,6 +24,9 @@ class SupportsStr(Protocol):
 
 # Object type that can used to turn into path.
 PathLike = t.Union[t.Text, Path]
+MaybePathLike = t.Optional[PathLike]
+PathLikes = t.Iterable[PathLike]
+MaybePathLikes = t.Optional[PathLikes]
 
 # TODO: Fix this
 # Nested iterable indicates that iterable can contain other iterable(s).
