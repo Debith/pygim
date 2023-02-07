@@ -63,9 +63,9 @@ def flatten(items: t.Iterable[t.Any]) -> t.Generator[t.Any, None, None]:
     >>> list(flatten(["one", "two", ["three", "four"]]))
     ['one', 'two', 'three', 'four']
     """
-    for subitem in items:
-        if is_container(subitem):
+    if is_container(items):
+        for subitem in items:
             for item in flatten(subitem):
                 yield item
-        else:
-            yield subitem
+    else:
+        yield items
