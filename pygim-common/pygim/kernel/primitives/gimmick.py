@@ -2,11 +2,13 @@
 
 """
 
+from collections.abc import MutableMapping
 import abc
 from types import FunctionType
 
 import pygim.typing as t
 import pygim.exceptions as e
+from pygim.utils import overlaps
 
 __all__ = ["Gim"]
 
@@ -50,6 +52,7 @@ def _is_valid_interface(func: t.Callable[[t.Any], t.Any]) -> bool:
 
 def _create_interface_class(mcls, name, bases, attrs):
     for name, func in attrs.items():
+        if name in _INJECT_ABC_MAP: continue
         if _is_dunder(name): continue
         if getattr(func, "__isabstractmethod__", False):
             continue
@@ -64,6 +67,7 @@ def _create_interface_class(mcls, name, bases, attrs):
         elif isinstance(func, property):
             attrs[name] = abc.abstractproperty(func)
         else:
+            continue
             raise e.GimError(f"Unknown: {name}")
 
         if not _is_valid_interface(func):
@@ -76,23 +80,55 @@ def _create_interface_class(mcls, name, bases, attrs):
     return mcls
 
 
-class MetaDict(dict):
+class Registry(MutableMapping):
     def __init__(self):
-        print('test')
+        self.__registered = dict()
+
+    def register(self, name, func):
+        self.__registered[name] = func
+
     def __getitem__(self, key):
-        return super().__getitem__(key)
+        return self.__registered[key]
+
+    def __delitem__(self, __key) -> None:
+        raise NotImplementedError
+
+    def __len__(self):
+        return len(self.__registered)
+
+    def __setitem__(self, __key, __value) -> None:
+        self.__registered[__key] = __value
+
+    def __iter__(self):
+        yield from self.__registered
+
+
+trait_registry = Registry()
+trait_registry.update(
+    interface=_create_interface_class,
+    abc=_create_gim_abc_meta,
+
+)
+
+_INJECT_ABC_MAP = dict(
+    abc=abc,
+    abstractmethod=abc.abstractmethod,
+    abstractclassmethod=abc.abstractclassmethod,
+    abstractstaticmethod=abc.abstractstaticmethod,
+    abstractproperty=abc.abstractproperty,
+    )
 
 
 class GimMeta(type):
-
     def __prepare__(name, bases, **kwargs):
-        return MetaDict()
+        if overlaps(["interface", "abc"], kwargs):
+            return _INJECT_ABC_MAP.copy()
+        return {}
 
     def __new__(mcls, name, bases, attrs, **kwargs):
-        if "interface" in kwargs:
-            return _create_interface_class(mcls, name, bases, attrs)
-        if "abc" in kwargs:
-            return _create_gim_abc_meta(mcls, name, bases, attrs)
+        for k, v in kwargs.items():
+            if v:
+                return trait_registry[k](mcls, name, bases, attrs)
         return super().__new__(mcls, name, bases, attrs)
 
 

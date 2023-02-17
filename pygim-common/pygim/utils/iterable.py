@@ -5,7 +5,7 @@ This module contains miscellenious utility functions that can't be fit anywhere 
 
 import pygim.typing as t
 
-__all__ = ('split', 'flatten', 'is_container')
+__all__ = ('split', 'flatten', 'is_container', 'overlaps')
 
 
 def split(
@@ -69,3 +69,27 @@ def flatten(items: t.Iterable[t.Any]) -> t.Generator[t.Any, None, None]:
                 yield item
         else:
             yield subitem
+
+
+def overlaps(candidates: t.Iterable[t.Any], collection: t.Iterable[t.Any]) -> bool:
+    """ Return true if any of the candidates is found from the collection.
+
+    >>> collection = [1,2,3,4,5]
+    >>> overlaps([0, 1, 6], collection)
+    True
+
+    >>> overlaps([0, 6], collection)
+    False
+
+    >>> overlaps([2,3,4], collection)
+    True
+
+    >>> overlaps(['2','3','4'], collection)
+    False
+    """
+    return not set(candidates).isdisjoint(collection)
+
+
+if __name__ == "__main__":
+    import doctest
+    doctest.testmod()

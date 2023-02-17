@@ -91,6 +91,21 @@ def test_interface_non_empty_function(decorator):
         assert False, "should throw exception!"
 
 
+def test_interface_included_to_locals():
+    try:
+        class Example(Gim, interface=True):
+            @abstractmethod
+            def example_func(self):
+                pass
+
+            @abstractproperty
+            def example_prop(self):
+                pass
+
+    except NameError as e:
+        assert False, f"Should not throw an exception, got {e}"
+
+
 ########################################################
 ######## ABC ###########################################
 ########################################################
@@ -164,10 +179,12 @@ def test_abc_included_to_locals():
     try:
         class Example(Gim, abc=True):
             TEST = 1
-            @abstractmethod
-            def _non_empty_func(self):
-                this = 1
-                return True
+
+            first = abstractmethod
+            second = abstractclassmethod
+            third = abstractstaticmethod
+            fourth = abstractproperty
+
 
     except NameError as e:
         assert False, f"Should not throw an exception"
