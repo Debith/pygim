@@ -64,6 +64,9 @@ class SlowCar(Car):
         print("snail speed!")
 
 
+# In UML language, SlowCar, FastCar defines an "is a"-relationship with Car interface,
+# and this strictly means that they are inherited from the Car.
+
 # We then define a `Race` class that allows us to race `Car` objects. The `Race` class
 # takes advantage of the fact that any object that implements the `Car` interface is
 # guaranteed to have a `drive()` method. We can therefore add any `Car` object to the
@@ -85,6 +88,7 @@ class Race:
         # function for cars. It doesn't need to know anything about the implementation
         # of the cars themselves.
         for car in self._cars:
+            assert isinstance(car, Car)
             car.drive()
 
 
