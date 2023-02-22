@@ -64,9 +64,6 @@ class SlowCar(Car):
         print("snail speed!")
 
 
-# In UML language, SlowCar, FastCar defines an "is a"-relationship with Car interface,
-# and this strictly means that they are inherited from the Car.
-
 # We then define a `Race` class that allows us to race `Car` objects. The `Race` class
 # takes advantage of the fact that any object that implements the `Car` interface is
 # guaranteed to have a `drive()` method. We can therefore add any `Car` object to the
@@ -91,6 +88,24 @@ class Race:
             assert isinstance(car, Car)
             car.drive()
 
+# In UML language, the "is a" relationship is typically represented using inheritance
+# arrows, which show that one class is a subclass or derived class of another.
+
+# The "is a" relationship between classes is an important concept in object-oriented
+# programming, as it allows us to define hierarchies of related classes that share
+# common behavior. By using inheritance, we can define a base class (in this case, the
+# Car interface) and then create subclasses that inherit its behavior while also adding
+# their own specialized behavior.
+
+#                +--------+          +------+
+#                |  Car   |<--------o| Race |
+#                +--------+          +------+
+#                    |
+#       ----------------------------
+#       |            |             |
+#  +---------+   +---------+   +---------+
+#  | FastCar |   | SlowCar |   |BrokenCar|
+#  +---------+   +---------+   +---------+
 
 race = Race()
 race.add_car(FastCar())
@@ -103,3 +118,30 @@ race.start()    # high speed!
 # principles, particularly the Interface Segregation Principle, which encourages us to
 # separate behavior from implementation details, and only depend on the minimal set of
 # methods required to accomplish our goals.
+
+print('###############################################################################')
+
+# Below is an example that highlights the flexibility and extensibility of interfaces
+# in Python. We can define interfaces and extend them to include new behavior,
+# all while maintaining type safety and separation of concerns.
+
+class CarLike:
+    def drive(self):
+        print("custom speed!")
+
+# By registering CarLike with Car, we are effectively saying that CarLike is a subclass
+# of Car, even though it does not inherit from Car explicitly. This means that any
+# object of type CarLike can be treated as a Car object.
+
+# By using the register() method, we have effectively extended the Car interface to
+# include CarLike. This demonstrates another benefit of using interfaces - we can
+# extend existing interfaces without modifying their original definition.
+Car.register(CarLike)
+
+# This allows us to add CarLike objects to the race just like we added FastCar and
+# SlowCar objects. Since CarLike has its own implementation of the drive() method,
+# it will be able to participate in the race just like the other cars.
+race.add_car(CarLike())
+race.start()    # high speed!
+                # snail speed!
+                # custom speed!
