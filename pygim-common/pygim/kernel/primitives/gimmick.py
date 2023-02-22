@@ -67,7 +67,6 @@ def _create_interface_class(mcls, name, bases, attrs):
         elif isinstance(func, property):
             attrs[name] = abc.abstractproperty(func)
         else:
-            continue
             raise e.GimError(f"Unknown: {name}")
 
         if not _is_valid_interface(func):
@@ -80,11 +79,18 @@ def _create_interface_class(mcls, name, bases, attrs):
     return mcls
 
 
-class Registry(MutableMapping):
+class Trait(abc.ABC):
+    @abc.abstractmethod
+    def __call__(self, *args: t.Any, **kwds: t.Any) -> t.Any:
+        """ Trait must be callable. """
+
+
+class Registry(MutableMapping[str, Trait]):
     def __init__(self):
         self.__registered = dict()
 
-    def register(self, name, func):
+    def register(self, name, func: t.Callable):
+        assert isinstance(func, t.Callable)
         self.__registered[name] = func
 
     def __getitem__(self, key):
@@ -103,11 +109,10 @@ class Registry(MutableMapping):
         yield from self.__registered
 
 
-trait_registry = Registry()
+trait_registry: Registry = Registry()
 trait_registry.update(
     interface=_create_interface_class,
     abc=_create_gim_abc_meta,
-
 )
 
 _INJECT_ABC_MAP = dict(
