@@ -24,6 +24,10 @@ classifiers = [
   "Typing :: Typed",
 ]
 
+dependencies = [
+  'pygim-common'
+]
+
 [project.optional-dependencies]
 dev = [
   'pytest',
