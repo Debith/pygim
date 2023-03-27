@@ -13,7 +13,7 @@ import pygim.typing as t
 
 Paths = t.Collection[Path]
 MaybePaths = t.Optional[Paths]
-PathGenerator = t.Iterable[Path]
+PathGenerator = t.Generator[Path, t.Any, t.Any]
 PathFilters = t.Mapping[t.Text, t.Any]
 
 
@@ -29,16 +29,13 @@ def _flatten_paths(paths: t.PathLikes) -> t.Iterator[Path]:
             yield path
 
 
-@dataclass
 class _FileSystemOps:
     """ Functionality to manipulate the filesystem. """
-    __instance: "PathSet" = None
-
     def __get__(self, __instance: "PathSet", _: type) -> "_FileSystemOps":
-        self.__instance = __instance
+        self.__pathset = __instance
         return self
 
-    def delete(self, path: Path):
+    def delete(self, path: Path) -> None:
         if path.is_file():
             path.unlink()
         elif path.is_dir():
@@ -46,7 +43,8 @@ class _FileSystemOps:
 
     def delete_all(self) -> None:
         """ Delete Path object from the file system. """
-        for p in self.__instance:
+        assert isinstance(self.__pathset, PathSet)
+        for p in self.__pathset:
             self.delete(p)
 
 
