@@ -11,19 +11,13 @@ import pygim.typing as t
 
 __all__ = ("write_bytes", "pickle_and_compress", "decompress_and_unpickle")
 
-def _drop_file_suffixes(p: pathlib.Path) -> pathlib.Path:
+def _drop_file_suffixes(p):
     while p.suffixes:
         p = p.with_suffix('')
     return p
 
 
-def write_bytes(
-        filename: t.Union[t.Text, pathlib.Path],
-        data: bytes,
-        *,
-        make_dirs: bool = False,
-        suffix: t.Text = ".bin",
-        ) -> None:
+def write_bytes(filename, data, *, make_dirs=False, suffix= ".bin"):
     """ Writes bytes into file.
 
     This function provides straight-forward means to write bytedata into a
@@ -48,13 +42,7 @@ def write_bytes(
     pth.write_bytes(data)
 
 
-def pickle_and_compress(
-        obj: t.Any,
-        filename: t.Union[t.Text, pathlib.Path] = None,
-        *,
-        make_dirs: bool = False,
-        suffix: t.Text = ".pkl.zip",
-        ) -> bytes:
+def pickle_and_compress(obj, filename=None, *, make_dirs, suffix= ".pkl.zip"):
     """ Writes pickled and compressed object into a file.
 
     Args:
@@ -75,7 +63,7 @@ def pickle_and_compress(
     return data
 
 
-def decompress_and_unpickle(obj: t.Union[bytes, pathlib.Path]) -> t.Any:
+def decompress_and_unpickle(obj):
     """ Decompress and unpickle given object.
 
     Args:

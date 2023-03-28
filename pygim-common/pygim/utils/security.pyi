@@ -1,0 +1,3 @@
+from typing import AnyStr, Text, NoReturn
+
+def sha256sum(obj: AnyStr, *, encoding: Text = ...) -> NoReturn: ...

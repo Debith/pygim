@@ -13,7 +13,7 @@ __all__ = ['sha256sum']
 
 
 @singledispatch
-def sha256sum(obj: t.AnyStr, *, encoding: t.Text = 'utf-8') -> t.NoReturn:
+def sha256sum(obj, *, encoding='utf-8'):
     """ Quickly get SHA256 sum for given string.
 
     >>> sha256sum("hello sha256!")
@@ -30,7 +30,7 @@ def sha256sum(obj: t.AnyStr, *, encoding: t.Text = 'utf-8') -> t.NoReturn:
 
 
 @sha256sum.register(str)
-def _(text: str, *, encoding: t.Text = 'utf-8'): # type: ignore
+def _(text: str, *, encoding='utf-8'):
     assert isinstance(text, str)
     return hashlib.sha256(text.encode(encoding)).hexdigest()
 

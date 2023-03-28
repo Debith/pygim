@@ -13,14 +13,14 @@ from pygim.kernel import PathSet
 
 __all__ = ['GimmicksCliApp']
 
-def _echo(msg: t.Text, quiet: bool) -> None:
+def _echo(msg, quiet):
     if not quiet:
         click.echo(msg)
 
 
 @dataclass
 class GimmicksCliApp:
-    def clean_up(self, yes: bool, build_dirs: bool, pycache_dirs: bool, compiled_files: bool, quiet: bool, all: bool):
+    def clean_up(self, yes, build_dirs, pycache_dirs, compiled_files, quiet, all):
         # TODO: clean up!
         _echo(f"Starting clean up in `{Path.cwd()}`", quiet)
         pth = PathSet()

@@ -7,22 +7,14 @@ __all__ = ["CachedTypeMeta", "CachedType", "create_cached_class"]
 
 import pygim.typing as t
 
-AnyClass = t.Type[t.Any]
-AnyArgs = t.Tuple[t.Any, ...]
-NamespaceDict = t.Dict[t.Text, t.Any]
-AnyKwargs = t.Unpack[NamespaceDict]
 
 class CachedInstanceMeta(type):
-    __instance_cache: t.Dict[t.Tuple[AnyClass, AnyArgs], t.Any] = {}
+    __instance_cache = {}
 
-    def __new__(mcls: AnyClass,
-                name: t.Text,
-                bases: t.Tuple[AnyClass],
-                namespace: t.Dict[t.Text, t.Any],
-            ) -> t.Any:
+    def __new__(mcls, name, bases, namespace):
         return super(CachedInstanceMeta, mcls).__new__(mcls, name, bases, namespace)
 
-    def __call__(self: AnyClass, *args: AnyArgs, **kwargs: AnyKwargs) -> t.Any:
+    def __call__(self, *args, **kwargs):
         try:
             return self.__instance_cache[self, args]
         except KeyError:
@@ -31,7 +23,7 @@ class CachedInstanceMeta(type):
             return instance
 
     @classmethod
-    def reset(cls) -> None:
+    def reset(cls):
         """
         A class method to reset the cached instances of the class.
 
@@ -65,11 +57,7 @@ class CachedClassInstanceMeta(CachedInstanceMeta):
 class CachedClassMeta(type):
     __class_cache = {}
 
-    def __new__(mcls: AnyClass,
-                name: t.Text,
-                bases: t.Tuple[AnyClass],
-                namespace: t.Dict[t.Text, t.Any],
-            ) -> t.Any:
+    def __new__(mcls, name, bases, namespace):
         try:
             return mcls.__class_cache[name, bases]
         except Exception:
@@ -122,7 +110,7 @@ class CachedTypeMeta(type):
     _class_cache = dict()  #_Cache(dict)  # filled my metaclass
     __instance_cache = dict()
 
-    def __new__(mcls, name: t.Text, bases=(), attrs=None, *, cache_class=True, cache_instance=True):
+    def __new__(mcls, name, bases=(), attrs=None, *, cache_class=True, cache_instance=True):
         """
         Creates a new class using the specified metaclass and caches the class based on their
         names to ensure they are always accessible by name. If no attributes provided, an empty
@@ -142,7 +130,7 @@ class CachedTypeMeta(type):
     def __init__(self, *args, **kwargs):
         """ Empty. """
 
-    def __call__(self, *args, **kwargs) -> t.Any:
+    def __call__(self, *args, **kwargs):
         if self is CachedType:
             raise TypeError(f"This class {self.__name__} is abstract and therefore can't be instantinated directly!")
 

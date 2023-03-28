@@ -11,13 +11,9 @@ from typing import Iterable
 from pygim.utils import is_container, flatten
 import pygim.typing as t
 
-Paths = t.Collection[Path]
-MaybePaths = t.Optional[Paths]
-PathGenerator = t.Generator[Path, t.Any, t.Any]
-PathFilters = t.Mapping[t.Text, t.Any]
 
 
-def _flatten_paths(paths: t.PathLikes) -> t.Iterator[Path]:
+def _flatten_paths(paths):
     for path in flatten(paths):
         path = Path(path)
 
@@ -31,17 +27,17 @@ def _flatten_paths(paths: t.PathLikes) -> t.Iterator[Path]:
 
 class _FileSystemOps:
     """ Functionality to manipulate the filesystem. """
-    def __get__(self, __instance: "PathSet", _: type) -> "_FileSystemOps":
+    def __get__(self, __instance, _):
         self.__pathset = __instance
         return self
 
-    def delete(self, path: Path) -> None:
+    def delete(self, path):
         if path.is_file():
             path.unlink()
         elif path.is_dir():
             shutil.rmtree(path)
 
-    def delete_all(self) -> None:
+    def delete_all(self):
         """ Delete Path object from the file system. """
         assert isinstance(self.__pathset, PathSet)
         for p in self.__pathset:
@@ -71,12 +67,12 @@ class PathSet:
 
     TODO: This class could allow multiple different path types (not just pathlib.Path).
     """
-    _paths: Paths = None  # type: ignore    # this is invariant
+    _paths: Path = None  # type: ignore    # this is invariant
     _pattern: str = "*"
     FS = _FileSystemOps()          # File system
 
-    def __post_init__(self) -> None:
-        paths: Paths = self._paths
+    def __post_init__(self):
+        paths = self._paths
 
         if paths is None:
             paths = Path.cwd()
@@ -89,34 +85,30 @@ class PathSet:
         assert isinstance(self._paths, frozenset)
 
     @classmethod
-    def prefixed(cls,  # type:ignore
-            paths: t.Collection[t.PathLike],
-            *,
-            prefix: t.MaybePathLike = None,
-        ):
+    def prefixed(cls, paths, *, prefix=None):
         if prefix is None:
             prefix = Path.cwd()
         prefix = Path(prefix)  # Ensure pathlike object is Path.
 
         return cls([prefix.joinpath(p) for p in paths])
 
-    def __len__(self) -> int:
+    def __len__(self):
         assert self._paths is not None
         return len(self._paths)
 
-    def __iter__(self) -> PathGenerator:
+    def __iter__(self):
         assert self._paths is not None
         yield from self._paths
 
-    def __bool__(self) -> bool:
+    def __bool__(self):
         assert self._paths is not None
         return bool(self._paths)
 
-    def __repr__(self) -> t.Text:  # pragma: no cover
+    def __repr__(self):  # pragma: no cover
         assert self._paths is not None
         return f"{self.__class__.__name__}({list(str(p) for p in self._paths)})"
 
-    def clone(self, paths: t.MaybePathLikes = None) -> "PathSet":
+    def clone(self, paths=None):
         """Create copy of the object.
 
         Args:
@@ -131,7 +123,7 @@ class PathSet:
         super(self.__class__, instance).__setattr__("_paths", frozenset(Path(p) for p in paths))
         return instance
 
-    def filter(self, **filters: PathFilters) -> PathGenerator:
+    def filter(self, **filters):
         """ Filter paths based on their properties, where those matching filters are kept.
 
         Args:
@@ -176,7 +168,7 @@ class PathSet:
                     yield p
                     break
 
-    def drop(self, **filters: PathFilters) -> PathGenerator:
+    def drop(self, **filters):
         """ Filter paths based on their properties, where those NOT matching filters are kept.
 
         Args:
@@ -221,27 +213,27 @@ class PathSet:
                     yield p
                     break
 
-    def filtered(self, **filters: PathFilters) -> "PathSet":
+    def filtered(self, **filters):
         """ As filter() but returns new object. """
         return self.clone(self.filter(**filters)) if filters else self
 
-    def dropped(self, **filters: PathFilters) -> "PathSet":
+    def dropped(self, **filters):
         """ As drop() but returns new object. """
         return self.clone(self.drop(**filters)) if filters else self
 
-    def dirs(self, **filters: PathFilters) -> "PathSet":
+    def dirs(self, **filters):
         """ A common filter to return only dirs. See filter() for more details. """
         return self.filtered(is_dir=True).filtered(**filters)
 
-    def files(self, **filters: PathFilters) -> "PathSet":
+    def files(self, **filters):
         """ A common filter to return only files. See filter() for more details. """
         return self.filtered(is_file=True).filtered(**filters)
 
-    def by_suffix(self, *suffix: t.Iterable[t.Text]) -> "PathSet":
+    def by_suffix(self, *suffix):
         """ A common filter to return files and folders by suffix. """
         return self.filtered(suffix=suffix)
 
-    def __add__(self, other: t.MaybePathLikes) -> "PathSet":
+    def __add__(self, other):
         """ Combine paths together. """
         assert isinstance(other, self.__class__)
         return self.clone(set(self._paths) | set(other._paths))

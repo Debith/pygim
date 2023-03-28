@@ -8,10 +8,7 @@ import pygim.typing as t
 __all__ = ('split', 'flatten', 'is_container')
 
 
-def split(
-        iterable: t.Iterable[t.Any],
-        condition: t.Callable[[t.Any], bool],
-    ) -> t.Tuple[t.Iterable[t.Any], t.Iterable[t.Any]]:
+def split(iterable, condition):
     """
     Split a iterable object into two, based on given condition.
     """
@@ -27,7 +24,7 @@ def split(
     return left, right
 
 
-def is_container(obj: t.Any) -> bool:
+def is_container(obj):
     """ Checks whether the object is container or not.
 
     Container is considered an object, which includes other objects,
@@ -48,7 +45,7 @@ def is_container(obj: t.Any) -> bool:
     return isinstance(obj, memoryview)
 
 
-def flatten(items: t.Iterable[t.Any]) -> t.Generator[t.Any, None, None]:
+def flatten(items):
     """ Flatten the nested arrays into single one.
 
     Example about list of lists.

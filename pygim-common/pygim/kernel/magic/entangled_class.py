@@ -3,13 +3,11 @@
 This creates a shared class that can be extended
 """
 
+from typing import DefaultDict
 import pygim.typing as t
 import pygim.exceptions as ex
 
 __all__ = ['EntangledClass']
-
-
-AnyClass = t.Type[t.Any]
 
 
 class EntangledClassError(ex.GimError):
@@ -17,20 +15,15 @@ class EntangledClassError(ex.GimError):
 
 
 class EntangledClassMetaMeta(type):
-    __namespaces: t.DefaultDict = {}
+    __namespaces = {}
 
     @staticmethod
-    def _resolve_namespace(namespace_name: t.Optional[t.Text], class_name: t.Text) -> t.Text:
+    def _resolve_namespace(namespace_name, class_name):
         if namespace_name is None:
             namespace_name = "pygim"
         return f"{namespace_name}.{class_name}"
 
-    def __call__(self,
-                 class_name: t.Text,
-                 bases: t.Tuple[AnyClass],
-                 namespace: t.Dict[t.Text, t.Any],
-                 namespace_name: t.Text = None,
-            ) -> t.Any:
+    def __call__(self, class_name, bases, namespace, namespace_name):
         namespace_name = self._resolve_namespace(namespace_name, class_name)
         try:
             existing_class = self.__namespaces[namespace_name]
@@ -45,13 +38,7 @@ class EntangledClassMetaMeta(type):
 
 
 class EntangledClassMeta(type, metaclass=EntangledClassMetaMeta):
-    __namespaces = {}
-
-    def __new__(mcls: AnyClass,
-                name: t.Text,
-                bases: t.Tuple[AnyClass],
-                namespace: t.Dict[t.Text, t.Any],
-            ) -> t.Any:
+    def __new__(mcls, name, bases, namespace):
         cls = super().__new__(mcls, name, bases, namespace)
         return cls
 
@@ -59,7 +46,7 @@ class EntangledClassMeta(type, metaclass=EntangledClassMetaMeta):
         assert self.__bases__ == (object, )
         return EntangledClassMetaMeta.__call__(EntangledClassMetaMeta, self.__name__, (), {}, key)
 
-    def __call__(self, *args: t.Any, **kwds: t.Any) -> t.Any:
+    def __call__(self, *args, **kwds):
         if EntangledClass not in self.__bases__:
             raise EntangledClassError("EntangledClass is abstract class, so please use inheritance!")
         return super().__call__(*args, **kwds)

@@ -16,10 +16,7 @@ __all__ = ['measure_coverage', 'run_tests']
 
 
 @contextmanager
-def measure_coverage(*,
-        include: t.Optional[t.PathLike] = None,
-        show_missing: bool = True,
-    ) -> t.Iterator[None]:
+def measure_coverage(*, include = None, show_missing: bool = True):
     """ Run code coverage for the code executed in this context manager.
 
     Parameters:
@@ -36,13 +33,7 @@ def measure_coverage(*,
     cov.report(include=include, show_missing=show_missing)
 
 
-def run_tests(
-        test_file: t.PathLike,
-        module_name: t.Text,
-        pytest_args: t.Iterable[t.Any] = None,
-        *,
-        coverage: bool = True,
-    ) -> None:
+def run_tests(test_file, module_name, pytest_args = None, *, coverage: bool = True):
     """ Runs tests for the file. """
     module = sys.modules[module_name]
     assert isinstance(module.__file__, str)
