@@ -119,7 +119,7 @@ class PathSet:
             PathSet: New Pathset collection.
         """
         paths = self._paths if paths is None else paths
-        instance = self.__class__([])  # type: ignore # Types are managed in constructor.
+        instance = self.__class__([])
         super(self.__class__, instance).__setattr__("_paths", frozenset(Path(p) for p in paths))
         return instance
 
