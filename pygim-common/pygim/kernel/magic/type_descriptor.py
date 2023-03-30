@@ -22,7 +22,7 @@ class TypeDescriptor:
         raise AttributeError("Cannot delete attribute")
 
     def __set_name__(self, owner, name):
-        print(f"Name descriptor set on attribute '{name}' in class '{owner.__name__}'")
+        self._parent_class = owner
 
     def __call__(self, *args, **kwargs):
-        return field(default_factory=self._parent_class)
+        return self
