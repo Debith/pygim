@@ -4,13 +4,10 @@ This module contains script to run coverage for specific module.
 """
 
 import sys
-from pathlib import Path
 from importlib import reload
 from contextlib import contextmanager
 import coverage
 import pytest
-
-import pygim.typing as t
 
 __all__ = ['measure_coverage', 'run_tests']
 

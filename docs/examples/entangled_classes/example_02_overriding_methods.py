@@ -42,6 +42,7 @@ class ExampleObject(EntangledExample):
 # ...and it is explicitly overridden. The `EntangledClass` provides these decorators
 # automagically within its namespace.
 class ExampleObject(EntangledExample):
+    @overrides
     @property
     def another_value(self):
         return self.__value * 10

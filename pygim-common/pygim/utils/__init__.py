@@ -10,6 +10,7 @@ from .iterable import *
 from .performance import *
 from .persistence import *
 from .security import *
+from .misc import *
 
 __all__ = [
     'split',            # Split iterable in two iterables based on condition function.
@@ -24,4 +25,6 @@ __all__ = [
     'decompress_and_unpickle',  # Decompress obj, unpickle it, while optionally read it from file.
 
     'sha256sum',        # Provides sha256 for a string.
+
+    'safedelattr',      # Delete attribute, ignoring error when its missing.
 ]
