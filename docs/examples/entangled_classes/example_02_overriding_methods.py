@@ -15,6 +15,9 @@ class ExampleObject(EntangledExample):
     def value(self):
         return self.__value
 
+# The new class is automatically included in the namespace of the inherited class.
+assert EntangledExample.__pygim_namespace__ == "Example2"
+assert ExampleObject.__pygim_namespace__ == "Example2"
 
 # Trying to overwrite value property via another class is not possible as that could
 # have some serious consequences, if done carelessly.

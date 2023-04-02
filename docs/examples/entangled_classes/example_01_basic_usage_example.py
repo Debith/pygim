@@ -5,7 +5,8 @@ from pygim import EntangledClass
 # advisable to specify the name of your project. The namespace's name must be hashable;
 # using strings is the easiest approach. However, enumerations can make the code more
 # structured and organized.
-assert EntangledClass.namespace == EntangledClass["pygim"].namespace
+assert EntangledClass.__pygim_namespace__ == EntangledClass["pygim"].__pygim_namespace__
+assert EntangledClass["AnotherNamespace"].__pygim_namespace__ != EntangledClass["pygim"].__pygim_namespace__
 assert id(EntangledClass) == id(EntangledClass["pygim"])
 assert EntangledClass.__name__ == "EntangledClass"
 
@@ -22,7 +23,7 @@ class ExampleObject(EntangledClass):
 
 
 # The new class has few properties, verified here.
-assert ExampleObject.namespace == "pygim"
+assert ExampleObject.__pygim_namespace__ == "pygim"
 assert id(ExampleObject) != id(EntangledClass)
 assert ExampleObject.__name__ == "ExampleObject"
 
