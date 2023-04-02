@@ -1,5 +1,6 @@
 # type: ignore
-from pygim import EntangledClass, EntangledMethodError
+from pygim import EntangledClass
+from pygim.exceptions import EntangledMethodError
 
 # This creates inheritable class locally so that it is more evident, which class is
 # used.

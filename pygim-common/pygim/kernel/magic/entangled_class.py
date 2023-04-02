@@ -3,26 +3,16 @@
 This creates a shared class that can be extended
 """
 
-import pygim.exceptions as ex
+from pygim import exceptions
+from collections.abc import Mapping, MutableMapping
 from .cached_type import CachedTypeMeta
 
 
-__all__ = ["EntangledClass", "EntangledMethodError", "overrideable", "overrides"]
-
-
-class EntangledError(ex.GimError):
-    """Base class for entanglement errors."""
-
-
-class EntangledClassError(EntangledError):
-    """Raised when issue detected with entangled class."""
-
-
-class EntangledMethodError(EntangledError):
-    """Raised when issue detected with methods of entangled class."""
+__all__ = ["EntangledClass", "overrideable", "overrides"]
 
 
 def setdefaultattr(obj, name, default):
+    """ Sets attribute to object in case it is missing. """
     if isinstance(obj, property):
         obj = obj.fget
 
@@ -54,7 +44,9 @@ _DEFAULT_KEY = ("EntangledClass", ())
 _ABSTRACT_ATTR = "__pygim_abstract__"
 
 
-def getgimdict(obj):
+# TODO: __pygim__ should be assumed to contain data in all situations.
+def _getgimdict(obj):
+    """ Retrieves __pygim__ dictionary from the object. """
     if isinstance(obj, property):
         obj = obj.fget
 
@@ -64,19 +56,26 @@ def getgimdict(obj):
     return {}
 
 
-def can_override(func, new_namespace, old_namespace):
-    _is_overrideable = getgimdict(old_namespace[func]).get("overrideable", False)
-    _can_override = getgimdict(new_namespace[func]).get("overrides", False)
+def _can_override(func_name, new_namespace, old_namespace):
+    """ Checks if function can be overridden in `EntangledClass`. """
+    assert isinstance(func_name, str), f"Expecting string, got {type(func_name)}"
+    assert isinstance(new_namespace, Mapping)
+    assert isinstance(old_namespace, Mapping)
+
+    _is_overrideable = _getgimdict(old_namespace[func_name]).get("overrideable", False)
+    _can_override = _getgimdict(new_namespace[func_name]).get("overrides", False)
+
     return _can_override and _is_overrideable
 
 
-from dataclasses import dataclass, field
-
-
-@dataclass(frozen=True)
 class _NameSpace(metaclass=CachedTypeMeta, cache_class=False, cache_instance=True):
-    _name: str
-    _classes: dict = field(default_factory=dict)
+    """ Namespace used to contain its classes.
+
+    For each namespace identified by its name, there is own namespace object.
+    """
+    def __init__(self, name, *, classes=None):
+        self._name = name
+        self._classes = classes or {}
 
     def __setitem__(self, key, value):
         self._classes[key] = value
@@ -86,25 +85,32 @@ class _NameSpace(metaclass=CachedTypeMeta, cache_class=False, cache_instance=Tru
 
 
 class EntangledClassMetaMeta(type):
+    """ This class ensures that all classes are created from scratch and updated with new data. """
     def __new__(mcls, name, bases, namespace):
         namespace.setdefault(_NAMESPACE_KEY, _DEFAULT_NAMESPACE)
         new_meta_class = super().__new__(mcls, name, bases, namespace)
         return new_meta_class
 
     def _ensure_obj_is_writeable(self, new_namespace, old_newspace):
-        """ """
+        """ Safe-guarding against overwriting shared methods. """
+        assert isinstance(new_namespace, Mapping)
+        assert isinstance(old_newspace, Mapping)
+
         common = set(new_namespace).intersection(old_newspace)
         allowed = set(["__module__", "overrides", "overrideable", _NAMESPACE_KEY, _ABSTRACT_ATTR])
-        overriding = set(f for f in common if can_override(f, new_namespace, old_newspace))
+        overriding = set(f for f in common if _can_override(f, new_namespace, old_newspace))
         unhandled = common - allowed - overriding
 
         if unhandled:
-            raise EntangledMethodError(f"Can't override following names: {','.join(unhandled)}")
+            raise exceptions.EntangledMethodError(f"Can't override following names: {','.join(unhandled)}")
 
         return overriding
 
     def __call__(self, _class_name, _bases, _namespace):
         """Create a new class or find existing from the namespaces."""
+        assert isinstance(_class_name, str)
+        assert isinstance(_bases, tuple)
+        assert isinstance(_namespace, MutableMapping)
         namespace = _NameSpace(_namespace[_NAMESPACE_KEY])
 
         try:
@@ -117,6 +123,18 @@ class EntangledClassMetaMeta(type):
         return existing_class
 
     def _extend(self, _existing_class, _namespace):
+        """Add new attributes and methods to existing class.
+
+        Args:
+            _existing_class (type): This is an existing class found in the namespace.
+            _namespace (Mapping): New namespaces that will be added to the class.
+
+        Returns:
+            type: returning the class given as an argument.
+        """
+        assert isinstance(_existing_class, type)
+        assert isinstance(_namespace, Mapping)
+
         overriding = self._ensure_obj_is_writeable(_namespace, _existing_class.__dict__)
         for name, obj in _namespace.items():
             if name not in _existing_class.__dict__ or name in overriding:
@@ -126,7 +144,7 @@ class EntangledClassMetaMeta(type):
 
 class EntangledClassMeta(type, metaclass=EntangledClassMetaMeta):
     @classmethod
-    def __prepare__(cls, name, bases):
+    def __prepare__(cls, _, bases):
         """Prepares namespace for EntangledClass."""
         # Ensure these decorators exists during class definition of subclasses.
         new_map = _DEFAULT_DICT.copy()
@@ -165,7 +183,7 @@ class EntangledClassMeta(type, metaclass=EntangledClassMetaMeta):
     def __call__(self, *args, **kwds):
         """Create instance of the EntangledClass, ensuring only subclasses can be created."""
         if getattr(self, _ABSTRACT_ATTR):
-            raise EntangledClassError("EntangledClass is abstract class, so please use inheritance!")
+            raise exceptions.EntangledClassError("EntangledClass is abstract class, so please use inheritance!")
         return super().__call__(*args, **kwds)
 
 
