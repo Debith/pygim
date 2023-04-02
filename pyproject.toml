@@ -37,9 +37,10 @@ dev = [
 
 [tool.pytest.ini_options]
 minversion = "6.0"
-addopts = "-ra -q"
+python_files = "test_*.py"
+addopts = '-ra -q --doctest-glob="**/*.py" --doctest-modules --doctest-continue-on-failure'
 testpaths = [
-    "pygim-common/tests",
+    "pygim-common/tests"
 ]
 
 [tool.coverage.paths]
@@ -58,17 +59,3 @@ exclude_lines = [
 [tool.pygim.commands]
 lint = "mypy ."
 test = "pytest"
-
-[tool.mypy]
-disallow_any_decorated = true
-disallow_any_generics = true
-disallow_any_unimported = false
-disallow_subclassing_any = false
-disallow_untyped_calls = true
-disallow_untyped_defs = true
-ignore_missing_imports = true
-warn_unused_ignores = true
-warn_return_any = true
-exclude = [
-    'tests/.*',
-]

@@ -11,12 +11,9 @@ import pygim.typing as t
 
 __all__ = ("quick_timer", "quick_profile")
 
+
 @contextmanager
-def quick_timer(
-        title: t.Text = "Code block",
-        *,
-        printer: t.Callable[[t.Text], None] = print,
-    ) -> t.Generator[None, None, None]:
+def quick_timer(title="Code block", *, printer=print):
     """
     Use this function to quickly measure time on a code block.
 
@@ -36,7 +33,7 @@ def quick_timer(
 
 
 @contextmanager
-def quick_profile(top: int = 30, *, sort: t.Text = "cumtime") -> t.Generator[None, None, None]:
+def quick_profile(top=30, *, sort="cumtime"):
     """
     Used to quickly print out profile results from the code inside the context.
 
