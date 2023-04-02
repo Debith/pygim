@@ -5,7 +5,7 @@ This module contains miscellenious utility functions that can't be fit anywhere 
 
 import pygim.typing as t
 
-__all__ = ('split', 'flatten', 'is_container')
+__all__ = ("split", "flatten", "is_container")
 
 
 def split(iterable, condition):
@@ -25,7 +25,7 @@ def split(iterable, condition):
 
 
 def is_container(obj):
-    """ Checks whether the object is container or not.
+    """Checks whether the object is container or not.
 
     Container is considered an object, which includes other objects,
     thus string is not qualified, even it implments iterator protocol.
@@ -39,14 +39,14 @@ def is_container(obj):
     if isinstance(obj, (str, bytes, type)):
         return False
 
-    if hasattr(obj, '__iter__'):
+    if hasattr(obj, "__iter__"):
         return True
 
     return isinstance(obj, memoryview)
 
 
 def flatten(items):
-    """ Flatten the nested arrays into single one.
+    """Flatten the nested arrays into single one.
 
     Example about list of lists.
     >>> list(flatten([[1, 2], [3, 4]]))

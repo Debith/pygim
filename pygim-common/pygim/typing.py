@@ -11,28 +11,31 @@ from typing_extensions import TypeAlias, runtime_checkable, Protocol
 from typing import Union, Optional, Iterable, Tuple, Dict, Callable, Text, Type, Any
 
 __all__ = [
-    'PathLike',
-    'MaybePathLike',
-    'PathLikes',
-    'MaybePathLikes',
-    'NestedIterable',
-    'AnyClass',
-    'AnyArgs',
-    'NamespaceDict',
-    'AnyKwargs',
-    'AnyCallable',
+    "PathLike",
+    "MaybePathLike",
+    "PathLikes",
+    "MaybePathLikes",
+    "NestedIterable",
+    "AnyClass",
+    "AnyArgs",
+    "NamespaceDict",
+    "AnyKwargs",
+    "AnyCallable",
 ]
 
 __all__ += t.__all__ + te.__all__
 
+
 @runtime_checkable
 class SupportsStr(Protocol):
     """An ABC with one abstract method __str__."""
+
     __slots__ = ()
 
     @abstractmethod
     def __str__(self) -> str:
         pass
+
 
 # Object type that can used to turn into path.
 PathLike = Union[Text, Path]

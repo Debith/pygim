@@ -7,19 +7,19 @@ import pygim.exceptions as ex
 from .cached_type import CachedTypeMeta
 
 
-__all__ = ['EntangledClass', "EntangledMethodError"]
+__all__ = ["EntangledClass", "EntangledMethodError", "overrideable", "overrides"]
 
 
 class EntangledError(ex.GimError):
-    """ Base class for entanglement errors. """
+    """Base class for entanglement errors."""
 
 
 class EntangledClassError(EntangledError):
-    """ Raised when issue detected with entangled class. """
+    """Raised when issue detected with entangled class."""
 
 
 class EntangledMethodError(EntangledError):
-    """ Raised when issue detected with methods of entangled class. """
+    """Raised when issue detected with methods of entangled class."""
 
 
 def setdefaultattr(obj, name, default):
@@ -35,15 +35,15 @@ def setdefaultattr(obj, name, default):
 
 def overrideable(func):
     assert callable(func) or isinstance(func, property)
-    map = setdefaultattr(func, '__pygim__', {})
-    map['overrideable'] = True
+    map = setdefaultattr(func, "__pygim__", {})
+    map["overrideable"] = True
     return func
 
 
 def overrides(func):
     assert callable(func) or isinstance(func, property)
-    map = setdefaultattr(func, '__pygim__', {})
-    map['overrides'] = True
+    map = setdefaultattr(func, "__pygim__", {})
+    map["overrides"] = True
     return func
 
 
@@ -53,19 +53,20 @@ _DEFAULT_NAMESPACE = "pygim"
 _DEFAULT_KEY = ("EntangledClass", ())
 _ABSTRACT_ATTR = "__pygim_abstract__"
 
+
 def getgimdict(obj):
     if isinstance(obj, property):
         obj = obj.fget
 
-    if hasattr(obj, '__pygim__'):
-        return getattr(obj, '__pygim__')
+    if hasattr(obj, "__pygim__"):
+        return getattr(obj, "__pygim__")
 
     return {}
 
 
 def can_override(func, new_namespace, old_namespace):
-    _is_overrideable = getgimdict(old_namespace[func]).get('overrideable', False)
-    _can_override = getgimdict(new_namespace[func]).get('overrides', False)
+    _is_overrideable = getgimdict(old_namespace[func]).get("overrideable", False)
+    _can_override = getgimdict(new_namespace[func]).get("overrides", False)
     return _can_override and _is_overrideable
 
 
@@ -93,7 +94,7 @@ class EntangledClassMetaMeta(type):
     def _ensure_obj_is_writeable(self, new_namespace, old_newspace):
         """ """
         common = set(new_namespace).intersection(old_newspace)
-        allowed = set(['__module__', 'overrides', 'overrideable', _NAMESPACE_KEY, _ABSTRACT_ATTR])
+        allowed = set(["__module__", "overrides", "overrideable", _NAMESPACE_KEY, _ABSTRACT_ATTR])
         overriding = set(f for f in common if can_override(f, new_namespace, old_newspace))
         unhandled = common - allowed - overriding
 
@@ -103,7 +104,7 @@ class EntangledClassMetaMeta(type):
         return overriding
 
     def __call__(self, _class_name, _bases, _namespace):
-        """ Create a new class or find existing from the namespaces. """
+        """Create a new class or find existing from the namespaces."""
         namespace = _NameSpace(_namespace[_NAMESPACE_KEY])
 
         try:
@@ -123,11 +124,10 @@ class EntangledClassMetaMeta(type):
         return _existing_class
 
 
-
 class EntangledClassMeta(type, metaclass=EntangledClassMetaMeta):
     @classmethod
     def __prepare__(cls, name, bases):
-        """ Prepares namespace for EntangledClass."""
+        """Prepares namespace for EntangledClass."""
         # Ensure these decorators exists during class definition of subclasses.
         new_map = _DEFAULT_DICT.copy()
         if not bases:
@@ -146,7 +146,7 @@ class EntangledClassMeta(type, metaclass=EntangledClassMetaMeta):
 
     def __getitem__(self, _key):
         assert not isinstance(_key, bool)
-        assert self.__bases__ == (object, )
+        assert self.__bases__ == (object,)
 
         key = _key or _DEFAULT_NAMESPACE
         namespaces = _NameSpace(key)
@@ -155,19 +155,21 @@ class EntangledClassMeta(type, metaclass=EntangledClassMetaMeta):
         except KeyError:
             EntangledClass = EntangledClassMetaMeta.__call__(
                 EntangledClassMeta,
-                'EntangledClass',
+                "EntangledClass",
                 (),
                 {_NAMESPACE_KEY: key},
-                )
+            )
 
         return EntangledClass
 
     def __call__(self, *args, **kwds):
-        """ Create instance of the EntangledClass, ensuring only subclasses can be created."""
+        """Create instance of the EntangledClass, ensuring only subclasses can be created."""
         if getattr(self, _ABSTRACT_ATTR):
             raise EntangledClassError("EntangledClass is abstract class, so please use inheritance!")
         return super().__call__(*args, **kwds)
 
 
 class EntangledClass(metaclass=EntangledClassMeta):
-    pass
+    """Helper class to create an entangled class using inheritance."""
+
+    __slots__ = ()

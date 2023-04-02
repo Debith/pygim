@@ -11,6 +11,7 @@ import pygim.typing as t
 
 __all__ = ("quick_timer", "quick_profile")
 
+
 @contextmanager
 def quick_timer(title="Code block", *, printer=print):
     """

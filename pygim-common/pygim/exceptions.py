@@ -3,5 +3,6 @@
 This module contains all exceptions found and used in pygim.
 """
 
+
 class GimError(Exception):
-    """ Main error class. """
+    """Main error class."""

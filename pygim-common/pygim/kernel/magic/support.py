@@ -8,6 +8,7 @@ __all__ = ["classproperty"]
 
 class classproperty:
     """Read-only @classproperty"""
+
     def __init__(self, fget):
         self.fget = fget
 

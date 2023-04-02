@@ -36,7 +36,6 @@ class CachedInstanceMeta(type):
         cls.__instance_cache = {}
 
 
-
 class CachedClassInstanceMeta(CachedInstanceMeta):
     __class_cache = {}
 
@@ -101,13 +100,14 @@ class CachedTypeMeta(type):
         obj3 = MyClass('val2', 'val1')  # new instance
         ```
     """
+
     __meta_classes = {
         (True, True): CachedClassInstanceMeta,
         (True, False): CachedClassMeta,
         (False, True): CachedInstanceMeta,
         (False, False): type,
     }
-    _class_cache = dict()  #_Cache(dict)  # filled my metaclass
+    _class_cache = dict()  # _Cache(dict)  # filled my metaclass
     __instance_cache = dict()
 
     def __new__(mcls, name, bases=(), attrs=None, *, cache_class=True, cache_instance=True):
@@ -128,11 +128,13 @@ class CachedTypeMeta(type):
         return mcls.__meta_classes[cache_class, cache_instance](name, bases, attrs or {})
 
     def __init__(self, *args, **kwargs):
-        """ Empty. """
+        """Empty."""
 
     def __call__(self, *args, **kwargs):
         if self is CachedType:
-            raise TypeError(f"This class {self.__name__} is abstract and therefore can't be instantinated directly!")
+            raise TypeError(
+                f"This class {self.__name__} is abstract and therefore can't be instantinated directly!"
+            )
 
         return self.__instance_cache[self](args, kwargs)
 
@@ -151,7 +153,7 @@ class CachedTypeMeta(type):
 
 
 class CachedType(metaclass=CachedTypeMeta):
-    """ Abstract base class for cached types. """
+    """Abstract base class for cached types."""
 
 
 create_cached_class = CachedTypeMeta

@@ -12,7 +12,6 @@ from pygim.utils import is_container, flatten
 import pygim.typing as t
 
 
-
 def _flatten_paths(paths):
     for path in flatten(paths):
         path = Path(path)
@@ -26,7 +25,8 @@ def _flatten_paths(paths):
 
 
 class _FileSystemOps:
-    """ Functionality to manipulate the filesystem. """
+    """Functionality to manipulate the filesystem."""
+
     def __get__(self, __instance, _):
         self.__pathset = __instance
         return self
@@ -38,7 +38,7 @@ class _FileSystemOps:
             shutil.rmtree(path)
 
     def delete_all(self):
-        """ Delete Path object from the file system. """
+        """Delete Path object from the file system."""
         assert isinstance(self.__pathset, PathSet)
         for p in self.__pathset:
             self.delete(p)
@@ -46,7 +46,7 @@ class _FileSystemOps:
 
 @dataclass(frozen=True)
 class PathSet:
-    """ This class encapsulates manipulation of multiple path objects at once.
+    """This class encapsulates manipulation of multiple path objects at once.
 
     Overview (further info in function docs):
         - len(PathSet()) provides total number of files and directories read recursively.
@@ -67,9 +67,10 @@ class PathSet:
 
     TODO: This class could allow multiple different path types (not just pathlib.Path).
     """
+
     _paths: Path = None  # type: ignore    # this is invariant
     _pattern: str = "*"
-    FS = _FileSystemOps()          # File system
+    FS = _FileSystemOps()  # File system
 
     def __post_init__(self):
         paths = self._paths
@@ -124,7 +125,7 @@ class PathSet:
         return instance
 
     def filter(self, **filters):
-        """ Filter paths based on their properties, where those matching filters are kept.
+        """Filter paths based on their properties, where those matching filters are kept.
 
         Args:
             filters (PathFilters):
@@ -169,7 +170,7 @@ class PathSet:
                     break
 
     def drop(self, **filters):
-        """ Filter paths based on their properties, where those NOT matching filters are kept.
+        """Filter paths based on their properties, where those NOT matching filters are kept.
 
         Args:
             filters (PathFilters):
@@ -214,31 +215,32 @@ class PathSet:
                     break
 
     def filtered(self, **filters):
-        """ As filter() but returns new object. """
+        """As filter() but returns new object."""
         return self.clone(self.filter(**filters)) if filters else self
 
     def dropped(self, **filters):
-        """ As drop() but returns new object. """
+        """As drop() but returns new object."""
         return self.clone(self.drop(**filters)) if filters else self
 
     def dirs(self, **filters):
-        """ A common filter to return only dirs. See filter() for more details. """
+        """A common filter to return only dirs. See filter() for more details."""
         return self.filtered(is_dir=True).filtered(**filters)
 
     def files(self, **filters):
-        """ A common filter to return only files. See filter() for more details. """
+        """A common filter to return only files. See filter() for more details."""
         return self.filtered(is_file=True).filtered(**filters)
 
     def by_suffix(self, *suffix):
-        """ A common filter to return files and folders by suffix. """
+        """A common filter to return files and folders by suffix."""
         return self.filtered(suffix=suffix)
 
     def __add__(self, other):
-        """ Combine paths together. """
+        """Combine paths together."""
         assert isinstance(other, self.__class__)
         return self.clone(set(self._paths) | set(other._paths))
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     import doctest
+
     doctest.testmod()

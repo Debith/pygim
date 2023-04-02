@@ -11,7 +11,8 @@ import pygim.typing as t
 from pygim.kernel import PathSet
 
 
-__all__ = ['GimmicksCliApp']
+__all__ = ["GimmicksCliApp"]
+
 
 def _echo(msg, quiet):
     if not quiet:
@@ -39,8 +40,8 @@ class GimmicksCliApp:
         if new and not yes:
             print("\n".join([str(n) for n in new]))
             response = input(f"Remove all {len(new)} files/folders (Y/N)? ")
-            if response == 'n':
+            if response == "n":
                 sys.exit("No? Maybe next time...")
-            elif response == 'y':
+            elif response == "y":
                 new.FS.delete_all()
                 _echo("Excellent! You never see them again!", quiet)

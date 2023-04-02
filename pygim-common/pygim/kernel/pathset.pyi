@@ -3,7 +3,6 @@ from typing_extensions import TypeAlias
 from pygim.typing import PathLike, MaybePathLike, MaybePathLikes
 from pathlib import Path
 
-
 Paths: TypeAlias = Collection[Path]
 MaybePaths: TypeAlias = Optional[Paths]
 PathGenerator: TypeAlias = Generator[Path, Any, Any]
