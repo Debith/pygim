@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools ~= 58.0", "cython ~= 0.29.0", "pdm-pep517"]
+requires = ["setuptools ~= 58.0", "wheel", "pdm-pep517"]
 build-backend = "pdm.pep517.api"
 
 [project]
@@ -7,7 +7,7 @@ name = "pygim-common"
 version = "0.1.0"
 description = "Common features for pygim"
 readme = "README.rst"
-requires-python = ">=3.6, <4"
+requires-python = ">=3.7, <4"
 authors = [
   {email = "debith-dev@outlook.com"},
   {name = "Teppo Perä"}
@@ -16,13 +16,13 @@ classifiers = [
   "Development Status :: 4 - Beta",
   "Intended Audience :: Developers",
   "License :: OSI Approved :: MIT License",
-  "Framework :: Python Gimmicks (pygim)",
   "Programming Language :: Python",
   "Programming Language :: Python :: 3",
   "Programming Language :: Python :: 3.7",
   "Programming Language :: Python :: 3.8",
   "Programming Language :: Python :: 3.9",
   "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
   "Topic :: Software Development :: Libraries :: Python Modules",
   "Topic :: Software Development :: Quality Assurance",
   "Typing :: Typed",
@@ -78,3 +78,6 @@ show_error_codes = true
 exclude = [
     'tests/.*',
 ]
+
+[tool.distutils.bdist_wheel]
+universal = true
