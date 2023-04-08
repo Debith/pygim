@@ -34,3 +34,12 @@ To install this project, simply write the following command:
     :prompt: $
 
     $ pip install pygim
+
+-----------
+Sub-modules
+-----------
+
+This library is divided into multiple different smaller packages.
+
+  * pygim: This is the main project that contains the CLI and all the examples.
+  * pygim-common: This sub-project contains common building blocks and is shared among other sub-projects.
