@@ -20,4 +20,26 @@ Python Gimmicks (pygim)
 
 
 Python Gimmicks is a library that contains magical but useful tools
-that can be used to improve productivity of any Python project.
+that can be used to improve productivity of any Python project. The
+goal is to use whatever Pythonic means to provide as light-weight
+and high-performance solutions as possible.
+
+------------
+Installation
+------------
+
+To install this project, simply write the following command:
+
+.. code-block:: bash
+    :prompt: $
+
+    $ pip install pygim
+
+-----------
+Sub-modules
+-----------
+
+This library is divided into multiple different smaller packages.
+
+  * pygim: This is the main project that contains the CLI and all the examples.
+  * pygim-common: This sub-project contains common building blocks and is shared among other sub-projects.
