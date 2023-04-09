@@ -6,10 +6,8 @@ This module contains implementation of PathSet class.
 import shutil
 from pathlib import Path
 from dataclasses import dataclass
-from typing import Iterable
 
 from pygim.utils import is_container, flatten
-import pygim.typing as t
 
 
 def _flatten_paths(paths):
@@ -46,28 +44,28 @@ class _FileSystemOps:
 
 @dataclass(frozen=True)
 class PathSet:
-    """This class encapsulates manipulation of multiple path objects at once.
+    """
+    This class encapsulates manipulation of multiple path objects at once.
 
     Overview (further info in function docs):
-        - len(PathSet()) provides total number of files and directories read recursively.
-        - list(PathSet()) provides list of all Path objects in the list.
-        - bool(PathSet()) tells whether there is any Path objects in the list.
-        - repr(PathSet()) provides nice string representation of this object.
+        - len(PathSet()) provides the total number of files and directories read recursively.
+        - list(PathSet()) provides a list of all Path objects in the list.
+        - bool(PathSet()) tells whether there are any Path objects in the list.
+        - repr(PathSet()) provides a nice string representation of this object.
         - PathSet.prefixed()
-        - PathSet() + PathSet() creates new object contains Path objects from both sets.
-        - PathSet.prefixed() create new PathSet with another path as prefix (e.g. folder+files).
-        - PathSet().clone() creates identical copy of the list.
+        - PathSet() + PathSet() creates a new object containing Path objects from both sets.
+        - PathSet.prefixed() creates a new PathSet with another path as a prefix (e.g., folder+files).
+        - PathSet().clone() creates an identical copy of the list.
         - PathSet().filter() generator that yields Path objects whose properties match the filters.
         - PathSet().drop() generator that yields Path objects whose properties do NOT match the filters.
-        - PathSet().filtered() as above but returns a new PathSet object.
-        - PathSet().dirs() a shorthand for list of dirs.
-        - PathSet().files() a shorthand for list of files.
+        - PathSet().filtered() as above, but returns a new PathSet object.
+        - PathSet().dirs() a shorthand for a list of directories.
+        - PathSet().files() a shorthand for a list of files.
         - PathSet().by_suffix() a shorthand for filtering by suffix(es).
-        - PathSet().delete_all() deletes all contained Path objects from the file-system.
+        - PathSet().delete_all() deletes all contained Path objects from the file system.
 
-    TODO: This class could allow multiple different path types (not just pathlib.Path).
     """
-
+    # TODO: This class could allow multiple different path types (not just pathlib.Path).
     _paths: Path = None  # type: ignore    # this is invariant
     _pattern: str = "*"
     FS = _FileSystemOps()  # File system
@@ -87,9 +85,24 @@ class PathSet:
 
     @classmethod
     def prefixed(cls, paths, *, prefix=None):
+        """
+        Create a new PathSet object with a specified prefix for each path.
+
+        Parameters
+        ----------
+        paths : `iterable` [path-like object]
+            Iterable of path-like objects.
+        prefix : path-like object, optional
+            The prefix to add to each path in the input `paths`. Defaults to the current working directory.
+
+        Returns
+        -------
+        PathSet
+            New PathSet object with the specified prefix for each path.
+        """
         if prefix is None:
             prefix = Path.cwd()
-        prefix = Path(prefix)  # Ensure pathlike object is Path.
+        prefix = Path(prefix)  # Ensure path-like object is Path.
 
         return cls([prefix.joinpath(p) for p in paths])
 
@@ -110,14 +123,18 @@ class PathSet:
         return f"{self.__class__.__name__}({list(str(p) for p in self._paths)})"
 
     def clone(self, paths=None):
-        """Create copy of the object.
+        """
+        Create a copy of the object.
 
-        Args:
-            paths (t.MaybePathLikes, optional):
-                Override paths in the clone. Defaults to None.
+        Parameters
+        ----------
+        paths : `iterable` [`pathlib.Path`], optional
+            Override paths in the clone. Defaults to None.
 
-        Returns:
-            PathSet: New Pathset collection.
+        Returns
+        -------
+        PathSet
+            New PathSet collection.
         """
         paths = self._paths if paths is None else paths
         instance = self.__class__([])
@@ -125,36 +142,41 @@ class PathSet:
         return instance
 
     def filter(self, **filters):
-        """Filter paths based on their properties, where those matching filters are kept.
+        """
+        Filter paths based on their properties, where those matching filters are kept.
 
-        Args:
-            filters (PathFilters):
-                Filters in this function has following functions:
+        Parameters
+        ----------
+        filters : `dict`
+            Filters in this function have the following properties:
 
-                    - KEYs must always be valid attribute names for underlying
-                      path objects. The KEY can be attribute, property or function.
-                      In case of function, the function is automatically invoked.
-                      However, functions requiring arguments are not supported.
+                - KEYs must always be valid attribute names for the underlying
+                path objects. The KEY can be an attribute, property, or function.
+                In the case of a function, the function is automatically invoked.
+                However, functions requiring arguments are not supported.
 
-                    - VALUEs represents the expected results of corresponding
-                      attributes or return values of the functions accessed by
-                      the KEY. VALUE can be a single value, or iterable of multiple
-                      different values. For latter case, if any of the VALUEs is
-                      satisfied, the corresponding Path object qualifies.
+                - VALUEs represent the expected results of the corresponding
+                attributes or return values of the functions accessed by
+                the KEY. VALUE can be a single value or an iterable of multiple
+                different values. In the latter case, if any of the VALUEs is
+                satisfied, the corresponding Path object qualifies.
 
-        Yields:
-            Iterator[PathGenerator]: Qualifying paths.
+        Yields
+        ------
+        `pathlib.Path`
+            Qualifying paths.
 
-        Examples:
-            >>> names = ["readme.txt", "readme.rst", "readme.md"]
-            >>> paths = PathSet(names)                      # A set of paths
-            >>> new_paths = paths.filter(suffix=".rst")     # Filter based on pathlib.Path.suffix property.
-            >>> [p.name for p in new_paths]                 # Show the names in filtered path set.
-            ['readme.rst']
+        Examples
+        --------
+        >>> names = ["readme.txt", "readme.rst", "readme.md"]
+        >>> paths = PathSet(names)                      # A set of paths
+        >>> new_paths = paths.filter(suffix=".rst")     # Filter based on pathlib.Path.suffix property.
+        >>> [p.name for p in new_paths]                 # Show the names in the filtered path set.
+        ['readme.rst']
 
-            >>> new_paths = paths.filter(suffix=[".rst", ".md"])    # This time we accept multiple suffixes.
-            >>> [p.name for p in sorted(new_paths)]                 # Show the names in filtered path set.
-            ['readme.md', 'readme.rst']
+        >>> new_paths = paths.filter(suffix=[".rst", ".md"])    # This time we accept multiple suffixes.
+        >>> [p.name for p in sorted(new_paths)]                 # Show the names in the filtered path set.
+        ['readme.md', 'readme.rst']
         """
         assert filters, "No filters given!"
         assert self._paths is not None
@@ -170,36 +192,41 @@ class PathSet:
                     break
 
     def drop(self, **filters):
-        """Filter paths based on their properties, where those NOT matching filters are kept.
+        """
+        Filter paths based on their properties, where those NOT matching filters are kept.
 
-        Args:
-            filters (PathFilters):
-                Filters in this function has following functions:
+        Parameters
+        ----------
+        filters : `dict`
+            Filters in this function have the following properties:
 
-                    - KEYs must always be valid attribute names for underlying
-                      path objects. The KEY can be attribute, property or function.
-                      In case of function, the function is automatically invoked.
-                      However, functions requiring arguments are not supported.
+                - KEYs must always be valid attribute names for the underlying
+                path objects. The KEY can be an attribute, property, or function.
+                In the case of a function, the function is automatically invoked.
+                However, functions requiring arguments are not supported.
 
-                    - VALUEs represents the expected results of corresponding
-                      attributes or return values of the functions accessed by
-                      the KEY. VALUE can be a single value, or iterable of multiple
-                      different values. For latter case, if any of the VALUEs is
-                      satisfied, the corresponding Path object qualifies.
+                - VALUEs represent the expected results of the corresponding
+                attributes or return values of the functions accessed by
+                the KEY. VALUE can be a single value or an iterable of multiple
+                different values. In the latter case, if any of the VALUEs is
+                satisfied, the corresponding Path object qualifies.
 
-        Yields:
-            Iterator[PathGenerator]: Not-Qualifying paths.
+        Yields
+        ------
+        `pathlib.Path`
+            Non-qualifying paths.
 
-        Examples:
-            >>> names = ["readme.txt", "readme.rst", "readme.md"]
-            >>> paths = PathSet(names)                      # A set of paths
-            >>> new_paths = paths.drop(suffix=".rst")       # Filter based on pathlib.Path.suffix property.
-            >>> [p.name for p in sorted(new_paths)]         # Show the names in filtered path set.
-            ['readme.md', 'readme.txt']
+        Examples
+        --------
+        >>> names = ["readme.txt", "readme.rst", "readme.md"]
+        >>> paths = PathSet(names)                      # A set of paths
+        >>> new_paths = paths.drop(suffix=".rst")       # Filter based on pathlib.Path.suffix property.
+        >>> [p.name for p in sorted(new_paths)]         # Show the names in the filtered path set.
+        ['readme.md', 'readme.txt']
 
-            >>> new_paths = paths.drop(suffix=[".rst", ".md"])      # This time we accept multiple suffixes.
-            >>> [p.name for p in new_paths]                         # Show the names in filtered path set.
-            ['readme.txt']
+        >>> new_paths = paths.drop(suffix=[".rst", ".md"])      # This time we accept multiple suffixes.
+        >>> [p.name for p in new_paths]                         # Show the names in the filtered path set.
+        ['readme.txt']
         """
         assert filters, "No filters given!"
         assert self._paths is not None
@@ -213,6 +240,7 @@ class PathSet:
                 if obj not in value:
                     yield p
                     break
+
 
     def filtered(self, **filters):
         """As filter() but returns new object."""
