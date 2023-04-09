@@ -1,6 +1,6 @@
-===============================
+#######################
 Python Gimmicks (pygim)
-===============================
+#######################
 
 | |docs| |downloads| |wheel| |pyversions|
 
@@ -24,18 +24,15 @@ that can be used to improve productivity of any Python project. The
 goal is to use whatever Pythonic means to provide as light-weight
 and high-performance solutions as possible.
 
-------------
 Installation
-------------
+============
 
 To install this project, simply write the following command:
 
 .. code-block:: bash
-    :prompt: $
 
     $ pip install pygim
 
------------
 Sub-modules
 -----------
 

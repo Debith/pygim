@@ -14,17 +14,30 @@ __all__ = ["sha256sum"]
 
 @singledispatch
 def sha256sum(obj, *, encoding="utf-8"):
-    """Quickly get SHA256 sum for given string.
+    """
+    Compute the SHA256 sum for the given string.
 
+    Parameters
+    ----------
+    obj : str
+        String to be encoded.
+    encoding : str, optional
+        Encoding used to convert string objects into bytes. Defaults to "utf-8".
+
+    Returns
+    -------
+    str
+        Calculated SHA256 sum.
+
+    Raises
+    ------
+    NotImplementedError
+        If `sha256sum` is not implemented for the given object type.
+
+    Examples
+    --------
     >>> sha256sum("hello sha256!")
     '705cb95c164e32feec2aef56f70d73e064afe2e38d40e5189fc5f8cdc84a9eaf'
-
-    Args:
-        obj (str):      String to be encoded.
-        encoding (str): Encoding used to convert string objects into bytes.
-
-    Returns:
-        Calculated SHA256 sum
     """
     raise NotImplementedError(f"sha256sum not implemented for type: {type(obj)}")
 

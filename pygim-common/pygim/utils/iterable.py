@@ -10,8 +10,40 @@ __all__ = ("split", "flatten", "is_container")
 
 def split(iterable, condition):
     """
-    Split a iterable object into two, based on given condition.
+    Split an iterable object into two lists based on a given condition.
+
+    Parameters
+    ----------
+    iterable : `iterable`
+        Any iterable that needs to be split in two.
+    condition : `callable`
+        A function that takes a simple argument and returns a boolean value.
+        The argument is used to decide which list the item should go into.
+
+    Returns
+    -------
+    `tuple` [`list` `list`]
+        A tuple containing two lists. The first list contains items that satisfy
+        the condition, while the second list contains the remaining items.
+
+    Notes
+    -----
+    The input iterable can be any iterable object such as string, tuple, list, set,
+    or generator.
+
+    Examples
+    --------
+    >>> numbers = [1, 2, 3, 4, 5]
+    >>> def is_even(n):
+    ...     return n % 2 == 0
+    ...
+    >>> even_numbers, odd_numbers = split_iterable(numbers, is_even)
+    >>> even_numbers
+    [2, 4]
+    >>> odd_numbers
+    [1, 3, 5]
     """
+
     left = []
     right = []
 
@@ -25,11 +57,24 @@ def split(iterable, condition):
 
 
 def is_container(obj):
-    """Checks whether the object is container or not.
+    """ Determine whether an object is a container.
 
-    Container is considered an object, which includes other objects,
-    thus string is not qualified, even it implments iterator protocol.
+    A container is considered an object that contains other objects. This
+    function returns `False` for strings, bytes, and types, even though they
+    implement the iterator protocol.
 
+    Parameters
+    ----------
+    obj : `object`
+        The object to check.
+
+    Returns
+    -------
+    `bool`
+        `True` if `obj` is a container, `False` otherwise.
+
+    Examples
+    --------
     >>> is_container("text")
     False
 
@@ -46,23 +91,37 @@ def is_container(obj):
 
 
 def flatten(items):
-    """Flatten the nested arrays into single one.
+    """Flatten a nested iterable into a single list.
 
-    Example about list of lists.
+    This function flattens nested iterables such as lists, tuples, and sets
+    into a single list. It can handle deeply nested and irregular structures.
+
+    Parameters
+    ----------
+    items : `iterable`
+        The nested iterable to flatten.
+
+    Yields
+    ------
+    `object`
+        The flattened objects from the nested iterable.
+
+    Examples
+    --------
+    Flatten a list of lists:
     >>> list(flatten([[1, 2], [3, 4]]))
     [1, 2, 3, 4]
 
-    Example of deeply nested irregular list:
+    Flatten a deeply nested irregular list:
     >>> list(flatten([[[1, 2]], [[[3]]], 4, 5, [[6, [7, 8]]]]))
     [1, 2, 3, 4, 5, 6, 7, 8]
 
-    List of strings is handled properly too
+    Flatten a list of strings:
     >>> list(flatten(["one", "two", ["three", "four"]]))
     ['one', 'two', 'three', 'four']
     """
     for subitem in items:
         if is_container(subitem):
-            for item in flatten(subitem):
-                yield item
+            yield from flatten(subitem)
         else:
             yield subitem
