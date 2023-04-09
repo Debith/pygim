@@ -7,7 +7,16 @@ __all__ = ["safedelattr"]
 
 
 def safedelattr(obj, name):
-    """Deletes attribute from the object and is happy if it is not there."""
+    """Deletes attribute from the object and is happy if it is not there.
+
+    Parameters
+    ----------
+    obj : `object`
+        Object containing the attribute.
+    name : `str`
+        Name of the attribute to be deleted.
+    """
+
     try:
         delattr(obj, name)
     except AttributeError:
