@@ -1,10 +1,11 @@
 # type: ignore
-from pygim import EntangledClass
+from pygim import EntangledClass, encls
 from pygim.exceptions import EntangledMethodError
 
 # This creates inheritable class locally so that it is more evident, which class is
 # used.
-EntangledExample = EntangledClass["Example2"]
+EntangledExample = encls.Example2.EntangledClass
+assert id(encls.Example2.EntangledClass) == id(EntangledClass["Example2"])
 
 # This is the first occasion we are creating `ExampleObject` class, which directly
 # inherits from `EntangledClass` in `pygim`'s scope.

@@ -14,12 +14,12 @@ class CachedInstanceMeta(type):
     def __new__(mcls, name, bases, namespace):
         return super(CachedInstanceMeta, mcls).__new__(mcls, name, bases, namespace)
 
-    def __call__(self, *args, **kwargs):
+    def __call__(self, name, bases, namespace, **kwargs):
         try:
-            return self.__instance_cache[self, args]
+            return self.__instance_cache[self, name, bases]
         except KeyError:
-            instance = super().__call__(*args, **kwargs)
-            self.__instance_cache[self, args] = instance
+            instance = super().__call__(name, bases, namespace, **kwargs)
+            self.__instance_cache[self, name, bases] = instance
             return instance
 
     @classmethod

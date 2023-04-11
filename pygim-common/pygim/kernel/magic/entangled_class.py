@@ -4,11 +4,12 @@ This creates a shared class that can be extended
 """
 
 from pygim import exceptions
+from pygim.utils import mgetattr
 from collections.abc import Mapping, MutableMapping
 from .cached_type import CachedTypeMeta
 
 
-__all__ = ["EntangledClass", "overrideable", "overrides"]
+__all__ = ["EntangledClass", "overrideable", "overrides", "encls"]
 
 
 def setdefaultattr(obj, name, default):
@@ -68,7 +69,18 @@ def _can_override(func_name, new_namespace, old_namespace):
     return _can_override and _is_overrideable
 
 
-class _NameSpace(metaclass=CachedTypeMeta, cache_class=False, cache_instance=True):
+class _NamespaceMeta(type, metaclass=CachedTypeMeta):
+    def __new__(mcls, *args, **kwargs):
+        return super(mcls, mcls).__new__(mcls, *args)
+
+    def __getattribute__(self, name):
+        try:
+            return super().__getattribute__(name)
+        except AttributeError:
+            return EntangledClass[name]
+
+
+class _NameSpace(metaclass=_NamespaceMeta, cache_class=False, cache_instance=True):
     """ Namespace used to contain its classes.
 
     For each namespace identified by its name, there is own namespace object.
@@ -82,6 +94,9 @@ class _NameSpace(metaclass=CachedTypeMeta, cache_class=False, cache_instance=Tru
 
     def __getitem__(self, key):
         return self._classes[key]
+
+
+encls = _NameSpace
 
 
 class EntangledClassMetaMeta(type):
@@ -185,6 +200,22 @@ class EntangledClassMeta(type, metaclass=EntangledClassMetaMeta):
         if getattr(self, _ABSTRACT_ATTR):
             raise exceptions.EntangledClassError("EntangledClass is abstract class, so please use inheritance!")
         return super().__call__(*args, **kwds)
+
+    def __getattribute__(self, name):
+        try:
+            return super().__getattribute__(name)
+        except AttributeError:
+            # This part is all about accessing/creating new class into current namespace.
+            namespaces = _NameSpace(self.__pygim_namespace__)
+            try:
+                return namespaces[name, ()]
+            except KeyError:
+                return EntangledClassMetaMeta.__call__(
+                    EntangledClassMeta,
+                    name,
+                    (),
+                    {_NAMESPACE_KEY: self.__pygim_namespace__},
+                )
 
 
 class EntangledClass(metaclass=EntangledClassMeta):
