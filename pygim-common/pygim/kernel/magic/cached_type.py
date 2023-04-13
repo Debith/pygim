@@ -5,8 +5,6 @@ This module implements cached type that can be used to manage singletons.
 
 __all__ = ["CachedTypeMeta", "CachedType", "create_cached_class"]
 
-import pygim.typing as t
-
 
 class CachedInstanceMeta(type):
     __instance_cache = {}
@@ -14,12 +12,12 @@ class CachedInstanceMeta(type):
     def __new__(mcls, name, bases, namespace):
         return super(CachedInstanceMeta, mcls).__new__(mcls, name, bases, namespace)
 
-    def __call__(self, name, bases, namespace, **kwargs):
+    def __call__(self, *args, **kwargs):
         try:
-            return self.__instance_cache[self, name, bases]
+            return self.__instance_cache[self, args]
         except KeyError:
-            instance = super().__call__(name, bases, namespace, **kwargs)
-            self.__instance_cache[self, name, bases] = instance
+            instance = super().__call__(*args, **kwargs)
+            self.__instance_cache[self, args] = instance
             return instance
 
     @classmethod
@@ -68,6 +66,10 @@ class CachedClassMeta(type):
     def reset(cls):
         cls.__class_cache = {}
 
+class _UserDefined: pass
+
+USER_DEFINED = _UserDefined()
+
 
 class CachedTypeMeta(type):
     """
@@ -107,8 +109,6 @@ class CachedTypeMeta(type):
         (False, True): CachedInstanceMeta,
         (False, False): type,
     }
-    _class_cache = dict()  # _Cache(dict)  # filled my metaclass
-    __instance_cache = dict()
 
     def __new__(mcls, name, bases=(), attrs=None, *, cache_class=True, cache_instance=True):
         """
@@ -125,7 +125,10 @@ class CachedTypeMeta(type):
         Returns:
             A new class using the specified metaclass.
         """
-        return mcls.__meta_classes[cache_class, cache_instance](name, bases, attrs or {})
+        try:
+            return mcls.__meta_classes[cache_class, cache_instance](name, bases, attrs or {})
+        except KeyError:
+            return super().__new__(mcls, name, bases, attrs)
 
     def __init__(self, *args, **kwargs):
         """Empty."""
@@ -136,7 +139,7 @@ class CachedTypeMeta(type):
                 f"This class {self.__name__} is abstract and therefore can't be instantinated directly!"
             )
 
-        return self.__instance_cache[self](args, kwargs)
+        return super().__call__(*args, **kwargs)
 
     @classmethod
     def reset_type_cache(mcls, *, type_cache=False, instance_cache=False):
@@ -152,7 +155,7 @@ class CachedTypeMeta(type):
             mcls.__meta_classes[False, True].reset()
 
 
-class CachedType(metaclass=CachedTypeMeta):
+class CachedType(metaclass=CachedTypeMeta, cache_class=USER_DEFINED, cache_instance=USER_DEFINED):
     """Abstract base class for cached types."""
 
 

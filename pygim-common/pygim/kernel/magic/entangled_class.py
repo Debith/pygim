@@ -6,7 +6,7 @@ This creates a shared class that can be extended
 from pygim import exceptions
 from pygim.utils import mgetattr
 from collections.abc import Mapping, MutableMapping
-from .cached_type import CachedTypeMeta
+from .cached_type import CachedType
 
 
 __all__ = ["EntangledClass", "overrideable", "overrides", "encls"]
@@ -69,18 +69,7 @@ def _can_override(func_name, new_namespace, old_namespace):
     return _can_override and _is_overrideable
 
 
-class _NamespaceMeta(type, metaclass=CachedTypeMeta):
-    def __new__(mcls, *args, **kwargs):
-        return super(mcls, mcls).__new__(mcls, *args)
-
-    def __getattribute__(self, name):
-        try:
-            return super().__getattribute__(name)
-        except AttributeError:
-            return EntangledClass[name]
-
-
-class _NameSpace(metaclass=_NamespaceMeta, cache_class=False, cache_instance=True):
+class _NameSpace(CachedType, cache_class=False, cache_instance=True):
     """ Namespace used to contain its classes.
 
     For each namespace identified by its name, there is own namespace object.
@@ -89,6 +78,9 @@ class _NameSpace(metaclass=_NamespaceMeta, cache_class=False, cache_instance=Tru
         self._name = name
         self._classes = classes or {}
 
+    def __str__(self):
+        return self._name
+
     def __setitem__(self, key, value):
         self._classes[key] = value
 
@@ -96,7 +88,32 @@ class _NameSpace(metaclass=_NamespaceMeta, cache_class=False, cache_instance=Tru
         return self._classes[key]
 
 
-encls = _NameSpace
+class _ClassFinder:
+    def __init__(self, namespace=None):
+        self._namespace = namespace
+
+    def __getattribute__(self, name):
+        try:
+            return super().__getattribute__(name)
+        except AttributeError:
+            # This part is all about accessing/creating new class into current namespace.
+
+            if self._namespace is None:
+                namespaces = _NameSpace(name)
+                return _ClassFinder(namespaces)
+
+            elif isinstance(self._namespace, _NameSpace):
+                try:
+                    return namespaces[name, ()]
+                except KeyError:
+                    return EntangledClassMetaMeta.__call__(
+                        EntangledClassMeta,
+                        name,
+                        (),
+                        {_NAMESPACE_KEY: str(self._namespace)},
+                    )
+
+encls = _ClassFinder()
 
 
 class EntangledClassMetaMeta(type):
@@ -168,7 +185,8 @@ class EntangledClassMeta(type, metaclass=EntangledClassMetaMeta):
             new_map[_ABSTRACT_ATTR] = True
         else:
             namespaces = set(getattr(b, _NAMESPACE_KEY, None) for b in bases if hasattr(b, _NAMESPACE_KEY))
-            assert len(namespaces) == 1
+            assert len(namespaces) == 1, \
+                "Something causes multiple namespaces to exist for this class!"
             new_map[_NAMESPACE_KEY] = list(namespaces)[0]
             new_map[_ABSTRACT_ATTR] = False
 
@@ -200,22 +218,6 @@ class EntangledClassMeta(type, metaclass=EntangledClassMetaMeta):
         if getattr(self, _ABSTRACT_ATTR):
             raise exceptions.EntangledClassError("EntangledClass is abstract class, so please use inheritance!")
         return super().__call__(*args, **kwds)
-
-    def __getattribute__(self, name):
-        try:
-            return super().__getattribute__(name)
-        except AttributeError:
-            # This part is all about accessing/creating new class into current namespace.
-            namespaces = _NameSpace(self.__pygim_namespace__)
-            try:
-                return namespaces[name, ()]
-            except KeyError:
-                return EntangledClassMetaMeta.__call__(
-                    EntangledClassMeta,
-                    name,
-                    (),
-                    {_NAMESPACE_KEY: self.__pygim_namespace__},
-                )
 
 
 class EntangledClass(metaclass=EntangledClassMeta):
