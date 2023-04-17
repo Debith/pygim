@@ -5,71 +5,102 @@ This module implements cached type that can be used to manage singletons.
 
 __all__ = ["CachedTypeMeta", "CachedType", "create_cached_class"]
 
-import pygim.typing as t
+import copy
+
+class ClassBuilder:
+    def __init__(self, name, bases, namespace, factory=None):
+        self._mcls = type
+        self.name = name
+        self._bases = bases
+        self._namespace = namespace
+        self._factory = factory or type.__new__
+
+    def updated(self, **kwargs):
+        new = copy.deepcopy(self)
+        assert id(new) != id(self)
+        new._namespace.update(kwargs)
+        return new
+
+    def create(self, **kwargs):
+        return self._factory(self._mcls, self.name, self._bases, self._namespace)
 
 
-class CachedInstanceMeta(type):
-    __instance_cache = {}
+new_caching_class = ClassBuilder("_CachingMeta", (type, ), {})
 
-    def __new__(mcls, name, bases, namespace):
-        return super(CachedInstanceMeta, mcls).__new__(mcls, name, bases, namespace)
+class _func_wrap:
+    def __init__(self, func):
+        self._func = func
 
-    def __call__(self, *args, **kwargs):
+    def __get__(self, __instance, __class):
+        if __instance:
+            return self._func.__get__(__instance, __class)
+        return self._func.__get__(None, __class)
+
+
+def make_meta(_cache_class, _cache_instance):
+    def __new_nocache__(mcls, name, bases, namespace):
+        return super(mcls.__class__, mcls).__new__(mcls, name, bases, namespace)
+
+    def __call_nocache__(self, *args, **kwargs):
+        return super(self.__class__, self).__call__(*args, **kwargs)
+
+    new_class = new_caching_class.updated(
+        __new__=__new_nocache__,
+        __call__=__call_nocache__,
+        )
+
+    def __new_cache__(mcls, name, bases, attrs):
         try:
-            return self.__instance_cache[self, args]
+            return mcls._class_cache[name, bases]
         except KeyError:
-            instance = super().__call__(*args, **kwargs)
-            self.__instance_cache[self, args] = instance
+            cls = super(mcls, mcls).__new__(mcls, name, bases, attrs)
+            mcls._class_cache[name, bases] = cls
+            return cls
+
+    def __call_cache__(self, *args, **kwargs):
+        try:
+            return self._instance_cache[self, args]
+        except KeyError:
+            instance = super(self.__class__, self).__call__(*args, **kwargs)
+            self._instance_cache[self, args] = instance
             return instance
 
-    @classmethod
-    def reset(cls):
-        """
-        A class method to reset the cached instances of the class.
+    if _cache_class:
+        new_class = new_class.updated(__new__=_func_wrap(__new_cache__), _class_cache={})
+        new_class.name += "Class"
 
-        Args:
-            cls: The class itself.
+    if _cache_instance:
+        new_class = new_class.updated(__call__=_func_wrap(__call_cache__), _instance_cache={})
+        new_class.name += "Instance"
 
-        Returns:
-            None
-        """
-        cls.__instance_cache = {}
+    cls = new_class.create()
 
 
-class CachedClassInstanceMeta(CachedInstanceMeta):
-    __class_cache = {}
+    return cls
+import inspect
 
-    def __new__(mcls, name, bases, attrs):
-        try:
-            return mcls.__class_cache[name, bases]
-        except Exception:
-            cls = super(CachedClassInstanceMeta, mcls).__new__(mcls, name, bases, attrs)
-            mcls.__class_cache[name, bases] = cls
-            return cls
+class CachedTypeMetaMeta(type):
+    def __new__(mcls, name, bases, namespaces):
+        mclses = {(_cls, _inst): make_meta(_cls, _inst) for _cls, _inst in (
+            (True, True), (True, False), (False, True), (False, False))}
+        namespaces["_meta_classes"] = mclses
+        cls = super().__new__(mcls, name, bases, namespaces)
+        cls._meta_classes[_USER_DEFINED, _USER_DEFINED] = super(mcls, cls).__new__
+        return cls
 
-    @classmethod
-    def reset(cls):
-        super().reset()
-        cls.__class_cache = {}
+    def __call__(self, name, bases=(), namespaces=None, **kwargs):
+        namespaces = namespaces or {}
+        if not kwargs:
+            return super(self, self).__new__(self, name, bases, namespaces)
 
+        return super(self, self).__call__(self, name, bases, namespaces, **kwargs)
+        cls._meta_classes = _CachingClasses
+        return cls
 
-class CachedClassMeta(type):
-    __class_cache = {}
-
-    def __new__(mcls, name, bases, namespace):
-        try:
-            return mcls.__class_cache[name, bases]
-        except Exception:
-            cls = super(CachedClassMeta, mcls).__new__(mcls, name, bases, namespace)
-            mcls.__class_cache[name, bases] = cls
-            return cls
-
-    @classmethod
-    def reset(cls):
-        cls.__class_cache = {}
+_USER_DEFINED = type("USER_DEFINED", (), {})()
 
 
-class CachedTypeMeta(type):
+class CachedTypeMeta(type, metaclass=CachedTypeMetaMeta):
     """
     A metaclass for creating classes and instances that are cached.
 
@@ -100,17 +131,7 @@ class CachedTypeMeta(type):
         obj3 = MyClass('val2', 'val1')  # new instance
         ```
     """
-
-    __meta_classes = {
-        (True, True): CachedClassInstanceMeta,
-        (True, False): CachedClassMeta,
-        (False, True): CachedInstanceMeta,
-        (False, False): type,
-    }
-    _class_cache = dict()  # _Cache(dict)  # filled my metaclass
-    __instance_cache = dict()
-
-    def __new__(mcls, name, bases=(), attrs=None, *, cache_class=True, cache_instance=True):
+    def __new__(mcls, name, bases=(), attrs=None, *, cache_class=_USER_DEFINED, cache_instance=_USER_DEFINED):
         """
         Creates a new class using the specified metaclass and caches the class based on their
         names to ensure they are always accessible by name. If no attributes provided, an empty
@@ -125,7 +146,8 @@ class CachedTypeMeta(type):
         Returns:
             A new class using the specified metaclass.
         """
-        return mcls.__meta_classes[cache_class, cache_instance](name, bases, attrs or {})
+        cached_mcls = mcls._meta_classes[cache_class, cache_instance]
+        return cached_mcls(name, bases, attrs or {})
 
     def __init__(self, *args, **kwargs):
         """Empty."""
@@ -136,7 +158,7 @@ class CachedTypeMeta(type):
                 f"This class {self.__name__} is abstract and therefore can't be instantinated directly!"
             )
 
-        return self.__instance_cache[self](args, kwargs)
+        return self._instance_cache[self](args, kwargs)
 
     @classmethod
     def reset_type_cache(mcls, *, type_cache=False, instance_cache=False):
@@ -145,15 +167,16 @@ class CachedTypeMeta(type):
         it is considered essential to shoot down bridges before crossing them.
         """
         if type_cache:
-            mcls.__meta_classes[True, False].reset()
-            mcls.__meta_classes[True, True].reset()
+            mcls._meta_classes[True, False].reset()
+            mcls._meta_classes[True, True].reset()
 
         if instance_cache:
-            mcls.__meta_classes[False, True].reset()
+            mcls._meta_classes[False, True].reset()
 
 
 class CachedType(metaclass=CachedTypeMeta):
     """Abstract base class for cached types."""
+
 
 
 create_cached_class = CachedTypeMeta

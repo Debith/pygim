@@ -63,15 +63,14 @@ def run_tests(test_file, module_name, pytest_args=None, *, coverage: bool = True
     coverage : `bool`, optional
         Runs the coverage. (the default is True, which runs the coverage).
     """
-    module = sys.modules[module_name]
-    assert isinstance(module.__file__, str), "No file for the module!"
-
     pytest_args = [str(test_file), "--tb=short"] or pytest_args
 
     if not coverage:
         pytest.main(pytest_args)
         return
 
+    module = sys.modules[module_name]
+    assert isinstance(module.__file__, str), "No file for the module!"
     assert module, "When running the coverage, module must be specified!"
 
     with measure_coverage(include=module.__file__):
