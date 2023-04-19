@@ -9,9 +9,9 @@ import copy
 
 class ClassBuilder:
     def __init__(self, name, bases, namespace, factory=None):
-        self._mcls = type
+        self.mcls = type
         self.name = name
-        self._bases = bases
+        self.bases = list(bases)
         self._namespace = namespace
         self._factory = factory or type.__new__
 
@@ -22,10 +22,10 @@ class ClassBuilder:
         return new
 
     def create(self, **kwargs):
-        return self._factory(self._mcls, self.name, self._bases, self._namespace)
+        return self._factory(self.mcls, self.name, tuple(self.bases), self._namespace)
 
 
-new_caching_class = ClassBuilder("_CachingMeta", (type, ), {})
+new_caching_class = ClassBuilder("_CachingMeta", (), {})
 
 class _func_wrap:
     def __init__(self, func):
@@ -73,25 +73,28 @@ def make_meta(_cache_class, _cache_instance):
         new_class = new_class.updated(__call__=_func_wrap(__call_cache__), _instance_cache={})
         new_class.name += "Instance"
 
-    cls = new_class.create()
-
-
+    cls = new_class.create(cache_class=_cache_class, cache_instance=_cache_instance)
     return cls
-import inspect
 
 class CachedTypeMetaMeta(type):
     def __new__(mcls, name, bases, namespaces):
-        mclses = {(_cls, _inst): make_meta(_cls, _inst) for _cls, _inst in (
-            (True, True), (True, False), (False, True), (False, False))}
-        namespaces["_meta_classes"] = mclses
         cls = super().__new__(mcls, name, bases, namespaces)
-        cls._meta_classes[_USER_DEFINED, _USER_DEFINED] = super(mcls, cls).__new__
         return cls
 
     def __call__(self, name, bases=(), namespaces=None, **kwargs):
         namespaces = namespaces or {}
-        if not kwargs:
-            return super(self, self).__new__(self, name, bases, namespaces)
+        if not kwargs and not bases:
+            try:
+                return self._base_cls
+            except AttributeError:
+                # This creates the top-most base-class.
+                cls = super(self, self).__new__(self, name, bases, namespaces)
+                new_caching_class.mcls = cls.__class__
+                new_caching_class.bases.append(type)
+                self._meta_classes = {(_cls, _inst): make_meta(_cls, _inst) for _cls, _inst in (
+                    (True, True), (True, False), (False, True), (False, False))}
+                self._base_cls = cls
+                return cls
 
         return super(self, self).__call__(self, name, bases, namespaces, **kwargs)
         cls._meta_classes = _CachingClasses
@@ -104,32 +107,6 @@ class CachedTypeMeta(type, metaclass=CachedTypeMetaMeta):
     """
     A metaclass for creating classes and instances that are cached.
 
-    Caching Classes:
-    When a class is created based on the given name, the `CachedType` ensures that it is
-    always accessible by its name. This removes the need to import the specific module
-    that exposes the class. This caching of classes can have benefits such as minimizing the
-    amount of maintenance necessary to import and update these modules within the project.
-
-    Caching Class Instances:
-    `CachedType` provides a specialized caching mechanism that caches instances and their
-    associated arguments, similar to the LRU Cache. This optimization can have a considerable
-    impact on performance, particularly with objects that have finite variations
-    of arguments and are immutable.
-
-    Usage:
-    To use this metaclass, inherit from it when defining a class.
-
-    Example:
-        ```
-        class MyClass(metaclass=CachedTypeMeta):
-            def __init__(self, arg1, arg2):
-                self.arg1 = arg1
-                self.arg2 = arg2
-
-        obj1 = MyClass('val1', 'val2')
-        obj2 = MyClass('val1', 'val2')  # cached object returned, no new instance created
-        obj3 = MyClass('val2', 'val1')  # new instance
-        ```
     """
     def __new__(mcls, name, bases=(), attrs=None, *, cache_class=_USER_DEFINED, cache_instance=_USER_DEFINED):
         """
@@ -147,7 +124,7 @@ class CachedTypeMeta(type, metaclass=CachedTypeMetaMeta):
             A new class using the specified metaclass.
         """
         cached_mcls = mcls._meta_classes[cache_class, cache_instance]
-        return cached_mcls(name, bases, attrs or {})
+        return cached_mcls.__new__(cached_mcls, name, bases, attrs or {})
 
     def __init__(self, *args, **kwargs):
         """Empty."""
@@ -157,8 +134,6 @@ class CachedTypeMeta(type, metaclass=CachedTypeMetaMeta):
             raise TypeError(
                 f"This class {self.__name__} is abstract and therefore can't be instantinated directly!"
             )
-
-        return self._instance_cache[self](args, kwargs)
 
     @classmethod
     def reset_type_cache(mcls, *, type_cache=False, instance_cache=False):
@@ -175,7 +150,36 @@ class CachedTypeMeta(type, metaclass=CachedTypeMetaMeta):
 
 
 class CachedType(metaclass=CachedTypeMeta):
-    """Abstract base class for cached types."""
+    """Abstract base class for cached types.
+
+    Caching Classes:
+    When a class is created based on the given name, the `CachedType` ensures that it is
+    always accessible by its name. This removes the need to import the specific module
+    that exposes the class. This caching of classes can have benefits such as minimizing the
+    amount of maintenance necessary to import and update these modules within the project.
+
+    Caching Class Instances:
+    `CachedType` provides a specialized caching mechanism that caches instances and their
+    associated arguments, similar to the LRU Cache. This optimization can have a considerable
+    impact on performance, particularly with objects that have finite variations
+    of arguments and are immutable.
+
+    Usage:
+    To use this class, inherit from it when defining a class and specify caching as class
+    arguments.
+
+    Example:
+        ```
+        class MyClass(CachedType, cache_class=False, cache_instance=True):
+            def __init__(self, arg1, arg2):
+                self.arg1 = arg1
+                self.arg2 = arg2
+
+        obj1 = MyClass('val1', 'val2')
+        obj2 = MyClass('val1', 'val2')  # cached object returned, no new instance created
+        obj3 = MyClass('val2', 'val1')  # new instance
+        ```
+    """
 
 
 
