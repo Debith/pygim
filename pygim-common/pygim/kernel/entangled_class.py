@@ -5,7 +5,7 @@ This creates a shared class that can be extended
 
 from pygim import exceptions
 from collections.abc import Mapping, MutableMapping
-from .cached_type import CachedTypeMeta
+from .magic.cached_type import CachedTypeMeta
 
 
 __all__ = ["EntangledClass", "overrideable", "overrides"]
