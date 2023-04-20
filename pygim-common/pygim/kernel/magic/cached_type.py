@@ -13,7 +13,7 @@ class ClassBuilder:
         self.name = name
         self.bases = list(bases)
         self._namespace = namespace
-        self._factory = factory or type.__new__
+        self.factory = factory or type
 
     def updated(self, **kwargs):
         new = copy.deepcopy(self)
@@ -22,7 +22,7 @@ class ClassBuilder:
         return new
 
     def create(self, **kwargs):
-        return self._factory(self.mcls, self.name, tuple(self.bases), self._namespace)
+        return self.factory(self.name, tuple(self.bases), self._namespace, **kwargs)
 
 
 new_caching_class = ClassBuilder("_CachingMeta", (), {})
@@ -73,7 +73,7 @@ def make_meta(_cache_class, _cache_instance):
         new_class = new_class.updated(__call__=_func_wrap(__call_cache__), _instance_cache={})
         new_class.name += "Instance"
 
-    cls = new_class.create(cache_class=_cache_class, cache_instance=_cache_instance)
+    cls = new_class.create()
     return cls
 
 class CachedTypeMetaMeta(type):
@@ -90,15 +90,20 @@ class CachedTypeMetaMeta(type):
                 # This creates the top-most base-class.
                 cls = super(self, self).__new__(self, name, bases, namespaces)
                 new_caching_class.mcls = cls.__class__
+                new_caching_class.factory = cls.__class__
+                new_caching_class.bases.append(cls)
                 new_caching_class.bases.append(type)
                 self._meta_classes = {(_cls, _inst): make_meta(_cls, _inst) for _cls, _inst in (
                     (True, True), (True, False), (False, True), (False, False))}
                 self._base_cls = cls
                 return cls
 
-        return super(self, self).__call__(self, name, bases, namespaces, **kwargs)
-        cls._meta_classes = _CachingClasses
-        return cls
+        try:
+            bases = (self._base_cls,)
+        except AttributeError:
+            return type.__new__(self, name, bases, namespaces)
+        else:
+            return self.__new__(self, name, bases, namespaces, **kwargs)
 
 _USER_DEFINED = type("USER_DEFINED", (), {})()
 
