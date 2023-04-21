@@ -6,6 +6,8 @@
 from dataclasses import dataclass, field
 import inspect
 
+from .support import classproperty
+
 @dataclass
 class Relocator:
     _filters: list = field(default_factory=lambda: [])
