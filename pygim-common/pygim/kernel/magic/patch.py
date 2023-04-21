@@ -12,6 +12,7 @@ import typing as t
 import types
 import inspect
 
+from ...utils import flatten
 
 def has_instances(iterable, types, *, how=all):
     return how(isinstance(it, types) for it in iterable)
@@ -86,7 +87,7 @@ class MutableFuncObject:
         return self._func_obj.__qualname__.split('.')[-2]
 
     def new_qualname(self, target):
-        return self._func_obj.__qualname__.replace(self.owning_class_name, target.__name__)
+        return f"{target.__qualname__}.{self._func_obj.__name__}"
 
     @property
     def function_name(self):
@@ -128,6 +129,7 @@ def transfer_ownership(target, *funcs):
     """
     assert inspect.isclass(target)
 
-    for func in funcs:
+    for func in flatten(funcs):
+        assert callable(func)
         func_obj = MutableFuncObject(func)
         func_obj >> target

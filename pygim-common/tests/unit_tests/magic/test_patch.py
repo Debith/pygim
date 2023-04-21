@@ -90,6 +90,7 @@ def test_new_transferred_function_behaves_as_a_member_of_new_class(importer):
     instance = NewOwner()
     assert instance.my_func() == instance.original()
     assert instance.my_func.__self__ == instance.original.__self__
+    assert instance.my_func.__qualname__.split(".")[:-1] == instance.original.__qualname__.split(".")[:-1]
 
 
 def test_move_multiple_functions_at_once(importer):
@@ -135,6 +136,31 @@ def test_move_multiple_functions_at_once(importer):
     assert instance.my_func_2.__self__ == instance.original.__self__
     assert instance.my_func_3.__self__ == instance.original.__self__
     assert instance.my_func_4.__self__ == instance.original.__self__
+
+
+def _module_level_func(self):
+    return self.public, self._protected, self.__private
+
+
+def test_new_transferred_module_function_behaves_as_a_member_of_new_class(importer):
+    # NOTE: see above
+    patch = importer("pygim-common/pygim/kernel/magic/patch.py")
+
+    class NewOwner:
+        def __init__(self):
+            self.public = 1
+            self._protected = 2
+            self.__private = 3
+
+        def original(self):
+            return self.public, self._protected, self.__private
+
+    trait_func = patch.MutableFuncObject(_module_level_func)
+    trait_func >> NewOwner
+
+    instance = NewOwner()
+    assert instance._module_level_func() == instance.original()
+    assert instance._module_level_func.__self__ == instance.original.__self__
 
 
 if __name__ == '__main__':
