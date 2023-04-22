@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 import pytest
 
-from pygim import create_cached_class, CachedType
+from _pygim._magic._cached_type import create_cached_class, CachedType
 
 
 def test_class_is_singleton():

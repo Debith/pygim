@@ -3,7 +3,7 @@
 Utility functions that are useful to patch objects and classes.
 """
 
-__all__ = ["transfer_ownership"]
+__all__ = ["MutableCodeObject", "MutableFuncObject"]
 
 from abc import ABCMeta
 from dataclasses import dataclass
@@ -12,20 +12,7 @@ import typing as t
 import types
 import inspect
 
-from .._utils import flatten
-
-
-def has_instances(iterable, types, *, how=all):
-    return how(isinstance(it, types) for it in iterable)
-
-
-def format_dict(dct, *, indent=0):
-    indention = " " * indent
-    lines = [''] + [f"{indention}{key}={repr(value)}," for key, value in dct.items()] + ['']
-    formatted_string = "\n".join(lines)
-
-    return formatted_string
-
+from .._utils import has_instances, format_dict
 
 class MutableCodeObjectMeta(ABCMeta):
     _CO_OBJ_VARS = [
@@ -119,25 +106,3 @@ class MutableFuncObject:
         new_func.__module__ = self._func_obj.__module__
         new_bound_func = new_func.__get__(None, target)
         setattr(target, self.function_name, new_bound_func)
-
-
-def transfer_ownership(target, *funcs):
-    """ Transfer ownership of source object to target object.
-
-    The point of transferring the ownership is to ensure that the
-    target things it has belonged into that object right from the
-    creation of the object. This is particularly useful with traits
-    support.
-
-    This is a low level function.
-
-    Arguments:
-        source: This can be callable [, class or instance]
-        target: Target class to be updated.
-    """
-    assert inspect.isclass(target)
-
-    for func in flatten(funcs):
-        assert callable(func)
-        func_obj = MutableFuncObject(func)
-        func_obj >> target

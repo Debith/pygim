@@ -3,13 +3,12 @@
 This module contains miscellenious utility functions that can't be fit anywhere else.
 """
 
-import pygim.typing as t
+from _pygim._utils._iterable import split, flatten, is_container, has_instances
 
-__all__ = ("split", "flatten", "is_container")
+__all__ = ("split", "flatten", "is_container", "has_instances")
 
 
-def split(iterable, condition):
-    """
+split.__doc__ = """
     Split an iterable object into two lists based on a given condition.
 
     Parameters
@@ -44,20 +43,9 @@ def split(iterable, condition):
     [1, 3, 5]
     """
 
-    left = []
-    right = []
 
-    for it in iterable:
-        if condition(it):
-            left.append(it)
-        else:
-            right.append(it)
-
-    return left, right
-
-
-def is_container(obj):
-    """ Determine whether an object is a container.
+is_container.__doc__ = """
+    Determine whether an object is a container.
 
     A container is considered an object that contains other objects. This
     function returns `False` for strings, bytes, and types, even though they
@@ -81,17 +69,10 @@ def is_container(obj):
     >>> is_container(tuple())
     True
     """
-    if isinstance(obj, (str, bytes, type)):
-        return False
-
-    if hasattr(obj, "__iter__"):
-        return True
-
-    return isinstance(obj, memoryview)
 
 
-def flatten(items):
-    """Flatten a nested iterable into a single list.
+flatten.__doc__ = """
+    Flatten a nested iterable into a single list.
 
     This function flattens nested iterables such as lists, tuples, and sets
     into a single list. It can handle deeply nested and irregular structures.
@@ -120,8 +101,3 @@ def flatten(items):
     >>> list(flatten(["one", "two", ["three", "four"]]))
     ['one', 'two', 'three', 'four']
     """
-    for subitem in items:
-        if is_container(subitem):
-            yield from flatten(subitem)
-        else:
-            yield subitem

@@ -1,16 +1,14 @@
 # -*- coding: utf-8 -*-
 import pytest
-import sys
-import importlib
 
 def test_gim_object_cannot_be_created(importer):
     # NOTE: Magic is stand-alone package which can be imported separately to avoid
     # execution of parent modules. This has benefit of testing otherwise difficult
     # code (metaclasses!) to test in isolation.
-    magic = importlib.import_module("pygim.kernel.magic")
+    from _pygim._magic import GimObject
 
     try:
-        magic.gim_object()
+        GimObject()
     except Exception:
         pass
     else:
@@ -19,9 +17,9 @@ def test_gim_object_cannot_be_created(importer):
 
 def test_gim_object_creation(importer):
     # NOTE: see above.
-    gim_object = importer("pygim-common/pygim/kernel/magic/gim_object.py")
+    from _pygim._magic import GimObject
 
-    class Object(gim_object.GimObject):
+    class Object(GimObject):
         """ Empty """
         def __init__(self, data):
             self.data = data
@@ -31,9 +29,9 @@ def test_gim_object_creation(importer):
 
 def test_gim_object_extension(importer):
     # NOTE: see above.
-    gim_object = importer("pygim-common/pygim/kernel/magic/gim_object.py").GimObject
+    from _pygim._magic import GimObject
 
-    class Object(gim_object):
+    class Object(GimObject):
         """ Empty """
         def __init__(self):
             self.public = 1
@@ -59,9 +57,9 @@ def test_gim_object_extension(importer):
 
 def test_gim_object_extension_2(importer):
     # NOTE: see above.
-    gim_object = importer("pygim-common/pygim/kernel/magic/gim_object.py").GimObject
+    from _pygim._magic import GimObject
 
-    class Object(gim_object):
+    class Object(GimObject):
         """ Empty """
         def __init__(self):
             self.public = 1

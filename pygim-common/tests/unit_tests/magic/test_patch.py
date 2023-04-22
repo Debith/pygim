@@ -89,7 +89,7 @@ def test_new_transferred_function_behaves_as_a_member_of_new_class(importer):
 
 
 def test_move_multiple_functions_at_once(importer):
-    from _pygim._magic._patch import transfer_ownership
+    from _pygim._magic._traits import transfer_ownership
 
     class Test1:
         def my_func_1(self):

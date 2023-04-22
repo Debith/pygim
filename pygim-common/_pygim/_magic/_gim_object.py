@@ -3,9 +3,7 @@
 This module implmements class GimObject.
 '''
 
-import importlib
-
-patch = importlib.import_module("pygim.kernel.magic.patch")
+from ._traits import transfer_ownership
 
 __all__ = ['GimObject']
 
@@ -20,7 +18,11 @@ class GimObjectMeta(type):
                 bases += (gim_object, )
         except NameError:
             return super().__new__(mcls, name, bases, namespace)
-        return super().__new__(mcls, name, bases, namespace)
+        return super().__new__(mcls, name, bases, namespace or {})
+
+    def __init__(cls, name, bases=(), namespace=None):
+        """"""
+        super().__init__(name, bases, namespace)
 
     def __call__(self, *args, **kwargs):
         if self is GimObject:
@@ -28,7 +30,7 @@ class GimObjectMeta(type):
         return super().__call__(*args, **kwargs)
 
     def __lshift__(cls, other):
-        patch.transfer_ownership(cls, other)
+        transfer_ownership(cls, other)
         return cls
 
 
