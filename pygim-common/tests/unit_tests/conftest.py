@@ -22,7 +22,7 @@ ROOT = pathlib.Path(__file__).parents[3]
 
 def to_module(relative_path):
     relative_path = pathlib.Path(relative_path).with_suffix("")
-    if relative_path.name == "__init__.py":
+    if relative_path.name == "__init__":
         relative_path = relative_path.parent
     module_path = str(relative_path).replace("/", ".")
     if '-' in module_path[:10]:
@@ -31,10 +31,16 @@ def to_module(relative_path):
 
 @pytest.fixture()
 def importer():
-    def importer(relative_path):
+    def importer(relative_path, *, execute=True, store=False):
         path = ROOT / relative_path
         spec = importlib.util.spec_from_file_location(to_module(relative_path), path)
         module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)
+
+        if store:
+            sys.modules[module.__name__] = module
+
+        if execute:
+            spec.loader.exec_module(module)
+
         return module
     return importer

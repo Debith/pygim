@@ -2,12 +2,13 @@
 '''
 This module implmements class GimObject.
 '''
-import inspect
 
-from .patch import transfer_ownership
-import numpy
+import importlib
+
+patch = importlib.import_module("pygim.kernel.magic.patch")
 
 __all__ = ['GimObject']
+
 
 class GimObjectMeta(type):
     __slots__ = ()
@@ -27,7 +28,7 @@ class GimObjectMeta(type):
         return super().__call__(*args, **kwargs)
 
     def __lshift__(cls, other):
-        transfer_ownership(cls, other)
+        patch.transfer_ownership(cls, other)
         return cls
 
 

@@ -11,8 +11,9 @@ import sys
 import typing as t
 import types
 import inspect
+import importlib
 
-from ...utils import flatten
+utils = importlib.import_module("pygim.utils")
 
 def has_instances(iterable, types, *, how=all):
     return how(isinstance(it, types) for it in iterable)
@@ -129,7 +130,7 @@ def transfer_ownership(target, *funcs):
     """
     assert inspect.isclass(target)
 
-    for func in flatten(funcs):
+    for func in utils.flatten(funcs):
         assert callable(func)
         func_obj = MutableFuncObject(func)
         func_obj >> target
