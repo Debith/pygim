@@ -2,24 +2,21 @@
 import pytest
 
 def test_mutable_code_object_returns_identical_code_object_for_function(importer):
-    # NOTE: Magic is stand-alone package which can be imported separately to avoid
-    # execution of parent modules. This has benefit of testing otherwise difficult
-    # code (metaclasses!) to test in isolation.
-    patch = importer("pygim-common/pygim/kernel/magic/patch.py")
+    from _pygim._magic._patch import MutableCodeObject
 
     def my_func(test: int):
         return test * 2
 
-    mutable = patch.MutableCodeObject(my_func.__code__)
+    mutable = MutableCodeObject(my_func.__code__)
     new_codeobj = mutable.freeze()
 
     assert id(my_func.__code__) != new_codeobj
+    assert MutableCodeObject(my_func.__code__) == MutableCodeObject(new_codeobj)
     assert my_func.__code__ == new_codeobj
 
 
 def test_mutable_code_object_can_modify_owner_of_class(importer):
-    # NOTE: see above
-    patch = importer("pygim-common/pygim/kernel/magic/patch.py")
+    from _pygim._magic._patch import MutableCodeObject
 
     class Test:
         def __init__(self):
@@ -30,22 +27,21 @@ def test_mutable_code_object_can_modify_owner_of_class(importer):
         def my_func(self):
             return self.public, self._protected, self.__private
 
-    mcode_obj = patch.MutableCodeObject(Test.my_func.__code__)
+    mcode_obj = MutableCodeObject(Test.my_func.__code__)
     mcode_obj.rename_owner("New")
     new_mcodeobj = mcode_obj.freeze()
 
     assert id(Test.my_func.__code__) != new_mcodeobj
     assert Test.my_func.__code__ != new_mcodeobj
 
-    expected = patch.MutableCodeObject(Test.my_func.__code__)
+    expected = MutableCodeObject(Test.my_func.__code__)
     expected['co_names'] = ('public', '_protected', '_New__private')
-    actual = patch.MutableCodeObject(new_mcodeobj)
+    actual = MutableCodeObject(new_mcodeobj)
     assert actual == expected
 
 
 def test_new_transferred_method_behaves_as_a_member_of_new_class(importer):
-    # NOTE: see above
-    patch = importer("pygim-common/pygim/kernel/magic/patch.py")
+    from _pygim._magic._patch import MutableFuncObject
 
     class Test:
         def my_func(self):
@@ -60,7 +56,7 @@ def test_new_transferred_method_behaves_as_a_member_of_new_class(importer):
         def original(self):
             return self.public, self._protected, self.__private
 
-    trait_func = patch.MutableFuncObject(Test.my_func)
+    trait_func = MutableFuncObject(Test.my_func)
     trait_func >> NewOwner
 
     instance = NewOwner()
@@ -69,8 +65,7 @@ def test_new_transferred_method_behaves_as_a_member_of_new_class(importer):
 
 
 def test_new_transferred_function_behaves_as_a_member_of_new_class(importer):
-    # NOTE: see above
-    patch = importer("pygim-common/pygim/kernel/magic/patch.py")
+    from _pygim._magic._patch import MutableFuncObject
 
     def my_func(self):
         return self.public, self._protected, self.__private
@@ -84,7 +79,7 @@ def test_new_transferred_function_behaves_as_a_member_of_new_class(importer):
         def original(self):
             return self.public, self._protected, self.__private
 
-    trait_func = patch.MutableFuncObject(my_func)
+    trait_func = MutableFuncObject(my_func)
     trait_func >> NewOwner
 
     instance = NewOwner()
@@ -94,8 +89,7 @@ def test_new_transferred_function_behaves_as_a_member_of_new_class(importer):
 
 
 def test_move_multiple_functions_at_once(importer):
-    # NOTE: see above
-    patch = importer("pygim-common/pygim/kernel/magic/patch.py")
+    from _pygim._magic._patch import transfer_ownership
 
     class Test1:
         def my_func_1(self):
@@ -122,10 +116,10 @@ def test_move_multiple_functions_at_once(importer):
         def original(self):
             return self.public, self._protected, self.__private
 
-    patch.transfer_ownership(NewOwner,
-                             Test1.my_func_1, Test1.my_func_2,
-                             Test2.my_func_3, Test2.my_func_4,
-                             )
+    transfer_ownership(NewOwner,
+                        Test1.my_func_1, Test1.my_func_2,
+                        Test2.my_func_3, Test2.my_func_4,
+                        )
 
     instance = NewOwner()
     assert instance.my_func_1() == instance.original()
@@ -143,8 +137,7 @@ def _module_level_func(self):
 
 
 def test_new_transferred_module_function_behaves_as_a_member_of_new_class(importer):
-    # NOTE: see above
-    patch = importer("pygim-common/pygim/kernel/magic/patch.py")
+    from _pygim._magic._patch import MutableFuncObject
 
     class NewOwner:
         def __init__(self):
@@ -155,7 +148,7 @@ def test_new_transferred_module_function_behaves_as_a_member_of_new_class(import
         def original(self):
             return self.public, self._protected, self.__private
 
-    trait_func = patch.MutableFuncObject(_module_level_func)
+    trait_func = MutableFuncObject(_module_level_func)
     trait_func >> NewOwner
 
     instance = NewOwner()

@@ -7,8 +7,6 @@ def test_gim_object_cannot_be_created(importer):
     # NOTE: Magic is stand-alone package which can be imported separately to avoid
     # execution of parent modules. This has benefit of testing otherwise difficult
     # code (metaclasses!) to test in isolation.
-    importer("pygim-common/pygim/utils/__init__.py", execute=True, store=True)
-    utils = importlib.import_module("pygim.utils")
     magic = importlib.import_module("pygim.kernel.magic")
 
     try:

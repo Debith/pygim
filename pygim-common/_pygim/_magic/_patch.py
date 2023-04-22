@@ -11,9 +11,9 @@ import sys
 import typing as t
 import types
 import inspect
-import importlib
 
-utils = importlib.import_module("pygim.utils")
+from .._utils import flatten
+
 
 def has_instances(iterable, types, *, how=all):
     return how(isinstance(it, types) for it in iterable)
@@ -30,8 +30,8 @@ def format_dict(dct, *, indent=0):
 class MutableCodeObjectMeta(ABCMeta):
     _CO_OBJ_VARS = [
         "co_argcount",
-        "co_kwonlyargcount",
         "co_posonlyargcount",
+        "co_kwonlyargcount",
         "co_nlocals",
         "co_stacksize",
         "co_flags",
@@ -41,9 +41,16 @@ class MutableCodeObjectMeta(ABCMeta):
         "co_varnames",
         "co_filename",
         "co_name",
+        "co_qualname",
         "co_firstlineno",
-        "co_lnotab",
+        "co_linetable",
+        "co_exceptiontable",
+        "co_freevars",
+        "co_cellvars",
     ]
+
+    if sys.version_info[:2] < (3, 11):
+        _CO_OBJ_VARS.remove("co_exceptiontable")
 
     if sys.version_info[:2] < (3, 8):
         _CO_OBJ_VARS.remove("co_posonlyargcount")
@@ -130,7 +137,7 @@ def transfer_ownership(target, *funcs):
     """
     assert inspect.isclass(target)
 
-    for func in utils.flatten(funcs):
+    for func in flatten(funcs):
         assert callable(func)
         func_obj = MutableFuncObject(func)
         func_obj >> target
