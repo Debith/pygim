@@ -73,20 +73,48 @@ class MutableCodeObject(metaclass=MutableCodeObjectMeta):
         return f"MutableCodeObject({format_dict(self._code_map, indent=4)})"
 
 
+class MutableFuncObjectMeta(type):
+    _FUNC_VARS = [
+        "__closure__",
+        "__code__",
+        "__defaults__",
+        "__kwdefaults__",
+        "__globals__",
+        "__module__",
+        "__name__",
+        "__qualname__",
+        "__doc__",
+        ]
+
+    _FUNC_NEW_SIG = dict(
+        code="__code__",
+        globals="__globals__",
+        name="__name__",
+        argdefs="__defaults__",
+        closure="__closure__",
+    )
+
+    def __call__(self, func):
+        assert isinstance(func, types.FunctionType)
+        func_map = {name: getattr(func, name) for name in self._FUNC_VARS}
+        assert has_instances(func_map, str)
+        mutable_func = super(self.__class__, self).__call__(func_map)
+        return mutable_func
+
 @dataclass
-class MutableFuncObject:
-    _func_obj: t.Callable
+class MutableFuncObject(metaclass=MutableFuncObjectMeta):
+    _func_map: dict
 
     @property
     def owning_class_name(self):
-        return self._func_obj.__qualname__.split('.')[-2]
+        return self._func_map["__qualname__"].split('.')[-2]
 
     def new_qualname(self, target):
-        return f"{target.__qualname__}.{self._func_obj.__name__}"
+        return f"{target.__qualname__}.{self._func_map['__name__']}"
 
     @property
     def function_name(self):
-        return self._func_obj.__name__
+        return self._func_map["__name__"]
 
     def _get_module_name(self, depth: int = 2):
         try:
@@ -98,11 +126,12 @@ class MutableFuncObject:
         assert inspect.isclass(target)
         assert not hasattr(target, self.function_name)
 
-        code_obj = MutableCodeObject(self._func_obj.__code__)
+        code_obj = MutableCodeObject(self._func_map["__code__"])
         code_obj.rename_owner(target.__name__)
-        new_func = types.FunctionType(code_obj.freeze(), self._func_obj.__globals__)
+        self._func_map["__code__"] = code_obj.freeze()
+
+        kwargs = {k: self._func_map[v] for k, v in self.__class__._FUNC_NEW_SIG.items()}
+        new_func = types.FunctionType(**kwargs)
         new_func.__qualname__ = self.new_qualname(target)
-        new_func.__name__ = self.function_name
-        new_func.__module__ = self._func_obj.__module__
         new_bound_func = new_func.__get__(None, target)
         setattr(target, self.function_name, new_bound_func)

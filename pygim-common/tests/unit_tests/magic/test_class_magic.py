@@ -77,5 +77,31 @@ def test_combiner_merges_multiple_classes_elegantly(importer):
     assert not hasattr(Third, "first")
 
 
+
+def test_combiner_merges_multiple_functions_elegantly(importer):
+
+    class First:
+        def first(self): pass
+
+    class Second:
+        def second(self): pass
+
+    class Third:
+        def third_a(self): pass
+        def third_b(self): pass
+
+    from _pygim._magic._traits import combine
+    CombinedClass = combine(First.first, Second.second, Third.third_a, Third.third_b)
+
+    assert hasattr(CombinedClass, "first")
+    assert hasattr(CombinedClass, "second")
+    assert hasattr(CombinedClass, "third_a")
+    assert hasattr(CombinedClass, "third_b")
+
+    assert not hasattr(First, "second")
+    assert not hasattr(Second, "first")
+    assert not hasattr(Third, "first")
+
+
 if __name__ == '__main__':
     pytest.main([__file__])

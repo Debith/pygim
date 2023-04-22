@@ -3,16 +3,31 @@
 This module implements cached type that can be used to manage singletons.
 """
 
+from ._traits import combine
+
+
 __all__ = ["CachedTypeMeta", "CachedType", "create_cached_class"]
 
 
-class CachedInstanceMeta(type):
-    __instance_cache = {}
+class _NoCls:
+    def __new_nocache__(mcls, name, bases, namespace):
+        return super().__new__(mcls, name, bases, namespace)
 
-    def __new__(mcls, name, bases, namespace):
-        return super(CachedInstanceMeta, mcls).__new__(mcls, name, bases, namespace)
+class _NoInst:
+    def __call_nocache__(self, *args, **kwargss):
+        return super().__call__(self, *args, **kwargss)
 
-    def __call__(self, *args, **kwargs):
+class _YesCls:
+    def __new_cache__(mcls, name, bases, attrs):
+        try:
+            return mcls.__class_cache[name, bases]
+        except Exception:
+            cls = super().__new__(mcls, name, bases, attrs)
+            mcls.__class_cache[name, bases] = cls
+            return cls
+
+class _YesInst:
+    def __call_cache__(self, *args, **kwargs):
         try:
             return self.__instance_cache[self, args]
         except KeyError:
@@ -20,54 +35,21 @@ class CachedInstanceMeta(type):
             self.__instance_cache[self, args] = instance
             return instance
 
-    @classmethod
-    def reset(cls):
-        """
-        A class method to reset the cached instances of the class.
 
-        Args:
-            cls: The class itself.
-
-        Returns:
-            None
-        """
-        cls.__instance_cache = {}
-
-
-class CachedClassInstanceMeta(CachedInstanceMeta):
-    __class_cache = {}
-
-    def __new__(mcls, name, bases, attrs):
-        try:
-            return mcls.__class_cache[name, bases]
-        except Exception:
-            cls = super(CachedClassInstanceMeta, mcls).__new__(mcls, name, bases, attrs)
-            mcls.__class_cache[name, bases] = cls
-            return cls
-
-    @classmethod
-    def reset(cls):
-        super().reset()
-        cls.__class_cache = {}
-
-
-class CachedClassMeta(type):
-    __class_cache = {}
-
+class CachedTypeMetaMeta(type):
     def __new__(mcls, name, bases, namespace):
-        try:
-            return mcls.__class_cache[name, bases]
-        except Exception:
-            cls = super(CachedClassMeta, mcls).__new__(mcls, name, bases, namespace)
-            mcls.__class_cache[name, bases] = cls
-            return cls
+        _CachedTypeMeta = super().__new__(mcls, name, bases, namespace)
+        _meta_classes = {
+            (True, True): combine(_YesCls, _YesInst, class_name="_CachedTypeMeta_CI", bases=(type,)),
+            (True, False): combine(_YesCls, _NoInst, class_name="_CachedTypeMeta_C", bases=(type,)),
+            (False, True): combine(_NoCls, _YesInst, class_name="_CachedTypeMeta_I", bases=(type,)),
+            (False, False): combine(_NoCls, _NoInst, class_name="_CachedTypeMeta", bases=(type,)),
+        }
+        setattr(_CachedTypeMeta, f"_{name}__meta_classes", _meta_classes)
+        return _CachedTypeMeta
 
-    @classmethod
-    def reset(cls):
-        cls.__class_cache = {}
 
-
-class CachedTypeMeta(type):
+class CachedTypeMeta(type, metaclass=CachedTypeMetaMeta):
     """
     A metaclass for creating classes and instances that are cached.
 
@@ -98,15 +80,6 @@ class CachedTypeMeta(type):
         obj3 = MyClass('val2', 'val1')  # new instance
         ```
     """
-
-    __meta_classes = {
-        (True, True): CachedClassInstanceMeta,
-        (True, False): CachedClassMeta,
-        (False, True): CachedInstanceMeta,
-        (False, False): type,
-    }
-    _class_cache = dict()  # _Cache(dict)  # filled my metaclass
-    __instance_cache = dict()
 
     def __new__(mcls, name, bases=(), attrs=None, *, cache_class=True, cache_instance=True):
         """

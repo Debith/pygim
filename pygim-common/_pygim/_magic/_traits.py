@@ -4,11 +4,12 @@
 '''
 
 from types import FunctionType
+from functools import singledispatch
 from dataclasses import dataclass, field
 import inspect
 
 from ._patch import MutableFuncObject
-from .._utils import flatten, has_instances
+from .._utils import flatten
 
 
 def transfer_ownership(target, *funcs):
@@ -48,18 +49,31 @@ class Relocator:
             setattr(target, name, namespace[name])
 
 
-def combine(*classes, class_name="NewType", bases=()):
+@singledispatch
+def _combine(*args, **kwargs):
+    raise TypeError("Unsupported Type")
+
+
+@_combine.register(FunctionType)
+def _combine_func(trait, target):
+    target << trait
+
+
+@_combine.register(type)
+def _combine_class(trait, target):
+    target_funcs = set(dir(target))
+    cls_funcs = set(dir(trait))
+    new_funcs = cls_funcs - target_funcs
+
+    for func in new_funcs:
+        target << trait.__dict__[func]
+
+
+def combine(*traits, class_name="NewType", bases=()):
     from ._gim_object import gim_type  # TODO: relocate
     NewType = gim_type(class_name, bases)
-    orig_funcs = set(dir(NewType))
 
-    funcs = []
-    for _class in classes:
-        cls_funcs = set(dir(_class))
-        new_funcs = cls_funcs - orig_funcs
+    for trait in traits:
+        _combine(trait, NewType)
 
-        for func in new_funcs:
-            funcs.append(_class.__dict__[func])
-
-    NewType << funcs
     return NewType
