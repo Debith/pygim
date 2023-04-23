@@ -101,6 +101,7 @@ class MutableFuncObjectMeta(type):
         mutable_func = super(self.__class__, self).__call__(func_map)
         return mutable_func
 
+
 @dataclass
 class MutableFuncObject(metaclass=MutableFuncObjectMeta):
     _func_map: dict
@@ -122,16 +123,24 @@ class MutableFuncObject(metaclass=MutableFuncObjectMeta):
         except (AttributeError, ValueError):
             return '__main__'
 
-    def __rshift__(self, target):
-        assert inspect.isclass(target)
-        assert not hasattr(target, self.function_name)
+    def assign_to_class(self, __class, __new_name=None):
+        assert inspect.isclass(__class)
+        assert not hasattr(__class, self.function_name)
 
         code_obj = MutableCodeObject(self._func_map["__code__"])
-        code_obj.rename_owner(target.__name__)
+        code_obj.rename_owner(__class.__name__)
         self._func_map["__code__"] = code_obj.freeze()
+
+        if __new_name is not None:
+            self._func_map["__name__"] = __new_name
+
+        assert self._func_map["__name__"]
 
         kwargs = {k: self._func_map[v] for k, v in self.__class__._FUNC_NEW_SIG.items()}
         new_func = types.FunctionType(**kwargs)
-        new_func.__qualname__ = self.new_qualname(target)
-        new_bound_func = new_func.__get__(None, target)
-        setattr(target, self.function_name, new_bound_func)
+        new_func.__qualname__ = self.new_qualname(__class)
+        new_func.__pygim_parent__ = __class
+        new_bound_func = new_func.__get__(None, __class)
+        setattr(__class, self.function_name, new_bound_func)
+
+    __rshift__ = assign_to_class
