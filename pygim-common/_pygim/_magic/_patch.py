@@ -38,6 +38,9 @@ class MutableCodeObjectMeta(ABCMeta):
 
     if sys.version_info[:2] < (3, 11):
         _CO_OBJ_VARS.remove("co_exceptiontable")
+        _CO_OBJ_VARS.remove("co_qualname")
+        ix = _CO_OBJ_VARS.index("co_linetable")
+        _CO_OBJ_VARS[ix] = "co_lnotab"
 
     if sys.version_info[:2] < (3, 8):
         _CO_OBJ_VARS.remove("co_posonlyargcount")
@@ -123,6 +126,23 @@ class MutableFuncObject(metaclass=MutableFuncObjectMeta):
         except (AttributeError, ValueError):
             return '__main__'
 
+    def freeze(self):
+        assert self._func_map["__name__"]
+
+        kwargs = {k: self._func_map[v] for k, v in self.__class__._FUNC_NEW_SIG.items()}
+        new_func = types.FunctionType(**kwargs)
+        self._copy_field(new_func, "__kwdefaults__")
+        self._copy_field(new_func, "__annotations__")
+        self._copy_field(new_func, "__dict__")
+        return new_func
+
+    def _copy_field(self, new_func, field_name):
+        if field_name not in self._func_map:
+            return
+        if self._func_map[field_name] is None:
+            return
+        setattr(new_func, field_name, self._func_map[field_name].copy())
+
     def assign_to_class(self, __class, __new_name=None):
         assert inspect.isclass(__class)
         assert not hasattr(__class, self.function_name)
@@ -134,10 +154,7 @@ class MutableFuncObject(metaclass=MutableFuncObjectMeta):
         if __new_name is not None:
             self._func_map["__name__"] = __new_name
 
-        assert self._func_map["__name__"]
-
-        kwargs = {k: self._func_map[v] for k, v in self.__class__._FUNC_NEW_SIG.items()}
-        new_func = types.FunctionType(**kwargs)
+        new_func = self.freeze()
         new_func.__qualname__ = self.new_qualname(__class)
         new_func.__pygim_parent__ = __class
         new_bound_func = new_func.__get__(None, __class)
