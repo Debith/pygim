@@ -14,10 +14,10 @@ def test_gimmick_cannot_be_created():
     # NOTE: Magic is stand-alone package which can be imported separately to avoid
     # execution of parent modules. This has benefit of testing otherwise difficult
     # code (metaclasses!) to test in isolation.
-    from _pygim._magic import GimObject
+    from _pygim._magic import gimmick
 
     try:
-        GimObject()
+        gimmick()
     except Exception:
         pass
     else:
@@ -26,9 +26,9 @@ def test_gimmick_cannot_be_created():
 
 def test_gimmick_creation():
     # NOTE: see above.
-    from _pygim._magic import GimObject
+    from _pygim._magic import gimmick
 
-    class Object(GimObject):
+    class Object(gimmick):
         """ Empty """
         def __init__(self, data):
             self.data = data
@@ -38,9 +38,9 @@ def test_gimmick_creation():
 
 def test_gimmick_extension():
     # NOTE: see above.
-    from _pygim._magic import GimObject
+    from _pygim._magic import gimmick
 
-    class Object(GimObject):
+    class Object(gimmick):
         """ Empty """
         def __init__(self):
             self.public = 1
@@ -59,9 +59,9 @@ def test_gimmick_extension():
 
 def test_gimmick_extension_2():
     # NOTE: see above.
-    from _pygim._magic import GimObject
+    from _pygim._magic import gimmick
 
-    class Object(GimObject):
+    class Object(gimmick):
         """ Empty """
         def __init__(self):
             self.public = 1
@@ -79,9 +79,9 @@ def test_gimmick_extension_2():
 
 def test_gimmick_extension_via_class():
     # NOTE: see above.
-    from _pygim._magic import GimObject
+    from _pygim._magic import gimmick
 
-    class Object(GimObject):
+    class Object(gimmick):
         """ Empty """
         def __init__(self):
             self.public = 1
