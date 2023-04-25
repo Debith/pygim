@@ -8,7 +8,6 @@ from types import FunctionType
 from functools import singledispatchmethod
 
 from ._patch import MutableFuncObject
-from ._traits import transfer_ownership
 from .._utils import type_error_msg, flatten
 
 __all__ = ['gimmick']
