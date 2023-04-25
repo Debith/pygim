@@ -21,6 +21,11 @@ class GimTypeMeta(type):
         print("thing")
 
 
+class _NoTraits:
+    def __setitem__(self, *args, **kwargs):
+        raise NotImplementedError("Can't add traits to this object!")
+
+
 class gim_type(type, metaclass=GimTypeMeta):
     """
     A metaclass that provides dynamic trait behavior for Python classes.
@@ -49,19 +54,26 @@ class gim_type(type, metaclass=GimTypeMeta):
     __slots__ = ()
 
     def __prepare__(*args):
-        return dict(__pygim_traits__={})
+        return dict(__pygim_traits__=_NoTraits())
 
     def __new__(mcls, name, bases=(), namespace=None, **kwargs):
         namespace = namespace or {}
         try:
             if gimmick not in bases:
+                # All classes created through the gim_type are
+                # guarranteed to be inherited from `gimmick`.
+                # This ensures all subclasses will contain all
+                # functionality provided by gimmick.
                 bases += (gimmick, )
         except NameError:
+            # This creates the `gimmick` class.
             return super().__new__(mcls, name, bases, namespace)
-        return super().__new__(mcls, name, bases, namespace or {})
+
+        # Ensure container for traits is found from this class's namespace.
+        namespace["__pygim_traits__"] = {}
+        return super().__new__(mcls, name, bases, namespace)
 
     def __init__(cls, name, bases=(), namespace=None):
-        """"""
         super().__init__(name, bases, namespace)
 
     def __call__(self, *args, **kwargs):

@@ -148,7 +148,6 @@ class MutableFuncObject(metaclass=MutableFuncObjectMeta):
 
     def assign_to_class(self, __class, __new_name=None):
         assert inspect.isclass(__class)
-        assert not hasattr(__class, __new_name or self.function_name)
 
         code_obj = MutableCodeObject(self._func_map["__code__"])
         code_obj.rename_owner(__class.__name__)
