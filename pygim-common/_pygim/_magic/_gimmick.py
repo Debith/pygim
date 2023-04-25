@@ -8,19 +8,30 @@ from functools import singledispatchmethod
 
 from ._patch import MutableFuncObject
 from ._traits import transfer_ownership
-from .._utils import complain_type, flatten
+from .._utils import type_error_msg, flatten
 
 __all__ = ['GimObject']
 
 
-class GimObjectMeta(type):
+class GimObjectMetaMeta(type):
+    def __prepare__(*args):
+        return dict(__traits__={})
+
+    def __lshift__(self, other):
+        print("thing")
+
+
+class GimObjectMeta(type, metaclass=GimObjectMetaMeta):
     __slots__ = ()
+
+    def __prepare__(*args):
+        return dict(__traits__={})
 
     def __new__(mcls, name, bases=(), namespace=None, **kwargs):
         namespace = namespace or {}
         try:
-            if gim_object not in bases:
-                bases += (gim_object, )
+            if gimmick not in bases:
+                bases += (gimmick, )
         except NameError:
             return super().__new__(mcls, name, bases, namespace)
         return super().__new__(mcls, name, bases, namespace or {})
@@ -34,9 +45,14 @@ class GimObjectMeta(type):
             raise NotImplementedError()
         return super().__call__(*args, **kwargs)
 
+    def __record_trait(cls, trait):
+        traitinfo = f"{trait.__module__}.{trait.__qualname__}"
+        fileinfo = f"{trait.__code__.co_filename}:{trait.__code__.co_firstlineno}"
+        cls.__traits__[traitinfo] = fileinfo
+
     @singledispatchmethod
     def __lshift__(cls, other):
-        raise TypeError(complain_type(other, FunctionType))
+        raise TypeError(type_error_msg(other, FunctionType))
 
     @__lshift__.register(list)
     @__lshift__.register(tuple)
@@ -48,6 +64,7 @@ class GimObjectMeta(type):
     @__lshift__.register(FunctionType)
     def __lshift_func__(cls, _func):
         cls.__do_setattr(_func, _func.__name__)
+        cls.__record_trait(_func)
         return cls
 
     @__lshift__.register(type)
@@ -69,6 +86,7 @@ class GimObjectMeta(type):
         # TODO: Maybe functions that are already assigned should be
         #       converted to special function types..?
         if getattr(_value, "__pygim_parent__", None) is cls:
+            cls.__record_trait(_value)
             return super().__setattr__(_name, _value)
         MutableFuncObject(_value).assign_to_class(cls, _name)
 
@@ -86,4 +104,4 @@ class GimObject(metaclass=GimObjectMeta):
 
 
 gim_type = GimObjectMeta
-gim_object = GimObject
+gimmick = GimObject

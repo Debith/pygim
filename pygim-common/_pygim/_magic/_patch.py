@@ -12,7 +12,7 @@ import typing as t
 import types
 import inspect
 
-from .._utils import has_instances, format_dict
+from .._utils import has_instances, format_dict, type_error_msg, TraitFunctions
 
 class MutableCodeObjectMeta(ABCMeta):
     _CO_OBJ_VARS = [
@@ -97,8 +97,11 @@ class MutableFuncObjectMeta(type):
         closure="__closure__",
     )
 
+    if sys.version_info[:2] < (3, 11):
+        _FUNC_VARS.remove("__qualname__")
+
     def __call__(self, func):
-        assert isinstance(func, types.FunctionType)
+        assert isinstance(func, TraitFunctions), type_error_msg(func, TraitFunctions)
         func_map = {name: getattr(func, name) for name in self._FUNC_VARS}
         assert has_instances(func_map, str)
         mutable_func = super(self.__class__, self).__call__(func_map)
@@ -145,7 +148,7 @@ class MutableFuncObject(metaclass=MutableFuncObjectMeta):
 
     def assign_to_class(self, __class, __new_name=None):
         assert inspect.isclass(__class)
-        assert not hasattr(__class, self.function_name)
+        assert not hasattr(__class, __new_name or self.function_name)
 
         code_obj = MutableCodeObject(self._func_map["__code__"])
         code_obj.rename_owner(__class.__name__)
@@ -159,5 +162,7 @@ class MutableFuncObject(metaclass=MutableFuncObjectMeta):
         new_func.__pygim_parent__ = __class
         new_bound_func = new_func.__get__(None, __class)
         setattr(__class, self.function_name, new_bound_func)
+
+        return self
 
     __rshift__ = assign_to_class

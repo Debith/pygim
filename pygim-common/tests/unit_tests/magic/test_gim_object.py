@@ -10,7 +10,7 @@ class OtherTwo:
         return self.public, self._protected, self.__private
 
 
-def test_gim_object_cannot_be_created():
+def test_gimmick_cannot_be_created():
     # NOTE: Magic is stand-alone package which can be imported separately to avoid
     # execution of parent modules. This has benefit of testing otherwise difficult
     # code (metaclasses!) to test in isolation.
@@ -24,7 +24,7 @@ def test_gim_object_cannot_be_created():
         assert False
 
 
-def test_gim_object_creation():
+def test_gimmick_creation():
     # NOTE: see above.
     from _pygim._magic import GimObject
 
@@ -36,7 +36,7 @@ def test_gim_object_creation():
     assert Object(42).data == 42
 
 
-def test_gim_object_extension():
+def test_gimmick_extension():
     # NOTE: see above.
     from _pygim._magic import GimObject
 
@@ -57,7 +57,7 @@ def test_gim_object_extension():
     assert o.orig() == o.func1() == o.func2()
 
 
-def test_gim_object_extension_2():
+def test_gimmick_extension_2():
     # NOTE: see above.
     from _pygim._magic import GimObject
 
@@ -77,7 +77,7 @@ def test_gim_object_extension_2():
     assert o.orig() == o.func1() == o.func2()
 
 
-def test_gim_object_extension_via_class():
+def test_gimmick_extension_via_class():
     # NOTE: see above.
     from _pygim._magic import GimObject
 

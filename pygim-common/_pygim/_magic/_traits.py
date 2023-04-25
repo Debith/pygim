@@ -9,7 +9,7 @@ from dataclasses import dataclass, field
 import inspect
 
 from ._patch import MutableFuncObject
-from .._utils import flatten, complain_type
+from .._utils import flatten, type_error_msg
 
 
 def transfer_ownership(target, *funcs):
@@ -29,7 +29,7 @@ def transfer_ownership(target, *funcs):
     assert inspect.isclass(target)
 
     for func in flatten(funcs):
-        assert callable(func), complain_type(func, FunctionType)
+        assert callable(func), type_error_msg(func, FunctionType)
         func_obj = MutableFuncObject(func)
         func_obj >> target
 
@@ -70,7 +70,7 @@ def _combine_class(trait, target):
 
 
 def combine(*traits, class_name="NewType", bases=()):
-    from ._gim_object import gim_type  # TODO: relocate
+    from ._gimmick import gim_type  # TODO: relocate
     NewType = gim_type(class_name, bases)
     NewType << traits
 
