@@ -31,3 +31,9 @@ def cli():
 def clean_up(**kwargs):
     """ Remove unnecessary files and folders related to Python. """
     GimmicksCliApp().clean_up(**kwargs)
+
+
+@cli.command()
+def show_test_coverage(**kwargs):
+    """ Run test coverage in current folder. """
+    GimmicksCliApp().show_teset_coverage(**kwargs)

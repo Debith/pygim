@@ -3,13 +3,12 @@
 Command-Line Interface Application for Python Gimmicks.
 """
 
+import subprocess
 import sys
 from pathlib import Path
 from dataclasses import dataclass
 import click
-import pygim.typing as t
 from pygim.kernel import PathSet
-
 
 __all__ = ["GimmicksCliApp"]
 
@@ -45,3 +44,7 @@ class GimmicksCliApp:
             elif response == "y":
                 new.FS.delete_all()
                 _echo("Excellent! You never see them again!", quiet)
+
+    def show_test_coverage(self):
+        # TODO: Make this nicer
+        subprocess.Popen("python -m coverage")
