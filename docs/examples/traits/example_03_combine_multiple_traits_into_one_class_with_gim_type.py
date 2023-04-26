@@ -43,8 +43,8 @@ assert obj.method4() == (1, 2, 3)
 # It's important to note that there is always the option to introspect the contents of the
 # `gimmick` object and its potential traits. The `gimmick` object holds the traceback from
 # where the trait was assigned to the class, as well as the line where the trait is defined.
-assert "__main__.ExampleClass.method1" in obj.__pygim_traits__
-assert "__main__.ExampleClass.method2" in obj.__pygim_traits__
-assert "__main__.ExampleClass.method3" in obj.__pygim_traits__
-assert "__main__.ExampleClass.method4" in obj.__pygim_traits__
+assert f"{__name__}.ExampleClass.method1" in obj.__pygim_traits__
+assert f"{__name__}.ExampleClass.method2" in obj.__pygim_traits__
+assert f"{__name__}.ExampleClass.method3" in obj.__pygim_traits__
+assert f"{__name__}.ExampleClass.method4" in obj.__pygim_traits__
 assert len(obj.__pygim_traits__) == 5

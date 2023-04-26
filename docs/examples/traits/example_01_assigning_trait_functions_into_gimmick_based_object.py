@@ -50,7 +50,7 @@ assert obj.new_method2() == obj.original()
 # It's important to note that there is always the option to introspect the contents of the
 # `gimmick` object and its potential traits. The `gimmick` object holds the traceback from
 # where the trait was assigned to the class, as well as the line where the trait is defined.
-assert "__main__.ExampleObject.module_level_function" in obj.__pygim_traits__
-assert "__main__.ExampleObject.method" in obj.__pygim_traits__
-assert "__main__.ExampleObject.new_method1" in obj.__pygim_traits__
-assert "__main__.ExampleObject.new_method2" in obj.__pygim_traits__
+assert f"{__name__}.ExampleObject.module_level_function" in obj.__pygim_traits__
+assert f"{__name__}.ExampleObject.method" in obj.__pygim_traits__
+assert f"{__name__}.ExampleObject.new_method1" in obj.__pygim_traits__
+assert f"{__name__}.ExampleObject.new_method2" in obj.__pygim_traits__

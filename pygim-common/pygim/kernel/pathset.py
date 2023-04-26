@@ -52,9 +52,8 @@ class PathSet:
         - list(PathSet()) provides a list of all Path objects in the list.
         - bool(PathSet()) tells whether there are any Path objects in the list.
         - repr(PathSet()) provides a nice string representation of this object.
-        - PathSet.prefixed()
-        - PathSet() + PathSet() creates a new object containing Path objects from both sets.
         - PathSet.prefixed() creates a new PathSet with another path as a prefix (e.g., folder+files).
+        - PathSet() + PathSet() creates a new object containing Path objects from both sets.
         - PathSet().clone() creates an identical copy of the list.
         - PathSet().filter() generator that yields Path objects whose properties match the filters.
         - PathSet().drop() generator that yields Path objects whose properties do NOT match the filters.

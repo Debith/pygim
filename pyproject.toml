@@ -37,7 +37,7 @@ dev = [
 [tool.pytest.ini_options]
 minversion = "6.0"
 python_files = "test_*.py"
-addopts = '-ra -q --doctest-glob="**/*.py" --doctest-modules --doctest-continue-on-failure'
+addopts = '-ra -q --doctest-glob="**/*.py" --tb=short --doctest-modules --doctest-continue-on-failure'
 testpaths = [
     "pygim-common/tests"
 ]
