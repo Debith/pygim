@@ -47,4 +47,5 @@ class GimmicksCliApp:
 
     def show_test_coverage(self):
         # TODO: Make this nicer
-        subprocess.Popen("python -m coverage")
+        subprocess.Popen("python -m coverage run -m pytest".split(' ')).wait()
+        subprocess.Popen("python -m coverage report -m".split(' ')).wait()

@@ -36,4 +36,4 @@ def clean_up(**kwargs):
 @cli.command()
 def show_test_coverage(**kwargs):
     """ Run test coverage in current folder. """
-    GimmicksCliApp().show_teset_coverage(**kwargs)
+    GimmicksCliApp().show_test_coverage(**kwargs)
