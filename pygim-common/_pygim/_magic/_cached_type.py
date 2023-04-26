@@ -3,21 +3,19 @@
 This module implements cached type that can be used to manage singletons.
 """
 
-from ._traits import combine
+from ._gimmick import gim_type
 
 
 __all__ = ["CachedTypeMeta", "CachedType", "create_cached_class"]
 
 
-class _NoCls:
+class _Templates:
     def __new_nocache__(mcls, name, bases, namespace):
-        return super().__new__(mcls, name, bases, namespace)
+        return super(mcls, mcls).__new__(mcls, name, bases, namespace)
 
-class _NoInst:
     def __call_nocache__(self, *args, **kwargss):
         return super().__call__(self, *args, **kwargss)
 
-class _YesCls:
     def __new_cache__(mcls, name, bases, attrs):
         try:
             return mcls.__class_cache[name, bases]
@@ -26,7 +24,6 @@ class _YesCls:
             mcls.__class_cache[name, bases] = cls
             return cls
 
-class _YesInst:
     def __call_cache__(self, *args, **kwargs):
         try:
             return self.__instance_cache[self, args]
@@ -39,11 +36,29 @@ class _YesInst:
 class CachedTypeMetaMeta(type):
     def __new__(mcls, name, bases, namespace):
         _CachedTypeMeta = super().__new__(mcls, name, bases, namespace)
+        _CachedTypeMeta_CI = gim_type("_CachedTypeMeta_CI", bases=(type,))
+        _CachedTypeMeta_CI.__new__ = _Templates.__new_cache__
+        _CachedTypeMeta_CI.__call__ = _Templates.__call_cache__
+        _CachedTypeMeta_C = gim_type("_CachedTypeMeta_C", bases=(type,))
+        _CachedTypeMeta_C.__new__ = _Templates.__new_cache__
+        _CachedTypeMeta_C.__call__ = _Templates.__call_nocache__
+        _CachedTypeMeta_I = gim_type("_CachedTypeMeta_I", bases=(type,))
+        _CachedTypeMeta_I.__new__ = _Templates.__new_nocache__
+        _CachedTypeMeta_I.__call__ = _Templates.__call_cache__
+        _CachedTypeMeta_no = gim_type("_CachedTypeMeta", bases=(type,))
+        _CachedTypeMeta_no.__new__ = _Templates.__new_nocache__
+        _CachedTypeMeta_no.__call__ = _Templates.__call_nocache__
+
+        assert issubclass(_CachedTypeMeta_CI, type)
+        assert issubclass(_CachedTypeMeta_C, type)
+        assert issubclass(_CachedTypeMeta_I, type)
+        assert issubclass(_CachedTypeMeta_no, type)
+
         _meta_classes = {
-            (True, True): combine(_YesCls, _YesInst, class_name="_CachedTypeMeta_CI", bases=(type,)),
-            (True, False): combine(_YesCls, _NoInst, class_name="_CachedTypeMeta_C", bases=(type,)),
-            (False, True): combine(_NoCls, _YesInst, class_name="_CachedTypeMeta_I", bases=(type,)),
-            (False, False): combine(_NoCls, _NoInst, class_name="_CachedTypeMeta", bases=(type,)),
+            (True, True): _CachedTypeMeta_CI,
+            (True, False): _CachedTypeMeta_C,
+            (False, True): _CachedTypeMeta_I,
+            (False, False): _CachedTypeMeta_no,
         }
         setattr(_CachedTypeMeta, f"_{name}__meta_classes", _meta_classes)
         return _CachedTypeMeta
@@ -96,7 +111,10 @@ class CachedTypeMeta(type, metaclass=CachedTypeMetaMeta):
         Returns:
             A new class using the specified metaclass.
         """
-        return mcls.__meta_classes[cache_class, cache_instance](name, bases, attrs or {})
+        try:
+            return mcls.__meta_classes[cache_class, cache_instance](name, bases, attrs or {})
+        except KeyError:
+            return super().__new__(mcls, name, bases, attrs)
 
     def __init__(self, *args, **kwargs):
         """Empty."""
@@ -122,8 +140,9 @@ class CachedTypeMeta(type, metaclass=CachedTypeMetaMeta):
         if instance_cache:
             mcls.__meta_classes[False, True].reset()
 
+_USERDEFINED = object()
 
-class CachedType(metaclass=CachedTypeMeta):
+class CachedType(metaclass=CachedTypeMeta, cache_class=_USERDEFINED, cache_instance=_USERDEFINED):
     """Abstract base class for cached types."""
 
 

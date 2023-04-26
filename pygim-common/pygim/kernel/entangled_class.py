@@ -5,7 +5,7 @@ This creates a shared class that can be extended
 
 from pygim import exceptions
 from collections.abc import Mapping, MutableMapping
-from _pygim._magic._cached_type import CachedTypeMeta
+from _pygim._magic._cached_type import CachedType
 
 
 __all__ = ["EntangledClass", "overrideable", "overrides"]
@@ -68,7 +68,7 @@ def _can_override(func_name, new_namespace, old_namespace):
     return _can_override and _is_overrideable
 
 
-class _NameSpace(metaclass=CachedTypeMeta, cache_class=False, cache_instance=True):
+class _NameSpace(CachedType, cache_class=False, cache_instance=True):
     """ Namespace used to contain its classes.
 
     For each namespace identified by its name, there is own namespace object.

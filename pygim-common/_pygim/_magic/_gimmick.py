@@ -69,7 +69,8 @@ class gim_type(type, metaclass=GimTypeMeta):
             # This creates the `gimmick` class.
             return super().__new__(mcls, name, bases, namespace)
 
-        # Ensure container for traits is found from this class's namespace.
+        # Ensure container for traits is found from this class's namespace. This
+        # way, all records are added to correct class when extending it.
         namespace["__pygim_traits__"] = {}
         return super().__new__(mcls, name, bases, namespace)
 
