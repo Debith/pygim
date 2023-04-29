@@ -14,6 +14,111 @@ import inspect
 
 from .._utils import has_instances, format_dict, type_error_msg, TraitFunctions
 
+# Python 3.7
+#  |  code(argcount, kwonlyargcount, nlocals, stacksize, flags, codestring,
+#  |        constants, names, varnames, filename, name, firstlineno,
+#  |        lnotab[, freevars[, cellvars]])
+#  |
+#  |  co_argcount
+#  |  co_cellvars
+#  |  co_code
+#  |  co_consts
+#  |  co_filename
+#  |  co_firstlineno
+#  |  co_flags
+#  |  co_freevars
+#  |  co_kwonlyargcount
+#  |  co_lnotab
+#  |  co_name
+#  |  co_names
+#  |  co_nlocals
+
+# Python 3.8
+#  |  code(argcount, posonlyargcount, kwonlyargcount, nlocals, stacksize,
+#  |        flags, codestring, constants, names, varnames, filename, name,
+#  |        firstlineno, lnotab[, freevars[, cellvars]])
+#
+#  |  co_argcount
+#  |  co_cellvars
+#  |  co_code
+#  |  co_consts
+#  |  co_filename
+#  |  co_firstlineno
+#  |  co_flags
+#  |  co_freevars
+#  |  co_kwonlyargcount
+#  |  co_lnotab
+#  |  co_name
+#  |  co_names
+#  |  co_nlocals
+#  |  co_posonlyargcount
+#  |  co_stacksize
+#  |  co_varnames
+
+# Python 3.9
+#  |  code(argcount, posonlyargcount, kwonlyargcount, nlocals, stacksize,
+#  |        flags, codestring, constants, names, varnames, filename, name,
+#  |        firstlineno, lnotab[, freevars[, cellvars]])
+#
+#  |  co_argcount
+#  |  co_cellvars
+#  |  co_code
+#  |  co_consts
+#  |  co_filename
+#  |  co_firstlineno
+#  |  co_flags
+#  |  co_freevars
+#  |  co_kwonlyargcount
+#  |  co_lnotab
+#  |  co_name
+#  |  co_names
+#  |  co_nlocals
+#  |  co_posonlyargcount
+#  |  co_stacksize
+#  |  co_varnames
+
+# Python 3.10
+#  |  code(argcount, posonlyargcount, kwonlyargcount, nlocals, stacksize, flags, codestring, constants, names, varnames, filename, name, firstlineno, linetable, freevars=(), cellvars=(), /)
+#  |  co_argcount
+#  |  co_cellvars
+#  |  co_code
+#  |  co_consts
+#  |  co_filename
+#  |  co_firstlineno
+#  |  co_flags
+#  |  co_freevars
+#  |  co_kwonlyargcount
+#  |  co_linetable
+#  |  co_lnotab
+#  |  co_name
+#  |  co_names
+#  |  co_nlocals
+#  |  co_posonlyargcount
+#  |  co_stacksize
+#  |  co_varnames
+
+#  Python 3.11
+#  |  code(argcount, posonlyargcount, kwonlyargcount, nlocals, stacksize, flags, codestring, constants, names, varnames, filename, name, qualname, firstlineno, linetable, exceptiontable, freevars=(), cellvars=(), /)
+#  |  co_argcount
+#  |  co_cellvars
+#  |  co_code
+#  |  co_consts
+#  |  co_exceptiontable
+#  |  co_filename
+#  |  co_firstlineno
+#  |  co_flags
+#  |  co_freevars
+#  |  co_kwonlyargcount
+#  |  co_linetable
+#  |  co_lnotab
+#  |  co_name
+#  |  co_names
+#  |  co_nlocals
+#  |  co_posonlyargcount
+#  |  co_qualname
+#  |  co_stacksize
+#  |  co_varnames
+
 class MutableCodeObjectMeta(ABCMeta):
     _CO_OBJ_VARS = [
         "co_argcount",
@@ -46,9 +151,11 @@ class MutableCodeObjectMeta(ABCMeta):
         _CO_OBJ_VARS.remove("co_posonlyargcount")
 
     def __call__(self, code_obj):
-        code_obj = {name: getattr(code_obj, name) for name in self._CO_OBJ_VARS}
-        assert has_instances(code_obj, str)
-        mutable_code_obj = super(self.__class__, self).__call__(code_obj)
+        lno_tab = code_obj.co_lnotab
+        code_map = {name: getattr(code_obj, name) for name in self._CO_OBJ_VARS}
+        code_map["co_lnotab"] = lno_tab
+        assert has_instances(code_map, str)
+        mutable_code_obj = super(self.__class__, self).__call__(code_map)
         return mutable_code_obj
 
 
@@ -66,14 +173,20 @@ class MutableCodeObject(metaclass=MutableCodeObjectMeta):
 
         self._code_map["co_names"] = tuple(map(modify, self._code_map["co_names"]))
 
+    def __iter__(self):
+        yield from self._code_map
+
     def __setitem__(self, key, value):
         self._code_map[key] = value
+
+    def __getitem__(self, key):
+        return self._code_map[key]
 
     def freeze(self):
         return types.CodeType(*self._code_map.values())
 
     def __repr__(self):
-        return f"MutableCodeObject({format_dict(self._code_map, indent=4)})"
+        return f"{self.__class__.__name__}({format_dict(self._code_map, indent=4)})"
 
 
 class MutableFuncObjectMeta(type):

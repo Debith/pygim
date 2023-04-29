@@ -1,7 +1,26 @@
 # -*- coding: utf-8 -*-
-from types import FunctionType, MethodWrapperType
+import tabulate
 
 import pytest
+
+def compare_dicts(actual, expected):
+    lines = []
+    for key in sorted(set(expected) | set(actual)):
+        try:
+            left = expected[key]
+        except KeyError:
+            left = "<<MISSING>>"
+
+        try:
+            right = actual[key]
+        except KeyError:
+            right = "<<MISSING>>"
+
+        matching = "!=" if left != right else "=="
+
+        lines.append((key, left, matching, right))
+    return tabulate.tabulate(lines)
+
 
 def test_mutable_code_object_returns_identical_code_object_for_function():
     from _pygim._magic._patch import MutableCodeObject
@@ -39,7 +58,8 @@ def test_mutable_code_object_can_modify_owner_of_class():
     expected = MutableCodeObject(Test.my_func.__code__)
     expected['co_names'] = ('public', '_protected', '_New__private')
     actual = MutableCodeObject(new_mcodeobj)
-    assert actual == expected
+
+    assert actual == expected, compare_dicts(actual, expected)
 
 
 def test_new_transferred_method_behaves_as_a_member_of_new_class():
