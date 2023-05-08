@@ -192,17 +192,7 @@ def func3(pos_or_kw_arg=10, *, kw_arg):
 def func4(pos_or_kw_arg=10, *, kw_arg=20):
     return pos_or_kw_arg, kw_arg
 
-def func5(pos_arg, /, pos_or_kw_arg, *, kw_arg):
-    return pos_arg, pos_or_kw_arg, kw_arg
 
-def func6(pos_arg, /, pos_or_kw_arg, *, kw_arg=20):
-    return pos_arg, pos_or_kw_arg, kw_arg
-
-def func7(pos_arg, /, pos_or_kw_arg=10, *, kw_arg):
-    return pos_arg, pos_or_kw_arg, kw_arg
-
-def func8(pos_arg, /, pos_or_kw_arg=10, *, kw_arg=20):
-    return pos_arg, pos_or_kw_arg, kw_arg
 
 def func9(pos_arg, *args, kw_arg, **kwargs):
     return pos_arg, args, kw_arg, kwargs
@@ -216,6 +206,20 @@ def func11(pos_arg=10, *args, kw_arg, **kwargs):
 def func12(pos_arg=10, *args, kw_arg=20, **kwargs):
     return pos_arg, args, kw_arg, kwargs
 
+
+MORE_TESTS = """
+def func5(pos_arg, /, pos_or_kw_arg, *, kw_arg):
+    return pos_arg, pos_or_kw_arg, kw_arg
+
+def func6(pos_arg, /, pos_or_kw_arg, *, kw_arg=20):
+    return pos_arg, pos_or_kw_arg, kw_arg
+
+def func7(pos_arg, /, pos_or_kw_arg=10, *, kw_arg):
+    return pos_arg, pos_or_kw_arg, kw_arg
+
+def func8(pos_arg, /, pos_or_kw_arg=10, *, kw_arg=20):
+    return pos_arg, pos_or_kw_arg, kw_arg
+
 def func13(pos_arg, /, pos_or_kw_arg, *args, kw_arg, **kwargs):
     return pos_arg, pos_or_kw_arg, args, kw_arg, kwargs
 
@@ -227,6 +231,52 @@ def func15(pos_arg, /, pos_or_kw_arg=10, *args, kw_arg, **kwargs):
 
 def func16(pos_arg, /, pos_or_kw_arg=10, *args, kw_arg=20, **kwargs):
     return pos_arg, pos_or_kw_arg, args, kw_arg, kwargs
+
+def meth5(self, pos_arg, /, pos_or_kw_arg, *, kw_arg):
+    return pos_arg, pos_or_kw_arg, kw_arg
+
+def meth6(self, pos_arg, /, pos_or_kw_arg, *, kw_arg=20):
+    return pos_arg, pos_or_kw_arg, kw_arg
+
+def meth7(self, pos_arg, /, pos_or_kw_arg=10, *, kw_arg):
+    return pos_arg, pos_or_kw_arg, kw_arg
+
+def meth8(self, pos_arg, /, pos_or_kw_arg=10, *, kw_arg=20):
+    return pos_arg, pos_or_kw_arg, kw_arg
+
+def meth13(self, pos_arg, /, pos_or_kw_arg, *args, kw_arg, **kwargs):
+    return pos_arg, pos_or_kw_arg, args, kw_arg, kwargs
+
+def meth14(self, pos_arg, /, pos_or_kw_arg, *args, kw_arg=20, **kwargs):
+    return pos_arg, pos_or_kw_arg, args, kw_arg, kwargs
+
+def meth15(self, pos_arg, /, pos_or_kw_arg=10, *args, kw_arg, **kwargs):
+    return pos_arg, pos_or_kw_arg, args, kw_arg, kwargs
+
+def meth16(self, pos_arg, /, pos_or_kw_arg=10, *args, kw_arg=20, **kwargs):
+    return pos_arg, pos_or_kw_arg, args, kw_arg, kwargs
+"""
+
+import sys
+if sys.version_info >= (3, 8):
+    exec(MORE_TESTS)
+else:
+    def func5(*args, **kwargs): pass
+    def func6(*args, **kwargs): pass
+    def func7(*args, **kwargs): pass
+    def func8(*args, **kwargs): pass
+    def func13(*args, **kwargs): pass
+    def func14(*args, **kwargs): pass
+    def func15(*args, **kwargs): pass
+    def func16(*args, **kwargs): pass
+    def meth5(*args, **kwargs): pass
+    def meth6(*args, **kwargs): pass
+    def meth7(*args, **kwargs): pass
+    def meth8(*args, **kwargs): pass
+    def meth13(*args, **kwargs): pass
+    def meth14(*args, **kwargs): pass
+    def meth15(*args, **kwargs): pass
+    def meth16(*args, **kwargs): pass
 
 
 # METHOD-LIKE
@@ -243,18 +293,6 @@ def meth3(self, pos_or_kw_arg=10, *, kw_arg):
 def meth4(self, pos_or_kw_arg=10, *, kw_arg=20):
     return pos_or_kw_arg, kw_arg
 
-def meth5(self, pos_arg, /, pos_or_kw_arg, *, kw_arg):
-    return pos_arg, pos_or_kw_arg, kw_arg
-
-def meth6(self, pos_arg, /, pos_or_kw_arg, *, kw_arg=20):
-    return pos_arg, pos_or_kw_arg, kw_arg
-
-def meth7(self, pos_arg, /, pos_or_kw_arg=10, *, kw_arg):
-    return pos_arg, pos_or_kw_arg, kw_arg
-
-def meth8(self, pos_arg, /, pos_or_kw_arg=10, *, kw_arg=20):
-    return pos_arg, pos_or_kw_arg, kw_arg
-
 def meth9(self, pos_arg, *args, kw_arg, **kwargs):
     return pos_arg, args, kw_arg, kwargs
 
@@ -266,19 +304,6 @@ def meth11(self, pos_arg=10, *args, kw_arg, **kwargs):
 
 def meth12(self, pos_arg=10, *args, kw_arg=20, **kwargs):
     return pos_arg, args, kw_arg, kwargs
-
-def meth13(self, pos_arg, /, pos_or_kw_arg, *args, kw_arg, **kwargs):
-    return pos_arg, pos_or_kw_arg, args, kw_arg, kwargs
-
-def meth14(self, pos_arg, /, pos_or_kw_arg, *args, kw_arg=20, **kwargs):
-    return pos_arg, pos_or_kw_arg, args, kw_arg, kwargs
-
-def meth15(self, pos_arg, /, pos_or_kw_arg=10, *args, kw_arg, **kwargs):
-    return pos_arg, pos_or_kw_arg, args, kw_arg, kwargs
-
-def meth16(self, pos_arg, /, pos_or_kw_arg=10, *args, kw_arg=20, **kwargs):
-    return pos_arg, pos_or_kw_arg, args, kw_arg, kwargs
-
 
 
 class Methods:
