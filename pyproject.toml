@@ -34,6 +34,7 @@ dev = [
   'mypy'
 ]
 
+
 [tool.pytest.ini_options]
 minversion = "6.0"
 python_files = "test_*.py"
@@ -42,10 +43,9 @@ testpaths = [
     "pygim-common/tests"
 ]
 
-[tool.coverage.paths]
-source = ["pygim-common/pygim"]
-
 [tool.coverage.report]
+omit = ["./docs/**/*.*", "**/tests/**/*.*"]
+include = ["./pygim-common/**/*.py"]
 show_missing = true
 exclude_lines = [
     "pragma: no cover",

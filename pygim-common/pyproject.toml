@@ -49,9 +49,16 @@ testpaths = [
     "tests",
 ]
 
-[tool.coverage.paths]
-source = [
-    "pygim-common",
+[tool.coverage.report]
+omit = ["./docs/**/*.*", "**/tests/**/*.*"]
+include = ["./**/*.py"]
+show_missing = true
+exclude_lines = [
+    "pragma: no cover",
+    "if False",
+    "if __name__ == .__main__.:",
+    "@abc.abstractmethod",
+    "@abc.abstractproperty",
 ]
 
 [tool.pygim-common.commands]
