@@ -4,7 +4,7 @@ Internal utilities package.
 '''
 
 from ._iterable import *
-from ._checking import *
+from ._inspect import *
 
 
 def format_dict(dct, *, indent=0):

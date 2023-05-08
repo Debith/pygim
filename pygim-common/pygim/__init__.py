@@ -12,6 +12,9 @@ from .kernel import *
 from _pygim._magic._gimmick import gimmick, gim_type
 
 __all__ = [
+    "gimmick",      # This is equivalent to Python's `object`. Inherit this!
+    "gim_type",     # This is equivalent to Python's `type`, creates `gimmick`s.
+
     "EntangledClass",  # A class that can be shared and extended across modules.
     "PathSet",  # A class to manage multiple Path objects.
 ]

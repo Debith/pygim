@@ -31,7 +31,9 @@ dependencies = [
 dev = [
   'pytest',
   'pytest-xdist',
-  'mypy'
+  'mypy',
+  'coverage',
+  'coverage[toml]',
 ]
 
 
