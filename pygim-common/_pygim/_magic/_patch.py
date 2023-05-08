@@ -8,152 +8,95 @@ __all__ = ["MutableCodeObject", "MutableFuncObject"]
 from abc import ABCMeta
 from dataclasses import dataclass
 import sys
-import typing as t
 import types
 import inspect
+import types
 
-from .._utils import has_instances, format_dict, type_error_msg, TraitFunctions
+from .._utils import has_instances, format_dict, type_error_msg, TraitFunctions, is_subset
 
-# Python 3.7
-#  |  code(argcount, kwonlyargcount, nlocals, stacksize, flags, codestring,
-#  |        constants, names, varnames, filename, name, firstlineno,
-#  |        lnotab[, freevars[, cellvars]])
-#  |
-#  |  co_argcount
-#  |  co_cellvars
-#  |  co_code
-#  |  co_consts
-#  |  co_filename
-#  |  co_firstlineno
-#  |  co_flags
-#  |  co_freevars
-#  |  co_kwonlyargcount
-#  |  co_lnotab
-#  |  co_name
-#  |  co_names
-#  |  co_nlocals
+PY37, PY38, PY39, PY310, PY311 = (3, 7), (3, 8), (3, 9), (3, 10), (3, 11)
+____ = _____ = ()
 
-# Python 3.8
-#  |  code(argcount, posonlyargcount, kwonlyargcount, nlocals, stacksize,
-#  |        flags, codestring, constants, names, varnames, filename, name,
-#  |        firstlineno, lnotab[, freevars[, cellvars]])
-#
-#  |  co_argcount
-#  |  co_cellvars
-#  |  co_code
-#  |  co_consts
-#  |  co_filename
-#  |  co_firstlineno
-#  |  co_flags
-#  |  co_freevars
-#  |  co_kwonlyargcount
-#  |  co_lnotab
-#  |  co_name
-#  |  co_names
-#  |  co_nlocals
-#  |  co_posonlyargcount
-#  |  co_stacksize
-#  |  co_varnames
+_PY_CODE_ARGS = dict(
+    argcount        = (PY37, PY38, PY39, PY310, PY311),
+    posonlyargcount = (____, PY38, PY39, PY310, PY311),
+    kwonlyargcount  = (PY37, PY38, PY39, PY310, PY311),
+    nlocals         = (PY37, PY38, PY39, PY310, PY311),
+    stacksize       = (PY37, PY38, PY39, PY310, PY311),
+    flags           = (PY37, PY38, PY39, PY310, PY311),
+    codestring      = (PY37, PY38, PY39, PY310, PY311),
+    constants       = (PY37, PY38, PY39, PY310, PY311),
+    names           = (PY37, PY38, PY39, PY310, PY311),
+    varnames        = (PY37, PY38, PY39, PY310, PY311),
+    filename        = (PY37, PY38, PY39, PY310, PY311),
+    name            = (PY37, PY38, PY39, PY310, PY311),
+    qualname        = (____, ____, ____, _____, PY311),
+    firstlineno     = (PY37, PY38, PY39, PY310, PY311),
+    lnotab          = (PY37, PY38, PY39, _____, _____),
+    linetable       = (____, ____, ____, PY310, PY311),
+    exceptiontable  = (____, ____, ____, _____, PY311),
+    freevars        = (PY37, PY38, PY39, PY310, PY311),
+    cellvars        = (PY37, PY38, PY39, PY310, PY311),
+)
 
-# Python 3.9
-#  |  code(argcount, posonlyargcount, kwonlyargcount, nlocals, stacksize,
-#  |        flags, codestring, constants, names, varnames, filename, name,
-#  |        firstlineno, lnotab[, freevars[, cellvars]])
-#
-#  |  co_argcount
-#  |  co_cellvars
-#  |  co_code
-#  |  co_consts
-#  |  co_filename
-#  |  co_firstlineno
-#  |  co_flags
-#  |  co_freevars
-#  |  co_kwonlyargcount
-#  |  co_lnotab
-#  |  co_name
-#  |  co_names
-#  |  co_nlocals
-#  |  co_posonlyargcount
-#  |  co_stacksize
-#  |  co_varnames
+_CODE_OBJECT_VARS = dict(
+    co_argcount         = (PY37, PY38, PY39, PY310, PY311),
+    co_cellvars         = (PY37, PY38, PY39, PY310, PY311),
+    co_code             = (PY37, PY38, PY39, PY310, PY311),
+    co_consts           = (PY37, PY38, PY39, PY310, PY311),
+    co_exceptiontable   = (____, ____, ____, _____, PY311),
+    co_filename         = (PY37, PY38, PY39, PY310, PY311),
+    co_firstlineno      = (PY37, PY38, PY39, PY310, PY311),
+    co_flags            = (PY37, PY38, PY39, PY310, PY311),
+    co_freevars         = (PY37, PY38, PY39, PY310, PY311),
+    co_kwonlyargcount   = (PY37, PY38, PY39, PY310, PY311),
+    co_linetable        = (____, ____, ____, PY310, PY311),
+    co_lnotab           = (PY37, PY38, PY39, PY310, PY311),
+    co_name             = (PY37, PY38, PY39, PY310, PY311),
+    co_names            = (PY37, PY38, PY39, PY310, PY311),
+    co_nlocals          = (PY37, PY38, PY39, PY310, PY311),
+    co_posonlyargcount  = (____, PY38, PY39, PY310, PY311),
+    co_qualname         = (____, ____, ____, _____, PY311),
+    co_stacksize        = (____, PY38, PY39, PY310, PY311),
+    co_varnames         = (____, PY38, PY39, PY310, PY311),
+)
 
-# Python 3.10
-#  |  code(argcount, posonlyargcount, kwonlyargcount, nlocals, stacksize, flags, codestring, constants, names, varnames, filename, name, firstlineno, linetable, freevars=(), cellvars=(), /)
-#  |  co_argcount
-#  |  co_cellvars
-#  |  co_code
-#  |  co_consts
-#  |  co_filename
-#  |  co_firstlineno
-#  |  co_flags
-#  |  co_freevars
-#  |  co_kwonlyargcount
-#  |  co_linetable
-#  |  co_lnotab
-#  |  co_name
-#  |  co_names
-#  |  co_nlocals
-#  |  co_posonlyargcount
-#  |  co_stacksize
-#  |  co_varnames
+_ARGS_TO_VARS = dict(
+    argcount         = "co_argcount",
+    posonlyargcount  = "co_posonlyargcount",
+    kwonlyargcount   = "co_kwonlyargcount",
+    nlocals          = "co_nlocals",
+    stacksize        = "co_stacksize",
+    flags            = "co_flags",
+    codestring       = "co_code",
+    constants        = "co_consts",
+    names            = "co_names",
+    varnames         = "co_varnames",
+    filename         = "co_filename",
+    name             = "co_name",
+    qualname         = "co_qualname",
+    firstlineno      = "co_firstlineno",
+    lnotab           = "co_lnotab",
+    linetable        = "co_linetable",
+    exceptiontable   = "co_exceptiontable",
+    freevars         = "co_freevars",
+    cellvars         = "co_cellvars",
+)
 
-#  Python 3.11
-#  |  code(argcount, posonlyargcount, kwonlyargcount, nlocals, stacksize, flags, codestring, constants, names, varnames, filename, name, qualname, firstlineno, linetable, exceptiontable, freevars=(), cellvars=(), /)
-#  |  co_argcount
-#  |  co_cellvars
-#  |  co_code
-#  |  co_consts
-#  |  co_exceptiontable
-#  |  co_filename
-#  |  co_firstlineno
-#  |  co_flags
-#  |  co_freevars
-#  |  co_kwonlyargcount
-#  |  co_linetable
-#  |  co_lnotab
-#  |  co_name
-#  |  co_names
-#  |  co_nlocals
-#  |  co_posonlyargcount
-#  |  co_qualname
-#  |  co_stacksize
-#  |  co_varnames
+_CUR_PY_VER = sys.version_info[:2]
+_CUR_CODETYPE_VARS = [k for k, v in _CODE_OBJECT_VARS.items() if _CUR_PY_VER in v]
+_CUR_CODETYPE_ARGS = [k for k, v in _PY_CODE_ARGS.items() if _CUR_PY_VER in v]
+_CUR_CODETYPE_ARGS_INDEX = list(_CUR_CODETYPE_ARGS)
+_CUR_ARGS_TO_VARS = {k:v for k,v in _ARGS_TO_VARS.items() if k in _CUR_CODETYPE_ARGS}
+
+assert is_subset(_CUR_CODETYPE_VARS, dir(types.CodeType))
+assert len(_CUR_ARGS_TO_VARS) == len(_CUR_CODETYPE_ARGS)
+assert len(_CUR_CODETYPE_ARGS_INDEX) == len(_CUR_CODETYPE_ARGS)
+
 
 class MutableCodeObjectMeta(ABCMeta):
-    _CO_OBJ_VARS = [
-        "co_argcount",
-        "co_posonlyargcount",
-        "co_kwonlyargcount",
-        "co_nlocals",
-        "co_stacksize",
-        "co_flags",
-        "co_code",
-        "co_consts",
-        "co_names",
-        "co_varnames",
-        "co_filename",
-        "co_name",
-        "co_qualname",
-        "co_firstlineno",
-        "co_linetable",
-        "co_exceptiontable",
-        "co_freevars",
-        "co_cellvars",
-    ]
-
-    if sys.version_info[:2] < (3, 11):
-        _CO_OBJ_VARS.remove("co_exceptiontable")
-        _CO_OBJ_VARS.remove("co_qualname")
-        ix = _CO_OBJ_VARS.index("co_linetable")
-        _CO_OBJ_VARS[ix] = "co_lnotab"
-
-    if sys.version_info[:2] < (3, 8):
-        _CO_OBJ_VARS.remove("co_posonlyargcount")
-
     def __call__(self, code_obj):
-        lno_tab = code_obj.co_lnotab
-        code_map = {name: getattr(code_obj, name) for name in self._CO_OBJ_VARS}
-        code_map["co_lnotab"] = lno_tab
+        code_map = {name: getattr(code_obj, name) for name in _CUR_CODETYPE_VARS}
         assert has_instances(code_map, str)
         mutable_code_obj = super(self.__class__, self).__call__(code_map)
         return mutable_code_obj
@@ -183,7 +126,11 @@ class MutableCodeObject(metaclass=MutableCodeObjectMeta):
         return self._code_map[key]
 
     def freeze(self):
-        return types.CodeType(*self._code_map.values())
+        try:
+            args = {k: self._code_map[v] for k, v in _CUR_ARGS_TO_VARS.items()}
+            return types.CodeType(*args.values())
+        except TypeError as e:
+            raise
 
     def __repr__(self):
         return f"{self.__class__.__name__}({format_dict(self._code_map, indent=4)})"

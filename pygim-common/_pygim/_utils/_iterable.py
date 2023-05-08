@@ -3,11 +3,15 @@
 This module contains internal utility functions.
 """
 
-__all__ = ("split", "flatten", "is_container", "has_instances")
+__all__ = ("split", "flatten", "is_container", "has_instances", "is_subset")
 
 
 def has_instances(iterable, types, *, how=all):
     return how(isinstance(it, types) for it in iterable)
+
+
+def is_subset(iterable, other):
+    return set(iterable).issubset(other)
 
 
 def split(iterable, condition):
