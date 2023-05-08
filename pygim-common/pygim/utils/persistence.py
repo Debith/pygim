@@ -98,10 +98,11 @@ def pickle_and_compress(obj, filename=None, *, make_dirs=False, suffix=".pkl.zip
     Examples
     --------
     Pickle and compress an object and write it to a file:
-    >>> my_list = [1, 2, 3, 4, 5]
-    >>> bts = pickle_and_compress(my_list, filename="my_list.pkl.zip", make_dirs=True)
-    >>> isinstance(bts, bytes)
-    True
+
+    .. code-block:: python
+
+        my_list = [1, 2, 3, 4, 5]
+        pickle_and_compress(my_list, filename="my_list.pkl.zip", make_dirs=True)
 
     Pickle and compress an object and return the bytes:
     >>> my_dict = {"name": "John", "age": 30}
