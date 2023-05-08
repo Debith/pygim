@@ -5,7 +5,7 @@ This module implmements class gimmick.
 
 from traceback import format_stack
 from types import FunctionType
-from functools import singledispatchmethod
+from functools import singledispatch
 
 from ._patch import MutableFuncObject
 from .._utils import type_error_msg, flatten
@@ -24,6 +24,60 @@ class GimTypeMeta(type):
 class _NoTraits:
     def __setitem__(self, *args, **kwargs):
         raise NotImplementedError("Can't add traits to this object!")
+
+def __record_trait_info(cls, trait):
+    """ Include trait information only in debug mode."""
+    # NOTE: Executing `python -O` skips this step.
+    if __debug__:
+        traitinfo = f"{trait.__module__}.{trait.__qualname__}"
+        lines = []
+        for line in format_stack():
+            if "_pygim" in line:
+                break
+            lines.append(line.split('\n')[0].strip())
+        fileinfo = f"{trait.__code__.co_filename}:{trait.__code__.co_firstlineno}"
+
+        cls.__pygim_traits__[traitinfo] = dict(definition=fileinfo, traceback=lines)
+
+
+@singledispatch
+def __do_shift__(other, cls):
+    raise TypeError(type_error_msg(other, FunctionType))
+
+@__do_shift__.register(list)
+@__do_shift__.register(tuple)
+def __lshift_iterable__(_iterable, cls):
+    for obj in flatten(_iterable):
+        cls << obj
+    return cls
+
+@__do_shift__.register(FunctionType)
+def __lshift_func__(_func, cls):
+    __do_setattr__(_func, _func.__name__, cls)
+    return cls
+
+@__do_shift__.register(type)
+def __lshift_class__(_class, cls):
+    new_funcs = [f for f in _class.__dict__.values() if isinstance(f, FunctionType)]
+    for func in new_funcs:
+        cls << func
+    return cls
+
+@singledispatch  # TODO: Work singledispatch method
+def __do_setattr__(_value, _name, cls):
+    cls.__setattr__(_name, _value)
+
+@__do_setattr__.register(FunctionType)
+def __do_setattr_func(_value, _name, cls):
+    # This condition ensures that functions that already assigned
+    # to this class won't be done so again, as it will lead to
+    # infinite recursion loop.
+    # TODO: Maybe functions that are already assigned should be
+    #       converted to special function types..?
+    if getattr(_value, "__pygim_parent__", None) is cls:
+        __record_trait_info(cls, _value)
+        return super(cls.__class__, cls).__setattr__(_name, _value)
+    MutableFuncObject(_value).assign_to_class(cls, _name)
 
 
 class gim_type(type, metaclass=GimTypeMeta):
@@ -82,61 +136,11 @@ class gim_type(type, metaclass=GimTypeMeta):
             raise NotImplementedError()
         return super().__call__(*args, **kwargs)
 
-    def __record_trait_info(cls, trait):
-        """ Include trait information only in debug mode."""
-        # NOTE: Executing `python -O` skips this step.
-        if __debug__:
-            traitinfo = f"{trait.__module__}.{trait.__qualname__}"
-            lines = []
-            for line in format_stack():
-                if "_pygim" in line:
-                    break
-                lines.append(line.split('\n')[0].strip())
-            fileinfo = f"{trait.__code__.co_filename}:{trait.__code__.co_firstlineno}"
-
-            cls.__pygim_traits__[traitinfo] = dict(definition=fileinfo, traceback=lines)
-
-    @singledispatchmethod
     def __lshift__(cls, other):
-        raise TypeError(type_error_msg(other, FunctionType))
-
-    @__lshift__.register(list)
-    @__lshift__.register(tuple)
-    def __lshift_iterable__(cls, _iterable):
-        for obj in flatten(_iterable):
-            cls << obj
-        return cls
-
-    @__lshift__.register(FunctionType)
-    def __lshift_func__(cls, _func):
-        cls.__do_setattr(_func, _func.__name__)
-        return cls
-
-    @__lshift__.register(type)
-    def __lshift_class__(cls, _class):
-        new_funcs = [f for f in _class.__dict__.values() if isinstance(f, FunctionType)]
-        for func in new_funcs:
-            cls << func
-        return cls
-
-    @singledispatchmethod  # TODO: Work singledispatch method
-    def __do_setattr(cls, _value, _name):
-        super().__setattr__(_name, _value)
-
-    @__do_setattr.register(FunctionType)
-    def __do_setattr_func(cls, _value, _name):
-        # This condition ensures that functions that already assigned
-        # to this class won't be done so again, as it will lead to
-        # infinite recursion loop.
-        # TODO: Maybe functions that are already assigned should be
-        #       converted to special function types..?
-        if getattr(_value, "__pygim_parent__", None) is cls:
-            cls.__record_trait_info(_value)
-            return super().__setattr__(_name, _value)
-        MutableFuncObject(_value).assign_to_class(cls, _name)
+        return __do_shift__(other, cls)
 
     def __setattr__(cls, _name, _value):
-        cls.__do_setattr(_value, _name)
+        __do_setattr__(_value, _name, cls)
 
 
 class gimmick(metaclass=gim_type):
