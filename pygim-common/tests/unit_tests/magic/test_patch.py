@@ -280,7 +280,6 @@ def meth16(self, pos_arg, /, pos_or_kw_arg=10, *args, kw_arg=20, **kwargs):
     return pos_arg, pos_or_kw_arg, args, kw_arg, kwargs
 
 
-
 class Methods:
     def func1(self, pos_or_kw_arg, *, kw_arg):
         return pos_or_kw_arg, kw_arg
