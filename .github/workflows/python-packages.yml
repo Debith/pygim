@@ -26,6 +26,12 @@ jobs:
       with:
         python-version: ${{ matrix.python-version }}
 
+    - name: Special step for Python 3.7
+      if: matrix.python-version == '3.7'
+      run: |
+        echo "Performing special step for Python 3.7"
+        git rm pygim-common/tests/unit_tests/magic/test_patch_py38_plus.py
+
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
