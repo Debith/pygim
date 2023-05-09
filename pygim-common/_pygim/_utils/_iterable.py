@@ -1,9 +1,7 @@
 # -*- coding: utf-8 -*-
 """
-This module contains miscellenious utility functions that can't be fit anywhere else.
+This module contains internal utility functions.
 """
-
-import pygim.typing as t
 
 __all__ = ("split", "flatten", "is_container")
 
@@ -43,7 +41,6 @@ def split(iterable, condition):
     >>> odd_numbers
     [1, 3, 5]
     """
-
     left = []
     right = []
 
@@ -57,7 +54,8 @@ def split(iterable, condition):
 
 
 def is_container(obj):
-    """ Determine whether an object is a container.
+    """
+    Determine whether an object is a container.
 
     A container is considered an object that contains other objects. This
     function returns `False` for strings, bytes, and types, even though they
@@ -90,15 +88,16 @@ def is_container(obj):
     return isinstance(obj, memoryview)
 
 
-def flatten(items):
-    """Flatten a nested iterable into a single list.
+def flatten(iterable):
+    """
+    Flatten a nested iterable into a single list.
 
     This function flattens nested iterables such as lists, tuples, and sets
     into a single list. It can handle deeply nested and irregular structures.
 
     Parameters
     ----------
-    items : `iterable`
+    iterable : `iterable`
         The nested iterable to flatten.
 
     Yields
@@ -120,7 +119,7 @@ def flatten(items):
     >>> list(flatten(["one", "two", ["three", "four"]]))
     ['one', 'two', 'three', 'four']
     """
-    for subitem in items:
+    for subitem in iterable:
         if is_container(subitem):
             yield from flatten(subitem)
         else:

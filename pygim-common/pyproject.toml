@@ -4,7 +4,7 @@ build-backend = "pdm.pep517.api"
 
 [project]
 name = "pygim-common"
-version = "0.1.0"
+version = "0.2.0"
 description = "Common features for pygim"
 readme = "README.rst"
 requires-python = ">=3.7, <4"
@@ -33,25 +33,36 @@ dependencies = [
   'coverage>=6.4.4',
   'pytest>=7.0.0',
   'typing_extensions>=4.2.0',
+  'tabulate>=0.8.10'
 ]
 
 [project.optional-dependencies]
 dev = [
+  'pytest',
   'pytest-xdist',
-  'mypy'
+  'mypy',
+  'coverage',
+  'coverage[toml]',
 ]
 
 [tool.pytest.ini_options]
 minversion = "6.0"
-addopts = '-ra -q --doctest-glob="**/*.py" --doctest-modules --doctest-continue-on-failure'
+addopts = '-ra -q --tb=short --doctest-glob="**/*.py" --doctest-modules --doctest-continue-on-failure'
 testpaths = [
     "pygim",
     "tests",
 ]
 
-[tool.coverage.paths]
-source = [
-    "pygim-common",
+[tool.coverage.report]
+omit = ["./docs/**/*.*", "**/tests/**/*.*"]
+include = ["./**/*.py"]
+show_missing = true
+exclude_lines = [
+    "pragma: no cover",
+    "if False",
+    "if __name__ == .__main__.:",
+    "@abc.abstractmethod",
+    "@abc.abstractproperty",
 ]
 
 [tool.pygim-common.commands]
