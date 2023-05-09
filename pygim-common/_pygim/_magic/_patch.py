@@ -57,8 +57,8 @@ _CODE_OBJECT_VARS = dict(
     co_nlocals          = (PY37, PY38, PY39, PY310, PY311),
     co_posonlyargcount  = (____, PY38, PY39, PY310, PY311),
     co_qualname         = (____, ____, ____, _____, PY311),
-    co_stacksize        = (____, PY38, PY39, PY310, PY311),
-    co_varnames         = (____, PY38, PY39, PY310, PY311),
+    co_stacksize        = (PY37, PY38, PY39, PY310, PY311),
+    co_varnames         = (PY37, PY38, PY39, PY310, PY311),
 )
 
 _ARGS_TO_VARS = dict(
