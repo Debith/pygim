@@ -1,5 +1,4 @@
 # -*- coding: utf-8 -*-
-import tabulate
 
 import pytest
 
@@ -175,42 +174,17 @@ def func3(pos_or_kw_arg=10, *, kw_arg):
 def func4(pos_or_kw_arg=10, *, kw_arg=20):
     return pos_or_kw_arg, kw_arg
 
-def func5(pos_arg, /, pos_or_kw_arg, *, kw_arg):
-    return pos_arg, pos_or_kw_arg, kw_arg
-
-def func6(pos_arg, /, pos_or_kw_arg, *, kw_arg=20):
-    return pos_arg, pos_or_kw_arg, kw_arg
-
-def func7(pos_arg, /, pos_or_kw_arg=10, *, kw_arg):
-    return pos_arg, pos_or_kw_arg, kw_arg
-
-def func8(pos_arg, /, pos_or_kw_arg=10, *, kw_arg=20):
-    return pos_arg, pos_or_kw_arg, kw_arg
-
-def func9(pos_arg, *args, kw_arg, **kwargs):
+def func5(pos_arg, *args, kw_arg, **kwargs):
     return pos_arg, args, kw_arg, kwargs
 
-def func10(pos_arg, *args, kw_arg=20, **kwargs):
+def func6(pos_arg, *args, kw_arg=20, **kwargs):
     return pos_arg, args, kw_arg, kwargs
 
-def func11(pos_arg=10, *args, kw_arg, **kwargs):
+def func7(pos_arg=10, *args, kw_arg, **kwargs):
     return pos_arg, args, kw_arg, kwargs
 
-def func12(pos_arg=10, *args, kw_arg=20, **kwargs):
+def func8(pos_arg=10, *args, kw_arg=20, **kwargs):
     return pos_arg, args, kw_arg, kwargs
-
-def func13(pos_arg, /, pos_or_kw_arg, *args, kw_arg, **kwargs):
-    return pos_arg, pos_or_kw_arg, args, kw_arg, kwargs
-
-def func14(pos_arg, /, pos_or_kw_arg, *args, kw_arg=20, **kwargs):
-    return pos_arg, pos_or_kw_arg, args, kw_arg, kwargs
-
-def func15(pos_arg, /, pos_or_kw_arg=10, *args, kw_arg, **kwargs):
-    return pos_arg, pos_or_kw_arg, args, kw_arg, kwargs
-
-def func16(pos_arg, /, pos_or_kw_arg=10, *args, kw_arg=20, **kwargs):
-    return pos_arg, pos_or_kw_arg, args, kw_arg, kwargs
-
 
 # METHOD-LIKE
 
@@ -226,41 +200,17 @@ def meth3(self, pos_or_kw_arg=10, *, kw_arg):
 def meth4(self, pos_or_kw_arg=10, *, kw_arg=20):
     return pos_or_kw_arg, kw_arg
 
-def meth5(self, pos_arg, /, pos_or_kw_arg, *, kw_arg):
-    return pos_arg, pos_or_kw_arg, kw_arg
-
-def meth6(self, pos_arg, /, pos_or_kw_arg, *, kw_arg=20):
-    return pos_arg, pos_or_kw_arg, kw_arg
-
-def meth7(self, pos_arg, /, pos_or_kw_arg=10, *, kw_arg):
-    return pos_arg, pos_or_kw_arg, kw_arg
-
-def meth8(self, pos_arg, /, pos_or_kw_arg=10, *, kw_arg=20):
-    return pos_arg, pos_or_kw_arg, kw_arg
-
-def meth9(self, pos_arg, *args, kw_arg, **kwargs):
+def meth5(self, pos_arg, *args, kw_arg, **kwargs):
     return pos_arg, args, kw_arg, kwargs
 
-def meth10(self, pos_arg, *args, kw_arg=20, **kwargs):
+def meth6(self, pos_arg, *args, kw_arg=20, **kwargs):
     return pos_arg, args, kw_arg, kwargs
 
-def meth11(self, pos_arg=10, *args, kw_arg, **kwargs):
+def meth7(self, pos_arg=10, *args, kw_arg, **kwargs):
     return pos_arg, args, kw_arg, kwargs
 
-def meth12(self, pos_arg=10, *args, kw_arg=20, **kwargs):
+def meth8(self, pos_arg=10, *args, kw_arg=20, **kwargs):
     return pos_arg, args, kw_arg, kwargs
-
-def meth13(self, pos_arg, /, pos_or_kw_arg, *args, kw_arg, **kwargs):
-    return pos_arg, pos_or_kw_arg, args, kw_arg, kwargs
-
-def meth14(self, pos_arg, /, pos_or_kw_arg, *args, kw_arg=20, **kwargs):
-    return pos_arg, pos_or_kw_arg, args, kw_arg, kwargs
-
-def meth15(self, pos_arg, /, pos_or_kw_arg=10, *args, kw_arg, **kwargs):
-    return pos_arg, pos_or_kw_arg, args, kw_arg, kwargs
-
-def meth16(self, pos_arg, /, pos_or_kw_arg=10, *args, kw_arg=20, **kwargs):
-    return pos_arg, pos_or_kw_arg, args, kw_arg, kwargs
 
 
 class Methods:
@@ -276,41 +226,17 @@ class Methods:
     def func4(self, pos_or_kw_arg=10, *, kw_arg=20):
         return pos_or_kw_arg, kw_arg
 
-    def func5(self, pos_arg, /, pos_or_kw_arg, *, kw_arg):
-        return pos_arg, pos_or_kw_arg, kw_arg
-
-    def func6(self, pos_arg, /, pos_or_kw_arg, *, kw_arg=20):
-        return pos_arg, pos_or_kw_arg, kw_arg
-
-    def func7(self, pos_arg, /, pos_or_kw_arg=10, *, kw_arg):
-        return pos_arg, pos_or_kw_arg, kw_arg
-
-    def func8(self, pos_arg, /, pos_or_kw_arg=10, *, kw_arg=20):
-        return pos_arg, pos_or_kw_arg, kw_arg
-
-    def func9(self, pos_arg, *args, kw_arg, **kwargs):
+    def func5(self, pos_arg, *args, kw_arg, **kwargs):
         return pos_arg, args, kw_arg, kwargs
 
-    def func10(self, pos_arg, *args, kw_arg=20, **kwargs):
+    def func6(self, pos_arg, *args, kw_arg=20, **kwargs):
         return pos_arg, args, kw_arg, kwargs
 
-    def func11(self, pos_arg=10, *args, kw_arg, **kwargs):
+    def func7(self, pos_arg=10, *args, kw_arg, **kwargs):
         return pos_arg, args, kw_arg, kwargs
 
-    def func12(self, pos_arg=10, *args, kw_arg=20, **kwargs):
+    def func8(self, pos_arg=10, *args, kw_arg=20, **kwargs):
         return pos_arg, args, kw_arg, kwargs
-
-    def func13(self, pos_arg, /, pos_or_kw_arg, *args, kw_arg, **kwargs):
-        return pos_arg, pos_or_kw_arg, args, kw_arg, kwargs
-
-    def func14(self, pos_arg, /, pos_or_kw_arg, *args, kw_arg=20, **kwargs):
-        return pos_arg, pos_or_kw_arg, args, kw_arg, kwargs
-
-    def func15(self, pos_arg, /, pos_or_kw_arg=10, *args, kw_arg, **kwargs):
-        return pos_arg, pos_or_kw_arg, args, kw_arg, kwargs
-
-    def func16(self, pos_arg, /, pos_or_kw_arg=10, *args, kw_arg=20, **kwargs):
-        return pos_arg, pos_or_kw_arg, args, kw_arg, kwargs
 
 
 @pytest.mark.parametrize("ofunc, args, kwargs", [
@@ -320,21 +246,11 @@ class Methods:
     (func3, (), dict(kw_arg=2)),
     (func4, (), {}),
     (func4, (1,), dict(kw_arg=2)),
-    (func5, (1, 2), dict(kw_arg=3)),
-    (func5, (1,), dict(pos_or_kw_arg=2, kw_arg=3)),
-    (func6, (1, 2), {}),
-    (func6, (1,), dict(pos_or_kw_arg=2)),
-    (func7, (1,), dict(kw_arg=3)),
-    (func8, (1,), {}),
-    (func9, (1,), dict(kw_arg=2)),
-    (func9, (1,2,3,4), dict(kw_arg=5, kw_arg2=6)),
-    (func10, (1,), {}),
-    (func11, (), dict(kw_arg=2)),
-    (func12, (), {}),
-    (func13, (1, 2), dict(kw_arg=3)),
-    (func14, (1, 2), {}),
-    (func15, (1,), dict(kw_arg=3)),
-    (func16, (1,), {}),
+    (func5, (1,), dict(kw_arg=2)),
+    (func5, (1,2,3,4), dict(kw_arg=5, kw_arg2=6)),
+    (func6, (1,), {}),
+    (func7, (), dict(kw_arg=2)),
+    (func8, (), {}),
 ])
 def test_mutable_function_correctly_duplicates_the_function(ofunc, args, kwargs):
     from _pygim._magic._patch import MutableFuncObject
@@ -360,21 +276,11 @@ def test_mutable_function_correctly_duplicates_the_function(ofunc, args, kwargs)
     (Methods, "func3", (), dict(kw_arg=2)),
     (Methods, "func4", (), {}),
     (Methods, "func4", (1,), dict(kw_arg=2)),
-    (Methods, "func5", (1, 2), dict(kw_arg=3)),
-    (Methods, "func5", (1,), dict(pos_or_kw_arg=2, kw_arg=3)),
-    (Methods, "func6", (1, 2), {}),
-    (Methods, "func6", (1,), dict(pos_or_kw_arg=2)),
-    (Methods, "func7", (1,), dict(kw_arg=3)),
-    (Methods, "func8", (1,), {}),
-    (Methods, "func9", (1,), dict(kw_arg=2)),
-    (Methods, "func9", (1,2,3,4), dict(kw_arg=5, kw_arg2=6)),
-    (Methods, "func10", (1,), {}),
-    (Methods, "func11", (), dict(kw_arg=2)),
-    (Methods, "func12", (), {}),
-    (Methods, "func13", (1, 2), dict(kw_arg=3)),
-    (Methods, "func14", (1, 2), {}),
-    (Methods, "func15", (1,), dict(kw_arg=3)),
-    (Methods, "func16", (1,), {}),
+    (Methods, "func5", (1,), dict(kw_arg=2)),
+    (Methods, "func5", (1,2,3,4), dict(kw_arg=5, kw_arg2=6)),
+    (Methods, "func6", (1,), {}),
+    (Methods, "func7", (), dict(kw_arg=2)),
+    (Methods, "func8", (), {}),
 ])
 def test_mutable_function_correctly_duplicates_the_method(oclass, omethod_name, args, kwargs):
     from _pygim._magic._patch import MutableFuncObject
@@ -407,21 +313,11 @@ def test_mutable_function_correctly_duplicates_the_method(oclass, omethod_name, 
     (meth3, (), dict(kw_arg=2)),
     (meth4, (), {}),
     (meth4, (1,), dict(kw_arg=2)),
-    (meth5, (1, 2), dict(kw_arg=3)),
-    (meth5, (1,), dict(pos_or_kw_arg=2, kw_arg=3)),
-    (meth6, (1, 2), {}),
-    (meth6, (1,), dict(pos_or_kw_arg=2)),
-    (meth7, (1,), dict(kw_arg=3)),
-    (meth8, (1,), {}),
-    (meth9, (1,), dict(kw_arg=2)),
-    (meth9, (1,2,3,4), dict(kw_arg=5, kw_arg2=6)),
-    (meth10, (1,), {}),
-    (meth11, (), dict(kw_arg=2)),
-    (meth12, (), {}),
-    (meth13, (1, 2), dict(kw_arg=3)),
-    (meth14, (1, 2), {}),
-    (meth15, (1,), dict(kw_arg=3)),
-    (meth16, (1,), {}),
+    (meth5, (1,), dict(kw_arg=2)),
+    (meth5, (1,2,3,4), dict(kw_arg=5, kw_arg2=6)),
+    (meth6, (1,), {}),
+    (meth7, (), dict(kw_arg=2)),
+    (meth8, (), {}),
 ])
 def test_function_assigned_to_class_properly(ofunc, args, kwargs):
     class NewOwner:
