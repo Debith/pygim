@@ -4,10 +4,10 @@
 '''
 
 from types import FunctionType
-from functools import singledispatch
 from dataclasses import dataclass, field
 import inspect
 
+from ._dispatcher import dispatch
 from ._patch import MutableFuncObject
 from .._utils import flatten, type_error_msg
 
@@ -49,7 +49,7 @@ class Relocator:
             setattr(target, name, namespace[name])
 
 
-@singledispatch
+@dispatch
 def _combine(*args, **kwargs):
     raise TypeError("Unsupported Type")
 

@@ -35,9 +35,11 @@ def type_error_msg(obj, expected_type):
     """
     if isinstance(expected_type, tuple):
         type_names = ",".join(f"`{t.__name__}`" for t in expected_type)
+        expected_type_name = "tuple"
     else:
         type_names = type(obj).__name__
-    return f"Expected to get type `{expected_type.__name__}`, got `{repr(obj)} [{type_names}]`"
+        expected_type_name = expected_type.__name__
+    return f"Expected to get type `{expected_type_name}`, got `{repr(obj)} [{type_names}]`"
 
 
 def diff(_left, _right):
