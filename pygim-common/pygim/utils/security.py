@@ -4,29 +4,27 @@ This module contains security utilities.
 """
 
 import hashlib
-from functools import singledispatch
 
-import pygim.typing as t
-
+from _pygim._magic._dispatcher import dispatch
 
 __all__ = ["sha256sum"]
 
 
-@singledispatch
+@dispatch
 def sha256sum(obj, *, encoding="utf-8"):
     """
     Compute the SHA256 sum for the given string.
 
     Parameters
     ----------
-    obj : str
+    obj : `str`
         String to be encoded.
-    encoding : str, optional
+    encoding : `str`, optional
         Encoding used to convert string objects into bytes. Defaults to "utf-8".
 
     Returns
     -------
-    str
+    `str`
         Calculated SHA256 sum.
 
     Raises

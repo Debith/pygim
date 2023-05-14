@@ -5,8 +5,8 @@ This module implmements class gimmick.
 
 from traceback import format_stack
 from types import FunctionType
-from functools import singledispatch
 
+from ._dispatcher import dispatch
 from ._patch import MutableFuncObject
 from .._utils import type_error_msg, flatten
 
@@ -40,7 +40,7 @@ def __record_trait_info(cls, trait):
         cls.__pygim_traits__[traitinfo] = dict(definition=fileinfo, traceback=lines)
 
 
-@singledispatch
+@dispatch
 def __do_shift__(other, cls):
     raise TypeError(type_error_msg(other, FunctionType))
 
@@ -63,7 +63,7 @@ def __lshift_class__(_class, cls):
         cls << func
     return cls
 
-@singledispatch  # TODO: Work singledispatch method
+@dispatch  # TODO: Work dispatch method
 def __do_setattr__(_value, _name, cls):
     cls.__setattr__(_name, _value)
 
