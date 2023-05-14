@@ -3,7 +3,7 @@ name = "pygim"
 version = "0.1.0"
 description = "Full Python Gimmicks project with all of its sub-projects."
 readme = "README.rst"
-requires-python = ">=3.6, <4"
+requires-python = ">=3.7, <4"
 authors = [
   {email = "debith-dev@outlook.com"},
   {name = "Teppo Perä"}
@@ -12,7 +12,6 @@ classifiers = [
   "Development Status :: 4 - Beta",
   "Intended Audience :: Developers",
   "License :: OSI Approved :: MIT License",
-  "Framework :: Python Gimmicks (pygim)",
   "Programming Language :: Python",
   "Programming Language :: Python :: 3",
   "Programming Language :: Python :: 3.7",
@@ -32,20 +31,23 @@ dependencies = [
 dev = [
   'pytest',
   'pytest-xdist',
-  'mypy'
+  'mypy',
+  'coverage',
+  'coverage[toml]',
 ]
+
 
 [tool.pytest.ini_options]
 minversion = "6.0"
-addopts = "-ra -q"
+python_files = "test_*.py"
+addopts = '-ra -q --doctest-glob="**/*.py" --tb=short --doctest-modules --doctest-continue-on-failure'
 testpaths = [
-    "pygim-common/tests",
+    "pygim-common/tests"
 ]
 
-[tool.coverage.paths]
-source = []
-
 [tool.coverage.report]
+omit = ["./docs/**/*.*", "**/tests/**/*.*"]
+include = ["./pygim-common/**/*.py"]
 show_missing = true
 exclude_lines = [
     "pragma: no cover",
@@ -58,17 +60,3 @@ exclude_lines = [
 [tool.pygim.commands]
 lint = "mypy ."
 test = "pytest"
-
-[tool.mypy]
-disallow_any_decorated = true
-disallow_any_generics = true
-disallow_any_unimported = false
-disallow_subclassing_any = false
-disallow_untyped_calls = true
-disallow_untyped_defs = true
-ignore_missing_imports = true
-warn_unused_ignores = true
-warn_return_any = true
-exclude = [
-    'tests/.*',
-]

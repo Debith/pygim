@@ -3,24 +3,24 @@
 Command-Line Interface Application for Python Gimmicks.
 """
 
+import subprocess
 import sys
 from pathlib import Path
 from dataclasses import dataclass
 import click
-import pygim.typing as t
 from pygim.kernel import PathSet
 
+__all__ = ["GimmicksCliApp"]
 
-__all__ = ['GimmicksCliApp']
 
-def _echo(msg: t.Text, quiet: bool) -> None:
+def _echo(msg, quiet):
     if not quiet:
         click.echo(msg)
 
 
 @dataclass
 class GimmicksCliApp:
-    def clean_up(self, yes: bool, build_dirs: bool, pycache_dirs: bool, compiled_files: bool, quiet: bool, all: bool):
+    def clean_up(self, yes, build_dirs, pycache_dirs, compiled_files, quiet, all):
         # TODO: clean up!
         _echo(f"Starting clean up in `{Path.cwd()}`", quiet)
         pth = PathSet()
@@ -39,8 +39,13 @@ class GimmicksCliApp:
         if new and not yes:
             print("\n".join([str(n) for n in new]))
             response = input(f"Remove all {len(new)} files/folders (Y/N)? ")
-            if response == 'n':
+            if response == "n":
                 sys.exit("No? Maybe next time...")
-            elif response == 'y':
+            elif response == "y":
                 new.FS.delete_all()
                 _echo("Excellent! You never see them again!", quiet)
+
+    def show_test_coverage(self):
+        # TODO: Make this nicer
+        subprocess.Popen("python -m coverage run -m pytest".split(' ')).wait()
+        subprocess.Popen("python -m coverage report -m".split(' ')).wait()

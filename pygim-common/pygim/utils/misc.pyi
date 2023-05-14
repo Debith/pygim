@@ -1,0 +1,3 @@
+from typing import Any, Text
+
+def safedelattr(obj: Any, name: Text) -> None: ...
