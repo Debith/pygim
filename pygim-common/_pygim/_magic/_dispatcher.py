@@ -78,6 +78,7 @@ class _Dispatcher:
         def __inner_register(func):
             assert self.__callable.__code__.co_argcount >= self.__start_index
             self.__registry[specs] = func
+            return func
         return __inner_register
 
     def __get__(self, __instance, __class):
@@ -108,7 +109,12 @@ class _Dispatcher:
         its_type = tuple(self.__args[i](args[i]) for i in range(len(self.__args)))
         if self.__start_index:
             args = (self.__instance,) + args
-        return self.__registry[its_type](*args, **kwargs)
+        try:
+            return self.__registry[its_type](*args, **kwargs)
+        except KeyError:
+            return self.__callable(*args, **kwargs)
+
+
 
 
 dispatch = _Dispatcher
