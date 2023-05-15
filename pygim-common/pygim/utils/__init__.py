@@ -6,14 +6,6 @@ NOTE: All the utilities here must be standalone, therefore never should
       import any modules outside from this package.
 """
 
-from .performance import *
-from .persistence import *
-from .security import *
-from .misc import *
-from _pygim._utils import format_dict
-from _pygim._utils._iterable import split, flatten, is_container
-from _pygim._utils._inspect import has_instances, diff
-
 __all__ = [
     "decompress_and_unpickle",  # Decompress obj, unpickle it, while optionally read it from file.
     "diff",                     # Compares two dictionaries and visually displays their differences.

@@ -115,6 +115,4 @@ class _Dispatcher:
             return self.__callable(*args, **kwargs)
 
 
-
-
 dispatch = _Dispatcher

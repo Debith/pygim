@@ -1,5 +1,5 @@
 [project]
-name = "pygim"
+name = "python-gimmicks"
 version = "0.1.0"
 description = "Full Python Gimmicks project with all of its sub-projects."
 readme = "README.rst"
@@ -24,7 +24,7 @@ classifiers = [
 ]
 
 dependencies = [
-  'pygim-common'
+  'pygim-common>=0.1.0'
 ]
 
 [project.optional-dependencies]

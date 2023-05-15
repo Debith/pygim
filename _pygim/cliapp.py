@@ -5,17 +5,21 @@ Command-Line Interface Application for Python Gimmicks.
 
 import subprocess
 import sys
+import functools
 from pathlib import Path
 from dataclasses import dataclass
 import click
 from pygim.kernel import PathSet
 
-__all__ = ["GimmicksCliApp"]
+__all__ = ["GimmicksCliApp", "flag_opt"]
 
 
 def _echo(msg, quiet):
     if not quiet:
         click.echo(msg)
+
+
+flag_opt = functools.partial(click.option, is_flag=True, default=False)
 
 
 @dataclass
