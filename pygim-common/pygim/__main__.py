@@ -4,9 +4,9 @@ Python Gimmicks Command-Line Interface.
 """
 
 import click
-from pygim._cli.cliapp import GimmicksCliApp
+from _pygim._cli.cliapp import GimmicksCliApp
 
-from pygim._cli import flag_opt
+from _pygim._cli import flag_opt
 
 
 @click.group()
@@ -31,3 +31,9 @@ def cli():
 def clean_up(**kwargs):
     """ Remove unnecessary files and folders related to Python. """
     GimmicksCliApp().clean_up(**kwargs)
+
+
+@cli.command()
+def show_test_coverage(**kwargs):
+    """ Run test coverage in current folder. """
+    GimmicksCliApp().show_test_coverage(**kwargs)
