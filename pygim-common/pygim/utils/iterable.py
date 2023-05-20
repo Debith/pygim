@@ -48,8 +48,9 @@ def is_container(obj: t.Any) -> bool:
     return isinstance(obj, memoryview)
 
 try:
-    from fast_ierable import flatten
+    from .fast_iterable import flatten
 except ImportError:
+    assert False
     def flatten(items: t.Iterable[t.Any]) -> t.Generator[t.Any, None, None]:
         """ Flatten the nested arrays into single one.
 
