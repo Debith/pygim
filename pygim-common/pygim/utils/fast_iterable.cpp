@@ -1,18 +1,43 @@
 #include <pybind11/pybind11.h>
+#include <pybind11/stl.h>
+
 #include "flatten.h"
+#include <iostream>         // std::string
 
+#define STRINGIFY(x) #x
+#define MACRO_STRINGIFY(x) STRINGIFY(x)
 
-int flatten(std::vector<Py>) {
-    return py::make_iterator(v.begin(), v.end());
-}
+namespace py = pybind11;
 
-
-
-PYBIND11_MODULE(example, m) {
+PYBIND11_MODULE(fast_iterable, m)
+{
     m.doc() = "Module of fast iterables."; // optional module docstring
 
-    m.def("flatten", [](py::list &v) {
-        auto *gen = new FlattenGenerator()
-        return flatten(v)
-    }, py::keep_alive<0, 1>(), "Function iterates every non iterable element as a 1-dimensional array.") /* Keep vector alive while iterator is used */
+    py::class_<FlattenGenerator>(m, "flatten")
+        .def(py::init(
+            [](py::list objs)
+            {
+                return new FlattenGenerator(objs);
+            }))
+        .def("__iter__", [](const py::object &self)
+             { return self; })
+        .def("__next__",
+             [](FlattenGenerator *self)
+             {
+                 if (self->isComplete())
+                 {
+                     throw py::stop_iteration();
+                 }
+
+                 py::gil_scoped_release release;
+                 auto result = self->next();
+
+                 return result;
+             });
+
+#ifdef VERSION_INFO
+    m.attr("__version__") = MACRO_STRINGIFY(VERSION_INFO);
+#else
+    m.attr("__version__") = "dev";
+#endif
 }

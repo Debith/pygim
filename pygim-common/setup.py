@@ -1,3 +1,4 @@
+#type: ignore
 import sys
 from pathlib import Path
 
@@ -12,7 +13,7 @@ __version__ = "0.0.1"
 
 
 ext_modules = [
-    Pybind11Extension("pygim.utils.fast_iterable",
+    Pybind11Extension("utils.fast_iterable",
         [
             "pygim/utils/fast_iterable.cpp",
         ],

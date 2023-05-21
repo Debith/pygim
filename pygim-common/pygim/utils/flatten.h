@@ -1,30 +1,29 @@
-#include <Python.h>
+#include <pybind11/pybind11.h>
+#include <pybind11/stl.h>
+
+#define STRINGIFY(x) #x
+#define MACRO_STRINGIFY(x) STRINGIFY(x)
+
+namespace py = pybind11;
 
 class FlattenGenerator {
 public:
-    FlattenGenerator(PyObject* items) : items_(items), index_(0) { }
+    FlattenGenerator(py::list items) :
+        mItems(items),
+        mIndex(0)
+        {};
 
-    PyObject* next() {
-        while (PyList_Check(items_)) {
-            Py_ssize_t size = PyList_Size(items_);
-            if (index_ < size) {
-                PyObject* subitem = PyList_GetItem(items_, index_++);
-                items_ = subitem;
-            } else {
-                break;
-            }
-        }
-        if (PyList_Check(items_)) {
-            Py_RETURN_NONE;
-        } else {
-            Py_INCREF(items_);
-            PyObject* result = items_;
-            items_ = NULL;
-            return result;
-        }
+    bool isComplete() {
+        return mIndex >= mItems.size();
     }
 
+    py::object next() {
+        py::object p = mItems[mIndex].cast<py::object>();
+        mIndex += 1;
+        return p;
+    };
+
 private:
-    PyObject* items_;
-    Py_ssize_t index_;
+    py::list mItems;
+    uint64_t mIndex;
 };
