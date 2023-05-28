@@ -15,7 +15,7 @@ PYBIND11_MODULE(fast_iterable, m)
 
     py::class_<FlattenGenerator>(m, "flatten")
         .def(py::init(
-            [](py::list objs)
+            [](py::iterable objs)
             {
                 return new FlattenGenerator(objs);
             }))
@@ -24,14 +24,17 @@ PYBIND11_MODULE(fast_iterable, m)
         .def("__next__",
              [](FlattenGenerator *self)
              {
+                // std::cout << "-> __next__" << std::endl;
                  if (self->isComplete())
                  {
+                    // std::cout << "<- __next__ (complete)" << std::endl;
                      throw py::stop_iteration();
                  }
 
-                 py::gil_scoped_release release;
+                 //py::gil_scoped_release release;
                  auto result = self->next();
 
+                 // std::cout << "<- next" << std::endl;
                  return result;
              });
 

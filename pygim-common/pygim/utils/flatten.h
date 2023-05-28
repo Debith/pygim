@@ -1,29 +1,32 @@
 #include <pybind11/pybind11.h>
+#include <pybind11/pytypes.h>
 #include <pybind11/stl.h>
-
-#define STRINGIFY(x) #x
-#define MACRO_STRINGIFY(x) STRINGIFY(x)
+#include <iostream>         // std::string
 
 namespace py = pybind11;
 
 class FlattenGenerator {
 public:
-    FlattenGenerator(py::list items) :
+    FlattenGenerator(py::iterable items) :
         mItems(items),
-        mIndex(0)
+        cur(items.attr("__iter__")())
         {};
 
     bool isComplete() {
-        return mIndex >= mItems.size();
-    }
+        // std::cout << "-> isComplete()" << std::endl;
+        return cur == py::iterator::sentinel();
+    };
 
     py::object next() {
-        py::object p = mItems[mIndex].cast<py::object>();
-        mIndex += 1;
-        return p;
+        // std::cout << "-> next()" << std::endl;
+        auto last = py::cast<py::object>(*cur);
+        ++cur;
+
+        // std::cout << "<- next()" << std::endl;
+        return last;
     };
 
 private:
-    py::list mItems;
-    uint64_t mIndex;
+    py::iterable mItems;
+    py::iterator cur;
 };
