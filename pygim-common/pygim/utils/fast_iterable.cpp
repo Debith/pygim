@@ -13,6 +13,15 @@ namespace py = pybind11;
 PYBIND11_MODULE(fast_iterable, m)
 {
     m.doc() = "Module of fast iterables."; // optional module docstring
+
+    // is_container
+    m.def("is_container", (bool (*)(const py::str&)) &is_container, "A function that checks if a Python str is a container.");
+    m.def("is_container", (bool (*)(const py::bytes&)) &is_container, "A function that checks if a Python bytes is a container.");
+    m.def("is_container", (bool (*)(const py::iterable&)) &is_container, "A function that converts an iterable to a tuple.");
+    m.def("is_container", (bool (*)(const py::memoryview&)) &is_container, "A function that checks if a Python memoryview is a container.");
+    m.def("is_container", (bool (*)(const py::handle&)) &is_container, "A generic function that checks if a Python object is a container.");
+
+    // tuplify
     m.def("tuplify", (py::tuple (*)(const py::bytes&)) &tuplify, "A function that converts a bytes object to a single-element tuple");
     m.def("tuplify", (py::tuple (*)(const py::str&)) &tuplify, "A function that converts a string object to a single-element tuple.");
     m.def("tuplify", (py::tuple (*)(const py::tuple&)) &tuplify, "A function that converts a tuple to a tuple.");
