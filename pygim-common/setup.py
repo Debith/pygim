@@ -16,6 +16,7 @@ ext_modules = [
     Pybind11Extension("utils.fast_iterable",
         [
             "pygim/utils/fast_iterable.cpp",
+            "pygim/utils/flatten.cpp",
         ],
         # Example: passing in the version to the compiled code
         define_macros = [('VERSION_INFO', __version__)],

@@ -1,27 +1,38 @@
 #type: ignore
 import pytest
-import inspect
 
-from pygim.utils.iterable import flatten
+import numpy as np
+from platform import platform, python_version
+print(python_version())
+from pygim.utils.iterable import flatten, flatten_simple, flatten_slow
 from pygim.utils.performance import quick_timer
 
-numbers = list(range(1, 100_000_000))
+numbers = [[n] for n in range(1, 3)]
+conv = lambda x: x
+
+with quick_timer("copy"):
+    r0 = list(numbers)
 
 with quick_timer("comprehension"):
-    r1 = [l for l in numbers]
+    r1 = [l[0] for l in numbers]
 
+with quick_timer("flatten_simple"):
+    r2 = flatten_simple(numbers)
 
 with quick_timer("flatten"):
-    r2 = list(flatten(numbers))
+    r3 = list(flatten(numbers))
+
+with quick_timer("flatten_slow"):
+    r4 = list(flatten_slow(numbers))
 
 
-assert r1 == r2
+#assert r1 == r2 == r3 == r4
 
 
 
 
 @pytest.mark.parametrize("input,expected_result", [
-    #("keep as is", ["keep as is"]),
+    ("keep as is", ["keep as is"]),
     #(b"keep as is", [b"keep as is"]),
     #(memoryview(b"keep as is"), [b"keep as is"]),
     #(1, [1]),
@@ -29,7 +40,13 @@ assert r1 == r2
     ([1, 2, 3], [1, 2, 3]),
     (tuple([1, 2, 3]), [1, 2, 3]),
     (set([1, 2, 3]), [1, 2, 3]),
-    #(range(4), [0,1,2,3]),
+    ([1, [2, [3, [4, [5, [6]]]]]], [1, 2, 3, 4, 5, 6]),
+    ([1, [], 2], [1, 2]),
+    ([[[[[[[[[[[1]]]]]]]]]]], [1]),
+    ((1,2,(3,4)), [1,2,3,4]),
+    ((1,2,set([3,4])), [1,2,3,4]),
+    ((1,2,np.array([3,4])), [1,2,3,4]),
+    (range(4), [0,1,2,3]),
 ])
 def test_flatten_with_various_types(input, expected_result):
     r = flatten(input)

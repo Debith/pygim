@@ -1,32 +1,37 @@
+#ifndef FLATTEN_GENERATOR_H
+#define FLATTEN_GENERATOR_H
+
+#include <vector>
 #include <pybind11/pybind11.h>
-#include <pybind11/pytypes.h>
-#include <pybind11/stl.h>
-#include <iostream>         // std::string
+
+#include "iterutils.h"
 
 namespace py = pybind11;
 
+inline py::iterator _ensure_iter(py::handle obj) {
+    if (py::isinstance<py::iterator>(obj)) {
+        return obj.cast<py::iterator>();
+    }
+
+    if (!is_container(obj)) {
+        return py::iter(tuplify(obj));
+    }
+
+    return py::iter(obj);
+};
+
+
 class FlattenGenerator {
 public:
-    FlattenGenerator(py::iterable items) :
-        mItems(items),
-        cur(items.attr("__iter__")())
-        {};
+    FlattenGenerator();
+    FlattenGenerator(py::iterator items);
 
-    bool isComplete() {
-        // std::cout << "-> isComplete()" << std::endl;
-        return cur == py::iterator::sentinel();
-    };
+    bool isComplete();
 
-    py::object next() {
-        // std::cout << "-> next()" << std::endl;
-        auto last = py::cast<py::object>(*cur);
-        ++cur;
-
-        // std::cout << "<- next()" << std::endl;
-        return last;
-    };
+    py::handle next();
 
 private:
-    py::iterable mItems;
-    py::iterator cur;
+    std::vector<py::iterator> iterators;
 };
+
+#endif // FLATTEN_GENERATOR_H

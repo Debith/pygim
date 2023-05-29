@@ -48,27 +48,27 @@ def is_container(obj: t.Any) -> bool:
     return isinstance(obj, memoryview)
 
 try:
-    from .fast_iterable import flatten
+    from .fast_iterable import flatten, flatten_simple
 except ImportError:
-    assert False
-    def flatten(items: t.Iterable[t.Any]) -> t.Generator[t.Any, None, None]:
-        """ Flatten the nested arrays into single one.
+    pass
+def flatten_slow(items: t.Iterable[t.Any]) -> t.Generator[t.Any, None, None]:
+    """ Flatten the nested arrays into single one.
 
-        Example about list of lists.
-        >>> list(flatten([[1, 2], [3, 4]]))
-        [1, 2, 3, 4]
+    Example about list of lists.
+    >>> list(flatten([[1, 2], [3, 4]]))
+    [1, 2, 3, 4]
 
-        Example of deeply nested irregular list:
-        >>> list(flatten([[[1, 2]], [[[3]]], 4, 5, [[6, [7, 8]]]]))
-        [1, 2, 3, 4, 5, 6, 7, 8]
+    Example of deeply nested irregular list:
+    >>> list(flatten([[[1, 2]], [[[3]]], 4, 5, [[6, [7, 8]]]]))
+    [1, 2, 3, 4, 5, 6, 7, 8]
 
-        List of strings is handled properly too
-        >>> list(flatten(["one", "two", ["three", "four"]]))
-        ['one', 'two', 'three', 'four']
-        """
-        if is_container(items):
-            for subitem in items:
-                for item in flatten(subitem):
-                    yield item
-        else:
-            yield items
+    List of strings is handled properly too
+    >>> list(flatten(["one", "two", ["three", "four"]]))
+    ['one', 'two', 'three', 'four']
+    """
+    if is_container(items):
+        for subitem in items:
+            for item in flatten_slow(subitem):
+                yield item
+    else:
+        yield items
