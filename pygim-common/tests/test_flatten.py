@@ -2,11 +2,10 @@
 import pytest
 
 import numpy as np
-from platform import platform, python_version
-print(python_version())
-from pygim.utils.iterable import flatten, flatten_simple, flatten_slow
+from _pygim._utils._iterable._iterable import flatten, flatten_simple
 from pygim.utils.performance import quick_timer
 
+"""
 numbers = [[n] for n in range(1, 3)]
 conv = lambda x: x
 
@@ -24,6 +23,7 @@ with quick_timer("flatten"):
 
 with quick_timer("flatten_slow"):
     r4 = list(flatten_slow(numbers))
+"""
 
 
 #assert r1 == r2 == r3 == r4
