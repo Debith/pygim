@@ -1,3 +1,8 @@
+[build-system]
+requires = ["setuptools ~= 58.0", "wheel", "python-pip", "editables", "pdm-backend", "toml"]
+build-backend = "build_backend"
+backend-path = ["_pygim_build"]
+
 [project]
 name = "python-gimmicks"
 version = "0.1.0"
