@@ -7,8 +7,6 @@ import pathlib
 import gzip
 import pickle
 
-import pygim.typing as t
-
 __all__ = ("write_bytes", "pickle_and_compress", "decompress_and_unpickle")
 
 

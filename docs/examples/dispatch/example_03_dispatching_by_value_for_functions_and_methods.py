@@ -1,6 +1,6 @@
 # type: ignore
 # Import the dispatch decorator from pygim
-from pygim import dispatch
+from pygim.performance.dispatch import dispatch
 
 # This approach, which extends the functionality of the dispatch decorator to allow
 # dispatching based on the values of arguments, offers increased flexibility and

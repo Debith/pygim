@@ -1,6 +1,6 @@
 # Import necessary modules
 import enum
-from pygim import dispatch
+from pygim.performance.dispatch import dispatch
 
 # The following approach leverages the specific enumerated values to dispatch to the
 # correct function, which enables concise and readable handling of different enumeration

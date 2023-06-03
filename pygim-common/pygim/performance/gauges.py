@@ -7,13 +7,12 @@ from contextlib import contextmanager
 import cProfile
 import pstats
 import time
-import pygim.typing as t
 
 __all__ = ("quick_timer", "quick_profile")
 
 
 @contextmanager
-def quick_timer(title: str = "Code block", *, printer=print):
+def quick_timer(title = "Code block", *, printer=print):
     """
     Measure the execution time of a code block using a context manager.
 

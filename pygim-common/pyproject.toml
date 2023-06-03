@@ -69,9 +69,6 @@ exclude_lines = [
 lint = "mypy ."
 test = "pytest"
 
-[project.scripts]
-pygim = "pygim.__main__:cli"
-
 [tool.mypy]
 strict = true
 no_implicit_optional = true

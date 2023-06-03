@@ -36,6 +36,8 @@ dev = [
   'coverage[toml]',
 ]
 
+[project.scripts]
+pygim = "_pygim.__main__:cli"
 
 [tool.pytest.ini_options]
 minversion = "6.0"
