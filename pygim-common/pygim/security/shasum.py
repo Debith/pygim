@@ -5,7 +5,7 @@ This module contains security utilities.
 
 import hashlib
 
-from _pygim._magic._dispatcher import dispatch
+from ..performance.dispatch import dispatch
 
 __all__ = ["sha256sum"]
 

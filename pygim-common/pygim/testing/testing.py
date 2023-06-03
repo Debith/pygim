@@ -6,8 +6,8 @@ This module contains script to run coverage for specific module.
 import sys
 from importlib import reload
 from contextlib import contextmanager
-import coverage
 import pytest
+import coverage
 
 __all__ = ["measure_coverage", "run_tests"]
 
