@@ -7,7 +7,6 @@ import sys
 from importlib import reload
 from contextlib import contextmanager
 import pytest
-import coverage
 
 __all__ = ["measure_coverage", "run_tests"]
 
@@ -23,6 +22,7 @@ def measure_coverage(*, include=None, show_missing: bool = True):
     show_missing : bool, optional
         True, if coverage report should include lines that were not run.
     """
+    import coverage
     cov = coverage.Coverage()
     cov.start()
 
