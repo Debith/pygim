@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-This module contains security utilities.
+This module checksum calculation helper.
 """
 
 import hashlib

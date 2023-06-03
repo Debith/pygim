@@ -22,6 +22,9 @@ def measure_coverage(*, include=None, show_missing: bool = True):
     show_missing : bool, optional
         True, if coverage report should include lines that were not run.
     """
+    # FIXME: Running pytest fails, when `coverage` module is being imported.
+    #        The error appears to be originating from os.getcwd(), which
+    #        indicates that some folder is interpreted as current is deleted.
     import coverage
     cov = coverage.Coverage()
     cov.start()

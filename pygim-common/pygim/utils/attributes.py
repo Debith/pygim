@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-This module contains utilities not fitting to other category.
+This module provides utilities for working with attributes.
 """
 
 __all__ = ["safedelattr"]
