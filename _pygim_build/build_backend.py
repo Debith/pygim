@@ -1,13 +1,39 @@
 import os
 import sys
 import pathlib
+import urllib
 from pdm.backend.editable import EditableBuilder
 from pdm.backend.wheel import WheelBuilder
 
 ROOT = pathlib.Path(__file__).parents[1]
 
-wheel_builder = WheelBuilder(str(ROOT))
-editable_builder = EditableBuilder(str(ROOT))
+
+def post_initialize(context):
+    md = dict(context.config.metadata)
+    md['dependencies'] = [urllib.parse.unquote(dep) for dep in md['dependencies']]
+    context.config.metadata = context.config.metadata.__class__(md)
+    context.config.data['project']['dependencies'] = [
+        urllib.parse.unquote(dep) for dep in context.config.data['project']['dependencies']]
+
+
+class GimmicksWheelBuilder(WheelBuilder):
+    def initialize(self, context):
+        # HACK: This handles issue with writing incorrect METADATA
+        #       in Windows for custom paths.
+        super().initialize(context)
+        post_initialize(context)
+
+
+class GimmicksEditableBuilder(EditableBuilder):
+    def initialize(self, context):
+        # HACK: This handles issue with writing incorrect METADATA
+        #       in Windows for custom paths.
+        super().initialize(context)
+        post_initialize(context)
+
+
+wheel_builder = GimmicksWheelBuilder(str(ROOT))
+editable_builder = GimmicksEditableBuilder(str(ROOT))
 
 # KNOWN HOOKS
 # get_requires_for_build_wheel(config_settings)
