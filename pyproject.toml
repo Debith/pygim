@@ -5,7 +5,7 @@ backend-path = ["_pygim_build"]
 
 [project]
 name = "python-gimmicks"
-version = "0.1.0"
+version = "0.2.0"
 description = "Full Python Gimmicks project with all of its sub-projects."
 readme = "README.rst"
 requires-python = ">=3.7, <4"
@@ -29,7 +29,7 @@ classifiers = [
 ]
 
 dependencies = [
-  'pygim-common>=0.1.0'
+  #'pygim-common>=0.1.0'
 ]
 
 [project.optional-dependencies]
@@ -67,3 +67,10 @@ exclude_lines = [
 [tool.pygim.commands]
 lint = "mypy ."
 test = "pytest"
+
+[tool.pdm.build]
+includes = [
+    "pygim-cli/_pygim",
+    "pygim-common/_pygim",
+    "pygim-common/pygim",
+]

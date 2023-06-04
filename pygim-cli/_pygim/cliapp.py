@@ -9,7 +9,7 @@ import functools
 from pathlib import Path
 from dataclasses import dataclass
 import click
-from pygim.kernel import PathSet
+from pygim.fileio import PathSet
 
 __all__ = ["GimmicksCliApp", "flag_opt"]
 
