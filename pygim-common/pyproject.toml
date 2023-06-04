@@ -4,7 +4,7 @@ build-backend = "pdm.backend"
 
 [project]
 name = "pygim-common"
-version = "0.3.0"
+version = "0.4.0"
 description = "Common features for pygim"
 readme = "README.rst"
 requires-python = ">=3.7, <4"

@@ -25,35 +25,37 @@ def prepare_metadata_for_build_wheel(metadata_directory, config_settings):
 
 def _trim_record(rel_path, full_path):
     rel_path = pathlib.Path(rel_path)
-    if rel_path.parts[0].startswith("pygim-"):
+    if rel_path.parts[0].startswith("pygim-cli"):
         rel_path = rel_path.relative_to(rel_path.parts[0])
     return str(rel_path), full_path
 
+
+def build_package(builder, metadata_directory):
+    context = builder.build_context(pathlib.Path(metadata_directory))
+    if (
+        not builder.config_settings.get("no-clean-build")
+        or os.getenv("PDM_BUILD_NO_CLEAN", "false").lower() == "false"
+    ):
+        builder.clean(context)
+    builder.initialize(context)
+    files = [_trim_record(*f) for f in sorted(builder.get_files(context))]
+
+    artifact = builder.build_artifact(context, files)
+    builder.finalize(context, artifact)
+
+    return str(artifact)
 
 def build_wheel(
         metadata_directory,
         config_settings,
         *args,
         ):
+    return build_package(wheel_builder, metadata_directory)
 
-    context = wheel_builder.build_context(pathlib.Path(metadata_directory))
-    if (
-        not wheel_builder.config_settings.get("no-clean-build")
-        or os.getenv("PDM_BUILD_NO_CLEAN", "false").lower() == "false"
-    ):
-        wheel_builder.clean(context)
-    wheel_builder.initialize(context)
-    files = [_trim_record(*f) for f in sorted(wheel_builder.get_files(context))]
-
-    artifact = wheel_builder.build_artifact(context, files)
-    wheel_builder.finalize(context, artifact)
-
-    return str(artifact)
 
 def build_editable(
         metadata_directory,
         config_settings,
         *args,
     ):
-    editable_builder.initialize()
-    return str(editable_builder.build(metadata_directory))
+    return build_package(editable_builder, metadata_directory)

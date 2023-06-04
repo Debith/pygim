@@ -29,7 +29,7 @@ classifiers = [
 ]
 
 dependencies = [
-  #'pygim-common>=0.1.0'
+  "pygim-common @ file:///${PROJECT_ROOT}/pygim-common"
 ]
 
 [project.optional-dependencies]
@@ -42,7 +42,7 @@ dev = [
 ]
 
 [project.scripts]
-pygim = "_pygim.__main__:cli"
+pygim = "_pygim_cli.__main__:cli"
 
 [tool.pytest.ini_options]
 minversion = "6.0"
@@ -70,7 +70,5 @@ test = "pytest"
 
 [tool.pdm.build]
 includes = [
-    "pygim-cli/_pygim",
-    "pygim-common/_pygim",
-    "pygim-common/pygim",
+    "pygim-cli",
 ]
