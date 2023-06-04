@@ -1,15 +1,11 @@
 # -*- coding: utf-8 -*-
 """
-This creates a shared class that can be extended
+Internal implementation of the magic behind EntangledClass.
 """
 
-from pygim import exceptions
 from collections.abc import Mapping, MutableMapping
-from _pygim._magic._cached_type import CachedTypeMeta
-
-
-__all__ = ["EntangledClass", "overrideable", "overrides"]
-
+from _pygim._exceptions import EntangledClassError, EntangledMethodError
+from ._cached_type import CachedTypeMeta
 
 def setdefaultattr(obj, name, default):
     """ Sets attribute to object in case it is missing. """
@@ -102,7 +98,7 @@ class EntangledClassMetaMeta(type):
         unhandled = common - allowed - overriding
 
         if unhandled:
-            raise exceptions.EntangledMethodError(f"Can't override following names: {','.join(unhandled)}")
+            raise EntangledMethodError(f"Can't override following names: {','.join(unhandled)}")
 
         return overriding
 
@@ -183,11 +179,5 @@ class EntangledClassMeta(type, metaclass=EntangledClassMetaMeta):
     def __call__(self, *args, **kwds):
         """Create instance of the EntangledClass, ensuring only subclasses can be created."""
         if getattr(self, _ABSTRACT_ATTR):
-            raise exceptions.EntangledClassError("EntangledClass is abstract class, so please use inheritance!")
+            raise EntangledClassError("EntangledClass is abstract class, so please use inheritance!")
         return super().__call__(*args, **kwds)
-
-
-class EntangledClass(metaclass=EntangledClassMeta):
-    """Helper class to create an entangled class using inheritance."""
-
-    __slots__ = ()

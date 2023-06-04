@@ -1,11 +1,11 @@
 # -*- coding: utf-8 -*-
 """
-This module contains security utilities.
+This module checksum calculation helper.
 """
 
 import hashlib
 
-from _pygim._magic._dispatcher import dispatch
+from ..performance.dispatch import dispatch
 
 __all__ = ["sha256sum"]
 

@@ -7,7 +7,7 @@ import shutil
 from pathlib import Path
 from dataclasses import dataclass
 
-from pygim.utils import is_container, flatten
+from _pygim._utils import is_container, flatten
 
 
 def _flatten_paths(paths):

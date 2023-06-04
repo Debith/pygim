@@ -4,9 +4,7 @@ Python Gimmicks Command-Line Interface.
 """
 
 import click
-from _pygim._cli.cliapp import GimmicksCliApp
-
-from _pygim._cli import flag_opt
+from _pygim_cli.cliapp import GimmicksCliApp, flag_opt
 
 
 @click.group()

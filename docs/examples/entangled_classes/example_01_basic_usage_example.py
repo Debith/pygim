@@ -1,5 +1,5 @@
 # type: ignore
-from pygim import EntangledClass
+from pygim.gimmicks import EntangledClass
 
 # The `EntangledClass` is capable of detecting the underlying package. However, it is
 # advisable to specify the name of your project. The namespace's name must be hashable;

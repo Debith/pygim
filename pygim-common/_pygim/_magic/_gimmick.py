@@ -6,12 +6,13 @@ This module implmements class gimmick.
 from traceback import format_stack
 from types import FunctionType
 
-from ._dispatcher import dispatch
+from ._dispatcher import _Dispatcher
 from ._patch import MutableFuncObject
 from .._utils import type_error_msg, flatten
 
 __all__ = ['gimmick']
 
+dispatch = _Dispatcher
 
 class GimTypeMeta(type):
     def __prepare__(*args):

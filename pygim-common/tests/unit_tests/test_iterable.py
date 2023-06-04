@@ -5,7 +5,7 @@
 from functools import singledispatch
 import pytest
 
-from pygim.utils import flatten, is_container, split
+from pygim.iterables import flatten, is_container, split
 
 @singledispatch
 def equals(left: object, right):

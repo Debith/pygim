@@ -5,7 +5,7 @@ import platform
 from pathlib import Path
 import pytest
 
-from pygim.kernel.pathset import PathSet
+from pygim.fileio import PathSet
 
 # FIXME: TemporaryDirectory().cleanup() fails due to some weird
 #        PermissionError in Windows environment in GitHub.

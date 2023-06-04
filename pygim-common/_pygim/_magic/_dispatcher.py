@@ -1,3 +1,8 @@
+# -*- coding: utf-8 -*-
+"""
+Dispatcher class internal implementation.
+"""
+
 from dataclasses import dataclass, field
 
 
@@ -22,26 +27,6 @@ def _arg_identifier(arg):
 
 @dataclass
 class _Dispatcher:
-    """
-    A dispatcher that routes calls to different functions depending on the type of arguments.
-
-    Parameters
-    ----------
-    callable : `object`
-        A callable object for which a dispatcher is needed.
-    registry : `dict`, optional
-        A dictionary of functions mapped to specific argument types.
-    args : `tuple`, optional
-        A tuple of functions (argument type identifiers) for the dispatcher.
-    start_index : `int`, optional
-        An integer that defines the starting index of the method call.
-
-    Methods
-    -------
-    register(*specs)
-        Register a function with specific argument types.
-    """
-
     __callable: object
     __registry: dict = field(default_factory=dict)
     __args: tuple = None
@@ -113,8 +98,3 @@ class _Dispatcher:
             return self.__registry[its_type](*args, **kwargs)
         except KeyError:
             return self.__callable(*args, **kwargs)
-
-
-
-
-dispatch = _Dispatcher
