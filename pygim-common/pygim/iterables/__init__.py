@@ -18,7 +18,7 @@ split(iterable, condition)
 """
 
 from _pygim._utils._iterable import flatten, is_container, split
-assert False
+
 __all__ = [
     "flatten",
     "is_container",
