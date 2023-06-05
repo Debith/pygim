@@ -3,7 +3,7 @@
 Internal utilities package.
 '''
 
-from ._iterable import *
+from ._iterable._iterable import *
 from ._inspect import *
 
 
