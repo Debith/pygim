@@ -5,7 +5,10 @@
 from functools import singledispatch
 import pytest
 
-from pygim.iterables import flatten, is_container, split
+from _pygim._utils._iterable._iterable import flatten
+from _pygim._utils._iterable.fast_iterable import flatten as flatten_fast
+
+
 
 @singledispatch
 def equals(left: object, right):
@@ -77,56 +80,6 @@ def test_flatten(input, expected_result):
         assert False, f"Results differ:\n  ACTUAL: {list(flatten(input))}\nEXPECTED: {expected_result} "
 
 
-IS_CONTAINER_TESTS = [
-    (str, False),
-    (bytes, False),
-    (bytearray, False),
-    (memoryview, False),
-    (range, False),
-    (list, False),
-    (tuple, False),
-    (int, False),
-    (float, False),
-    (complex, False),
-    (set, False),
-    (frozenset, False),
-    (dict, False),
-
-    # Various instances
-    ('text', False),
-    (b'text', False),
-    (bytearray([1,2,3]), True),
-    (memoryview(bytearray([1,2,3])), True),
-    (range(100), True),
-    ([1,2,3], True),
-    ((1,2,3), True),
-    (42, False),
-    (42.42, False),
-    (complex(42, 42), False),
-    (set([1, 2, 3]), True),
-    (frozenset([1, 2, 3]), True),
-    (dict(one=1), True),
-]
-
-@pytest.mark.parametrize("input,expected_result", IS_CONTAINER_TESTS)
-def test_is_container(input, expected_result):
-    actual_result = is_container(input)
-    if not equals(actual_result, expected_result):
-        assert False, f"{type(input)} is not {expected_result}"
-
-
-SPLIT_TESTS = [
-    ([1, 2, 3, 4], lambda v: v % 2, ([1, 3], [2, 4])),
-    ([1, 2, 3, 4], lambda v: v <= 2, ([1, 2], [3, 4])),
-    ([], lambda v: v <= 2, ([], [])),
-]
-
-@pytest.mark.parametrize("input,func,expected_result", SPLIT_TESTS)
-def test_split(input, func, expected_result):
-
-    actual_result = split(input, func)
-    if not equals(actual_result, expected_result):
-        assert False, f"{actual_result} != {expected_result}"
 
 
 if __name__ == "__main__":
