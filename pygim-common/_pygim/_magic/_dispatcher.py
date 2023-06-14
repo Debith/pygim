@@ -3,7 +3,9 @@
 Dispatcher class internal implementation.
 """
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
+from .._utils._inspect import type_error_msg
 
 
 def _arg_identifier(arg):
@@ -32,11 +34,24 @@ class _Dispatcher:
     __args: tuple = None
     __start_index: int = 0
 
+    @staticmethod
+    def __no_default(*__a, **__kw):
+        raise NotImplementedError(
+            f"Argument types not supported: {','.join(type(a).__name__ for a in __a)}")
+
+    @classmethod
+    def no_default(cls):
+        return cls(NotImplemented)
+
     def __post_init__(self):
         """
         Post-initialization method that sets the starting index for method calls
         if the callable object appears to be a method.
         """
+        if self.__callable is NotImplemented:
+            self.__callable = self.__no_default
+
+        assert callable(self.__callable), type_error_msg(self.__callable, Callable)
         if "." in self.__callable.__qualname__ and self.__callable.__code__.co_argcount > 0:
             # This looks like a method.
             self.__start_index = 1
