@@ -42,7 +42,7 @@ dev = [
 ]
 
 [project.scripts]
-pygim = "_pygim_cli.__main__:cli"
+pygim = "_pygim._cli.__main__:cli"
 
 [tool.pytest.ini_options]
 minversion = "6.0"

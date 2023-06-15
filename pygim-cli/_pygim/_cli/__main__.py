@@ -4,17 +4,17 @@ Python Gimmicks Command-Line Interface.
 """
 
 import click
-from _pygim_cli.cliapp import GimmicksCliApp, flag_opt
+from .cliapp import GimmicksCliApp, flag_opt
 
 
 @click.group()
 def cli():
     """\b
-     ___       ___ _
-    | _ \_  _ / __(_)_ __
-    |  _/ || | (_ | | '  \ \b
-    |_|  \_, |\___|_|_|_|_|
-        |__/Python Gimmicks
+     ___        ___ _
+    | _ \_  _  / __(_)_ __
+    |  _/ || || (_ | | '  \ \b
+    |_|  \_, / \___|_|_|_|_|
+          |_/Python Gimmicks
 
     """
 
