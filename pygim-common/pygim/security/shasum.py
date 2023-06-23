@@ -50,3 +50,59 @@ def _(text: str, *, encoding="utf-8"):
 def _(text: bytes, **_):  # type: ignore
     assert isinstance(text, bytes)
     return hashlib.sha256(text).hexdigest()
+
+
+@sha256sum.register(int)
+@sha256sum.register(float)
+def _(number, *, encoding="utf-8"):
+    return sha256sum(str(number), encoding=encoding)
+
+
+@sha256sum.register(list)
+def _(items: list, **_):
+    content = ",".join(sha256sum(i) for i in items)
+    return sha256sum(f"[{content}]")
+
+try:
+    import numpy as np
+
+    @sha256sum.register(np.float16)
+    @sha256sum.register(np.float32)
+    @sha256sum.register(np.float64)
+    def _(number, *, encoding="utf-8"):
+        return sha256sum(str(number), encoding=encoding)
+
+    @sha256sum.register(np.str_)
+    def _(text: np.str_, *, encoding="utf-8"):
+        return sha256sum(text.encode(encoding))
+
+    @sha256sum.register(np.array)
+    @sha256sum.register(np.ndarray)
+    def _(items: np.array, **_):
+        content = np.vectorize(sha256sum)(items)
+        return sha256sum(f"{items.__class__.__name__}({content})")
+except ImportError:
+    pass
+
+
+try:
+    import pandas as pd
+
+    @sha256sum.register(pd.Timestamp)
+    def _(ts, **_):
+        return sha256sum(ts.isoformat())
+
+    @sha256sum.register(pd.Series)
+    def _(series: pd.Series, **_):
+        content = series.apply(sha256sum)
+        return sha256sum(f"{series.__class__.__name__}({content})")
+
+    ROWS, COLS = 0, 1
+    @sha256sum.register(pd.DataFrame)
+    def _(df: pd.DataFrame, *, axis=ROWS, **_):
+        content = df.apply(sha256sum, axis=0)
+        return sha256sum(f"{df.__class__.__name__}({content})")
+
+
+except ImportError:
+    pass
