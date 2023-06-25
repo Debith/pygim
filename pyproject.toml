@@ -41,6 +41,11 @@ dev = [
   'coverage[toml]',
 ]
 
+test = [
+  'pandas',
+  'numpy',
+]
+
 [project.scripts]
 pygim = "_pygim_cli.__main__:cli"
 
