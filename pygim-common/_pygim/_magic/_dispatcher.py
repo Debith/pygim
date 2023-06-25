@@ -3,6 +3,7 @@
 Dispatcher class internal implementation.
 """
 
+from functools import wraps
 from dataclasses import dataclass, field
 
 
@@ -40,6 +41,11 @@ class _Dispatcher:
         if "." in self.__callable.__qualname__ and self.__callable.__code__.co_argcount > 0:
             # This looks like a method.
             self.__start_index = 1
+        wraps(self.__callable)(self)
+
+    @property
+    def supported_types(self):
+        return list(self.__registry)
 
     def register(self, *specs):
         """
