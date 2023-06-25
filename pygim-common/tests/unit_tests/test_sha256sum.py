@@ -3,15 +3,20 @@
 """ Test security functions. """
 
 import sys
-import platform
 import pytest
 from importlib import reload
 from unittest.mock import patch
 
 from pygim.security import sha256sum
 from pygim.iterables import flatten
-import numpy as np
-import pandas as pd
+
+IGNORE_MISSING_LIBRARY_TESTS = False
+try:
+    import numpy as np
+    import pandas as pd
+except ImportError:
+    IGNORE_MISSING_LIBRARY_TESTS = True
+
 
 @pytest.mark.parametrize('input,expected_result', [
     (1,                             "6b86b273ff34fce19d6b804eff5a3f5747ada4eaa22f1d49c01e52ddb7875b4b"),
@@ -49,10 +54,8 @@ def test_not_supported():
         assert False
 
 
-
 @patch.dict('sys.modules', {'numpy': None, 'pandas': None})
-@pytest.mark.skipif(
-    "macOS" in platform.platform() and sys.version_info == (3,7),
+@pytest.mark.skipif(IGNORE_MISSING_LIBRARY_TESTS,
     reason="Issue installing Pandas and test is simple")
 def test_missing_libraries():
     all_types = set(sha256sum.supported_types)
