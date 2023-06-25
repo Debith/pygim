@@ -3,6 +3,7 @@
 """ Test security functions. """
 
 import sys
+import platform
 import pytest
 from importlib import reload
 from unittest.mock import patch
@@ -48,7 +49,11 @@ def test_not_supported():
         assert False
 
 
+
 @patch.dict('sys.modules', {'numpy': None, 'pandas': None})
+@pytest.mark.skipif(
+    "macOS" in platform.platform() and sys.version_info == (3,7),
+    reason="Issue installing Pandas and test is simple")
 def test_missing_libraries():
     all_types = set(sha256sum.supported_types)
     new_mod = reload(sys.modules[sha256sum.__module__])
