@@ -7,7 +7,8 @@ import pytest
 from importlib import reload
 from unittest.mock import patch
 
-from pygim.security import sha256sum
+from pygim.security import sha256sum, sha256sum_file
+from pygim.exceptions import ShaSumTargetNotFoundError
 from pygim.iterables import flatten
 
 
@@ -82,6 +83,45 @@ def test_missing_libraries():
     missing_modules = set([c.__module__.split('.')[0] for c in flatten(missing_types)])
 
     if missing_modules != set(["numpy", "pandas"]):
+        assert False
+
+
+def test_filesum_for_a_file(temp_dir):
+    test_file = temp_dir / "test.txt"
+    test_file.write_text("something cool!")
+
+    actual_result = sha256sum_file(str(test_file))
+    expected_result = "d262e1ed71d28ce5629fae0688ba78d729c3f5e11d15aff57f69bbaa33acd811"
+
+    if actual_result != expected_result:
+        assert False, f'{actual_result} != {expected_result}'
+
+    actual_result = sha256sum(test_file)
+    if actual_result != expected_result:
+        assert False, f'{actual_result} != {expected_result}'
+
+
+def test_filesum_for_a_dir(temp_dir):
+    for i in range(3):
+        test_file = temp_dir / f"test_{i}.txt"
+        test_file.write_text(f"something cool {i}!")
+
+    try:
+        sha256sum_file(str(temp_dir))
+    except NotImplementedError:
+        pass
+    else:
+        assert False
+
+
+def test_unknown_file(temp_dir):
+    test_file = temp_dir / "test.txt"
+
+    try:
+        sha256sum(test_file)
+    except ShaSumTargetNotFoundError:
+        pass
+    else:
         assert False
 
 

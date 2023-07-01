@@ -8,7 +8,8 @@ from types import FunctionType
 
 from ._dispatcher import _Dispatcher
 from ._patch import MutableFuncObject
-from .._utils import type_error_msg, flatten
+from .._utils import flatten
+from .._error_msgs import type_error_msg
 
 __all__ = ['gimmick']
 
