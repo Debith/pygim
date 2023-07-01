@@ -18,3 +18,7 @@ class EntangledClassError(EntangledError):
 
 class EntangledMethodError(EntangledError):
     """Raised when issue detected with methods of entangled class."""
+
+
+class ShaSumTargetNotFoundError(GimError, FileNotFoundError):
+    """Raised when path for sha256sum not found."""

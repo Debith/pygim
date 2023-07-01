@@ -4,10 +4,15 @@ This module checksum calculation helper.
 """
 
 import hashlib
+import pathlib
 
+from _pygim._error_msgs import file_error_msg
+from _pygim._exceptions import ShaSumTargetNotFoundError
+from _pygim.typing import PathLike
+from ..fileio.pathset import PathSet
 from ..performance.dispatch import dispatch
 
-__all__ = ["sha256sum"]
+__all__ = ["sha256sum", "sha256sum_file"]
 
 
 @dispatch
@@ -17,8 +22,8 @@ def sha256sum(obj, *, encoding="utf-8"):
 
     Parameters
     ----------
-    obj : `str`
-        String to be encoded.
+    obj : `Any`
+        Object to be encoded.
     encoding : `str`, optional
         Encoding used to convert string objects into bytes. Defaults to "utf-8".
 
@@ -63,6 +68,22 @@ def _(items: list, **_):
     content = ",".join(sha256sum(i) for i in items)
     return sha256sum(f"[{content}]")
 
+
+@sha256sum.register(pathlib.Path)
+def sha256sum_file(filename: PathLike):
+    filename = pathlib.Path(filename)
+    if not filename.exists():
+        raise ShaSumTargetNotFoundError(file_error_msg(filename))
+
+    if filename.is_dir():
+        p = PathSet(filename)
+        for file in p:
+            pass
+    else:
+        assert filename.is_file()
+        return sha256sum(filename.read_bytes())
+
+
 try:
     import numpy as np
 
@@ -77,7 +98,7 @@ try:
         return sha256sum(text.encode(encoding))
 
     @sha256sum.register(np.ndarray)
-    def _(items: np.array, **_):
+    def _(items: np.ndarray, **_):
         content = np.vectorize(sha256sum)(items)
         return sha256sum(f"{items.__class__.__name__}({content})")
 except ImportError:

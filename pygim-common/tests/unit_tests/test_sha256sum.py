@@ -7,7 +7,7 @@ import pytest
 from importlib import reload
 from unittest.mock import patch
 
-from pygim.security import sha256sum
+from pygim.security import sha256sum, sha256sum_file
 from pygim.iterables import flatten
 
 
@@ -85,6 +85,21 @@ def test_missing_libraries():
         assert False
 
 
+def test_filesum(temp_dir):
+    test_file = temp_dir / "test.txt"
+    test_file.write_text("something cool!")
+
+    actual_result = sha256sum_file(str(test_file))
+    expected_result = "d262e1ed71d28ce5629fae0688ba78d729c3f5e11d15aff57f69bbaa33acd811"
+
+    if actual_result != expected_result:
+        assert False, f'{actual_result} != {expected_result}'
+
+    actual_result = sha256sum(test_file)
+    if actual_result != expected_result:
+        assert False, f'{actual_result} != {expected_result}'
+
+
 if __name__ == '__main__':
     from pygim.testing import run_tests
-    run_tests(__file__, sha256sum.__module__, coverage=True)
+    run_tests(__file__, sha256sum.__module__, coverage=False)
