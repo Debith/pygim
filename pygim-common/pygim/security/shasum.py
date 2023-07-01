@@ -96,7 +96,7 @@ try:
         return sha256sum(text.encode(encoding))
 
     @sha256sum.register(np.ndarray)
-    def _(items: np.ndarray, **_):
+    def _(items: np.array, **_):
         content = np.vectorize(sha256sum)(items)
         return sha256sum(f"{items.__class__.__name__}({content})")
 except ImportError:
