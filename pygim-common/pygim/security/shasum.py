@@ -76,9 +76,7 @@ def sha256sum_file(filename: PathLike):
         raise ShaSumTargetNotFoundError(file_error_msg(filename))
 
     if filename.is_dir():
-        p = PathSet(filename)
-        for file in p:
-            pass
+        raise NotImplementedError(f"Not implemented for dir: {str(filename)}")
     else:
         assert filename.is_file()
         return sha256sum(filename.read_bytes())
