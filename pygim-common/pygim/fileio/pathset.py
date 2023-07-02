@@ -9,17 +9,22 @@ from dataclasses import dataclass
 
 from _pygim._utils import is_container, flatten
 
+__all__ = ["PathSet"]
 
-def _flatten_paths(paths):
-    for path in flatten(paths):
-        path = Path(path)
 
-        if path.is_dir():
-            yield path
-            for p in _flatten_paths(path.glob("*")):
+def flatten_paths(paths, pattern):
+    if isinstance(paths, Path):
+        if paths.is_dir():
+            yield paths
+            for p in flatten_paths(paths.glob(pattern), pattern):
                 yield p
         else:
-            yield path
+            yield paths
+    else:
+        assert is_container(paths), f'Expected `iterable` got `{type(paths).__name__}`'
+
+        for path in flatten(paths):
+            yield from flatten_paths(Path(path), pattern)
 
 
 class _FileSystemOps:
@@ -45,25 +50,46 @@ class _FileSystemOps:
 @dataclass(frozen=True)
 class PathSet:
     """
-    This class encapsulates manipulation of multiple path objects at once.
+    A class for manipulating multiple Path objects at once.
 
-    Overview (further info in function docs):
-        - len(PathSet()) provides the total number of files and directories read recursively.
-        - list(PathSet()) provides a list of all Path objects in the list.
-        - bool(PathSet()) tells whether there are any Path objects in the list.
-        - repr(PathSet()) provides a nice string representation of this object.
-        - PathSet.prefixed() creates a new PathSet with another path as a prefix (e.g., folder+files).
-        - PathSet() + PathSet() creates a new object containing Path objects from both sets.
-        - PathSet().clone() creates an identical copy of the list.
-        - PathSet().filter() generator that yields Path objects whose properties match the filters.
-        - PathSet().drop() generator that yields Path objects whose properties do NOT match the filters.
-        - PathSet().filtered() as above, but returns a new PathSet object.
-        - PathSet().dirs() a shorthand for a list of directories.
-        - PathSet().files() a shorthand for a list of files.
-        - PathSet().by_suffix() a shorthand for filtering by suffix(es).
-        - PathSet().delete_all() deletes all contained Path objects from the file system.
+    Methods
+    -------
+    prefixed(prefix : str) -> PathSet
+        Returns a new PathSet with `prefix` added to each path.
+    clone() -> PathSet
+        Returns a new PathSet that is a copy of this one.
+    filter(filter : callable) -> Generator
+        Yields paths from this set that pass a filter function.
+    drop(filter : callable) -> Generator
+        Yields paths from this set that do not pass a filter function.
+    filtered(filter : callable) -> PathSet
+        Returns a new PathSet of paths from this set that pass a filter function.
+    dirs() -> List
+        Returns a list of directories in this set.
+    files() -> List
+        Returns a list of files in this set.
+    by_suffix(suffix : str) -> PathSet
+        Returns a new PathSet of paths from this set with a given suffix.
+    FS.delete_all() -> None
+        Deletes all paths in this set from the file system.
+    transform(container_type : type = list, path_type : type = str) -> container_type
+        Returns a new container of `container_type` with elements of `path_type`.
 
+    Examples
+    --------
+    >>> paths = PathSet([Path('path1'), Path('path2')])
+    >>> len(paths)
+    2
+    >>> bool(paths)
+    True
+    >>> list(paths)
+    [Path('path1'), Path('path2')]
+    >>> repr(paths)
+    "PathSet([Path('path1'), Path('path2')])"
+    >>> paths.prefixed("/new")
+    PathSet([Path('/new/path1'), Path('/new/path2')])
     """
+
     # TODO: This class could allow multiple different path types (not just pathlib.Path).
     _paths: Path = None  # type: ignore    # this is invariant
     _pattern: str = "*"
@@ -78,7 +104,7 @@ class PathSet:
         # We just handled the optional part, let's make mypy happy.
         assert paths is not None
 
-        super().__setattr__("_paths", frozenset(_flatten_paths([paths])))
+        super().__setattr__("_paths", frozenset(flatten_paths([paths], self._paths)))
         assert all([isinstance(p, Path) for p in self._paths])
         assert isinstance(self._paths, frozenset)
 
@@ -265,6 +291,40 @@ class PathSet:
         """Combine paths together."""
         assert isinstance(other, self.__class__)
         return self.clone(set(self._paths) | set(other._paths))
+
+    def transform(self, container_type=list, path_type=str):
+        """
+        Transform the container and elements of the instance to specified types.
+
+        This function transforms the elements of the instance using the
+        `path_type` argument, and then packs them into a new container
+        specified by the `container_type` argument.
+
+        Parameters
+        ----------
+        container_type : type, optional
+            The type of the output container (default is `list`). This should
+            be a type (like `list` or `set`), not an instance of a type (like `[]` or `{}`).
+        path_type : type, optional
+            The type to convert each path in the instance (default is `str`).
+            This should be a callable that takes a path as input and returns
+            a new path of the desired type.
+
+        Returns
+        -------
+        container_type
+            The container filled with `path_type` objects.
+
+        Examples
+        --------
+        Given a class `PathSet` that holds a list of `Path` objects:
+
+        >>> paths = PathSet([Path('path1'), Path('path2')])
+        >>> transformed = paths.transform(container_type=set, path_type=str)
+        >>> print(transformed)
+        {'path1', 'path2'}
+        """
+        return container_type(path_type(p) for p in self)
 
 
 if __name__ == "__main__":

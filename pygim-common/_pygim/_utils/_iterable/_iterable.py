@@ -3,6 +3,8 @@
 This module contains internal utility functions.
 """
 
+from pathlib import Path
+
 __all__ = ("split", "flatten", "is_container")
 
 
@@ -55,7 +57,7 @@ def split(iterable, condition):
 
 def is_container(obj):
 
-    if isinstance(obj, (str, bytes, type)):
+    if isinstance(obj, (str, bytes, type, Path)):
         return False
 
     if hasattr(obj, "__iter__"):
@@ -65,9 +67,8 @@ def is_container(obj):
 
 
 def flatten(iterable):
-
-    for subitem in iterable:
-        if is_container(subitem):
-            yield from flatten(subitem)
-        else:
-            yield subitem
+    if is_container(iterable):
+        for o in iterable:
+            yield from flatten(o)
+    else:
+        yield iterable

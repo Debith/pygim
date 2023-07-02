@@ -1,5 +1,5 @@
 #type: ignore
-import importlib
+import sys
 from pathlib import Path
 
 # Available at setup time due to pyproject.toml
@@ -8,27 +8,26 @@ from setuptools import setup,find_packages
 import toml
 
 ROOT = Path(__file__).parent
-version_file = ROOT / "pygim/__version__.py"
+sys.path.append(str(ROOT / "pygim"))
 
-spec = importlib.util.spec_from_file_location(version_file)
-version_module = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(version_module)
-__version__ = version_module.__version__
+from __version__ import __version__
+from pygim.fileio.pathset import PathSet
 
 pyproject = toml.loads(Path('pyproject.toml').read_text())
 
+print("===================")
+#print(PathSet(ROOT, "*.cpp").transform())
 
+"""
 ext_modules = [
-    Pybind11Extension("utils.fast_iterable",
-        [
-            "_pygim/_utils/iterable_fast.cpp",
-            "_pygim/_utils/flatten.cpp",
-        ],
+    Pybind11Extension("_pygim._pygim_common_fast",
+        #PathSet(ROOT, "*.cpp").transform(),
         # Example: passing in the version to the compiled code
         define_macros = [('VERSION_INFO', __version__)],
         ),
 ]
-
+"""
+ext_modules = []
 cfg = {**pyproject["project"]}
 cfg['packages']=find_packages('pygim')
 cfg['package_dir']={'': 'pygim'}

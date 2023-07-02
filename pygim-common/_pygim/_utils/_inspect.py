@@ -6,7 +6,7 @@ Internal package for complaining functions.
 import inspect
 import types
 
-from ._iterable import flatten
+from ._iterable._iterable import flatten
 
 __all__ = ('TraitFunctions', 'has_instances', 'is_subset')
 
