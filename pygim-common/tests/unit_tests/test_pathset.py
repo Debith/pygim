@@ -129,6 +129,10 @@ if platform.uname().system != "Windows":
         assert new_paths == PathSet([])
 
 
+def test_flatten_paths(temp_dir):
+    pass
+
+
 if __name__ == "__main__":
-    from pygim.utils.testing import run_tests
+    from pygim.testing import run_tests
     run_tests(__file__, PathSet.__module__, coverage=False)

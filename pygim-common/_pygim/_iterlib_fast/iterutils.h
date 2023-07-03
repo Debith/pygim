@@ -19,7 +19,7 @@ inline bool is_container(py::handle obj) {
 */
 // Base case function template for generic types
 template <typename T>
-inline std::enable_if_t<!std::is_same_v<T, py::str> && !std::is_same_v<T, py::bytes> && !std::is_same_v<T, py::memoryview>, bool>
+inline std::enable_if_t<!std::is_same_v<T, py::str> && !std::is_same_v<T, py::bytes> && !std::is_same_v<T, py::memoryview> && !std::is_same_v<T, py::type>, bool>
 is_container(const T& obj) {
     if (py::hasattr(obj, "__iter__")) {
         return true;
@@ -33,6 +33,15 @@ inline std::enable_if_t<std::is_same_v<T, py::str> || std::is_same_v<T, py::byte
 is_container(const T& obj) {
     return false;
 }
+
+
+// Specialization for py::memoryview
+template <typename T>
+inline std::enable_if_t<std::is_same_v<T, py::type>, bool>
+is_container(const T& obj) {
+    return false;
+}
+
 
 // Specialization for py::memoryview
 template <typename T>

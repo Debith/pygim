@@ -1,16 +1,10 @@
-# -*- coding: utf-8 -*-
-"""
+from typing import Iterable, Any, Callable, Tuple, Generator
 
-"""
-
-try:
-    from _pygim._utils import iterable_fast as iterables
-except ImportError:
-    from _pygim._utils import _iterable as iterables
-
-
-is_container = iterables.is_container
-is_container.__doc__ = """
+def split(
+    iterable: Iterable[Any], condition: Callable[[Any], bool]
+) -> Tuple[Iterable[Any], Iterable[Any]]: ...
+def is_container(obj: Any) -> bool:
+    """
     Determine whether an object is a container.
 
     A container is considered an object that contains other objects. This
@@ -35,11 +29,11 @@ is_container.__doc__ = """
 
     >>> is_container(tuple())
     True
-""".split()
+    """
+    ...
 
-
-flatten = iterables.flatten
-flatten.__doc__ = """
+def flatten(items: Iterable[Any]) -> Generator[Any, None, None]:
+    """
     Flatten a nested iterable into a single list.
 
     This function flattens nested iterables such as lists, tuples, and sets
@@ -69,7 +63,4 @@ flatten.__doc__ = """
     Flatten a list of strings:
     >>> list(flatten(["one", "two", ["three", "four"]]))
     ['one', 'two', 'three', 'four']
-""".strip()
-
-
-__all__ = ["flatten", "is_container"]
+    """

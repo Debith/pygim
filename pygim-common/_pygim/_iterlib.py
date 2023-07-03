@@ -55,6 +55,14 @@ def split(iterable, condition):
     return left, right
 
 
+def tuplify(obj):
+    if isinstance(obj, dict):
+        return tuple((k, v) for k, v in obj.items())
+    if is_container(obj):
+        return tuple(list(obj))
+    return obj,
+
+
 def is_container(obj):
 
     if isinstance(obj, (str, bytes, type, Path)):

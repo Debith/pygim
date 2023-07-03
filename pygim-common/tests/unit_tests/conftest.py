@@ -14,6 +14,19 @@ def temp_dir():
 
     tdir.cleanup()
 
+
+@pytest.fixture()
+def filled_temp_dir(temp_dir):
+    _FILES = ['readme.txt', 'readme.rst', 'AUTHORS.rst']
+    test_files = [temp_dir / f for f in _FILES]
+    assert not any(f.is_file() for f in test_files)
+
+    [f.touch() for f in test_files]
+    assert all(f.is_file() for f in test_files)
+
+    yield temp_dir
+
+
 import importlib.util
 import sys
 

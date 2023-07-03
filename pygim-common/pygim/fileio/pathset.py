@@ -7,24 +7,12 @@ import shutil
 from pathlib import Path
 from dataclasses import dataclass
 
-from _pygim._utils import is_container, flatten
+from pygim.iterlib import flatten, is_container
 
 __all__ = ["PathSet"]
 
 
-def flatten_paths(paths, pattern):
-    if isinstance(paths, Path):
-        if paths.is_dir():
-            yield paths
-            for p in flatten_paths(paths.glob(pattern), pattern):
-                yield p
-        else:
-            yield paths
-    else:
-        assert is_container(paths), f'Expected `iterable` got `{type(paths).__name__}`'
 
-        for path in flatten(paths):
-            yield from flatten_paths(Path(path), pattern)
 
 
 class _FileSystemOps:

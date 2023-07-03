@@ -19,6 +19,12 @@ Functions
 ---------
 dispatch.dispatch
     A function that supersedes `singledispatch(method)`.
+iterarium.flatten(iterable)
+    Convert nested arrays into a single flat array.
+iterarium.is_container(obj)
+    Check whether an object is iterable but not a string or bytes.
+iterarium.split(iterable, condition)
+    Split an iterable into two iterables based on a condition function.
 
 Examples
 --------

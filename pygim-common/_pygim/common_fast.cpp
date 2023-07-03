@@ -1,8 +1,8 @@
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 
-#include "flatten.h"
-#include "iterutils.h"
+#include "_iterlib_fast/flatten.h"
+#include "_iterlib_fast/iterutils.h"
 #include <iostream>         // std::string
 
 #define STRINGIFY(x) #x
@@ -10,11 +10,12 @@
 
 namespace py = pybind11;
 
-PYBIND11_MODULE(fast_iterable, m)
+PYBIND11_MODULE(common_fast, m)
 {
-    m.doc() = "Module of fast iterables."; // optional module docstring
+    m.doc() = "Python Gimmicks Common library."; // optional module docstring
 
     // is_container
+    m.def("is_container", (bool (*)(const py::type&)) &is_container, "A generic function that checks if a Python type is a container.");
     m.def("is_container", (bool (*)(const py::str&)) &is_container, "A function that checks if a Python str is a container.");
     m.def("is_container", (bool (*)(const py::bytes&)) &is_container, "A function that checks if a Python bytes is a container.");
     m.def("is_container", (bool (*)(const py::iterable&)) &is_container, "A function that converts an iterable to a tuple.");
@@ -28,21 +29,7 @@ PYBIND11_MODULE(fast_iterable, m)
     m.def("tuplify", (py::tuple (*)(const py::dict&)) &tuplify, "A function that converts a dict to a tuple of key-value pairs.");
     m.def("tuplify", (py::tuple (*)(const py::iterable&)) &tuplify, "A function that converts an iterable to a tuple.");
     m.def("tuplify", (py::tuple (*)(const py::handle&)) &tuplify, "A function that converts a generic object to a single-element tuple.");
-    m.def("flatten_simple", [](py::iterable objects) {
-        py::iterator it = py::iter(objects);
-        py::list results;
-        for (; it != py::iterator::sentinel(); ++it) {
-            if (py::isinstance<py::list>(*it)) {
-                py::iterator it2 = py::iter(*it);
-                for (; it2 != py::iterator::sentinel(); ++it2) {
-                    results.append(*it2);
-                }
-            } else {
-                results.append(*it);
-            }
-        }
-        return results;
-    });
+
     py::class_<FlattenGenerator>(m, "flatten")
         .def(py::init([](py::object objs) { return new FlattenGenerator(_ensure_iter(objs)); }))
         .def("__iter__", [](const py::object &self)

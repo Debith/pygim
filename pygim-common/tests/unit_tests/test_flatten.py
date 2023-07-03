@@ -5,8 +5,8 @@
 from functools import singledispatch
 import pytest
 
-from _pygim._utils._iterable._iterable import flatten
-from _pygim._utils._iterable.fast_iterable import flatten as flatten_fast
+from _pygim._iterlib import flatten
+from _pygim.common_fast import flatten as flatten_fast
 
 
 

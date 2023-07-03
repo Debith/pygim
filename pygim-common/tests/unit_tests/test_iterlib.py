@@ -1,57 +1,21 @@
 #type: ignore
 import pytest
 
-from pygim.utils.fast_iterable import tuplify, is_container
+from _pygim.common_fast import (
+    tuplify as tuplify_fast,
+    is_container as is_container_fast)
+from _pygim._iterlib import is_container, tuplify
 
 
 class CustomIterableObject:
     def __iter__(self):
         return []
 
+
 class CustomNonIterableObject:
     pass
 
 '''
-
-
-IS_CONTAINER_TESTS = [
-    (str, False),
-    (bytes, False),
-    (bytearray, False),
-    (memoryview, False),
-    (range, False),
-    (list, False),
-    (tuple, False),
-    (int, False),
-    (float, False),
-    (complex, False),
-    (set, False),
-    (frozenset, False),
-    (dict, False),
-
-    # Various instances
-    ('text', False),
-    (b'text', False),
-    (bytearray([1,2,3]), True),
-    (memoryview(bytearray([1,2,3])), True),
-    (range(100), True),
-    ([1,2,3], True),
-    ((1,2,3), True),
-    (42, False),
-    (42.42, False),
-    (complex(42, 42), False),
-    (set([1, 2, 3]), True),
-    (frozenset([1, 2, 3]), True),
-    (dict(one=1), True),
-]
-
-@pytest.mark.parametrize("input,expected_result", IS_CONTAINER_TESTS)
-def test_is_container(input, expected_result):
-    actual_result = is_container(input)
-    if not equals(actual_result, expected_result):
-        assert False, f"{type(input)} is not {expected_result}"
-
-
 SPLIT_TESTS = [
     ([1, 2, 3, 4], lambda v: v % 2, ([1, 3], [2, 4])),
     ([1, 2, 3, 4], lambda v: v <= 2, ([1, 2], [3, 4])),
@@ -68,12 +32,27 @@ def test_split(input, func, expected_result):
 '''
 
 @pytest.mark.parametrize("input,expected_result", [
+    (str,                       False),     # str-type is not a container
+    (bytes,                     False),     # bytes-type is not a container
+    (bytearray,                 False),     # bytearray-type is not a container
+    (memoryview,                False),     # memoryview-type is not a container
+    (range,                     False),     # range-type is not a container
+    (list,                      False),     # list-type is not a container
+    (tuple,                     False),     # tuple-type is not a container
+    (int,                       False),     # int-type is not a container
+    (float,                     False),     # float-type is not a container
+    (complex,                   False),     # complex-type is not a container
+    (set,                       False),     # set-type is not a container
+    (frozenset,                 False),     # frozenset-type is not a container
+    (dict,                      False),     # dict-type is not a container
+
     ((1, 2, 3),                  True),     # Tuple is a container
     ([1, 2, 3],                  True),     # List is a container
     (set([1, 2, 3]),             True),     # Set is a container
     (range(1, 4),                True),     # Range is a container
     ("123",                      False),    # String is not considered a container
     (b"123",                     False),    # Byte string is not considered a container
+    (bytearray(122),             True),     # Byte array is not considered a container
     (123,                        False),    # Integer is not a container
     (123.456,                    False),    # Float is not a container
     (None,                       False),    # None is not a container
@@ -90,10 +69,16 @@ def test_split(input, func, expected_result):
 ])
 
 def test_is_container_with_various_types(input, expected_result):
+    actual_result_fast = is_container_fast(input)
     actual_result = is_container(input)
 
-    if actual_result != expected_result:
-        assert False, f"Results differ:\n  ACTUAL: {actual_result}\nEXPECTED: {expected_result} "
+    if not (actual_result == actual_result_fast == expected_result):
+        assert False, "\n".join([
+            f"Results differ for `{input}`:",
+            f"       ACTUAL: {actual_result}",
+            f"ACTUAL (fast): {actual_result_fast}",
+            f"     EXPECTED: {expected_result} ",
+            ])
 
 
 @pytest.mark.parametrize("input,expected_result", [
@@ -109,14 +94,24 @@ def test_is_container_with_various_types(input, expected_result):
     (True,                      (True,)),             # Boolean remains as single-element tuple
     ({"a": 1},                  (("a", 1),)),         # Dictionary remains as single-element tuple
     (complex(1, 2),             (complex(1, 2),)),    # Complex number remains as single-element tuple
-    (iter([1, 2, 3]),           (1, 2, 3)),           # Iterable gets converted to tuple
-    ((i for i in range(1, 4)),  (1, 2, 3)),           # Generator gets converted to tuple
 ])
 def test_tuplify_with_various_types(input, expected_result):
     actual_result = tuplify(input)
+    actual_result_fast = tuplify_fast(input)
 
-    if actual_result != expected_result:
-        assert False, f"Results differ:\n  ACTUAL: {actual_result}\nEXPECTED: {expected_result} "
+    if not (actual_result == actual_result_fast == expected_result):
+        assert False, "\n".join([
+            f"Results differ for `{input}`:",
+            f"       ACTUAL: {actual_result}",
+            f"ACTUAL (fast): {actual_result_fast}",
+            f"     EXPECTED: {expected_result} ",
+            ])
+
+
+def test_tuplify_with_generators():
+    assert tuplify(iter([1, 2, 3])) == tuplify_fast(iter([1, 2, 3])) == (1,2,3)
+    assert tuplify(i for i in range(1, 4)) == tuplify_fast(i for i in range(1, 4)) == (1,2,3)
+
 
 
 if __name__ == "__main__":
