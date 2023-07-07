@@ -25,6 +25,7 @@ class FlattenGenerator {
 public:
     FlattenGenerator();
     FlattenGenerator(py::iterator items);
+    ~FlattenGenerator();
 
     bool isComplete();
 

@@ -7,12 +7,10 @@ import shutil
 from pathlib import Path
 from dataclasses import dataclass
 
-from pygim.iterlib import flatten, is_container
+from pygim.iterlib import is_container
+from _pygim._utils._fileutils import flatten_paths
 
 __all__ = ["PathSet"]
-
-
-
 
 
 class _FileSystemOps:
@@ -92,7 +90,7 @@ class PathSet:
         # We just handled the optional part, let's make mypy happy.
         assert paths is not None
 
-        super().__setattr__("_paths", frozenset(flatten_paths([paths], self._paths)))
+        super().__setattr__("_paths", frozenset(flatten_paths(paths, pattern=self._pattern)))
         assert all([isinstance(p, Path) for p in self._paths])
         assert isinstance(self._paths, frozenset)
 

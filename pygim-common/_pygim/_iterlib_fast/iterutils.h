@@ -4,23 +4,19 @@
 #include <iostream>         // std::string
 
 namespace py = pybind11;
-/*
-inline bool is_container(py::handle obj) {
-    if (py::isinstance<py::str>(obj) || py::isinstance<py::bytes>(obj)) {
-        return false;
-    }
 
-    if (py::hasattr(obj, "__iter__")) {
-        return true;
-    }
-
-    return py::isinstance<py::memoryview>(obj);
-};
-*/
 // Base case function template for generic types
 template <typename T>
-inline std::enable_if_t<!std::is_same_v<T, py::str> && !std::is_same_v<T, py::bytes> && !std::is_same_v<T, py::memoryview> && !std::is_same_v<T, py::type>, bool>
+inline std::enable_if_t<
+        !std::is_same_v<T, py::str> &&
+        !std::is_same_v<T, py::bytes> &&
+        !std::is_same_v<T, py::memoryview> &&
+        !std::is_same_v<T, py::type>,
+    bool>
 is_container(const T& obj) {
+    if (py::isinstance<py::str>(obj) | py::isinstance<py::bytes>(obj)) {
+        return false;
+    }
     if (py::hasattr(obj, "__iter__")) {
         return true;
     }
@@ -29,8 +25,12 @@ is_container(const T& obj) {
 
 // Specialization for py::str and py::bytes
 template <typename T>
-inline std::enable_if_t<std::is_same_v<T, py::str> || std::is_same_v<T, py::bytes>, bool>
+inline std::enable_if_t<
+        std::is_same_v<T, py::str> ||
+        std::is_same_v<T, py::bytes>,
+    bool>
 is_container(const T& obj) {
+    std::cout << "<-> is_container(str, bytes)" << std::endl;
     return false;
 }
 
@@ -39,6 +39,7 @@ is_container(const T& obj) {
 template <typename T>
 inline std::enable_if_t<std::is_same_v<T, py::type>, bool>
 is_container(const T& obj) {
+    std::cout << "<-> is_container(type)" << std::endl;
     return false;
 }
 
@@ -47,6 +48,7 @@ is_container(const T& obj) {
 template <typename T>
 inline std::enable_if_t<std::is_same_v<T, py::memoryview>, bool>
 is_container(const T& obj) {
+    std::cout << "<-> is_container(memoryview)" << std::endl;
     return true;
 }
 

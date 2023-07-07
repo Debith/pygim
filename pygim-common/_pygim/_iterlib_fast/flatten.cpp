@@ -8,6 +8,12 @@
 
 FlattenGenerator::FlattenGenerator() {}
 
+FlattenGenerator::~FlattenGenerator() {
+    std::cout << "destruct()";
+    std::cout << py::str(iterators.back()) << std::endl;
+    iterators.clear();
+}
+
 FlattenGenerator::FlattenGenerator(py::iterator items) {
     iterators.push_back(items);
 }
@@ -20,13 +26,13 @@ bool FlattenGenerator::isComplete() {
 }
 
 py::handle FlattenGenerator::next() {
-    // std::cout << "-> next()" << std::endl;
+    std::cout << "-> next()" << std::endl;
     py::iterator &it = iterators.back();
     auto last = *it;
     ++it;
 
     if (is_container(last)) {
-        // std::cout << "it's a list! " << std::endl;
+        std::cout << "it's a list!" << py::str(last) << std::endl;
         iterators.push_back(py::iter(last));
         if (!isComplete()) {
             return next();
@@ -34,7 +40,7 @@ py::handle FlattenGenerator::next() {
             throw py::stop_iteration();
         }
     } else {
-        // std::cout << "<- next() " << std::endl;
+        std::cout << "<- next() " << std::endl;
         return last;
     }
 }

@@ -4,18 +4,20 @@ Internal package for file utils.
 '''
 
 from pathlib import Path
-from .._iterlib import flatten, is_container
+
+try:
+    from ..common_fast import flatten
+except ImportError:
+    from .._iterlib import flatten
 
 
-def flatten_paths(paths, pattern):
-    if isinstance(paths, Path):
-        if paths.is_dir():
-            yield paths
-            ps = list(paths.rglob(pattern))
+def flatten_paths(*paths, pattern):
+    for path in flatten(paths):
+        path = Path(path)
+
+        if path.is_dir():
+            yield path
+            ps = list(path.rglob(pattern))
             yield from ps
         else:
-            yield paths
-    else:
-        assert is_container(paths), f'Expected `iterable` got `{type(paths).__name__}`'
-        for path in flatten(paths):
-            yield from flatten_paths(Path(path), pattern)
+            yield path
