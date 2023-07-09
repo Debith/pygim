@@ -9,6 +9,7 @@
 namespace py = pybind11;
 
 inline py::iterator _ensure_iter(py::handle obj) {
+    std::cout << "ensure_iter" << std::endl;
     if (py::isinstance<py::iterator>(obj)) {
         return obj.cast<py::iterator>();
     }
@@ -25,6 +26,7 @@ class FlattenGenerator {
 public:
     FlattenGenerator();
     FlattenGenerator(py::iterator items);
+    FlattenGenerator(const FlattenGenerator&);
     ~FlattenGenerator();
 
     bool isComplete();

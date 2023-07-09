@@ -19,6 +19,7 @@ ext_modules = [
         list(str(p) for p in Path(ROOT).rglob("*.cpp")),
         # Example: passing in the version to the compiled code
         define_macros = [('VERSION_INFO', __version__)],
+        extra_compile_args=["-g"],
         ),
 ]
 

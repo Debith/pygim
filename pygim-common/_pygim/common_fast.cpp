@@ -10,17 +10,26 @@
 
 namespace py = pybind11;
 
+
 PYBIND11_MODULE(common_fast, m)
 {
     m.doc() = "Python Gimmicks Common library."; // optional module docstring
 
     // is_container
+    m.def("is_container", (bool (*)(const py::int_&)) &is_container, "A function that checks if a Python str is a container.");
+    m.def("is_container", (bool (*)(const py::float_&)) &is_container, "A function that checks if a Python str is a container.");
     m.def("is_container", (bool (*)(const py::str&)) &is_container, "A function that checks if a Python str is a container.");
+    m.def("is_container", (bool (*)(const py::bytearray&)) &is_container, "A function that checks if a Python bytes is a container.");
     m.def("is_container", (bool (*)(const py::bytes&)) &is_container, "A function that checks if a Python bytes is a container.");
+    m.def("is_container", (bool (*)(const py::tuple&)) &is_container, "A function that checks if a Python bytes is a container.");
+    m.def("is_container", (bool (*)(const py::list&)) &is_container, "A function that checks if a Python bytes is a container.");
+    m.def("is_container", (bool (*)(const py::set&)) &is_container, "A function that checks if a Python bytes is a container.");
+    m.def("is_container", (bool (*)(const py::dict&)) &is_container, "A function that checks if a Python bytes is a container.");
     m.def("is_container", (bool (*)(const py::type&)) &is_container, "A generic function that checks if a Python type is a container.");
-    m.def("is_container", (bool (*)(const py::iterable&)) &is_container, "A function that converts an iterable to a tuple.");
     m.def("is_container", (bool (*)(const py::memoryview&)) &is_container, "A function that checks if a Python memoryview is a container.");
-    //m.def("is_container", (bool (*)(const py::handle&)) &is_container, "A generic function that checks if a Python object is a container.");
+    m.def("is_container", (bool (*)(const py::iterator&)) &is_container, "A function that checks if a Python memoryview is a container.");
+    m.def("is_container", (bool (*)(const py::iterable&)) &is_container, "A function that checks if a Python memoryview is a container.");
+    m.def("is_container", (bool (*)(const py::handle&)) &is_container, "A generic function that checks if a Python object is a container.");
 
     // tuplify
     m.def("tuplify", (py::tuple (*)(const py::bytes&)) &tuplify, "A function that converts a bytes object to a single-element tuple");
@@ -32,9 +41,9 @@ PYBIND11_MODULE(common_fast, m)
 
     py::class_<FlattenGenerator>(m, "flatten")
         .def(py::init([](py::object objs) {
-            std::cout << "-> init" << std::endl;
+            //std::cout << "-> init" << std::endl;
             return new FlattenGenerator(_ensure_iter(objs));
-        }))
+        }), py::keep_alive<1, 0>())
         .def("__iter__", [](const py::object &self)
              { return self; })
         .def("__next__",
@@ -43,11 +52,10 @@ PYBIND11_MODULE(common_fast, m)
                 std::cout << "-> __next__" << std::endl;
                 if (self->isComplete())
                 {
-                    self->iterators.clear();
+                    std::cout << "stop" << std::endl;
                     throw py::stop_iteration();
                 }
 
-                //py::gil_scoped_release release;
                 auto result = self->next();
 
                 std::cout << "<- __next__" << py::str(result) << std::endl;

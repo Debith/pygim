@@ -6,6 +6,8 @@ from _pygim.common_fast import (
     is_container as is_container_fast,
     )
 from _pygim._iterlib import is_container, tuplify
+import numpy as np
+import pandas as pd
 
 
 class CustomIterableObject:
@@ -46,6 +48,11 @@ def test_split(input, func, expected_result):
     (set,                       False),     # set-type is not a container
     (frozenset,                 False),     # frozenset-type is not a container
     (dict,                      False),     # dict-type is not a container
+    (np.float64,                False),     # numpy-type is not a container
+    (np.float32,                False),     # numpy-type is not a container
+    (np.float16,                False),     # numpy-type is not a container
+    (np.nan,                    False),     # numpy-type is not a container
+    (pd.NA,                     False),     # pandas-type is not a container
 
     ((1, 2, 3),                  True),     # Tuple is a container
     ([1, 2, 3],                  True),     # List is a container
@@ -67,6 +74,10 @@ def test_split(input, func, expected_result):
     (CustomNonIterableObject(),  False),    # Custom non-iterable object is not a container
     ([[1, 2, 3]],                True),     # List of lists is a container
     ({'a': set([1, 2, 3])},      True),     # Dictionary of sets is a container
+
+    (np.ndarray([]),             True),     # ndarray-type is a container
+    (pd.Series([], dtype=int),   True),     # Series-type is a container
+    (pd.DataFrame([]),           True),     # DataFrame-type is a container
 ])
 
 def test_is_container_with_various_types(input, expected_result):
@@ -76,8 +87,8 @@ def test_is_container_with_various_types(input, expected_result):
     if not (actual_result == actual_result_fast == expected_result):
         assert False, "\n".join([
             f"Results differ for `{input}`:",
-            f"       ACTUAL: {actual_result}",
-            f"ACTUAL (fast): {actual_result_fast}",
+            f"       ACTUAL: {is_container(input)}",
+            f"ACTUAL (fast): {is_container_fast(input)}",
             f"     EXPECTED: {expected_result} ",
             ])
 
@@ -117,4 +128,4 @@ def test_tuplify_with_generators():
 
 if __name__ == "__main__":
     import pytest
-    pytest.main([__file__])
+    pytest.main([__file__, "--capture=no"])
