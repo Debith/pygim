@@ -75,7 +75,7 @@ def test_split(input, func, expected_result):
     (complex(1, 2),              False),    # Complex number is not a container
     (iter([1, 2, 3]),            True),     # Iterator is a container
     ((i for i in range(1, 4)),   True),     # Generator is a container
-    (memoryview(b"123"),         True),     # Memoryview is a container
+    (memoryview(b"123"),         False),    # Memoryview is a container
     (CustomIterableObject(),     True),     # Custom iterable object is a container
     (CustomNonIterableObject(),  False),    # Custom non-iterable object is not a container
     ([[1, 2, 3]],                True),     # List of lists is a container

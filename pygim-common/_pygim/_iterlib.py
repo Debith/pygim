@@ -64,14 +64,13 @@ def tuplify(obj):
 
 
 def is_container(obj):
-
-    if isinstance(obj, (str, bytes, type, Path)):
+    if isinstance(obj, (str, bytes, type, Path, memoryview)):
         return False
 
     if hasattr(obj, "__iter__"):
         return True
 
-    return isinstance(obj, memoryview)
+    return False
 
 
 def flatten(iterable):

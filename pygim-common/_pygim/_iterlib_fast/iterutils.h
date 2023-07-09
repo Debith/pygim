@@ -26,14 +26,11 @@ inline std::enable_if_t<
 is_container(const T& obj) {
     std::cout << "is_container" << std::endl;
     if (py::isinstance<py::str>(obj) | py::isinstance<py::bytes>(obj)) {
-        std::cout << "isinstance<str> || isinstance<bytes>" << std::endl;
         return false;
     }
     if (py::hasattr(obj, "__iter__")) {
-        std::cout << "hasattr __iter__" << std::endl;
         return true;
     }
-    std::cout << "return false" << std::endl;
     return false;
 }
 
