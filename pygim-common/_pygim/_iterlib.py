@@ -37,7 +37,7 @@ def split(iterable, condition):
     >>> def is_even(n):
     ...     return n % 2 == 0
     ...
-    >>> even_numbers, odd_numbers = split_iterable(numbers, is_even)
+    >>> even_numbers, odd_numbers = split(numbers, is_even)
     >>> even_numbers
     [2, 4]
     >>> odd_numbers

@@ -42,7 +42,8 @@ inline std::enable_if_t<
         std::is_same_v<T, py::float_> ||
         std::is_same_v<T, py::str> ||
         std::is_same_v<T, py::type> ||
-        std::is_same_v<T, py::bytes>,
+        std::is_same_v<T, py::bytes> ||
+        std::is_same_v<T, py::memoryview>,
     bool>
 is_container(const T& obj) {
     return false;
@@ -58,8 +59,7 @@ inline std::enable_if_t<
         std::is_same_v<T, py::bytearray> ||
         std::is_same_v<T, py::dict> ||
         std::is_same_v<T, py::iterator> ||
-        std::is_same_v<T, py::iterable> ||
-        std::is_same_v<T, py::memoryview>,
+        std::is_same_v<T, py::iterable>,
     bool>
 is_container(const T& obj) {
     return true;

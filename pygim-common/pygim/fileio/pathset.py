@@ -40,7 +40,7 @@ class PathSet:
 
     Methods
     -------
-    prefixed(prefix : str) -> PathSet
+    prefixed(paths: iterable, *, prefix : str) -> PathSet
         Returns a new PathSet with `prefix` added to each path.
     clone() -> PathSet
         Returns a new PathSet that is a copy of this one.
@@ -68,12 +68,12 @@ class PathSet:
     2
     >>> bool(paths)
     True
-    >>> list(paths)
-    [Path('path1'), Path('path2')]
+    >>> [p.stem for p in sorted(paths)]
+    ['path1', 'path2']
     >>> repr(paths)
-    "PathSet([Path('path1'), Path('path2')])"
-    >>> paths.prefixed("/new")
-    PathSet([Path('/new/path1'), Path('/new/path2')])
+    "PathSet(['path1', 'path2'])"
+    >>> paths.prefixed(["file1.txt", "file2.txt"], prefix="/root_folder")
+    PathSet(['/root_folder/file1.txt', '/root_folder/file2.txt'])
     """
 
     # TODO: This class could allow multiple different path types (not just pathlib.Path).
@@ -111,6 +111,8 @@ class PathSet:
         PathSet
             New PathSet object with the specified prefix for each path.
         """
+        assert is_container(paths), f"Paths must be a container, not {type(paths)}."
+
         if prefix is None:
             prefix = Path.cwd()
         prefix = Path(prefix)  # Ensure path-like object is Path.
@@ -131,7 +133,7 @@ class PathSet:
 
     def __repr__(self):  # pragma: no cover
         assert self._paths is not None
-        return f"{self.__class__.__name__}({list(str(p) for p in self._paths)})"
+        return f"{self.__class__.__name__}({sorted(str(p) for p in self._paths)})"
 
     def clone(self, paths=None):
         """
@@ -307,8 +309,8 @@ class PathSet:
 
         >>> paths = PathSet([Path('path1'), Path('path2')])
         >>> transformed = paths.transform(container_type=set, path_type=str)
-        >>> print(transformed)
-        {'path1', 'path2'}
+        >>> print(sorted(transformed))
+        ['path1', 'path2']
         """
         return container_type(path_type(p) for p in self)
 

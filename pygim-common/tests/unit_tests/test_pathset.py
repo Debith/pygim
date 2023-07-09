@@ -1,8 +1,9 @@
 # -*- coding: utf-8 -*-
 """ Tests PathSet. """
 
-import platform
+
 from pathlib import Path
+import platform
 import pytest
 
 from pygim.fileio import PathSet

@@ -4,11 +4,7 @@ Internal package for file utils.
 '''
 
 from pathlib import Path
-
-try:
-    from ..common_fast import flatten
-except ImportError:
-    from .._iterlib import flatten
+from .._iterlib import flatten
 
 
 def flatten_paths(*paths, pattern):
