@@ -7,6 +7,7 @@ import pytest
 
 from pygim.fileio import PathSet
 
+
 # FIXME: TemporaryDirectory().cleanup() fails due to some weird
 #        PermissionError in Windows environment in GitHub.
 #        Therefore, Windows is relieved from testing duty for now.
@@ -129,5 +130,5 @@ if platform.uname().system != "Windows":
 
 
 if __name__ == "__main__":
-    from pygim.utils.testing import run_tests
+    from pygim.testing import run_tests
     run_tests(__file__, PathSet.__module__, coverage=False)
