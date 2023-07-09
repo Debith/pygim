@@ -15,7 +15,7 @@ try:
     import _pygim.common_fast as _lib
 except ImportError:
     from _pygim import _iterlib as _lib
-from _pygim._iterlib import split
+from _pygim._iterlib import split, flatten
 
 
 __all__ = ["flatten", "is_container", "split"]

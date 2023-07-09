@@ -1,11 +1,11 @@
 #type: ignore
+from functools import singledispatch
 import pytest
-
 from _pygim.common_fast import (
     tuplify as tuplify_fast,
     is_container as is_container_fast,
     )
-from _pygim._iterlib import is_container, tuplify
+from _pygim._iterlib import is_container, tuplify, split
 import numpy as np
 import pandas as pd
 
@@ -17,6 +17,12 @@ class CustomIterableObject:
 
 class CustomNonIterableObject:
     pass
+
+
+@singledispatch
+def equals(left: object, right):
+    return left == right
+
 
 
 SPLIT_TESTS = [
