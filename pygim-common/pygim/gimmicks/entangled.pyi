@@ -1,5 +1,5 @@
-import pygim.exceptions as ex
-from .cached_type import CachedTypeMeta
+import pygim.explib as ex
+from _pygim._magic.cached_type import CachedTypeMeta
 
 def overrideable(func): ...
 def overrides(func): ...

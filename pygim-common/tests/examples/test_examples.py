@@ -5,7 +5,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).parents[3]
 
-EXAMPLES = PathSet(ROOT / 'docs/examples').files(suffix=".py"   )
+EXAMPLES = PathSet(ROOT / 'docs/examples').files(suffix=".py")
 assert EXAMPLES
 EXAMPLES = list(reversed(sorted(EXAMPLES)))
 
