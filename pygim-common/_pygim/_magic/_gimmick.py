@@ -181,6 +181,7 @@ class gimmick(metaclass=gim_type):
     ...     return self.public + 1
     ...
     >>> ExampleObject << new_method
+    <class '_pygim._magic._gimmick.ExampleObject'>
     >>> obj = ExampleObject()
     >>> obj.new_method()
     2

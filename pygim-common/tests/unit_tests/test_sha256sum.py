@@ -8,8 +8,8 @@ from importlib import reload
 from unittest.mock import patch
 
 from pygim.security import sha256sum, sha256sum_file
-from pygim.exceptions import ShaSumTargetNotFoundError
-from pygim.iterables import flatten
+from pygim.explib import ShaSumTargetNotFoundError
+from pygim.iterlib import flatten
 
 
 TESTS = [
