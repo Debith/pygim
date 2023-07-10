@@ -11,7 +11,7 @@ def diff(__left, __right):
 
 
 @diff.register(dict, dict)
-def _diff_dict(_left, _right):
+def _diff_dict(_left, _right, *, start="", end="\n"):
     """
     Compare two dictionaries visualizing differences.
 
@@ -50,4 +50,36 @@ def _diff_dict(_left, _right):
         matching = "!=" if left != right else ""
 
         lines.append((key, left, matching, right))
-    return tabulate.tabulate(lines)
+    return start + tabulate.tabulate(lines) + end
+
+
+@diff.register(list, list)
+def _diff_list(_left, _right, *, start="", end="\n"):
+    """
+    Compare two lists visualizing differences.
+
+    Parameters
+    ----------
+    _left : list
+        A list to be compared with `_right`.
+    _right : list
+        A list to be compared with `_left`.
+
+    Returns
+    -------
+    str
+        A table of differences between `_left` and `_right`, visualizing the values that are missing or mismatched.
+
+    Notes
+    -----
+    This function returns a string representation of a table that shows the differences between two lists.
+    It compares the values of the lists, and for each value present in either list, it displays the
+    corresponding values side by side, highlighting any differences. If a value is present in one list but not
+    the other, the corresponding value is replaced with "<<MISSING>>" in the table.
+
+    """
+    lines = []
+    for left, right in zip(_left, _right):
+        matching = "!=" if left != right else ""
+        lines.append((left, matching, right))
+    return start + tabulate.tabulate(lines) + end
