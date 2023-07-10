@@ -34,4 +34,8 @@ cfg['package_dir']={
     }
 cfg['ext_modules']=ext_modules
 cfg['cmdclass']={"build_ext": build_ext}
+cfg['install_requires']=cfg.pop('dependencies')
+
+#import pprint
+#pprint.pprint(cfg)
 setup(**cfg)
