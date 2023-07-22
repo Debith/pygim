@@ -119,6 +119,11 @@ class PathSet:
 
         return cls([prefix.joinpath(p) for p in paths])
 
+    @classmethod
+    def from_parent(cls, filename):
+        filename = Path(filename)
+        return cls(filename.parent)
+
     def __len__(self):
         assert self._paths is not None
         return len(self._paths)
@@ -134,6 +139,10 @@ class PathSet:
     def __repr__(self):  # pragma: no cover
         assert self._paths is not None
         return f"{self.__class__.__name__}({sorted(str(p) for p in self._paths)})"
+
+    def __contains__(self, filename):
+        filename = Path(filename)
+        return bool(list(self.filter(name=filename.name)))
 
     def clone(self, paths=None):
         """
