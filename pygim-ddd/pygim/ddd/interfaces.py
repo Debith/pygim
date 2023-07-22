@@ -1,8 +1,56 @@
 # -*- coding: utf-8 -*-
-'''
+"""
+This module provides a set of abstract interfaces aimed at simplifying the development of
+applications following Domain-Driven Design (DDD) principles. These interfaces form the
+foundation for modeling complex business domains.
 
+Classes
+-------
+IEntity:
+    An interface representing entities, which are objects with a distinct identity that
+    persists over time.
 
-'''
+IRootEntity:
+    An interface representing the root of an aggregate, a cluster of associated objects
+    that are treated as a unit.
+
+IValueObject:
+    An interface for value objects, which are objects that contain attributes but do not
+    have a conceptual identity.
+
+IDomainEvent:
+    An interface for domain events, which are discrete events that domain experts care about.
+
+IRepository:
+    An interface for repositories, which are mechanisms for retrieving entities and
+    persisting them back to the database.
+
+IFactory:
+    An interface for factories, which are used to create domain objects.
+
+IBuilder:
+    An interface for builders, a specific kind of factory that is used to build complex
+    objects step by step.
+
+IDomainService:
+    An interface for domain services, which are used when a significant process or
+    transformation in the domain isn’t a natural responsibility of an entity or value
+    object.
+
+IService:
+    A generic service interface from which the more specific domain, application and
+    infrastructure service interfaces derive.
+
+IApplicationService:
+    An interface for application services, which are used to drive the interactions between
+    domain layer and user interface or external systems.
+
+IInfrastructureService:
+    An interface for infrastructure services, which provide technical capabilities that
+    support the layers of the application.
+
+"""
+
 
 import abc
 from enum import Enum, unique
