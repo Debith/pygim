@@ -3,6 +3,7 @@
 Internal package for complaining functions.
 '''
 
+from dataclasses import dataclass
 import inspect
 import types
 
@@ -17,8 +18,27 @@ def has_instances(iterable, types, *, how=all):
     return how(isinstance(it, types) for it in iterable)
 
 
-def is_subset(iterable, other):
-    return set(iterable).issubset(other)
+@dataclass
+class SubSetResult:
+    subset: set
+    superset: set
+
+    def __post_init__(self):
+        self.subset = set(self.subset)
+        self.superset = set(self.superset)
+
+    def __bool__(self):
+        return set(self.subset).issubset(self.superset)
+
+    def missing(self):
+        return sorted(self.subset - self.superset)
+
+    def extra(self):
+        return sorted(self.superset - self.subset)
+
+
+def is_subset(subset, superset):
+    return SubSetResult(subset, superset)
 
 
 def class_names(*classes):

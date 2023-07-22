@@ -34,7 +34,7 @@ IBuilder:
 
 IDomainService:
     An interface for domain services, which are used when a significant process or
-    transformation in the domain isn’t a natural responsibility of an entity or value
+    transformation in the domain isn't a natural responsibility of an entity or value
     object.
 
 IService:
@@ -54,7 +54,7 @@ IInfrastructureService:
 
 import abc
 from enum import Enum, unique
-from pygim.utils import type_error_msg
+from pygim.explib import type_error_msg
 
 
 class IService(abc.ABC):
@@ -420,7 +420,7 @@ class IBuilder(IFactory):
     An abstract base class that represents a Builder in Domain-Driven Design.
 
     In Domain-Driven Design (DDD), a Builder is used to construct complex objects step
-    by step. It’s the same construction process to create different types of products.
+    by step. It's the same construction process to create different types of products.
     This Builder interface encapsulates the process of building complex domain objects,
     isolating the rest of the application from this complexity.
 
@@ -534,8 +534,7 @@ class IDomainEvent(abc.ABC):
     ...         self.username = username
     """
 
-    @property
-    @abc.abstractmethod
+    @abc.abstractproperty
     def type(self):
         """
         Abstract property that should return the type or name of the event.
