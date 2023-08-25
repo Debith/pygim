@@ -3,9 +3,10 @@
 This module contains internal utility functions.
 """
 
+import itertools
 from pathlib import Path
 
-__all__ = ("split", "flatten", "is_container")
+__all__ = ("split", "flatten", "is_container", "chunks", "dictify", "tuplify")
 
 
 def split(iterable, condition):
@@ -79,3 +80,19 @@ def flatten(iterable):
             yield from flatten(o)
     else:
         yield iterable
+
+
+def chunks(iterable, size):
+    it = iter(iterable)
+    chunk = tuple(itertools.islice(it,size))
+    while chunk:
+        yield chunk
+        chunk = tuple(itertools.islice(it,size))
+
+
+def dictify(obj):
+    if isinstance(obj, dict):
+        return obj
+    if isinstance(obj, tuple):
+        return dict(chunks(obj, 2))
+    raise NotImplementedError(f"Cannot convert {type(obj).__name__} to dict.")

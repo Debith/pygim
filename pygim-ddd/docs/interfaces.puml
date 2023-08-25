@@ -1,0 +1,58 @@
+@startuml
+
+package "Domain Layer" {
+    interface IEntity
+    interface IValueObject
+    interface IRootEntity
+    interface IAggregate
+    interface IDomainEvent
+    interface IDomainService
+    interface IFactory
+    interface IBuilder
+    interface IViewModel
+
+    IEntity <|-- IRootEntity
+    IEntity <|-- IValueObject
+    IRootEntity <|-- IAggregate
+    IFactory <|-- IBuilder
+}
+
+package "Application Layer" {
+    interface IApplicationService
+    interface ICommandHandler
+    interface IQueryHandler
+    interface IUnitOfWork
+
+    IApplicationService ..> IDomainService : uses
+    IApplicationService ..> IRepository : uses
+    IApplicationService ..> IUnitOfWork : uses
+    ICommandHandler ..> IApplicationService : uses
+    IQueryHandler ..> IApplicationService : uses
+}
+
+package "Infrastructure Layer" {
+    interface IRepository
+    interface IInfrastructureService
+    interface ISaveRepository
+    interface ILoadRepository
+    interface IAntiCorruptionLayer
+
+    IRepository <|-- ISaveRepository
+    IRepository <|-- ILoadRepository
+    IRepository ..> IRootEntity : uses
+    IInfrastructureService ..> IRepository : uses
+}
+
+package "Shared Kernel" {
+    interface IService
+    interface ISpecification
+    interface IPolicy
+
+    IService <|-- IDomainService
+    IService <|-- IInfrastructureService
+    IService <|-- IApplicationService
+    ISpecification ..> IEntity : uses
+    IPolicy ..> IEntity : uses
+}
+
+@enduml

@@ -1,5 +1,5 @@
 from typing import *
-from pygim.typing import AnyClass, AnyArgs, AnyKwargs
+from _pygim.typing import AnyClass, AnyArgs, AnyKwargs
 
 class CachedInstanceMeta(type):
     def __new__(mcls: AnyClass, name: Text, bases: Tuple[AnyClass], namespace: AnyKwargs) -> Any: ...
