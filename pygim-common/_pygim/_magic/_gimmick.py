@@ -19,9 +19,6 @@ class GimTypeMeta(type):
     def __prepare__(*args):
         return dict(__pygim_traits__={})
 
-    def __lshift__(self, other):
-        print("thing")
-
 
 class _NoTraits:
     def __setitem__(self, *args, **kwargs):
