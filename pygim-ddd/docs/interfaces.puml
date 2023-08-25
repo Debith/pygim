@@ -9,6 +9,7 @@ package "Domain Layer" {
     interface IDomainService
     interface IFactory
     interface IBuilder
+    interface IViewModel
 
     IEntity <|-- IRootEntity
     IEntity <|-- IValueObject
@@ -34,6 +35,7 @@ package "Infrastructure Layer" {
     interface IInfrastructureService
     interface ISaveRepository
     interface ILoadRepository
+    interface IAntiCorruptionLayer
 
     IRepository <|-- ISaveRepository
     IRepository <|-- ILoadRepository
