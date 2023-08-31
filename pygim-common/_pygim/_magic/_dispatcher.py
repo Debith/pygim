@@ -5,10 +5,12 @@ Dispatcher class internal implementation.
 
 from functools import wraps
 from collections.abc import Callable
+from itertools import product
 from dataclasses import dataclass, field
-from .._utils._inspect import type_error_msg
 from .._exceptions import NoArgumentsError
 from .._static import auto
+from .._exceptions import GimError
+from .._utils._inspect import class_names, type_error_msg
 
 
 def _arg_identifier(arg):
@@ -120,7 +122,11 @@ class _Dispatcher:
         if the callable object appears to be a method.
         """
         assert callable(self.__callable), type_error_msg(self.__callable, Callable)
-        wraps(self)(self.__callable)
+        wraps(self.__callable)(self)
+
+    @property
+    def supported_types(self):
+        return list(self.__registry)
 
     def register(self, *specs):
         """
@@ -178,21 +184,27 @@ class _Dispatcher:
 
         # TODO: This code is ineffective and needs some extra magic to make it more performant.
         its_type = tuple(self.__args[i](args[i]) for i in range(len(self.__args)))
+        if its_type not in self.__registry:
+            prod_type = [t.__mro__[:-1] for t in its_type]
+            prods = set(product(*prod_type))
+            common = set(prods).intersection(self.__registry)
+
+            if len(common) > 1:
+                raise GimError(f"Multiple base class combinations: {class_names(common)}")
+
+            if not common:
+                return self.__callable(*args, **kwargs)
+
+            func = self.__registry[list(common)[0]]
+
+            for key in prods - common:
+                if object in key:
+                    continue
+                self.__registry[key] = func
+
         if self.__start_index:
             args = (self.__instance,) + args
         try:
             return self.__registry[its_type](*args, **kwargs)
         except KeyError:
             return self.__callable(*args, **kwargs)
-
-
-def _default_unregistered_function(*__a, **__kw):
-    raise NotImplementedError(
-        f"Argument types not supported: {','.join(type(a).__name__ for a in __a)}")
-
-
-def dispatch(func=None):
-    assert func.__code__.co_argcount, f"given function {func.__qualname__}"
-    if func is None:
-        func = _default_unregistered_function
-    return _Dispatcher(func)

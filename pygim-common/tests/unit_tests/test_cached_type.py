@@ -64,7 +64,7 @@ def test_class_is_singleton_via_cached_type():
 
 
 if __name__ == "__main__":
-    from pygim.utils.testing import run_tests
+    from pygim.testing import run_tests
 
     # With coverage run, tests fail in meta.__call__ due to reload.
     run_tests(__file__, "_pygim._magic._cached_type", coverage=False)

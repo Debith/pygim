@@ -12,7 +12,8 @@ import types
 import inspect
 import types
 
-from .._utils import has_instances, format_dict, type_error_msg, TraitFunctions, is_subset
+from .._utils import has_instances, format_dict, TraitFunctions, is_subset
+from .._error_msgs import type_error_msg
 
 PY37, PY38, PY39, PY310, PY311 = (3, 7), (3, 8), (3, 9), (3, 10), (3, 11)
 ____ = _____ = ()

@@ -8,7 +8,8 @@ from types import FunctionType
 
 from ._dispatcher import _Dispatcher
 from ._patch import MutableFuncObject
-from .._utils import type_error_msg, flatten
+from .._utils import flatten
+from .._error_msgs import type_error_msg
 
 __all__ = ['gimmick']
 
@@ -17,9 +18,6 @@ dispatch = _Dispatcher
 class GimTypeMeta(type):
     def __prepare__(*args):
         return dict(__pygim_traits__={})
-
-    def __lshift__(self, other):
-        print("thing")
 
 
 class _NoTraits:
@@ -180,6 +178,7 @@ class gimmick(metaclass=gim_type):
     ...     return self.public + 1
     ...
     >>> ExampleObject << new_method
+    <class '_pygim._magic._gimmick.ExampleObject'>
     >>> obj = ExampleObject()
     >>> obj.new_method()
     2

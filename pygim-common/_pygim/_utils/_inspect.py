@@ -3,100 +3,47 @@
 Internal package for complaining functions.
 '''
 
+from dataclasses import dataclass
+import inspect
 import types
-import tabulate
 
-__all__ = ('type_error_msg', 'TraitFunctions', 'has_instances', 'is_subset')
+from .._iterlib import flatten
+
+__all__ = ('TraitFunctions', 'has_instances', 'is_subset')
 
 TraitFunctions = (types.FunctionType, types.MethodType)
 
-def type_error_msg(obj, expected_type):
-    """
-    Returns a formatted error message for a type error.
-
-    Parameters
-    ----------
-    obj : Any
-        The object that was found to have a type error.
-    expected_type : type or tuple of types
-        The expected type(s) of the object.
-
-    Returns
-    -------
-    str
-        The formatted error message.
-
-    Examples
-    --------
-    >>> type_error_msg(2, str)
-    "Expected to get type `str`, got `2 [int]`"
-    >>> type_error_msg([], (tuple, list))
-    "Expected to get type `(tuple,list)`, got `[] [list]`"
-    """
-    if isinstance(expected_type, tuple):
-        type_names = ",".join(f"`{t.__name__}`" for t in expected_type)
-        expected_type_name = "tuple"
-    else:
-        type_names = type(obj).__name__
-        expected_type_name = expected_type.__name__
-    return f"Expected to get type `{expected_type_name}`, got `{repr(obj)} [{type_names}]`"
-
 
 def has_instances(iterable, types, *, how=all):
-    """
-    Check if all or any items in an iterable are instances of a specified type.
-
-    Parameters
-    ----------
-    iterable : iterable
-        The iterable to check.
-    types : type or tuple of types
-        The expected type(s) of the items.
-    how : callable, optional
-        A callable that will be used to aggregate the results of the checks
-        (e.g. `all` to check if all items are instances of the specified type(s),
-        `any` to check if any items are instances of the specified type(s)).
-        Defaults to `all`.
-
-    Returns
-    -------
-    bool
-        True if all/any items in the iterable are instances of the specified type(s),
-        False otherwise.
-
-    Examples
-    --------
-    >>> has_instances([1,2,3], int)
-    True
-    >>> has_instances([1,2,'3'], int)
-    False
-    >>> has_instances([1,2,'3'], int, how=any)
-    True
-    """
     return how(isinstance(it, types) for it in iterable)
 
 
-def is_subset(iterable, other):
-    """
-    Check if an iterable is a subset of another iterable.
+@dataclass
+class SubSetResult:
+    subset: set
+    superset: set
 
-    Parameters
-    ----------
-    iterable : iterable
-        The iterable to check.
-    other : iterable
-        The iterable to check against.
+    def __post_init__(self):
+        self.subset = set(self.subset)
+        self.superset = set(self.superset)
 
-    Returns
-    -------
-    bool
-        True if `iterable` is a subset of `other`, False otherwise.
+    def __bool__(self):
+        return set(self.subset).issubset(self.superset)
 
-    Examples
-    --------
-    >>> is_subset([1, 2], [1, 2, 3])
-    True
-    >>> is_subset([1, 2, 3], [1, 2])
-    False
-    """
-    return set(iterable).issubset(other)
+    def missing(self):
+        return sorted(self.subset - self.superset)
+
+    def extra(self):
+        return sorted(self.superset - self.subset)
+
+
+def is_subset(subset, superset):
+    return SubSetResult(subset, superset)
+
+
+def class_names(*classes):
+    for cls in flatten(classes):
+        if inspect.isclass(cls):
+            yield cls.__name__
+        else:
+            yield cls.__class__.__name__
