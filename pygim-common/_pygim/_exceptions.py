@@ -8,6 +8,10 @@ class GimError(Exception):
     """Main error class."""
 
 
+class NoArgumentsError(GimError):
+    """Raised when function does not receive arguments while expecting them."""
+
+
 class EntangledError(GimError):
     """Base class for entanglement errors."""
 

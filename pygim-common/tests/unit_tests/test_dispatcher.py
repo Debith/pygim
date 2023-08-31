@@ -2,6 +2,7 @@
 import pytest
 
 from pygim.performance.dispatch import dispatch
+from pygim.exceptions import NoArgumentsError
 
 
 def test_dispatcher_without_default_function():
@@ -12,10 +13,10 @@ def test_dispatcher_without_default_function():
         return integer
 
     assert do_something(1) == 1
-    try:
-        do_something(None)
-    except NotImplementedError:
-        pass
+
+    with pytest.raises(NoArgumentsError):
+        do_something()
+
 
 
 if __name__ == '__main__':

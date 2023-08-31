@@ -3,11 +3,10 @@
 This module holds the dispatcher function implementation.
 """
 
-from _pygim._magic._dispatcher import _Dispatcher
+from _pygim._magic._dispatcher import dispatch
 
 __all__ = ["dispatch"]
 
-dispatch = _Dispatcher
 dispatch.__doc__ = """
     A dispatcher that routes calls to different functions depending on the type of arguments.
 

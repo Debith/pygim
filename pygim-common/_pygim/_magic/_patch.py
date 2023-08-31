@@ -136,7 +136,7 @@ class MutableCodeObject(metaclass=MutableCodeObjectMeta):
         return f"{self.__class__.__name__}({format_dict(self._code_map, indent=4)})"
 
 
-class MutableFuncObjectMeta(type):
+class RoutineMeta(type):
     _FUNC_VARS = [
         "__closure__",
         "__code__",
@@ -161,6 +161,8 @@ class MutableFuncObjectMeta(type):
         _FUNC_VARS.remove("__qualname__")
 
     def __call__(self, func):
+        if self.__name__ == "Routine":
+            return super(self.__class__, self).__call__(func)
         assert isinstance(func, TraitFunctions), type_error_msg(func, TraitFunctions)
         func_map = {name: getattr(func, name) for name in self._FUNC_VARS}
         assert has_instances(func_map, str)
@@ -169,12 +171,34 @@ class MutableFuncObjectMeta(type):
 
 
 @dataclass
-class MutableFuncObject(metaclass=MutableFuncObjectMeta):
-    _func_map: dict
+class Routine(metaclass=RoutineMeta):
+    _routine: callable
 
     @property
     def owning_class_name(self):
-        return self._func_map["__qualname__"].split('.')[-2]
+        return self._code_obj_vars["__qualname__"].split('.')[-2]
+
+    def takes_arguments(self):
+        pass
+
+    def has_parent_class(self):
+        qualname = self._routine.__qualname__
+
+        # nested functions have ``.<locals>.`` in middle of the their qualname to
+        # indicate that
+        qualname = qualname.split('.<locals>.')[-1]
+
+        # Functions that have class parent has one dot in its name.
+        # TODO: ensure that it is the case.
+        if '.' not in qualname:
+            return False
+
+        return True
+
+
+@dataclass
+class MutableFuncObject(Routine):
+    _func_map: dict
 
     def new_qualname(self, target):
         return f"{target.__qualname__}.{self._func_map['__name__']}"
