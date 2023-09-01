@@ -7,6 +7,7 @@ import shutil
 from pathlib import Path
 from dataclasses import dataclass
 
+import anytree
 from pygim.iterlib import is_container
 from _pygim._utils._fileutils import flatten_paths
 
@@ -140,6 +141,20 @@ class PathSet:
         assert self._paths is not None
         return f"{self.__class__.__name__}({sorted(str(p) for p in self._paths)})"
 
+    def __str__(self):
+        assert self._paths is not None
+        paths = sorted(self._paths)
+        root= anytree.Node(str(paths[0]))
+        nodes = {str(paths.pop(0)): root}
+        for item in paths:
+            parent_node = nodes[str(item.parent)]
+            nodes[str(item)] = anytree.Node(item.name, parent_node)
+
+        text = []
+        for pre, _, node in anytree.RenderTree(root):
+            text.append(f'{pre}{node.name}')
+        return "\n".join(text)
+
     def __contains__(self, filename):
         filename = Path(filename)
         return bool(list(self.filter(name=filename.name)))
@@ -204,16 +219,21 @@ class PathSet:
         assert self._paths is not None
 
         for p in self._paths:
-            for func, value in filters.items():
-                value = value if is_container(value) else [value]
-                obj = getattr(p, func)
+            for source, value in filters.items():
+                obj = getattr(p, source)
                 obj = obj() if callable(obj) else obj
 
-                if obj in value:
-                    yield p
-                    break
+                if callable(value):
+                    if value(obj):
+                        yield p
+                        break
+                else:
+                    value = value if is_container(value) else [value]
+                    if obj in value:
+                        yield p
+                        break
 
-    def drop(self, **filters):
+    def drop(self, *paths_to_ignore, **filters):
         """
         Filter paths based on their properties, where those NOT matching filters are kept.
 
@@ -250,27 +270,35 @@ class PathSet:
         >>> [p.name for p in new_paths]                         # Show the names in the filtered path set.
         ['readme.txt']
         """
-        assert filters, "No filters given!"
+        assert paths_to_ignore or filters, "No filters given!"
         assert self._paths is not None
 
         for p in self._paths:
-            for func, value in filters.items():
-                value = value if is_container(value) else [value]
-                obj = getattr(p, func)
+            if p not in paths_to_ignore:
+                yield p
+
+        for p in self._paths:
+            for source, value in filters.items():
+                obj = getattr(p, source)
                 obj = obj() if callable(obj) else obj
 
-                if obj not in value:
-                    yield p
-                    break
-
+                if callable(value):
+                    if not value(obj):
+                        yield p
+                        break
+                else:
+                    value = value if is_container(value) else [value]
+                    if obj not in value:
+                        yield p
+                        break
 
     def filtered(self, **filters):
         """As filter() but returns new object."""
         return self.clone(self.filter(**filters)) if filters else self
 
-    def dropped(self, **filters):
+    def dropped(self, *paths_to_ignore, **filters):
         """As drop() but returns new object."""
-        return self.clone(self.drop(**filters)) if filters else self
+        return self.clone(self.drop(*paths_to_ignore, **filters)) if paths_to_ignore or filters else self
 
     def dirs(self, **filters):
         """A common filter to return only dirs. See filter() for more details."""
