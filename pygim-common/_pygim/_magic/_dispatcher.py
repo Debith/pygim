@@ -10,7 +10,8 @@ from dataclasses import dataclass, field
 from .._exceptions import NoArgumentsError
 from .._static import auto
 from .._exceptions import GimError
-from .._utils._inspect import class_names, type_error_msg
+from .._utils._inspect import class_names
+from .._error_msgs import type_error_msg
 
 
 def _arg_identifier(arg):
@@ -72,6 +73,10 @@ class _FunctionWrapper:
         pass
 
 
+# TODO: May not be needed
+def _default_unregistered_function(*args, **kwargs):
+    raise NotImplementedError
+
 @dataclass
 class _Dispatcher:
     __callable: object
@@ -124,6 +129,18 @@ class _Dispatcher:
         assert callable(self.__callable), type_error_msg(self.__callable, Callable)
         wraps(self.__callable)(self)
 
+    def __repr__(self):
+        _template = "<{qualname} {kind} dispatcher at {address} for: {types}"
+        _qualnames = [f.__qualname__ for f in self.__registry.values()]
+        _args = dict(
+            qualname=_qualnames[0],
+            kind="method",
+            address=f"{hex(id(self))}",
+            types=", ".join(s[0].__name__ for s in self.__registry),
+            )
+
+        return _template.format_map(_args)
+
     @property
     def supported_types(self):
         return list(self.__registry)
@@ -148,11 +165,11 @@ class _Dispatcher:
 
         # TODO: verify length
         def __inner_register(func):
-            assert self.__callable.__code__.co_argcount >= self.__start_index
+            #assert self.__callable.__code__.co_argcount >= self.__start_index
             if self.__is_default_generated and _is_method(func):
                 self.__start_index = 1
             self.__registry[specs] = func
-            return func
+            return self
         return __inner_register
 
     def __get__(self, __instance, __class):
@@ -192,6 +209,8 @@ class _Dispatcher:
             if len(common) > 1:
                 raise GimError(f"Multiple base class combinations: {class_names(common)}")
 
+            # Missing common arguments means there is no handler for those types,
+            # therefore, need to call the default function.
             if not common:
                 return self.__callable(*args, **kwargs)
 
@@ -208,3 +227,7 @@ class _Dispatcher:
             return self.__registry[its_type](*args, **kwargs)
         except KeyError:
             return self.__callable(*args, **kwargs)
+
+
+def dispatch(func=None):
+    return _Dispatcher(func or _default_unregistered_function)
