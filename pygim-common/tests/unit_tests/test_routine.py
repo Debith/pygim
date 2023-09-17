@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 import pytest
 
-from _pygim._magic._patch import Routine
+from _pygim._magic._routine import Routine
 
 def _function(): pass
 def _function_with_nested():

@@ -7,7 +7,7 @@ from traceback import format_stack
 from types import FunctionType
 
 from ._dispatcher import _Dispatcher
-from ._patch import MutableFuncObject
+from ._routine import MutableRoutine
 from .._utils import flatten
 from .._error_msgs import type_error_msg
 
@@ -61,8 +61,6 @@ class gim_type(type, metaclass=GimTypeMeta):
             if gimmick not in bases:
                 # All classes created through the gim_type are
                 # guarranteed to be inherited from `gimmick`.
-                # This ensures all subclasses will contain all
-                # functionality provided by gimmick.
                 bases += (gimmick, )
         except NameError:
             # This creates the `gimmick` class.
@@ -94,7 +92,6 @@ class gim_type(type, metaclass=GimTypeMeta):
             fileinfo = f"{trait.__code__.co_filename}:{trait.__code__.co_firstlineno}"
 
             cls.__pygim_traits__[traitinfo] = dict(definition=fileinfo, traceback=lines)
-
 
     @dispatch
     def __lshift__(cls, other):
@@ -134,7 +131,7 @@ class gim_type(type, metaclass=GimTypeMeta):
             cls.__record_trait_info(_value)
             return super().__setattr__(_name, _value)
 
-        MutableFuncObject(_value).assign_to_class(cls, _name)
+        MutableRoutine(_value).assign_to_class(cls, _name)
 
 
 class gimmick(metaclass=gim_type):
