@@ -2,6 +2,7 @@
 #include <pybind11/stl.h>
 
 #include "_iterlib_fast/iterutils.h"
+#include "_iterlib_fast/string_list.h"
 #include <iostream>         // std::string
 
 #define STRINGIFY(x) #x
@@ -37,6 +38,13 @@ PYBIND11_MODULE(common_fast, m)
     m.def("tuplify", (py::tuple (*)(const py::dict&))       &tuplify, "A function that converts a dict to a tuple of key-value pairs.");
     m.def("tuplify", (py::tuple (*)(const py::iterable&))   &tuplify, "A function that converts an iterable to a tuple.");
     m.def("tuplify", (py::tuple (*)(const py::handle&))     &tuplify, "A function that converts a generic object to a single-element tuple.");
+
+    // string list
+    m.def("string_list", &string_list,
+          py::arg("strings"),
+          py::arg("sep") = "\n",
+          py::arg("encoding") = "utf-8",
+          "Converts a list of strings to a single string with the provided separator.");
 
 #ifdef VERSION_INFO
     m.attr("__version__") = MACRO_STRINGIFY(VERSION_INFO);
