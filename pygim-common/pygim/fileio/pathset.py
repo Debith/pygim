@@ -3,6 +3,7 @@
 This module contains implementation of PathSet class.
 """
 
+import re
 import shutil
 from pathlib import Path
 from dataclasses import dataclass
@@ -322,6 +323,24 @@ class PathSet:
         ['path1', 'path2']
         """
         return container_type(path_type(p) for p in self)
+
+    def read_all(self, *, as_bytes=False, split_regex=None, encoding="utf-8"):
+        """ Read all files in the PathSet.
+
+        Parameters
+        ----------
+        as_bytes : bool
+            Read as bytes
+        split_regex : str
+            Split the file contents by the given regex.
+        """
+        for file in self:
+            context = file.read_bytes() if as_bytes else file.read_text(encoding=encoding)
+            if split_regex:
+                for chunk in re.split(split_regex, context):
+                    yield chunk
+            else:
+                yield context
 
 
 if __name__ == "__main__":

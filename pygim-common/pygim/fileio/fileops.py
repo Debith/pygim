@@ -7,7 +7,16 @@ import pathlib
 import gzip
 import pickle
 
-__all__ = ("write_bytes", "pickle_and_compress", "decompress_and_unpickle")
+from _pygim._error_msgs import type_error_msg
+
+__all__ = (
+    "write_bytes",
+    "write_text",
+    "pickle_and_compress",
+    "decompress_and_unpickle",
+    "read_text",
+    "read_bytes",
+    )
 
 
 def _drop_file_suffixes(p):
@@ -16,7 +25,28 @@ def _drop_file_suffixes(p):
     return p
 
 
-def write_bytes(filename, data, *, make_dirs=False, suffix=".bin"):
+def _ensure_file(filename, use_dir, make_dirs):
+    if use_dir:
+        use_dir = pathlib.Path(use_dir)
+
+        if use_dir.is_file():
+            use_dir = use_dir.parent
+
+    pth = pathlib.Path(filename)
+    parent = pth.parent
+
+    if use_dir:
+        parent = use_dir.resolve() / parent
+
+    if make_dirs and not parent.is_dir():
+        parent.mkdir(parents=True, exist_ok=True)
+
+    assert parent.is_dir(), f"Parent directory doesn't exist for file: {str(pth.resolve())}"
+
+    return parent / pth.name
+
+
+def write_bytes(filename, data, *, use_dir=None, make_dirs=False, suffix=".bin"):
     """
     Write bytes data to a file.
 
@@ -30,16 +60,20 @@ def write_bytes(filename, data, *, make_dirs=False, suffix=".bin"):
         Name of the file to be written.
     data : `bytes`
         Data to be written to the file.
+    use_dir : `str` or `pathlib.Path`, optional
+        The directory to use when writing the file. If specified, it overrides the parent
+        directory of the `filename` parameter.
+        Defaults to `None`, which means that the current working directory will be used
+        or the parent directory of the file if the `filename` contains a path.
     make_dirs : `bool`, optional
         Create any necessary folders to allow writing. Defaults to `False`.
     suffix : `str`, optional
         The file suffix to use when writing the file. Defaults to `.bin`.
 
-    Raises
-    ------
-    AssertionError
-        If the `data` parameter is not a bytes object or if the parent directory
-        doesn't exist and `make_dirs` is `False`.
+    Returns
+    -------
+    `pathlib.Path`
+        The path to the file that was written.
 
     Examples
     --------
@@ -52,18 +86,56 @@ def write_bytes(filename, data, *, make_dirs=False, suffix=".bin"):
     """
     assert isinstance(data, bytes), "Data parameter must be a bytes object."
 
-    pth = pathlib.Path(filename)
-    parent = pth.parent
-
-    if make_dirs and not parent.is_dir():
-        parent.mkdir(parents=True, exist_ok=True)
-
-    assert parent.is_dir(), f"Parent directory doesn't exist for file: {str(pth.resolve())}"
+    target_file = _ensure_file(filename, use_dir, make_dirs)
 
     if suffix:
-        pth = _drop_file_suffixes(pth).with_suffix(suffix)
+        target_file = _drop_file_suffixes(target_file).with_suffix(suffix)
 
-    pth.write_bytes(data)
+    target_file.write_bytes(data)
+    return target_file
+
+
+def write_text(filename, data, *, use_dir=None, make_dirs=False, suffix=".txt", encoding="utf-8"):
+    """
+    Write text data to a file.
+
+    This function provides a straightforward means of writing text data to a file by passing
+
+    Parameters
+    ----------
+    filename : `str`
+        Name of the file to be written.
+    data : `str` or `list`
+        Data to be written to the file.
+    use_dir : `str` or `pathlib.Path`, optional
+        The directory to use when writing the file. If specified, it overrides the parent
+        directory of the `filename` parameter.
+        Defaults to `None`, which means that the current working directory will be used
+        or the parent directory of the file if the `filename` contains a path.
+    make_dirs : `bool`, optional
+        Create any necessary folders to allow writing. Defaults to `False`.
+    suffix : `str`, optional
+        The file suffix to use when writing the file. Defaults to `.txt`.
+    encoding : `str`, optional
+        The encoding to use when writing the file. Defaults to `utf-8`.
+
+    Returns
+    -------
+    `pathlib.Path`
+        The path to the file that was written.
+    """
+    assert isinstance(data, (str, list)), type_error_msg(data, str)
+
+    if isinstance(data, list):
+        data = "\n".join(data)
+
+    target_file = _ensure_file(filename, use_dir, make_dirs)
+
+    if suffix:
+        target_file = _drop_file_suffixes(target_file).with_suffix(suffix)
+
+    target_file.write_text(data)
+    return target_file
 
 
 def pickle_and_compress(obj, filename=None, *, make_dirs=False, suffix=".pkl.zip"):
@@ -145,3 +217,67 @@ def decompress_and_unpickle(obj):
         obj = obj.read_bytes()
 
     return pickle.loads(gzip.decompress(obj))
+
+
+def read_text(filename, *, use_dir=None, encoding="utf-8"):
+    """
+    Reads text data from a file.
+
+    Parameters
+    ----------
+    filename : `str`
+        Name of the file to be read.
+    use_dir : `str` or `pathlib.Path`, optional
+        The directory to use when reading the file. If specified, it overrides the parent
+        directory of the `filename` parameter.
+        Defaults to `None`, which means that the current working directory will be used
+        or the parent directory of the file if the `filename` contains a path.
+    encoding : `str`, optional
+        The encoding to use when reading the file. Defaults to `utf-8`.
+
+    Returns
+    -------
+    `str`
+        The text data read from the file.
+
+    Examples
+    --------
+    Read text data from a file:
+
+    .. code-block:: python
+
+        data = read_text("hello.txt")
+    """
+    source_file = _ensure_file(filename, use_dir, False)
+    return source_file.read_text(encoding=encoding)
+
+
+def read_bytes(filename, *, use_dir=None):
+    """
+    Reads binary data from a file.
+
+    Parameters
+    ----------
+    filename : `str`
+        Name of the file to be read.
+    use_dir : `str` or `pathlib.Path`, optional
+        The directory to use when reading the file. If specified, it overrides the parent
+        directory of the `filename` parameter.
+        Defaults to `None`, which means that the current working directory will be used
+        or the parent directory of the file if the `filename` contains a path.
+
+    Returns
+    -------
+    `bytes`
+        The binary data read from the file.
+
+    Examples
+    --------
+    Read binary data from a file:
+
+    .. code-block:: python
+
+        data = read_bytes("hello.bin")
+    """
+    source_file = _ensure_file(filename, use_dir, False)
+    return source_file.read_bytes()
