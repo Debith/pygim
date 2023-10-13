@@ -2,7 +2,7 @@
 import pytest
 
 from pygim.performance.dispatch import dispatch
-from pygim.exceptions import NoArgumentsError
+from pygim.explib import NoArgumentsError
 
 
 def test_dispatcher_without_default_function():

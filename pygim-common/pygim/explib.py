@@ -4,6 +4,7 @@ from _pygim._exceptions import (
     EntangledClassError,
     EntangledMethodError,
     ShaSumTargetNotFoundError,
+    NoArgumentsError,
 )
 
 from _pygim._error_msgs import (
@@ -17,6 +18,7 @@ __all__ = [
     "EntangledClassError",
     "EntangledMethodError",
     "ShaSumTargetNotFoundError",
+    "NoArgumentsError",
     "file_error_msg",
     "type_error_msg",
 ]
