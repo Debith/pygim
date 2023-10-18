@@ -2,6 +2,7 @@
 #include <pybind11/stl.h>
 
 #include "_iterlib_fast/iterutils.h"
+#include "_common_fast/url.h"
 #include <iostream>         // std::string
 
 #define STRINGIFY(x) #x
@@ -43,4 +44,7 @@ PYBIND11_MODULE(common_fast, m)
 #else
     m.attr("__version__") = "dev";
 #endif
+    m.attr("__pygim_fast__") = true;  // This indicates fast lib is in use
+
+    Url::expose_to_python(m);
 }
