@@ -11,7 +11,8 @@ namespace py = pybind11;
 class Url {
 private:
     std::string mScheme;
-    std::string mUserInfo;
+    std::string mUsername;
+    std::string mPassword;
     std::string mHost;
     uint16_t mPort;
     std::vector<std::string> mPath;
@@ -26,9 +27,10 @@ public:
     Url();
     Url(const Url& other);
     Url(const std::string& value);
-    Url(const std::vector<std::string>& valueList);
     Url(const std::map<std::string, std::string>& parts);
     Url(const std::string& scheme,
+        const std::string& username,
+        const std::string& password,
         const std::string& host,
         const uint16_t port,
         const std::string& path,
@@ -39,7 +41,7 @@ public:
     // Utility function for string splitting
     std::vector<std::string> split(const std::string& s, char delimiter);
 
-    std::string str();
+    const std::string str() const;
     Url operator/(const std::string& other);
     Url operator/(const Url& other);
 
@@ -50,7 +52,8 @@ public:
     Url operator|(const std::map<std::string, std::string>& other);
 
     inline const std::string scheme() const { return mScheme; };
-    inline const std::string userInfo() const { return mUserInfo; };
+    inline const std::string username() const { return mUsername; };
+    inline const std::string password() const { return mPassword; };
     inline const std::string host() const { return mHost; };
     inline const uint16_t port() const { return mPort; };
     inline const std::vector<std::string> path() const { return mPath; };
@@ -71,21 +74,26 @@ public:
             .def(py::init<>()) // Default constructor
             .def(py::init<const Url&>()) // Copy constructor
             .def(py::init<const std::string&>()) // Construct from string
-            .def(py::init<const std::vector<std::string>&>()) // Construct from list of strings
             .def(py::init<const std::map<std::string, std::string>&>()) // Construct from map
             .def(py::init<const std::string&,
+                          const std::string&,
+                          const std::string&,
                           const std::string&,
                           const uint16_t,
                           const std::string&,
                           const std::string&,
                           const std::string&>(),
                 py::arg("scheme") = "",
+                py::arg("username") = "",
+                py::arg("password") = "",
                 py::arg("host") = "",
                 py::arg("port") = 0,
                 py::arg("path") = "",
                 py::arg("query") = "",
                 py::arg("fragment") = "") // Detailed constructor
-            .def("__repr__", &Url::str)
+            .def("__repr__", [](const Url& u) {
+                return "Url(\"" + u.str() + "\")";
+            })
             .def("__str__", &Url::str)
 
             .def("__truediv__", py::overload_cast<const Url&>(&Url::operator/))  // Division operator with Url
@@ -95,7 +103,8 @@ public:
             .def("__ne__", &Url::operator!=)
 
             .def_property_readonly("scheme", &Url::scheme)
-            .def_property_readonly("user_info", &Url::userInfo)
+            .def_property_readonly("username", &Url::username)
+            .def_property_readonly("password", &Url::password)
             .def_property_readonly("host", &Url::host)
             .def_property_readonly("port", &Url::port)
             .def_property_readonly("path", &Url::path)

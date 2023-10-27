@@ -1,10 +1,12 @@
 #include <sstream>
 #include "url.h"
 
+
 // Default constructor
 Url::Url() :
     mScheme(""),
-    mUserInfo(""),
+    mUsername(""),
+    mPassword(""),
     mHost(""),
     mPort(0),
     mAuthority(""),
@@ -13,9 +15,11 @@ Url::Url() :
     // Default constructor initializes all string members to empty strings
 }
 
+
 Url::Url(const Url& other) :
     mScheme(other.mScheme),
-    mUserInfo(other.mUserInfo),
+    mUsername(other.mUsername),
+    mPassword(other.mPassword),
     mHost(other.mHost),
     mPort(other.mPort),
     mAuthority(other.mAuthority),
@@ -25,9 +29,11 @@ Url::Url(const Url& other) :
     // Copy constructor
 }
 
+
 Url::Url(const std::string& value) :
         mScheme(""),
-        mUserInfo(""),
+        mUsername(""),
+        mPassword(""),
         mHost(""),
         mPort(0),
         mAuthority(""),
@@ -54,16 +60,11 @@ Url::Url(const std::string& value) :
     }
 }
 
-Url::Url(const std::vector<std::string>& valueList) {
-    // Assuming valueList contains ordered URL parts:
-    if(valueList.size() > 0) mScheme = valueList[0];
-    if(valueList.size() > 1) mUserInfo = valueList[1];
-    // ... and so on, adjust as per the actual structure of valueList
-}
 
 Url::Url(const std::map<std::string, std::string>& parts) {
     mScheme = parts.at("scheme");
-    mUserInfo = parts.at("userInfo");
+    mUsername = parts.at("userInfo");
+    mPassword = parts.at("userInfo");
     mHost = parts.at("host");
     int port = std::stoi(parts.at("port"));  // Convert string to int
 
@@ -79,6 +80,8 @@ Url::Url(const std::map<std::string, std::string>& parts) {
 
 
 Url::Url(const std::string& scheme,
+         const std::string& username,
+         const std::string& password,
          const std::string& host,
          const uint16_t port,
          const std::string& path,
@@ -86,7 +89,8 @@ Url::Url(const std::string& scheme,
          const std::string& fragment
          ) :
     mScheme(scheme),
-    mUserInfo(""),
+    mUsername(username),
+    mPassword(password),
     mHost(host),
     mPort(port),
     mAuthority(""),
@@ -94,6 +98,7 @@ Url::Url(const std::string& scheme,
     mFragment(fragment) {
     mPath = split(path, '/');
 }
+
 
 std::vector<std::string> Url::split(const std::string& s, char delimiter) {
     std::vector<std::string> tokens;
@@ -106,7 +111,7 @@ std::vector<std::string> Url::split(const std::string& s, char delimiter) {
 }
 
 
-std::string Url::str() {
+const std::string Url::str() const {
     std::stringstream result;
 
     // Scheme (e.g., "http")
@@ -115,8 +120,16 @@ std::string Url::str() {
     }
 
     // User Info (e.g., "username:password@")
-    if (!mUserInfo.empty()) {
-        result << mUserInfo << "@";
+    if (!mUsername.empty()) {
+        result << mUsername;
+    }
+
+    if (!mPassword.empty()) {
+        result << ":" << mPassword;
+    }
+
+    if (!mUsername.empty() || !mPassword.empty()) {
+        result << "@";
     }
 
     // Host (e.g., "www.example.com")
@@ -171,6 +184,7 @@ Url Url::withParams(const std::map<std::string, std::string>& mapping) const {
     return new_url;
 }
 
+
 // Overloaded or-operator implementation
 Url Url::operator|(const std::map<std::string, std::string>& other) {
     return this->withParams(other);
@@ -181,7 +195,8 @@ bool Url::operator==(const Url& other) const {
     if (this == &other) return true;
     return
         mScheme == other.mScheme &&
-        mUserInfo == other.mUserInfo &&
+        mUsername == other.mUsername &&
+        mPassword == other.mPassword &&
         mHost == other.mHost &&
         mPort == other.mPort &&
         mPath == other.mPath &&
@@ -190,6 +205,7 @@ bool Url::operator==(const Url& other) const {
         mFragment == other.mFragment &&
         _params == other._params;
 }
+
 
 bool Url::operator!=(const Url& other) const {
     return !(*this == other);

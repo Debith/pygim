@@ -2,9 +2,18 @@
 Tests for URL class.
 """
 
+from urllib.parse import urlparse
 import cppimport.import_hook
 import pytest
 from _pygim.common_fast import Url
+
+
+def make_url(url):
+    mapping = dict(**urlparse(url)._asdict())
+    mapping['host'] = mapping.pop("netloc")
+    mapping.pop("params")
+    return Url(**mapping)
+
 
 @pytest.mark.parametrize(
     "url,expected_result",
@@ -17,7 +26,12 @@ from _pygim.common_fast import Url
         (Url(path="root/sub"),      Url(path="root/sub")),
         (Url(query="this=that"),    Url(query="this=that")),
         (Url(fragment="this"),      Url(fragment="this")),
-        (Url("http://test"),        Url(scheme="http", host="test")),
+        (Url("http://test"),        Url(make_url("http://test"))),
+        (Url("//root/sub"),         Url(make_url("//root/sub"))),
+
+        (Url("http://username:password@example.com:8080/path/to/resource?query=value#fragment"),
+            Url(scheme="http", username="username", password="password", host="example.com",
+                port=8080, path="/path/to/resource", query="query=value", fragment="fragment")),
 
         #(Url("http://test"), "http://test"),
         #(Url(["test"]), "http://test"),
