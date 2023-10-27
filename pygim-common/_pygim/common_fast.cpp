@@ -1,3 +1,4 @@
+// cppimport
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 
@@ -48,3 +49,14 @@ PYBIND11_MODULE(common_fast, m)
 
     Url::expose_to_python(m);
 }
+
+/*
+<%
+setup_pybind11(cfg)
+import pygim
+cfg['dependencies'] = ['_iterlib_fast/iterutils.h', '_common_fast/url.h']
+cfg['sources'] = ['_common_fast/url.cpp']
+cfg['extra_compile_args'] = ['-std=c++20', '-g', '-O3']
+print(cfg)
+%>
+*/

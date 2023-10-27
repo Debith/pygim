@@ -5,6 +5,7 @@ __pycache__/
 
 # C extensions
 *.so
+.rendered.*.cpp
 
 # Distribution / packaging
 .Python
@@ -27,7 +28,7 @@ share/python-wheels/
 *.egg
 MANIFEST
 *.whl
-debug/
+*debug*/
 
 # PyInstaller
 #  Usually these files are written by a python script from a template
