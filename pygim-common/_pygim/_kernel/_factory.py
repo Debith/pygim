@@ -3,15 +3,21 @@
 This contains a generic factory that works in open-closed principle.
 """
 
+import typing as t
+
 from .._magic._entangled import EntangledClassMeta
 from .._magic._support import classproperty
+from .._error_msgs import type_error_msg
+
 
 class FactoryMeta(EntangledClassMeta):
     @classmethod
     def __prepare__(cls, _, bases):
-        mapping = dict(__registered_classes={})
+        mapping = super().__prepare__(_, bases)
+        mapping["__registered_classes"] = {}  # Nasty trickery avoiding mangling.
         return mapping
 
+GENERATED = object()
 
 class Factory(metaclass=FactoryMeta):
     """
@@ -59,6 +65,20 @@ class Factory(metaclass=FactoryMeta):
     @classmethod
     def __getitem__(self, object_name: str):
         pass
+
+    @classmethod
+    def register(cls, factory, *, obj_name: str = GENERATED, func_name: str = GENERATED):
+        if not callable(factory):
+            raise TypeError(type_error_msg(factory, t.Callable))
+        
+        if obj_name is GENERATED:
+            obj_name = factory.__name__
+        
+        if func_name is GENERATED:
+            func_name = f"create_{obj_name.lower()}"
+
+        cls.__registered_classes[obj_name] = factory
+        setattr(cls, func_name, factory)
 
     @classproperty
     def registered(cls):

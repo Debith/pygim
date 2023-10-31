@@ -7,6 +7,7 @@ from collections.abc import Mapping, MutableMapping
 from _pygim._exceptions import EntangledClassError, EntangledMethodError
 from ._cached_type import CachedTypeMeta
 
+
 def setdefaultattr(obj, name, default):
     """ Sets attribute to object in case it is missing. """
     if isinstance(obj, property):
@@ -178,6 +179,12 @@ class EntangledClassMeta(type, metaclass=EntangledClassMetaMeta):
 
     def __call__(self, *args, **kwds):
         """Create instance of the EntangledClass, ensuring only subclasses can be created."""
-        if getattr(self, _ABSTRACT_ATTR):
-            raise EntangledClassError("EntangledClass is abstract class, so please use inheritance!")
+        if not getattr(self, _NAMESPACE_KEY, False):
+            raise EntangledClassError(f"{self.__name__} is entangled class. "\
+                                      "You must create your own namespace by using "\
+                                      f"`{self.__name__}['your_namespace']`")
+
+        if getattr(self, _ABSTRACT_ATTR, True):
+            raise EntangledClassError(f"{self.__name__} is abstract class. You must inherit from it!")
+        
         return super().__call__(*args, **kwds)

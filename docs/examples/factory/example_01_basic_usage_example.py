@@ -1,29 +1,30 @@
 # type: ignore
 
-from pygim.gimmicks import EntangledClass
+from pygim.patterns.factory import Factory
 
+MainFactory = Factory[__name__]
 
-class Factory(EntangledClass):
-    """ """
-    
-    
-class GameFactory(Factory):    
+assert MainFactory.__pygim_namespace__ == __name__
+
+class RockFactory(MainFactory):    
     def create_rock(self):
         return "rock"
+    
+
+@MainFactory.register
+class Scissor:
+    pass
 
 
-class GameFactory(Factory):
-    def create_scissor(self):
-        return "scissor"
-
-
-
+@MainFactory.register
+def create_paper():
+    return "paper"
 
 
 print(Factory.__pygim_namespace__)
 print(GameFactory.__pygim_namespace__)
 print(GameFactory.__pygim_namespace__)
 
-f = GameFactory()
+f = RockFactory()
 print(f.create_rock())
 print(f.create_scissor())
