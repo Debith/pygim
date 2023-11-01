@@ -39,7 +39,7 @@ public:
     );
 
     // Utility function for string splitting
-    std::vector<std::string> split(const std::string& s, char delimiter);
+    std::vector<std::string> split(const std::string& s, char delimiter, bool allowEmpty=false);
 
     const std::string str() const;
     Url operator/(const std::string& other);

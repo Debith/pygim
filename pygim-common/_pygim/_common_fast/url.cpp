@@ -22,11 +22,12 @@ Url::Url(const Url& other) :
     mPassword(other.mPassword),
     mHost(other.mHost),
     mPort(other.mPort),
+    mPath(other.mPath),
     mAuthority(other.mAuthority),
     mQuery(other.mQuery),
     mFragment(other.mFragment),
     _params(other._params) {
-    // Copy constructor
+
 }
 
 
@@ -100,12 +101,14 @@ Url::Url(const std::string& scheme,
 }
 
 
-std::vector<std::string> Url::split(const std::string& s, char delimiter) {
+std::vector<std::string> Url::split(const std::string& s, char delimiter, bool allowEmpty) {
     std::vector<std::string> tokens;
     std::string token;
     std::istringstream tokenStream(s);
     while (std::getline(tokenStream, token, delimiter)) {
-        tokens.push_back(token);
+        if (allowEmpty || !token.empty()) {
+            tokens.push_back(token);
+        }
     }
     return tokens;
 }
