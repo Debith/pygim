@@ -20,7 +20,7 @@ ext_modules = [
         list(str(p) for p in Path(ROOT).rglob("*.cpp") if ".rendered." not in str(p)),
         # Example: passing in the version to the compiled code
         define_macros=[("VERSION_INFO", __version__)],
-        extra_compile_args=["-g"],
+        extra_compile_args=["-g", "-O3", "-std=c++17", "-fopenmp"],
     ),
 ]
 
@@ -36,6 +36,6 @@ cfg["ext_modules"] = ext_modules
 cfg["cmdclass"] = {"build_ext": build_ext}
 cfg["install_requires"] = cfg.pop("dependencies")
 
-# import pprint
-# pprint.pprint(cfg)
+import pprint
+pprint.pprint(cfg)
 setup(**cfg)

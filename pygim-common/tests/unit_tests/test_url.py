@@ -3,7 +3,7 @@ Tests for URL class.
 """
 
 from urllib.parse import urlparse
-import cppimport.import_hook
+#import cppimport.import_hook
 import pytest
 from _pygim.common_fast import Url
 
