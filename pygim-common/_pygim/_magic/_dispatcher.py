@@ -3,7 +3,11 @@
 Dispatcher class internal implementation.
 """
 
+from itertools import product
+from functools import wraps
 from dataclasses import dataclass, field
+from .._exceptions import GimError
+from .._utils._inspect import class_names
 
 
 def _arg_identifier(arg):
@@ -40,6 +44,11 @@ class _Dispatcher:
         if "." in self.__callable.__qualname__ and self.__callable.__code__.co_argcount > 0:
             # This looks like a method.
             self.__start_index = 1
+        wraps(self.__callable)(self)
+
+    @property
+    def supported_types(self):
+        return list(self.__registry)
 
     def register(self, *specs):
         """
@@ -92,9 +101,25 @@ class _Dispatcher:
         """
         # TODO: This code is ineffective and needs some extra magic to make it more performant.
         its_type = tuple(self.__args[i](args[i]) for i in range(len(self.__args)))
+        if its_type not in self.__registry:
+            prod_type = [t.__mro__[:-1] for t in its_type]
+            prods = set(product(*prod_type))
+            common = set(prods).intersection(self.__registry)
+
+            if len(common) > 1:
+                raise GimError(f"Multiple base class combinations: {class_names(common)}")
+
+            if not common:
+                return self.__callable(*args, **kwargs)
+
+            func = self.__registry[list(common)[0]]
+
+            for key in prods - common:
+                if object in key:
+                    continue
+                self.__registry[key] = func
+
         if self.__start_index:
             args = (self.__instance,) + args
-        try:
-            return self.__registry[its_type](*args, **kwargs)
-        except KeyError:
-            return self.__callable(*args, **kwargs)
+
+        return self.__registry[its_type](*args, **kwargs)
