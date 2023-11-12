@@ -1,5 +1,19 @@
 #include <sstream>
+#include <iostream>
 #include "url.h"
+#include "id.h"
+
+
+std::string stripCharacter(const std::string& str, char character) {
+    size_t start = str.find_first_not_of(character);
+    if (start == std::string::npos) {
+        // The string contains only the character to be stripped
+        return "";
+    }
+
+    size_t end = str.find_last_not_of(character);
+    return str.substr(start, (end - start + 1));
+}
 
 
 // Default constructor
@@ -22,11 +36,11 @@ Url::Url(const Url& other) :
     mPassword(other.mPassword),
     mHost(other.mHost),
     mPort(other.mPort),
+    mPath(other.mPath),
     mAuthority(other.mAuthority),
     mQuery(other.mQuery),
     mFragment(other.mFragment),
     _params(other._params) {
-    // Copy constructor
 }
 
 
@@ -96,18 +110,36 @@ Url::Url(const std::string& scheme,
     mAuthority(""),
     mQuery(query),
     mFragment(fragment) {
-    mPath = split(path, '/');
+    split(path, '/');
 }
 
 
-std::vector<std::string> Url::split(const std::string& s, char delimiter) {
-    std::vector<std::string> tokens;
+void Url::split(const std::string& s, char delimiter) {
     std::string token;
     std::istringstream tokenStream(s);
     while (std::getline(tokenStream, token, delimiter)) {
-        tokens.push_back(token);
+        // push token to vector after removing leading and trailing whitespaces
+        // as well as slashes.
+        token = stripCharacter(token, '/');
+        if (token.empty()) {
+            continue;
+        }
+        mPath.push_back(token);
     }
-    return tokens;
+}
+
+
+bool Url::compareWithOther(const Url& other) const {
+    size_t minLength = std::min(components.size(), other.components.size());
+
+    for (size_t i = 0; i < minLength; ++i) {
+        if (components[i] != other.components[i]) {
+            return false;
+        }
+    }
+
+    // If all elements up to the shortest length match, return true
+    return true;
 }
 
 
@@ -164,15 +196,34 @@ const std::string Url::str() const {
 // Overloaded division operator for string
 Url Url::operator/(const std::string& other) {
     Url new_url(*this);
-    auto other_parts = split(other, '/');
-    //new_url._url.insert(new_url._url.end(), other_parts.begin(), other_parts.end());
+    new_url.split(other, '/');
     return new_url;
 }
 
 // Overloaded division operator for Url object
 Url Url::operator/(const Url& other) {
     Url new_url(*this);
-    //new_url._url.insert(new_url._url.end(), other._url.begin(), other._url.end());
+
+    if (mScheme != other.mScheme) {
+        throw std::invalid_argument("Scheme mismatch");
+    } else if (mHost != other.mHost) {
+        throw std::invalid_argument("Username mismatch");
+    } else if (mHost != other.mHost) {
+        throw std::invalid_argument("Host mismatch");
+    } else if (mPort != other.mPort) {
+        throw std::invalid_argument("Port mismatch");
+    } else if (mAuthority != other.mAuthority) {
+        throw std::invalid_argument("Authority mismatch");
+    } else if (mQuery != other.mQuery) {
+        throw std::invalid_argument("Query mismatch");
+    } else if (mFragment != other.mFragment) {
+        throw std::invalid_argument("Fragment mismatch");
+    }
+
+    for (const auto& part : other.mPath) {
+        new_url.mPath.push_back(part);
+    }
+
     return new_url;
 }
 
@@ -180,6 +231,7 @@ Url Url::operator/(const Url& other) {
 // withParams implementation
 Url Url::withParams(const std::map<std::string, std::string>& mapping) const {
     Url new_url(*this);
+
     //new_url._params.insert(mapping.begin(), mapping.end());
     return new_url;
 }

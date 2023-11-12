@@ -22,6 +22,16 @@ private:
 
     std::map<std::string, std::string> _params;
 
+    // Utility function for string splitting
+    /**
+     * @brief Split a string by a delimiter extending
+     *
+     * @param s
+     * @param delimiter
+     * @return std::vector<std::string>
+     */
+    void split(const std::string& s, char delimiter);
+
 public:
     // Constructors
     Url();
@@ -37,9 +47,6 @@ public:
         const std::string& query,
         const std::string& fragment
     );
-
-    // Utility function for string splitting
-    std::vector<std::string> split(const std::string& s, char delimiter);
 
     const std::string str() const;
     Url operator/(const std::string& other);

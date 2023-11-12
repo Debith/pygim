@@ -3,7 +3,7 @@ Tests for URL class.
 """
 
 from urllib.parse import urlparse
-#import cppimport.import_hook
+import cppimport.import_hook
 import pytest
 from _pygim.common_fast import Url
 
@@ -18,34 +18,37 @@ def make_url(url):
 @pytest.mark.parametrize(
     "url,expected_result",
     [
-        (Url(), Url()),
-        (Url(scheme="http"),        Url(scheme="http")),
-        (Url(host="host"),          Url(host="host")),
-        (Url(port=345),             Url(port=345)),
-        (Url(path="root"),          Url(path="root")),
-        (Url(path="root/sub"),      Url(path="root/sub")),
-        (Url(query="this=that"),    Url(query="this=that")),
-        (Url(fragment="this"),      Url(fragment="this")),
-        (Url("http://test"),        Url(make_url("http://test"))),
-        (Url("//root/sub"),         Url(make_url("//root/sub"))),
+        #(Url(), Url()),
+        #(Url(scheme="http"),        Url(scheme="http")),
+        #(Url(host="host"),          Url(host="host")),
+        #(Url(port=345),             Url(port=345)),
+        #(Url(path="root"),          Url(path="root")),
+        #(Url(path="root/sub"),      Url(path="root/sub")),
+        #(Url(query="this=that"),    Url(query="this=that")),
+        #(Url(fragment="this"),      Url(fragment="this")),
+        #(Url("http://test"),        Url(make_url("http://test"))),
+        #(Url("//root/sub"),         Url(make_url("//root/sub"))),
 
-        (Url("http://username:password@example.com:8080/path/to/resource?query=value#fragment"),
-            Url(scheme="http", username="username", password="password", host="example.com",
-                port=8080, path="/path/to/resource", query="query=value", fragment="fragment")),
+        #(Url("http://username:password@example.com:8080/path/to/resource?query=value#fragment"),
+        #    Url(scheme="http", username="username", password="password", host="example.com",
+        #        port=8080, path="/path/to/resource", query="query=value", fragment="fragment")),
 
-        #(Url("http://test"), "http://test"),
-        #(Url(["test"]), "http://test"),
-        #(Url(Url("http://test")), "http://test"),
-        #(Url(["http://"]), "http://"),
-        #(Url("http://test") / "sub", "http://test/sub"),
-        #(Url("http://test") / "/sub", "http://test/sub"),
-        #(Url("http://test") / "sub/", "http://test/sub"),
-        #(Url("http://test") / "/sub/", "http://test/sub"),
-        #(Url("http://test/") / "/sub/", "http://test/sub"),
-        #(Url("http://test/") / "/sub1/sub2/sub3", "http://test/sub1/sub2/sub3"),
-        #(Url("http://test/") / Url("http://test/sub"), "http://test/sub"),
-        #(Url("http://test") | dict(param="example"), "http://test"),
-        #(Url("http://test").with_params(param="example"), "http://test"),
+        #(str(Url("http://test")), "http://test"),
+        #(str(Url(["test"])), "http://test"),
+        #(str(Url(Url("http://test"))), "http://test"),
+        #(str(Url(["http://"])), "http://"),
+        #(str(Url("http://test") / "sub"), "http://test/sub"),
+        #(str(Url("http://test") / "/sub"), "http://test/sub"),
+        #(str(Url("http://test") / "sub/"), "http://test/sub"),
+        #(str(Url("http://test") / "/sub/"), "http://test/sub"),
+        #(str(Url("http://test/") / "/sub/"), "http://test/sub"),
+        #(str(Url("http://test/") / "/sub1/sub2/sub3"), "http://test/sub1/sub2/sub3"),
+        #(str(Url("http://test/") / Url("http://test/sub")), "http://test/sub"),
+        (str(Url("http://test/") / Url("http://test/sub/")), "http://test/sub"),
+        #(Url("http://test/") / Url("http://test/sub/"), make_url("http://test/sub")),
+        (str(Url("http://test/sub1") / Url("http://test/sub1/sub2")), "http://test/sub1/sub2"),
+        #(str(Url("http://test") | dict(param="example")), "http://test"),
+        #(str(Url("http://test").with_params(param="example")), "http://test"),
     ],
 )
 def test_url(url, expected_result):

@@ -56,7 +56,7 @@ setup_pybind11(cfg)
 import pygim
 cfg['dependencies'] = ['_iterlib_fast/iterutils.h', '_common_fast/url.h']
 cfg['sources'] = ['_common_fast/url.cpp']
-cfg['extra_compile_args'] = ['-std=c++20', '-g', '-O3']
+cfg['extra_compile_args'] = ['-std=c++17', '-g', '-O3']
 print(cfg)
 %>
 */
