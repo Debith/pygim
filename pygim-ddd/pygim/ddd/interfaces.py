@@ -54,7 +54,6 @@ IInfrastructureService:
 
 import abc
 from enum import Enum, unique
-from pygim.explib import type_error_msg
 
 
 class IService(abc.ABC):
@@ -156,7 +155,7 @@ class IEntity(abc.ABC):
         bool
             True if the entities' ids are equal, False otherwise.
         """
-        assert isinstance(entity, IEntity), type_error_msg(entity, IEntity)
+        assert isinstance(entity, IEntity)
         return self.id == entity.id
 
 
@@ -263,7 +262,6 @@ class IValueObject(abc.ABC):
         AssertionError
             If `value_object` is not an instance of `IValueObject`.
         """
-        assert isinstance(value_object, IValueObject), type_error_msg(value_object, IValueObject)
         raise NotImplementedError()
 
 
