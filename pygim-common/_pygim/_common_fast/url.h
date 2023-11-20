@@ -1,3 +1,5 @@
+#pragma once
+
 #include <string>
 #include <vector>
 #include <map>
@@ -47,6 +49,11 @@ public:
         const std::string& query,
         const std::string& fragment
     );
+
+    class Iterator;
+
+    Iterator begin() const;
+    Iterator end() const;
 
     const std::string str() const;
     Url operator/(const std::string& other);
@@ -129,4 +136,32 @@ public:
             .def("__or__", &Url::operator|)  // or-operator binding
             ;
     }
+};
+
+
+class Url::Iterator {
+private:
+    std::vector<std::string> components;
+    size_t index;
+
+public:
+    using iterator_category = std::forward_iterator_tag;
+    using value_type = std::string;
+    using difference_type = std::ptrdiff_t;
+    using pointer = const std::string*;
+    using reference = const std::string&;
+
+    Iterator(std::vector<std::string> components, size_t start);
+
+    reference operator*() const;
+    pointer operator->() const;
+
+    // Prefix increment
+    Iterator& operator++();
+
+    // Postfix increment
+    Iterator operator++(int);
+
+    friend bool operator==(const Iterator& a, const Iterator& b);
+    friend bool operator!=(const Iterator& a, const Iterator& b);
 };

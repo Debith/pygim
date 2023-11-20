@@ -129,17 +129,31 @@ void Url::split(const std::string& s, char delimiter) {
 }
 
 
-bool Url::compareWithOther(const Url& other) const {
-    size_t minLength = std::min(components.size(), other.components.size());
+std::vector<std::string> iter() const {
+    std::vector<std::string> components;
 
-    for (size_t i = 0; i < minLength; ++i) {
-        if (components[i] != other.components[i]) {
-            return false;
-        }
+    components.push_back(mScheme);
+
+    // Combine username and password as a single string
+    if (!mUsername.empty()) {
+        components.push_back(mUsername + (mPassword.empty() ? "" : ":" + mPassword));
     }
 
-    // If all elements up to the shortest length match, return true
-    return true;
+    // Combine host and port as a single string
+    components.push_back(mHost + (mPort ? ":" + std::to_string(mPort) : ""));
+
+    // Append all path components
+    for (const auto& segment : mPath) {
+        components.push_back(segment);
+    }
+
+    if (!mQuery.empty()) {
+        components.push_back(mQuery);
+    }
+
+    // ... include other components as needed ...
+
+    return components;
 }
 
 
