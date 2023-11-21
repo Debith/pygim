@@ -1,5 +1,5 @@
 from typing import Iterator, Text, Any, Optional, Iterable
-from pygim.typing import PathLike
+from _pygim.typing import PathLike
 
 def measure_coverage(*, include: Optional[PathLike] = ..., show_missing: bool = ...) -> Iterator[None]: ...
 def run_tests(

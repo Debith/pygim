@@ -1,9 +1,11 @@
 import os
-import sys
 import pathlib
 import urllib
 from pdm.backend.editable import EditableBuilder
 from pdm.backend.wheel import WheelBuilder
+from loguru import logger
+from pprint import pformat
+
 
 ROOT = pathlib.Path(__file__).parents[1]
 
@@ -11,6 +13,7 @@ ROOT = pathlib.Path(__file__).parents[1]
 def post_initialize(context):
     md = dict(context.config.metadata)
     md['dependencies'] = [urllib.parse.unquote(dep) for dep in md['dependencies']]
+    logger.debug(f"Metadata: {pformat(md)}")
     context.config.metadata = context.config.metadata.__class__(md)
     context.config.data['project']['dependencies'] = [
         urllib.parse.unquote(dep) for dep in context.config.data['project']['dependencies']]

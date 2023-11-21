@@ -1,6 +1,6 @@
 from typing import Iterable, Text, Collection, Optional, Generator, Any, Mapping
 from typing_extensions import TypeAlias
-from pygim.typing import PathLike, MaybePathLike, MaybePathLikes
+from _pygim.typing import PathLike, MaybePathLike, MaybePathLikes
 from pathlib import Path
 
 Paths: TypeAlias = Collection[Path]
