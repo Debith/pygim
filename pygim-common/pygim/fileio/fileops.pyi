@@ -1,5 +1,5 @@
 from typing import Text, Any, Union
-from pygim.typing import PathLike
+from _pygim.typing import PathLike
 
 def write_bytes(filename: PathLike, data: bytes, *, make_dirs: bool = ..., suffix: Text = ...) -> None: ...
 def pickle_and_compress(

@@ -249,7 +249,7 @@ class IValueObject(abc.ABC):
         raise NotImplementedError('Value objects are immutable.')
 
     @abc.abstractmethod
-    def __eq__(self, value_object) -> bool:
+    def __eq__(self, value_object):
         """
         Abstract method for comparing two value objects based on their attributes.
 
@@ -297,7 +297,7 @@ class ILoadRepository(IService):
     """
 
     @abc.abstractmethod
-    def load(self, *args, **kwargs) -> IRootEntity:
+    def load(self, *args, **kwargs):
         """
         Abstract method that when implemented should load an Aggregate Root from
         the data storage.
@@ -347,7 +347,7 @@ class ISaveRepository(IService):
     """
 
     @abc.abstractmethod
-    def save(self, entity: IRootEntity):
+    def save(self, entity):
         """
         Abstract method that when implemented should save an Aggregate Root to
         the data storage.
@@ -439,16 +439,16 @@ class IBuilder(IFactory):
     >>> class UserBuilder(IBuilder):
     ...     def __init__(self):
     ...         self._user = User()
-    ...     def set_id(self, id):
+    ...     def id(self, id):
     ...         self._user.id = id
     ...         return self
-    ...     def set_name(self, name):
+    ...     def name(self, name):
     ...         self._user.name = name
     ...         return self
     ...     def build(self):
     ...         return self._user
     >>> builder = UserBuilder()
-    >>> alice = builder.set_id(1).set_name('Alice').build()
+    >>> alice = builder.id(1).name('Alice').build()
     >>> print(alice.name)
     'Alice'
     """

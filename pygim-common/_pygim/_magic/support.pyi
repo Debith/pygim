@@ -1,5 +1,5 @@
 from typing import Any
-from pygim.typing import AnyCallable
+from _pygim.typing import AnyCallable
 
 class classproperty:
     fget: AnyCallable
