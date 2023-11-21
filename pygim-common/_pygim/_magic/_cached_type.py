@@ -5,8 +5,6 @@ This module implements cached type that can be used to manage singletons.
 
 __all__ = ["CachedTypeMeta", "CachedType", "create_cached_class"]
 
-import pygim.typing as t
-
 
 class CachedInstanceMeta(type):
     __instance_cache = {}

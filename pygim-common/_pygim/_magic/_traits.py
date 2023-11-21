@@ -7,10 +7,12 @@ from types import FunctionType
 from dataclasses import dataclass, field
 import inspect
 
-from ._dispatcher import dispatch
+from ._dispatcher import _Dispatcher
 from ._patch import MutableFuncObject
-from .._utils import flatten, type_error_msg
+from .._utils import flatten
+from .._error_msgs import type_error_msg
 
+dispatch = _Dispatcher
 
 def transfer_ownership(target, *funcs):
     """ Transfer ownership of source object to target object.

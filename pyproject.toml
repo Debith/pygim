@@ -1,6 +1,11 @@
+[build-system]
+requires = ["setuptools ~= 58.0", "wheel", "python-pip", "editables", "pdm-backend", "toml", "loguru"]
+build-backend = "build_backend"
+backend-path = ["_pygim_build"]
+
 [project]
-name = "pygim"
-version = "0.1.0"
+name = "python-gimmicks"
+version = "0.2.0"
 description = "Full Python Gimmicks project with all of its sub-projects."
 readme = "README.rst"
 requires-python = ">=3.7, <4"
@@ -24,7 +29,8 @@ classifiers = [
 ]
 
 dependencies = [
-  'pygim-common'
+  "pygim-common @ file:///${PROJECT_ROOT}/pygim-common",
+  "pygim-ddd @ file:///${PROJECT_ROOT}/pygim-ddd",
 ]
 
 [project.optional-dependencies]
@@ -36,18 +42,26 @@ dev = [
   'coverage[toml]',
 ]
 
+test = [
+  'pandas',
+  'numpy',
+]
+
+[project.scripts]
+pygim = "_pygim._cli.__main__:cli"
 
 [tool.pytest.ini_options]
 minversion = "6.0"
 python_files = "test_*.py"
 addopts = '-ra -q --doctest-glob="**/*.py" --tb=short --doctest-modules --doctest-continue-on-failure'
 testpaths = [
-    "pygim-common/tests"
+    "pygim-common/tests",
+    "pygim-ddd/tests"
 ]
 
 [tool.coverage.report]
 omit = ["./docs/**/*.*", "**/tests/**/*.*"]
-include = ["./pygim-common/**/*.py"]
+include = ["./pygim-common/**/*.py", "./pygim-ddd/**/*.py"]
 show_missing = true
 exclude_lines = [
     "pragma: no cover",
@@ -60,3 +74,8 @@ exclude_lines = [
 [tool.pygim.commands]
 lint = "mypy ."
 test = "pytest"
+
+[tool.pdm.build]
+includes = [
+    "pygim-cli",
+]

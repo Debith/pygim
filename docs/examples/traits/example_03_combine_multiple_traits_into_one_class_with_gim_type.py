@@ -1,5 +1,5 @@
 #type: ignore
-from pygim import gim_type
+from pygim.gimmicks import gim_type
 
 
 class DataClass1:
