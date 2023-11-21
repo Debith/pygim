@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools ~= 58.0", "wheel", "python-pip", "editables", "pdm-backend", "toml"]
+requires = ["setuptools ~= 58.0", "wheel", "python-pip", "editables", "pdm-backend", "toml", "loguru"]
 build-backend = "build_backend"
 backend-path = ["_pygim_build"]
 
@@ -29,7 +29,8 @@ classifiers = [
 ]
 
 dependencies = [
-  "pygim-common @ file:///${PROJECT_ROOT}/pygim-common"
+  "pygim-common @ file:///${PROJECT_ROOT}/pygim-common",
+  "pygim-ddd @ file:///${PROJECT_ROOT}/pygim-ddd",
 ]
 
 [project.optional-dependencies]
