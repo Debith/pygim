@@ -1,6 +1,6 @@
 import pytest
 
-from pygim.kernel.entangled_class import EntangledClassMetaMeta
+from _pygim._magic._entangled import EntangledClassMetaMeta
 from pygim.utils import safedelattr
 
 

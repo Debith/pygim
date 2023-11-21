@@ -1,11 +1,11 @@
 import importlib
 import pytest
-from pygim import PathSet
+from pygim.fileio import PathSet
 from pathlib import Path
 
 ROOT = Path(__file__).parents[3]
 
-EXAMPLES = PathSet(ROOT / 'docs/examples').files(suffix=".py"   )
+EXAMPLES = PathSet(ROOT / 'docs/examples').files(suffix=".py")
 assert EXAMPLES
 EXAMPLES = list(reversed(sorted(EXAMPLES)))
 
@@ -17,6 +17,6 @@ def test_examples(module_path):
 
 
 if __name__ == "__main__":
-    from pygim.utils.testing import run_tests
-    from pygim import EntangledClass
+    from pygim.testing import run_tests
+    from pygim.gimmicks import EntangledClass
     run_tests(__file__, module_name=EntangledClass.__module__, coverage=False)

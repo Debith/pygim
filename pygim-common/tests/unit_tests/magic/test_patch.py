@@ -19,7 +19,7 @@ def test_mutable_code_object_returns_identical_code_object_for_function():
 
 def test_mutable_code_object_can_modify_owner_of_class():
     from _pygim._magic._patch import MutableCodeObject
-    from _pygim._utils._inspect import diff
+    from pygim.testing import diff
 
     class Test:
         def __init__(self):

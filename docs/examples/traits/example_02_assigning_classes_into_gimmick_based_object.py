@@ -1,5 +1,5 @@
 # type: ignore
-from pygim import gimmick
+from pygim.gimmicks import gimmick
 
 # Create a new class `ExampleObject` that inherits from the `gimmick` class
 class ExampleObject(gimmick):

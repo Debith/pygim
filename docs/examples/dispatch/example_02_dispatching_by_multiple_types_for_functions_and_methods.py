@@ -1,6 +1,6 @@
 # type: ignore
 # First, we import the dispatch decorator from pygim
-from pygim import dispatch
+from pygim.performance.dispatch import dispatch
 
 # In this example, the dispatch function is designed to handle two arguments,
 # and different implementations are registered to handle different combinations

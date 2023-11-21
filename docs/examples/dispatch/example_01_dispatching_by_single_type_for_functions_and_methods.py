@@ -1,6 +1,6 @@
 # type: ignore
 # first, import the dispatch decorator from pygim
-from pygim import dispatch
+from pygim.performance.dispatch import dispatch
 
 # The purpose of dispatching is to allow a single function name to handle
 # multiple types of input. In the provided example code, the dispatch_by_type
