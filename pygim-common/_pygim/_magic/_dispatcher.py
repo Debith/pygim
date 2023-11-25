@@ -110,6 +110,8 @@ class _Dispatcher:
                 raise GimError(f"Multiple base class combinations: {class_names(common)}")
 
             if not common:
+                if self.__start_index:
+                    args = (self.__instance,) + args
                 return self.__callable(*args, **kwargs)
 
             func = self.__registry[list(common)[0]]
