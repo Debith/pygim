@@ -19,8 +19,6 @@ _EMPTY_BODY = __empty_body__.__code__.co_code
 del __empty_body__
 
 
-
-
 def _is_dunder(attr):
     return attr.startswith('__') and attr.endswith('__')
 
@@ -45,6 +43,10 @@ def _is_valid_interface(func) -> bool:
     return _is_valid_interface_func(func)
 
 
+class GimABCError(e.GimError):
+    """Base class for all errors raised by this module."""
+
+
 class InterfaceMeta(gim_type, abc.ABCMeta):
     '''
     '''
@@ -58,12 +60,14 @@ class InterfaceMeta(gim_type, abc.ABCMeta):
 
     @classmethod
     def _ensure_abstract_bases(mcls, bases):
+        if gimmick not in bases:
+            bases += (gimmick, )
         if not bases:
             return (abc.ABC, )
         elif abc.ABC in bases:
             return bases
         else:
-            return (abc.ABC, ) + bases
+            return bases + (abc.ABC, )
 
     @classmethod
     def _ensure_abstract_methods_and_properties(mcls, attrs):
@@ -116,8 +120,9 @@ class InterfaceMeta(gim_type, abc.ABCMeta):
             return super().__new__(mcls, name, bases, kwargs)
 
         bases = mcls._ensure_abstract_bases(bases)
-        attrs = mcls._ensure_abstract_methods_and_properties(namespace)
-        attrs = mcls._clean_attrs(attrs)
+        attrs = mcls._clean_attrs(namespace)
+        if interface in bases:
+            attrs = mcls._ensure_abstract_methods_and_properties(attrs)
 
         cls = super().__new__(mcls, name, bases, attrs)
         assert gimmick in cls.__bases__
@@ -126,9 +131,19 @@ class InterfaceMeta(gim_type, abc.ABCMeta):
     def __call__(self, *args, **kwargs):
         if self is interface:
             raise NotImplementedError()
-        if not self.__abstractmethods__:
-            raise e.GimError("Can't instantiate interface!")
-        return super().__call__(*args, **kwargs)
+
+        # If interface is found in immediate bases, but no abstract methods
+        # are found, then it is still an interface.
+        if interface in self.__bases__ and not self.__abstractmethods__:
+            raise GimABCError("Can't instantiate interface!")
+
+        try:
+            return super().__call__(*args, **kwargs)
+        except TypeError:
+            raise GimABCError(
+                f"Can't instantiate interface ``{self.__name__}`` "
+                f"with abstract methods: {', '.join(sorted(self.__abstractmethods__))}"
+                ) from None
 
 
 @dataclass
