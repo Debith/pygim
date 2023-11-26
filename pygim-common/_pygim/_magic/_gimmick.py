@@ -55,7 +55,7 @@ class gim_type(type, metaclass=GimTypeMeta):
     def __prepare__(*args):
         return dict(__pygim_traits__=_NoTraits())
 
-    def __new__(mcls, name, bases=(), namespace=None, **kwargs):
+    def __new__(mcls, name, bases=(), namespace=None, **_):
         namespace = namespace or {}
         try:
             if gimmick not in bases:
@@ -73,7 +73,7 @@ class gim_type(type, metaclass=GimTypeMeta):
         namespace["__pygim_traits__"] = {}
         return super().__new__(mcls, name, bases, namespace)
 
-    def __init__(cls, name, bases=(), namespace=None):
+    def __init__(cls, name, bases=(), namespace=None, **_):
         super().__init__(name, bases, namespace)
 
     def __call__(self, *args, **kwargs):

@@ -115,6 +115,40 @@ def test_with_implementation_of_single_method_interface():
     ExampleClass()
 
 
+def test_interface_with_body_containing_implementation():
+    from pygim.gimmicks.abc import interface, GimABCError
+
+    with pytest.raises(
+        GimABCError,
+        match="Interface functions are intended to be empty! "
+              "Use ``pygim.gimmicks.abc.abstract`` "
+              "if you need function to contain body."):
+        class ExampleInterface(interface):
+            def test_func():
+                return 1
+
+
+def test_interface_name_space_contains_abc_modules_methods():
+    from pygim.gimmicks.abc import interface
+
+    try:
+        class ExampleInterface(interface):
+            @abstractmethod  # type: ignore
+            def method(self): pass
+    except Exception:
+        pytest.fail("Failed to create interface with ``abstractmethod`` decorator!")
+
+
+def test_abstract_class_with_body_containing_implementation():
+    from pygim.gimmicks.abc import abstract
+
+    class ExampleAbstractClass(abstract):
+        def test_func():
+            return 1
+
+    assert ExampleAbstractClass.test_func() == 1
+
+
 if __name__ == '__main__':
     from pygim.testing import run_tests
 

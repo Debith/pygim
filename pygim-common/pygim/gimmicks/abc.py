@@ -7,6 +7,7 @@ import abc
 from collections.abc import Iterable
 from dataclasses import dataclass, field
 from types import FunctionType
+from typing import TYPE_CHECKING
 
 from _pygim._magic._gimmick import gimmick, gim_type
 import _pygim._exceptions as e
@@ -47,6 +48,15 @@ class GimABCError(e.GimError):
     """Base class for all errors raised by this module."""
 
 
+def reraise(func):
+    def wrapper(*args, **kwargs):
+        try:
+            return func(*args, **kwargs)
+        except GimABCError as exc:
+            raise GimABCError(str(exc)) from None
+    return wrapper
+
+
 class InterfaceMeta(gim_type, abc.ABCMeta):
     '''
     '''
@@ -70,7 +80,7 @@ class InterfaceMeta(gim_type, abc.ABCMeta):
             return bases + (abc.ABC, )
 
     @classmethod
-    def _ensure_abstract_methods_and_properties(mcls, attrs):
+    def _ensure_abstract_methods_and_properties(mcls, attrs, allow_empty_body):
         for attr_name, attr_value in attrs.items():
             if attr_name in mcls._INJECT_ABC_MAP: continue
             if _is_dunder(attr_name): continue
@@ -87,12 +97,13 @@ class InterfaceMeta(gim_type, abc.ABCMeta):
             elif isinstance(attr_value, property):
                 attrs[attr_name] = abc.abstractproperty(attr_value)
             else:
-                raise e.GimError(f"Unknown: {attr_name}")
+                raise GimABCError(f"Unknown: {attr_name}")
 
-            if not _is_valid_interface(attr_value):
-                raise e.GimError(
-                    "Interface functions are intended to be empty!",
-                    "Use `abstract` if you need function to contain body.",
+            if not allow_empty_body and not _is_valid_interface(attr_value):
+                raise GimABCError(
+                    "Interface functions are intended to be empty! "
+                    f"Use ``{mcls.__module__}.abstract`` if you need function "
+                    "to contain body.",
                     )
 
         return attrs
@@ -106,23 +117,26 @@ class InterfaceMeta(gim_type, abc.ABCMeta):
         return attrs
 
     @classmethod
-    def __prepare__(cls, name, bases):
+    def __prepare__(cls, name, bases, **_):
         mapping = super().__prepare__(name, bases)
         mapping.update(cls._INJECT_ABC_MAP)
+
         return mapping
 
     @classmethod
     def __dir__(cls):
         return super().__dir__()
 
-    def __new__(mcls, name, bases=(), namespace=None, **kwargs):
-        if name == "interface":
-            return super().__new__(mcls, name, bases, kwargs)
+    @reraise
+    def __new__(mcls, name, bases=(), namespace=None, *,
+                allow_empty_body=False, **kwargs):
+        if name in ("abstract", "interface"):
+            return super().__new__(mcls, name, bases, mcls._clean_attrs(namespace))
 
         bases = mcls._ensure_abstract_bases(bases)
         attrs = mcls._clean_attrs(namespace)
         if interface in bases:
-            attrs = mcls._ensure_abstract_methods_and_properties(attrs)
+            attrs = mcls._ensure_abstract_methods_and_properties(attrs, allow_empty_body)
 
         cls = super().__new__(mcls, name, bases, attrs)
         assert gimmick in cls.__bases__
@@ -146,7 +160,12 @@ class InterfaceMeta(gim_type, abc.ABCMeta):
                 ) from None
 
 
-@dataclass
-class interface(metaclass=InterfaceMeta):
+
+class interface(metaclass=InterfaceMeta, allow_method_body=False):
+    '''
+    '''
+
+
+class abstract(metaclass=InterfaceMeta, allow_method_body=True):
     '''
     '''
