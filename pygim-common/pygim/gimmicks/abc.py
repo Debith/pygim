@@ -44,6 +44,12 @@ def _is_valid_interface(func) -> bool:
     return _is_valid_interface_func(func)
 
 
+def _walk_bases(bases):
+    for base in bases:
+        yield base
+        yield from _walk_bases(base.__bases__)
+
+
 class GimABCError(e.GimError):
     """Base class for all errors raised by this module."""
 
@@ -102,7 +108,7 @@ class InterfaceMeta(gim_type, abc.ABCMeta):
             if not allow_empty_body and not _is_valid_interface(attr_value):
                 raise GimABCError(
                     "Interface functions are intended to be empty! "
-                    f"Use ``{mcls.__module__}.abstract`` if you need function "
+                    f"Use ``{mcls.__module__}.AbstractClass`` if you need function "
                     "to contain body.",
                     )
 
@@ -130,12 +136,12 @@ class InterfaceMeta(gim_type, abc.ABCMeta):
     @reraise
     def __new__(mcls, name, bases=(), namespace=None, *,
                 allow_empty_body=False, **kwargs):
-        if name in ("abstract", "interface"):
+        if name in ("Abstract", "Interface"):
             return super().__new__(mcls, name, bases, mcls._clean_attrs(namespace))
 
         bases = mcls._ensure_abstract_bases(bases)
         attrs = mcls._clean_attrs(namespace)
-        if interface in bases:
+        if Interface in bases:
             attrs = mcls._ensure_abstract_methods_and_properties(attrs, allow_empty_body)
 
         cls = super().__new__(mcls, name, bases, attrs)
@@ -143,12 +149,12 @@ class InterfaceMeta(gim_type, abc.ABCMeta):
         return cls
 
     def __call__(self, *args, **kwargs):
-        if self is interface:
+        if self is Interface:
             raise NotImplementedError()
 
-        # If interface is found in immediate bases, but no abstract methods
+        # If Interface is found in immediate bases, but no abstract methods
         # are found, then it is still an interface.
-        if interface in self.__bases__ and not self.__abstractmethods__:
+        if Interface in self.__bases__ and not self.__abstractmethods__:
             raise GimABCError("Can't instantiate interface!")
 
         try:
@@ -160,12 +166,64 @@ class InterfaceMeta(gim_type, abc.ABCMeta):
                 ) from None
 
 
+class Interface(metaclass=InterfaceMeta, allow_method_body=False):
+    """
+    Represents a strict interface class in Python.
 
-class interface(metaclass=InterfaceMeta, allow_method_body=False):
-    '''
-    '''
+    An interface, as defined in this context, is a contract for other classes to implement.
+    It contains only abstract methods without any implementation. Subclasses of an Interface
+    must provide an implementation for all abstract methods defined in the interface.
+
+    In this implementation, the Interface class does not allow method bodies. Any attempt to
+    include implementation details in the methods of an Interface will result in a TypeError.
+
+    Examples
+    --------
+    >>> class MyInterface(Interface):
+    ...     def my_method(self):
+    ...         pass
+
+    Notes
+    -----
+    The Interface class is used to define a set of methods that the implementing class must
+    provide. It's similar to interfaces in languages like Java, where it's used to define
+    a contract without dictating the exact method implementation.
+
+    See Also
+    --------
+    Abstract : For creating abstract classes with partial method implementations.
+    """
 
 
-class abstract(metaclass=InterfaceMeta, allow_method_body=True):
-    '''
-    '''
+class AbstractClass(metaclass=InterfaceMeta, allow_method_body=True):
+    """
+    Represents an abstract class in Python.
+
+    An abstract class, unlike an interface, allows and may contain method implementations.
+    Subclasses can inherit from an abstract class and override or extend the provided methods.
+    However, similar to an interface, an abstract class cannot be instantiated on its own.
+
+    In this implementation, the Abstract class allows method bodies, enabling partial or full
+    implementation of methods, which subclasses can utilize or override.
+
+    Examples
+    --------
+    >>> class MyAbstract(AbstractClass):
+    ...     def implemented_method(self):
+    ...         print("This method is implemented.")
+    ...     def abstract_method(self):
+    ...         pass
+
+    Notes
+    -----
+    Abstract classes in Python are similar to those in other object-oriented languages. They
+    provide a way to define default behavior for subclasses and to enforce certain methods to
+    be implemented by any non-abstract subclass.
+
+    The key distinction between an 'Abstract' class and an 'Interface' is that the former
+    allows for method implementations, while the latter does not.
+
+    See Also
+    --------
+    Interface : For creating strict interface classes without method implementations.
+    """
