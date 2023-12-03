@@ -36,8 +36,8 @@ download = "https://pypi.org/project/python-gimmicks/#files"
 tracker = "https://github.com/Debith/pygim/issues"
 
 dependencies = [
-  "pygim-common @ file:///${PROJECT_ROOT}/pygim-common",
-  "pygim-ddd @ file:///${PROJECT_ROOT}/pygim-ddd",
+  "pygim-common",
+  "pygim-ddd",
 ]
 
 [project.optional-dependencies]
