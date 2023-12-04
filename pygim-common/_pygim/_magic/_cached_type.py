@@ -7,7 +7,7 @@ __all__ = ["CachedTypeMeta", "CachedType", "create_cached_class"]
 
 
 class CachedInstanceMeta(type):
-    __instance_cache = {}
+    __instance_cache = {}  # type: ignore
 
     def __new__(mcls, name, bases, namespace):
         return super(CachedInstanceMeta, mcls).__new__(mcls, name, bases, namespace)
@@ -35,7 +35,7 @@ class CachedInstanceMeta(type):
 
 
 class CachedClassInstanceMeta(CachedInstanceMeta):
-    __class_cache = {}
+    __class_cache = {}  # type: ignore
 
     def __new__(mcls, name, bases, attrs):
         try:
@@ -52,7 +52,7 @@ class CachedClassInstanceMeta(CachedInstanceMeta):
 
 
 class CachedClassMeta(type):
-    __class_cache = {}
+    __class_cache = {}  # type: ignore
 
     def __new__(mcls, name, bases, namespace):
         try:
