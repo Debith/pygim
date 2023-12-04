@@ -3,7 +3,7 @@ This module holds logic for exceptions.
 """
 
 from dataclasses import dataclass
-import pygim.typing as t
+import _pygim.typing as t
 
 @dataclass
 class GimException(Exception):
