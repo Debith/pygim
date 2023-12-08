@@ -112,7 +112,21 @@ class RangeSelector(gimmick, metaclass=RangeSelectorMeta):
         assert has_instances(self._ranges, tuple), 'keys must be tuples'
 
     def __getitem__(self, index):
-        ''' Returns the range at the given index.'''
+        ''' Returns the range at the given index.
+        
+        Parameters
+        ----------
+        index : int | tuple
+            The index of the range to return. If a tuple is given, it is
+            used to select the range.
+        
+        Returns
+        -------
+        tuple
+            The range at the given index.
+        '''
+        if isinstance(index, tuple):
+            return self._ranges[index]
         return list(self._ranges.keys())[index]
 
     def __len__(self):
@@ -129,7 +143,14 @@ class RangeSelector(gimmick, metaclass=RangeSelectorMeta):
 
     def __repr__(self):
         ''' Returns a string representation of the ranges.'''
-        return f'RangeSelector({list(self._ranges.keys())}, {list(self._ranges.values())})'
+        keys = list(self._ranges.keys())
+        values = list(self._ranges.values())
+        if has_instances(values, int):
+            args = [keys]
+        else:
+            args = [keys, values]
+        
+        return f'RangeSelector({", ".join(repr(a) for a in args)})'
 
     def __str__(self):
         ''' Returns a string representation of the ranges and their values.'''
