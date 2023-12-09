@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 import pytest
+from pygim.explib import GimError
 from pygim.primitives.range_selector import RangeSelector
 
 _TUPLE_RANGES = [
@@ -40,14 +41,23 @@ def test_range_selector_length(ranges, values, expected_length):
     assert len(rs) == expected_length
 
 
-@pytest.mark.parametrize("ranges, values, expected_repr", [
-    (_TUPLE_RANGES, None, "RangeSelector([(-10, 0), (0, 10), (10, 20), (20, 30), (30, 40)])"),
-    (_INT_RANGES, ['a', 'b'], "RangeSelector([(-10, 0), (0, 10)], ['a', 'b'])"),
-    (_DICT_RANGES, None, "RangeSelector([(-10, 0), (0, 10), (10, 20), (20, 30), (30, 40)], ['a', 'b', 'c', 'd', 'e'])")
+@pytest.mark.parametrize("func, ranges, values, expected_repr", [
+    (repr, _TUPLE_RANGES, None,
+    "RangeSelector([(-10, 0), (0, 10), (10, 20), (20, 30), (30, 40)])"),
+    (repr, _INT_RANGES, ['a', 'b'],
+    "RangeSelector([(-10, 0), (0, 10)], ['a', 'b'])"),
+    (repr, _DICT_RANGES, None,
+    "RangeSelector([(-10, 0), (0, 10), (10, 20), (20, 30), (30, 40)], ['a', 'b', 'c', 'd', 'e'])"),
+    (str, _TUPLE_RANGES, None,
+     "-10  ->   0  :  0\n  0  ->  10  :  1\n 10  ->  20  :  2\n 20  ->  30  :  3\n 30  ->  40  :  4"),
+    (str, _INT_RANGES, ['a', 'b'],
+     "-10  ->   0  :  a\n  0  ->  10  :  b"),
+    (str, _DICT_RANGES, None,
+     "-10  ->   0  :  a\n  0  ->  10  :  b\n 10  ->  20  :  c\n 20  ->  30  :  d\n 30  ->  40  :  e")
 ])
-def test_range_selector_repr(ranges, values, expected_repr):
+def test_range_selector_repr(func, ranges, values, expected_repr):
     rs = RangeSelector(ranges, values)
-    assert repr(rs) == expected_repr
+    assert func(rs) == expected_repr
 
 
 @pytest.mark.parametrize("ranges, value, expected", [
@@ -64,7 +74,7 @@ def test_range_selector_repr(ranges, values, expected_repr):
     (_DICT_RANGES, 25, True),
     (_DICT_RANGES, 35, True),
     (_DICT_RANGES, -15, False),
-    (_DICT_RANGES, 45, False),    
+    (_DICT_RANGES, 45, False),
 ])
 def test_range_selector_contains(ranges, value, expected):
     rs = RangeSelector(ranges)
@@ -81,13 +91,13 @@ def test_range_selector_contains(ranges, value, expected):
     (_TUPLE_RANGES, -1, (30, 40)),
     (_INT_RANGES, 1, (0, 10)),
     (_INT_RANGES, -1, (0, 10)),
-    (_TUPLE_RANGES, (-10, 0), 'a'),
-    (_TUPLE_RANGES, (10, 20), 'c'),
-    (_TUPLE_RANGES, (30, 40), 'e'),
-    (_TUPLE_RANGES, 0, (-10, 0)),
-    (_TUPLE_RANGES, 2, (10, 20)),
-    (_TUPLE_RANGES, 4, (30, 40)),
-    (_TUPLE_RANGES, -1, (30, 40)),
+    (_DICT_RANGES, (-10, 0), 'a'),
+    (_DICT_RANGES, (10, 20), 'c'),
+    (_DICT_RANGES, (30, 40), 'e'),
+    (_DICT_RANGES, 0, (-10, 0)),
+    (_DICT_RANGES, 2, (10, 20)),
+    (_DICT_RANGES, 4, (30, 40)),
+    (_DICT_RANGES, -1, (30, 40)),
 ])
 def test_range_selector_getitem(ranges, index, expected):
     rs = RangeSelector(ranges)
@@ -96,8 +106,37 @@ def test_range_selector_getitem(ranges, index, expected):
         raise AssertionError(f'{rs[index]} != {expected}')
 
 
+@pytest.mark.parametrize("ranges, values, exception, message", [
+    ([], None, GimError, 'Ranges must be specified'),
+    (None, None, GimError, 'Ranges must be specified'),
+    ({(1, 3): 'a', (2, 4): 'b'}, None, GimError, 'Ranges must be consecutive'),
+    ([(1, 3), (2, 4)], None, GimError, 'Ranges must be consecutive'),
+    (["1234"], None, GimError, 'Ranges must be a list of tuples or integers'),
+    ([1, 2, 3, 4, 5], ['a', 'b'], GimError, 'Number of ranges and values must be equal'),
+])
+def test_can_not_create_range_selector_with_no_ranges(ranges, values, exception, message):
+    with pytest.raises(exception, match=message):
+        RangeSelector(ranges, values)
+
+
+def test_key_iterator():
+    rs = RangeSelector(_TUPLE_RANGES)
+    assert list(rs) == list(_TUPLE_RANGES)
+    assert list(reversed(rs)) == list(reversed(_TUPLE_RANGES))
+
+
+@pytest.mark.parametrize("value, expected", [
+    (40,    'Value 40 is out of range of -10-40'),
+    (-11,   'Value -11 is out of range of -10-40'),
+])
+def test_selecting_out_of_range(value, expected):
+    rs = RangeSelector(_TUPLE_RANGES)
+    with pytest.raises(GimError, match=expected):
+        rs.select(value)
+
+
 if __name__ == '__main__':
     from pygim.testing import run_tests
 
     # With coverage run, tests fail in meta.__call__ due to reload.
-    run_tests(__file__, RangeSelector.__module__, coverage=False)
+    run_tests(__file__, RangeSelector.__module__, coverage=True)

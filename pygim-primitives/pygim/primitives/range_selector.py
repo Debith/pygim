@@ -10,6 +10,7 @@ from tabulate import tabulate
 from pygim.gimmicks import gimmick, gim_type
 from pygim.explib import GimError
 from pygim.checklib import has_instances
+from pygim.iterlib import is_container
 
 __all__ = ['RangeSelector']
 
@@ -34,11 +35,11 @@ class RangeSelectorMeta(gim_type):
 
         else:
             if has_instances(ranges, Iterable):
+                if has_instances(ranges, str):
+                    raise GimError('Ranges must be a list of tuples or integers')
                 ranges = list(ranges)
             elif has_instances(ranges, int):
                 ranges = list(zip(ranges[:-1], ranges[1:]))
-            else:
-                raise GimError('Ranges must be a list of tuples or integers')
 
             ranges = sorted(ranges, key=lambda x: x[0])
 
@@ -113,13 +114,13 @@ class RangeSelector(gimmick, metaclass=RangeSelectorMeta):
 
     def __getitem__(self, index):
         ''' Returns the range at the given index.
-        
+
         Parameters
         ----------
         index : int | tuple
             The index of the range to return. If a tuple is given, it is
             used to select the range.
-        
+
         Returns
         -------
         tuple
@@ -149,7 +150,7 @@ class RangeSelector(gimmick, metaclass=RangeSelectorMeta):
             args = [keys]
         else:
             args = [keys, values]
-        
+
         return f'RangeSelector({", ".join(repr(a) for a in args)})'
 
     def __str__(self):
@@ -170,9 +171,17 @@ class RangeSelector(gimmick, metaclass=RangeSelectorMeta):
         bool
             True if the value is in any of the ranges, False otherwise.
         '''
-        first = list(self._ranges.keys())[0][0]
-        last = list(self._ranges.keys())[-1][-1]
-        return first <= value < last
+        return self.start <= value < self.end
+
+    @property
+    def start(self):
+        ''' Returns the start of the range.'''
+        return list(self._ranges.keys())[0][0]
+
+    @property
+    def end(self):
+        ''' Returns the end of the range.'''
+        return list(self._ranges.keys())[-1][-1]
 
     def select(self, value):
         ''' Selects the range for the given value.
@@ -190,7 +199,7 @@ class RangeSelector(gimmick, metaclass=RangeSelectorMeta):
         for (lower, upper), content in self._ranges.items():
             if lower <= value < upper:
                 return content
-        raise GimError('Value is out of range')
+        raise GimError(f'Value {value} is out of range of {self.start}-{self.end}')
 
 
 if __name__ == '__main__':
