@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
-'''
+"""
 This module implmements class ``Interface``.
-'''
+"""
 
 import abc
 from types import FunctionType
@@ -11,16 +11,19 @@ from _pygim._magic._gimmick import gimmick, gim_type
 from _pygim._utils import format_dict
 import _pygim._exceptions as e
 
-__all__ = ['Interface', 'AbstractClass']
+__all__ = ["Interface", "AbstractClass"]
+
 
 def __empty_body__():
     pass
+
+
 _EMPTY_BODY = __empty_body__.__code__.co_code
 del __empty_body__
 
 
 def _is_dunder(attr):
-    return attr.startswith('__') and attr.endswith('__')
+    return attr.startswith("__") and attr.endswith("__")
 
 
 def _is_valid_interface_func(func) -> bool:
@@ -53,6 +56,7 @@ def reraise(func):
             return func(*args, **kwargs)
         except GimABCError as exc:
             raise GimABCError(str(exc)) from None
+
     return wrapper
 
 
@@ -75,8 +79,9 @@ CONCRETE, ABSTRACT, ABSTRACT_WANNABE = object(), object(), object()
 
 @dataclass
 class Abstractions:
-    """ Tracks all methods of a class and its bases, and whether they are
-    concrete or abstract. """
+    """Tracks all methods of a class and its bases, and whether they are
+    concrete or abstract."""
+
     _ignore: set
     _methods: dict = field(default_factory=dict)
 
@@ -137,8 +142,8 @@ class Abstractions:
     def __str__(self):
         def function_formatter(func):
             return func.lower()
-        return format_dict(self._methods, indent=4,
-                           value_formatter=function_formatter)
+
+        return format_dict(self._methods, indent=4, value_formatter=function_formatter)
 
     @property
     def taggable(self):
@@ -148,15 +153,15 @@ class Abstractions:
 
 
 class InterfaceMeta(gim_type, abc.ABCMeta):
-    '''
-    '''
+    """ """
+
     _INJECT_ABC_MAP = dict(
         abc=abc,
         abstractmethod=abc.abstractmethod,
         abstractclassmethod=abc.abstractclassmethod,
         abstractstaticmethod=abc.abstractstaticmethod,
         abstractproperty=abc.abstractproperty,
-        )
+    )
 
     @classmethod
     def _ensure_abstract_bases(mcls, bases):
@@ -164,10 +169,10 @@ class InterfaceMeta(gim_type, abc.ABCMeta):
         # that MRO is constructed properly. A wrong MRO directly prevents
         # implementation of derived classes.
         if gimmick not in bases:
-            bases += (gimmick, )
+            bases += (gimmick,)
 
         if abc.ABC not in bases:
-            return bases + (abc.ABC, )
+            return bases + (abc.ABC,)
         return bases
 
     @classmethod
@@ -190,7 +195,7 @@ class InterfaceMeta(gim_type, abc.ABCMeta):
                     "Interface functions are intended to be empty! "
                     f"Use ``{mcls.__module__}.AbstractClass`` if you need "
                     "function to contain body.",
-                    )
+                )
 
         return attrs
 
@@ -198,9 +203,7 @@ class InterfaceMeta(gim_type, abc.ABCMeta):
     def _clean_attrs(mcls, attrs):
         # Remove all ABCs from attrs, they are only needed for making them
         # available in the namespace during (sub)class creation.
-        attrs = {
-            k: v for k, v in attrs.items() if k not in mcls._INJECT_ABC_MAP
-            }
+        attrs = {k: v for k, v in attrs.items() if k not in mcls._INJECT_ABC_MAP}
 
         return attrs
 
@@ -216,8 +219,7 @@ class InterfaceMeta(gim_type, abc.ABCMeta):
         return super().__dir__()
 
     @reraise
-    def __new__(mcls, name, bases=(), namespace=None, *,
-                allow_empty_body=False, **kwargs):
+    def __new__(mcls, name, bases=(), namespace=None, *, allow_empty_body=False, **kwargs):
         if name in ("AbstractClass", "Interface"):
             return super().__new__(mcls, name, bases, mcls._clean_attrs(namespace))
 
@@ -248,7 +250,7 @@ class InterfaceMeta(gim_type, abc.ABCMeta):
             raise GimABCError(
                 f"Can't instantiate interface ``{self.__name__}`` "
                 f"with abstract methods: {', '.join(sorted(self.__abstractmethods__))}"
-                ) from None
+            ) from None
 
     @classmethod
     def _is_interface_derived(mcls, bases):

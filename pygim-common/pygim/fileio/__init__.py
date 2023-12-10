@@ -30,4 +30,4 @@ __all__ = [
     "pickle_and_compress",
     "decompress_and_unpickle",
     "PathSet",
-    ]
+]

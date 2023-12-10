@@ -24,9 +24,8 @@ tuplify = _lib.tuplify
 is_container = _lib.is_container
 
 
-
-def overlaps(candidate, collection):
-    """ Return true if any of the candidates is found from the collection.
+def overlaps(candidates, collection):
+    """Return true if any of the candidates is found from the collection.
 
     >>> collection = [1,2,3,4,5]
     >>> overlaps([0, 1, 6], collection)

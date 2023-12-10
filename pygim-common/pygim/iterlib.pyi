@@ -1,8 +1,6 @@
 from typing import Iterable, Any, Callable, Tuple, Generator
 
-def split(
-    iterable: Iterable[Any], condition: Callable[[Any], bool]
-) -> Tuple[Iterable[Any], Iterable[Any]]: ...
+def split(iterable: Iterable[Any], condition: Callable[[Any], bool]) -> Tuple[Iterable[Any], Iterable[Any]]: ...
 def is_container(obj: Any) -> bool:
     """
     Determine whether an object is a container.
@@ -31,7 +29,6 @@ def is_container(obj: Any) -> bool:
     True
     """
     ...
-
 
 def flatten(items: Iterable[Any]) -> Generator[Any, None, None]:
     """
@@ -66,7 +63,6 @@ def flatten(items: Iterable[Any]) -> Generator[Any, None, None]:
     ['one', 'two', 'three', 'four']
     """
     ...
-
 
 def tuplify(obj: Any) -> Tuple[Any, ...]:
     """

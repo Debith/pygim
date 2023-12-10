@@ -99,6 +99,7 @@ try:
     def _(items: np.array, **_):
         content = np.vectorize(sha256sum)(items)
         return sha256sum(f"{items.__class__.__name__}({content})")
+
 except ImportError:
     pass
 
@@ -116,6 +117,7 @@ try:
         return sha256sum(f"{series.__class__.__name__}({content})")
 
     ROWS, COLS = 0, 1
+
     @sha256sum.register(pd.DataFrame)
     def _(df: pd.DataFrame, *, axis=ROWS, **_):
         content = df.apply(sha256sum, axis=axis)

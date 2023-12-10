@@ -263,7 +263,6 @@ class PathSet:
                     yield p
                     break
 
-
     def filtered(self, **filters):
         """As filter() but returns new object."""
         return self.clone(self.filter(**filters)) if filters else self

@@ -26,6 +26,7 @@ def measure_coverage(*, include=None, show_missing: bool = True):
     #        The error appears to be originating from os.getcwd(), which
     #        indicates that some folder is interpreted as current is deleted.
     import coverage
+
     cov = coverage.Coverage()
     cov.start()
 
