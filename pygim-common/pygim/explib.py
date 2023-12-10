@@ -4,6 +4,7 @@ from _pygim._exceptions import (
     EntangledClassError,
     EntangledMethodError,
     ShaSumTargetNotFoundError,
+    DispatchError,
 )
 
 from _pygim._error_msgs import (

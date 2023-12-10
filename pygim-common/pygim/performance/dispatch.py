@@ -4,8 +4,9 @@ This module holds the dispatcher function implementation.
 """
 
 from _pygim._magic._dispatcher import _Dispatcher
+from _pygim._exceptions import DispatchError, UnrecognizedTypeError
 
-__all__ = ["dispatch"]
+__all__ = ["dispatch", "DispatchError", "UnrecognizedTypeError"]
 
 dispatch = _Dispatcher
 dispatch.__doc__ = """

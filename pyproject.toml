@@ -62,12 +62,17 @@ minversion = "6.0"
 python_files = "test_*.py"
 addopts = '-ra -q --doctest-glob="**/*.py" --tb=short --doctest-modules --doctest-continue-on-failure'
 testpaths = [
-    "pygim-common/tests"
+    "pygim-common/tests",
+    "pygim-ddd/tests",
+    "pygim-primitives/tests",
 ]
 
 [tool.coverage.report]
 omit = ["./docs/**/*.*", "**/tests/**/*.*"]
-include = ["./pygim-common/**/*.py"]
+include = ["./pygim-common/**/*.py",
+           "./pygim-ddd/**/*.py",
+           "./pygim-primitives/**/*.py",
+           ]
 show_missing = true
 exclude_lines = [
     "pragma: no cover",

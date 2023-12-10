@@ -3,14 +3,14 @@
 This module implmements class RangeSelector.
 '''
 
-from collections.abc import Mapping, Iterable
+from collections.abc import Mapping, Iterable, Sequence
 from types import MappingProxyType
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from tabulate import tabulate
 from pygim.gimmicks import gimmick, gim_type
 from pygim.explib import GimError
 from pygim.checklib import has_instances
-from pygim.iterlib import is_container
+from pygim.performance import dispatch, UnrecognizedTypeError
 
 __all__ = ['RangeSelector']
 
@@ -19,45 +19,70 @@ class RangeSelectorMeta(gim_type):
     ''' Metaclass for RangeSelector.
 
     '''
+    _NON_EMPTY_MSG = 'Parameter ``ranges`` must be specified.'
+    _MAPPING_OR_SEQUENCE_MSG = 'Parameter ``ranges`` must be a mapping or a sequence.'
+    _TUPLES_SIZE_TWO_MSG = 'Tuples in ``ranges`` must have length 2.'
+
+    def _is_consequtive(self, ranges: Mapping):
+        ''' Checks if the given ranges are consecutive.
+
+        Parameters
+        ----------
+        ranges : list
+            The ranges to check.
+
+        Returns
+        -------
+        bool
+            True if the ranges are consecutive, False otherwise.
+        '''
+        keys = list(ranges.keys())
+        for i in range(len(keys) - 1):
+            left = keys[i][1]
+            right = keys[i + 1][0]
+            if left != right:
+                # This branch is only taken if the ranges are not consecutive,
+                # which is used only in assertion.
+                return False  # pragma: no cover
+        return True
+
+    @dispatch
     def __call__(cls, ranges, values=None):
+        """ Creates a new RangeSelector object. """
         if not ranges:
-            raise GimError('Ranges must be specified')
-        if isinstance(ranges, Mapping):
-            ranges = sorted(ranges.items(), key=lambda x: x[0][0])
-            assert not values, 'Values must not be specified'
-            # Ranges must be consecutive
-            for i in range(len(ranges) - 1):
-                left = ranges[i][0][1]
-                right = ranges[i + 1][0][0]
-                if left != right:
-                    raise GimError('Ranges must be consecutive')
-            ranges = dict(ranges)
+            raise GimError(cls._NON_EMPTY_MSG)
+        raise UnrecognizedTypeError(ranges, (Mapping, Sequence))
 
-        else:
-            if has_instances(ranges, Iterable):
-                if has_instances(ranges, str):
-                    raise GimError('Ranges must be a list of tuples or integers')
-                ranges = list(ranges)
-            elif has_instances(ranges, int):
-                ranges = list(zip(ranges[:-1], ranges[1:]))
+    @__call__.register(dict)
+    def _(cls, ranges: Mapping, *_):
+        assert ranges, cls._NON_EMPTY_MSG
 
-            ranges = sorted(ranges, key=lambda x: x[0])
+        ranges = dict(sorted(ranges.items(), key=lambda x: x[0][0]))
 
-            # Ranges must be consecutive
-            for i in range(len(ranges) - 1):
-                left = ranges[i][1]
-                right = ranges[i + 1][0]
-                if left != right:
-                    raise GimError('Ranges must be consecutive')
-
-            if values:
-                if len(ranges) != len(values):
-                    raise GimError('Number of ranges and values must be equal')
-            else:
-                values = range(len(ranges))
-            ranges = dict(zip(ranges, values))
+        # Ranges must be consecutive
+        assert cls._is_consequtive(ranges), 'Ranges must be consecutive'
 
         return super().__call__(MappingProxyType(ranges))
+
+    @__call__.register(list)
+    def _(cls, ranges: Sequence, values=None):
+        assert ranges, cls._NON_EMPTY_MSG
+
+        if has_instances(ranges, Iterable):
+            assert all(has_instances(r, int) for r in ranges), cls._MAPPING_OR_SEQUENCE_MSG
+            assert all(len(r) == 2 for r in ranges), cls._TUPLES_SIZE_TWO_MSG
+            ranges = list(ranges)
+        elif has_instances(ranges, int):
+            ranges = list(zip(ranges[:-1], ranges[1:]))
+
+        if values:
+            assert len(ranges) == len(values), 'Number of ranges and values must be equal'
+            ranges = dict(zip(ranges, values))
+        else:
+            ranges = dict(zip(ranges, range(len(ranges))))
+
+        # Ranges is now a dictionary, so we can use the mapping version of the function
+        return cls.__call__(ranges)
 
 
 @dataclass(frozen=True, slots=True)

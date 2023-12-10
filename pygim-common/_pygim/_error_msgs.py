@@ -5,7 +5,7 @@
 __all__ = ('type_error_msg', 'file_error_msg')
 
 
-def type_error_msg(obj, expected_type):
+def type_error_msg(obj_or_type, expected_type):
     """
     Returns a formatted error message for a type error.
 
@@ -32,7 +32,11 @@ def type_error_msg(obj, expected_type):
         type_names = ",".join(f"{t.__name__}" for t in expected_type)
     else:
         type_names = expected_type.__name__
-    return f"Expected to get type `{type_names}`, got `{repr(obj)} [{type(obj).__name__}]`"
+
+    if isinstance(obj_or_type, type):
+        return f"Expected to get type `{type_names}`, got `{obj_or_type.__name__}]`"
+    else:
+        return f"Expected to get type `{type_names}`, got `{repr(obj_or_type)} [{type(obj_or_type).__name__}]`"
 
 
 def file_error_msg(filename, msg="not found"):

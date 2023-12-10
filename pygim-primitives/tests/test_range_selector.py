@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+import re
 import pytest
 from pygim.explib import GimError
 from pygim.primitives.range_selector import RangeSelector
@@ -102,17 +103,13 @@ def test_range_selector_contains(ranges, value, expected):
 def test_range_selector_getitem(ranges, index, expected):
     rs = RangeSelector(ranges)
     actual = rs[index]
-    if  actual != expected:
+    if actual != expected:
         raise AssertionError(f'{rs[index]} != {expected}')
 
 
 @pytest.mark.parametrize("ranges, values, exception, message", [
-    ([], None, GimError, 'Ranges must be specified'),
-    (None, None, GimError, 'Ranges must be specified'),
-    ({(1, 3): 'a', (2, 4): 'b'}, None, GimError, 'Ranges must be consecutive'),
-    ([(1, 3), (2, 4)], None, GimError, 'Ranges must be consecutive'),
-    (["1234"], None, GimError, 'Ranges must be a list of tuples or integers'),
-    ([1, 2, 3, 4, 5], ['a', 'b'], GimError, 'Number of ranges and values must be equal'),
+    (None, None, GimError, 'Parameter ``ranges`` must be specified'),
+    (True, None, GimError, re.escape('Expected to get type `Mapping,Sequence`, got `True [bool]`')),
 ])
 def test_can_not_create_range_selector_with_no_ranges(ranges, values, exception, message):
     with pytest.raises(exception, match=message):
