@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
-'''
+"""
 This module implmements class RangeSelector.
-'''
+"""
 
 from collections.abc import Mapping, Iterable, Sequence
 from types import MappingProxyType
@@ -12,19 +12,18 @@ from pygim.explib import GimError
 from pygim.checklib import has_instances
 from pygim.performance import dispatch, UnrecognizedTypeError
 
-__all__ = ['RangeSelector']
+__all__ = ["RangeSelector"]
 
 
 class RangeSelectorMeta(gim_type):
-    ''' Metaclass for RangeSelector.
+    """Metaclass for RangeSelector."""
 
-    '''
-    _NON_EMPTY_MSG = 'Parameter ``ranges`` must be specified.'
-    _MAPPING_OR_SEQUENCE_MSG = 'Parameter ``ranges`` must be a mapping or a sequence.'
-    _TUPLES_SIZE_TWO_MSG = 'Tuples in ``ranges`` must have length 2.'
+    _NON_EMPTY_MSG = "Parameter ``ranges`` must be specified."
+    _MAPPING_OR_SEQUENCE_MSG = "Parameter ``ranges`` must be a mapping or a sequence."
+    _TUPLES_SIZE_TWO_MSG = "Tuples in ``ranges`` must have length 2."
 
     def _is_consequtive(self, ranges: Mapping):
-        ''' Checks if the given ranges are consecutive.
+        """Checks if the given ranges are consecutive.
 
         Parameters
         ----------
@@ -35,7 +34,7 @@ class RangeSelectorMeta(gim_type):
         -------
         bool
             True if the ranges are consecutive, False otherwise.
-        '''
+        """
         keys = list(ranges.keys())
         for i in range(len(keys) - 1):
             left = keys[i][1]
@@ -48,7 +47,7 @@ class RangeSelectorMeta(gim_type):
 
     @dispatch
     def __call__(cls, ranges, values=None):
-        """ Creates a new RangeSelector object. """
+        """Creates a new RangeSelector object."""
         if not ranges:
             raise GimError(cls._NON_EMPTY_MSG)
         raise UnrecognizedTypeError(ranges, (Mapping, Sequence))
@@ -60,7 +59,7 @@ class RangeSelectorMeta(gim_type):
         ranges = dict(sorted(ranges.items(), key=lambda x: x[0][0]))
 
         # Ranges must be consecutive
-        assert cls._is_consequtive(ranges), 'Ranges must be consecutive'
+        assert cls._is_consequtive(ranges), "Ranges must be consecutive"
 
         return super().__call__(MappingProxyType(ranges))
 
@@ -76,7 +75,7 @@ class RangeSelectorMeta(gim_type):
             ranges = list(zip(ranges[:-1], ranges[1:]))
 
         if values:
-            assert len(ranges) == len(values), 'Number of ranges and values must be equal'
+            assert len(ranges) == len(values), "Number of ranges and values must be equal"
             ranges = dict(zip(ranges, values))
         else:
             ranges = dict(zip(ranges, range(len(ranges))))
@@ -87,7 +86,7 @@ class RangeSelectorMeta(gim_type):
 
 @dataclass(frozen=True, slots=True)
 class RangeSelector(gimmick, metaclass=RangeSelectorMeta):
-    ''' RangeSelector class.
+    """RangeSelector class.
 
     This class implements a range selector. It is used to select a range
     based on a value. The ranges are defined as a list of tuples. The
@@ -130,15 +129,16 @@ class RangeSelector(gimmick, metaclass=RangeSelectorMeta):
     >>> rs[0]
     (-10, 0)
 
-    '''
+    """
+
     _ranges: Mapping
 
     def __post_init__(self):
-        assert self._ranges, 'Ranges must be specified'
-        assert has_instances(self._ranges, tuple), 'keys must be tuples'
+        assert self._ranges, "Ranges must be specified"
+        assert has_instances(self._ranges, tuple), "keys must be tuples"
 
     def __getitem__(self, index):
-        ''' Returns the range at the given index.
+        """Returns the range at the given index.
 
         Parameters
         ----------
@@ -150,25 +150,25 @@ class RangeSelector(gimmick, metaclass=RangeSelectorMeta):
         -------
         tuple
             The range at the given index.
-        '''
+        """
         if isinstance(index, tuple):
             return self._ranges[index]
         return list(self._ranges.keys())[index]
 
     def __len__(self):
-        ''' Returns the number of ranges.'''
+        """Returns the number of ranges."""
         return len(self._ranges)
 
     def __iter__(self):
-        ''' Returns an iterator over the ranges.'''
+        """Returns an iterator over the ranges."""
         yield from self._ranges.keys()
 
     def __reversed__(self):
-        ''' Returns a reversed iterator over the ranges.'''
+        """Returns a reversed iterator over the ranges."""
         yield from reversed(self._ranges.keys())
 
     def __repr__(self):
-        ''' Returns a string representation of the ranges.'''
+        """Returns a string representation of the ranges."""
         keys = list(self._ranges.keys())
         values = list(self._ranges.values())
         if has_instances(values, int):
@@ -179,12 +179,12 @@ class RangeSelector(gimmick, metaclass=RangeSelectorMeta):
         return f'RangeSelector({", ".join(repr(a) for a in args)})'
 
     def __str__(self):
-        ''' Returns a string representation of the ranges and their values.'''
-        table = [(k[0], '->', k[1], ':', v) for k, v in self._ranges.items()]
+        """Returns a string representation of the ranges and their values."""
+        table = [(k[0], "->", k[1], ":", v) for k, v in self._ranges.items()]
         return tabulate(table, tablefmt="plain")
 
     def __contains__(self, value):
-        ''' Checks if the given value is in any of the ranges.
+        """Checks if the given value is in any of the ranges.
 
         Parameters
         ----------
@@ -195,21 +195,21 @@ class RangeSelector(gimmick, metaclass=RangeSelectorMeta):
         -------
         bool
             True if the value is in any of the ranges, False otherwise.
-        '''
+        """
         return self.start <= value < self.end
 
     @property
     def start(self):
-        ''' Returns the start of the range.'''
+        """Returns the start of the range."""
         return list(self._ranges.keys())[0][0]
 
     @property
     def end(self):
-        ''' Returns the end of the range.'''
+        """Returns the end of the range."""
         return list(self._ranges.keys())[-1][-1]
 
     def select(self, value):
-        ''' Selects the range for the given value.
+        """Selects the range for the given value.
 
         Parameters
         ----------
@@ -220,13 +220,14 @@ class RangeSelector(gimmick, metaclass=RangeSelectorMeta):
         -------
         int
             The index of the range that contains the given value.
-        '''
+        """
         for (lower, upper), content in self._ranges.items():
             if lower <= value < upper:
                 return content
-        raise GimError(f'Value {value} is out of range of {self.start}-{self.end}')
+        raise GimError(f"Value {value} is out of range of {self.start}-{self.end}")
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     import doctest
+
     doctest.testmod()
