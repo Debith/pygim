@@ -1,11 +1,11 @@
+from pathlib import Path
 import importlib
 import pytest
-from pygim.fileio import PathSet
 from pathlib import Path
 
 ROOT = Path(__file__).parents[3]
 
-EXAMPLES = PathSet(ROOT / 'docs/examples').files(suffix=".py")
+EXAMPLES = list(ROOT.joinpath('docs/examples').rglob('*.py'))
 assert EXAMPLES
 EXAMPLES = list(reversed(sorted(EXAMPLES)))
 

@@ -7,10 +7,21 @@ import shutil
 from pathlib import Path
 from dataclasses import dataclass
 
-from pygim.iterlib import is_container
-from _pygim._utils._fileutils import flatten_paths
+from pygim.iterlib import is_container, flatten
 
 __all__ = ["PathSet"]
+
+
+def flatten_paths(*paths, pattern):
+    for path in flatten(paths):
+        path = Path(path)
+
+        if path.is_dir():
+            yield path
+            ps = list(path.rglob(pattern))
+            yield from ps
+        else:
+            yield path
 
 
 class _FileSystemOps:

@@ -9,7 +9,6 @@ import pathlib
 from _pygim._error_msgs import file_error_msg
 from _pygim._exceptions import ShaSumTargetNotFoundError
 from _pygim.typing import PathLike
-from ..fileio.pathset import PathSet
 from ..performance.dispatch import dispatch
 
 __all__ = ["sha256sum", "sha256sum_file"]

@@ -5,12 +5,25 @@ This module contains all exceptions found and used in pygim.
 
 from ._error_msgs import type_error_msg
 
-class GimError(Exception):
-    """Main error class."""
+
+class GimException(Exception):
+    """Generic exception that can be used across Python projects."""
     DEFAULT_MSG = "Gim error."
 
-    def __init__(self, msg=None):
-        super().__init__(msg or self.DEFAULT_MSG)
+    def __init__(self, msg=None, sep='\n'):
+        assert isinstance(msg, (str, list, tuple))
+        self._msg = msg or self.DEFAULT_MSG
+        self._sep = sep
+
+    def __str__(self):
+        if isinstance(self._msg, str):
+            return self._msg
+
+        return self._sep.join(str(m) for m in self._msg)
+
+
+class GimError(GimException):
+    """Error used as a base class for all exceptions Python Gimmicks library."""
 
 
 class EntangledError(GimError):

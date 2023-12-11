@@ -30,6 +30,7 @@ classifiers = [
 dependencies = [
   "pygim-common @ file:///${PROJECT_ROOT}/pygim-common",
   "pygim-ddd @ file:///${PROJECT_ROOT}/pygim-ddd",
+  "pygim-primitives @ file:///${PROJECT_ROOT}/pygim-primitives",
 ]
 
 [project.urls]
@@ -62,6 +63,7 @@ minversion = "6.0"
 python_files = "test_*.py"
 addopts = '-ra -q --doctest-glob="**/*.py" --tb=short --doctest-modules --doctest-continue-on-failure'
 testpaths = [
+    "pygim-common/pygim",
     "pygim-common/tests",
     "pygim-ddd/tests",
     "pygim-primitives/tests",
