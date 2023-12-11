@@ -38,6 +38,12 @@ jobs:
         cd pygim-common
         python -m pip install .
         cd ..
+        cd pygim-ddd
+        python -m pip install .
+        cd ..
+        cd pygim-primitives
+        python -m pip install .
+        cd ..
         python -m pip install .[test] -f .
         python -m pip install pytest
 
