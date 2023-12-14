@@ -1,4 +1,4 @@
-import tabulate
+import tabulate  # type: ignore
 from pygim.performance.dispatch import dispatch
 
 

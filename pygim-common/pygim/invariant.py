@@ -1,3 +1,3 @@
-from _pygim._utils._inspect import type_error_msg, has_instances
+from _pygim._utils._inspect import has_instances, is_subset, TraitFunctions
 
-__all__ = ['type_error_msg', 'has_instances']
+__all__ = ['has_instances', 'is_subset', 'TraitFunctions']

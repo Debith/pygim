@@ -6,6 +6,7 @@ from pathlib import Path
 from pybind11.setup_helpers import Pybind11Extension, build_ext
 from setuptools import setup,find_namespace_packages
 import toml
+import psutil
 
 ROOT = Path(__file__).parent
 sys.path.append(str(ROOT / "pygim"))
@@ -13,15 +14,20 @@ sys.path.append(str(ROOT / "pygim"))
 from __version__ import __version__
 
 pyproject = toml.loads(Path('pyproject.toml').read_text())
+ext_modules = []
 
-ext_modules = [
-    Pybind11Extension("_pygim.common_fast",
-        list(str(p) for p in Path(ROOT).rglob("*.cpp")),
-        # Example: passing in the version to the compiled code
-        define_macros = [('VERSION_INFO', __version__)],
-        extra_compile_args=["-g"],
-        ),
-]
+# This is a bit hacky way to resolve passing arguments to setup.py.
+# Invoked by:
+# $ python -m build -w --config-setting python_only
+if not psutil.Process().parent().cmdline()[-1] == "python_only":
+    ext_modules = [
+        Pybind11Extension("_pygim.common_fast",
+            list(str(p) for p in Path(ROOT).rglob("*.cpp")),
+            # Example: passing in the version to the compiled code
+            define_macros = [('VERSION_INFO', __version__)],
+            extra_compile_args=["-g"],
+            ),
+    ]
 
 pygim = map(lambda v: ('pygim.' + v), find_namespace_packages('pygim'))
 pygim_internal = map(lambda v: ('_pygim.' + v), find_namespace_packages('_pygim'))
