@@ -7,6 +7,7 @@ from _pygim._exceptions import (
     ShaSumTargetNotFoundError,
     DispatchError,
     UnrecognizedTypeError,
+    GimOptionError,
 )
 
 from _pygim._error_msgs import (
@@ -17,6 +18,7 @@ from _pygim._error_msgs import (
 __all__ = [
     "GimException",
     "GimError",
+    "GimOptionError",
     "EntangledError",
     "DispatchError",
     "EntangledClassError",

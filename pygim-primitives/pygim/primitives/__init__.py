@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-Domain Driven Design (DDD) toolkit for Python.
+Python Gimmicks - Primitives
 """
 
 from .pathset import PathSet

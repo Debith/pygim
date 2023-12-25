@@ -4,6 +4,8 @@ This module contains all exceptions found and used in pygim.
 """
 
 from ._error_msgs import type_error_msg
+from dataclasses import dataclass
+import _pygim.typing as t
 
 
 class GimException(Exception):
@@ -25,6 +27,17 @@ class GimException(Exception):
 class GimError(GimException):
     """Error used as a base class for all exceptions Python Gimmicks library."""
 
+
+@dataclass
+class GimOptionError(GimError):
+    """ Raised when value not among options. """
+    _input_value: t.Any
+    _choices: t.Iterable
+
+    def __str__(self):
+        choices = ", ".join(self._choices)
+        return f"Given input ``{self._input_value}`` not among: {choices}"
+    
 
 class EntangledError(GimError):
     """Base class for entanglement errors."""

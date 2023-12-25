@@ -8,7 +8,7 @@ from types import MappingProxyType
 from dataclasses import dataclass
 from tabulate import tabulate
 from pygim.gimmicks import gimmick, gim_type
-from pygim.explib import GimError
+from pygim.explib import GimError, GimOptionError, type_error_msg
 from pygim.checklib import has_instances
 from pygim.performance import dispatch, UnrecognizedTypeError
 
@@ -151,9 +151,16 @@ class RangeSelector(gimmick, metaclass=RangeSelectorMeta):
         tuple
             The range at the given index.
         """
+        assert isinstance(index, (int, tuple, slice)), type_error_msg(index, (str, tuple))
+        
         if isinstance(index, tuple):
             return self._ranges[index]
-        return list(self._ranges.keys())[index]
+        elif isinstance(index, slice):
+            return
+        for (lower, upper), content in self._ranges.items():
+            if lower <= index < upper:
+                return content
+        raise GimError(f'Value {index} is out of range of {self.start}-{self.end}')
 
     def __len__(self):
         """Returns the number of ranges."""
@@ -208,8 +215,14 @@ class RangeSelector(gimmick, metaclass=RangeSelectorMeta):
         """Returns the end of the range."""
         return list(self._ranges.keys())[-1][-1]
 
-    def select(self, value):
-        """Selects the range for the given value.
+    def find(self, value):
+        for _range, _content in self._ranges.items():
+            if value == _content:
+                return _range
+        raise GimOptionError(_content, self._ranges.values())
+
+    def select(self, input_value):
+        ''' Match input value for range and get its content.
 
         Parameters
         ----------
@@ -220,11 +233,11 @@ class RangeSelector(gimmick, metaclass=RangeSelectorMeta):
         -------
         int
             The index of the range that contains the given value.
-        """
+        '''
         for (lower, upper), content in self._ranges.items():
-            if lower <= value < upper:
+            if lower <= input_value < upper:
                 return content
-        raise GimError(f"Value {value} is out of range of {self.start}-{self.end}")
+        raise GimError(f'Value {input_value} is out of range of {self.start}-{self.end}')
 
 
 if __name__ == "__main__":
