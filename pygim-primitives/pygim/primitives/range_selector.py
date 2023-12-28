@@ -137,6 +137,28 @@ class RangeSelector(gimmick, metaclass=RangeSelectorMeta):
         assert self._ranges, "Ranges must be specified"
         assert has_instances(self._ranges, tuple), "keys must be tuples"
 
+    def _find_first_range_index(self, index):
+        """Finds the index of the first range that contains the given index.
+
+        Parameters
+        ----------
+        index : int
+            The index to find the range for.
+
+        Returns
+        -------
+        int
+            The index of the first range that contains the given index.
+        """
+        first_range_index = 0
+        r_start, r_stop = tuple(self._ranges.keys())[first_range_index]
+        for i in range(len(self._ranges)):
+            r_start, r_stop = tuple(self._ranges.keys())[i]
+            if r_start <= index < r_stop:
+                first_range_index = i
+                break
+        return first_range_index
+
     def __getitem__(self, index):
         """Returns the range at the given index.
 
@@ -152,15 +174,18 @@ class RangeSelector(gimmick, metaclass=RangeSelectorMeta):
             The range at the given index.
         """
         assert isinstance(index, (int, tuple, slice)), type_error_msg(index, (str, tuple))
-        
+
         if isinstance(index, tuple):
             return self._ranges[index]
         elif isinstance(index, slice):
-            return
-        for (lower, upper), content in self._ranges.items():
-            if lower <= index < upper:
-                return content
-        raise GimError(f'Value {index} is out of range of {self.start}-{self.end}')
+            first_range_index = 0
+            r_start, r_stop = tuple(self._ranges.keys())[first_range_index]
+            for i in range(len(self._ranges)):
+                r_start, r_stop = tuple(self._ranges.keys())[i]
+                if r_start <= index.start < r_stop:
+                    first_range_index = i
+                    break
+        return self.select(index)
 
     def __len__(self):
         """Returns the number of ranges."""

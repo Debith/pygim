@@ -86,19 +86,24 @@ def test_range_selector_contains(ranges, value, expected):
     (_TUPLE_RANGES, (-10, 0), 0),
     (_TUPLE_RANGES, (10, 20), 2),
     (_TUPLE_RANGES, (30, 40), 4),
-    (_TUPLE_RANGES, 0, (-10, 0)),
-    (_TUPLE_RANGES, 2, (10, 20)),
-    (_TUPLE_RANGES, 4, (30, 40)),
-    (_TUPLE_RANGES, -1, (30, 40)),
-    (_INT_RANGES, 1, (0, 10)),
-    (_INT_RANGES, -1, (0, 10)),
+    (_TUPLE_RANGES, 0, 1),
+    (_TUPLE_RANGES, -1, 0),
+    (_TUPLE_RANGES, 39, 4),
+    (_TUPLE_RANGES, 30, 4),
+    (_TUPLE_RANGES, slice(0, 20), [1, 2]),
+    (_TUPLE_RANGES, slice(10, 40), [2, 3, 4]),
+    (_INT_RANGES, 0, 1),
+    (_INT_RANGES, -1, 0),
+    (_INT_RANGES, 9, 1),
     (_DICT_RANGES, (-10, 0), 'a'),
     (_DICT_RANGES, (10, 20), 'c'),
     (_DICT_RANGES, (30, 40), 'e'),
-    (_DICT_RANGES, 0, (-10, 0)),
-    (_DICT_RANGES, 2, (10, 20)),
-    (_DICT_RANGES, 4, (30, 40)),
-    (_DICT_RANGES, -1, (30, 40)),
+    (_DICT_RANGES, 0, 'b'),
+    (_DICT_RANGES, -1, 'a'),
+    (_DICT_RANGES, 39, 'e'),
+    (_DICT_RANGES, 30, 'e'),
+    (_DICT_RANGES, slice(0, 20), ['b', 'c']),
+    (_DICT_RANGES, slice(10, 40), ['c', 'd', 'e']),
 ])
 def test_range_selector_getitem(ranges, index, expected):
     rs = RangeSelector(ranges)
@@ -132,8 +137,14 @@ def test_selecting_out_of_range(value, expected):
         rs.select(value)
 
 
+def test_super_long_range():
+    rs = RangeSelector(list(range(0, 1000000, 5)))
+    assert rs[1000] == 200
+    assert rs[100:50000] == list(range(20, 10000, 5))
+
+
 if __name__ == '__main__':
     from pygim.testing import run_tests
 
     # With coverage run, tests fail in meta.__call__ due to reload.
-    run_tests(__file__, RangeSelector.__module__, coverage=True)
+    run_tests(__file__, RangeSelector.__module__, coverage=False)
