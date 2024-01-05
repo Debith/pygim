@@ -17,7 +17,7 @@ __all__ = ["RangeSelector"]
 EXCEPTION = object()
 
 class RangeSelectorMeta(gim_type):
-    """Metaclass for RangeSelector."""
+    """Metaclass as factory for RangeSelector."""
 
     _NON_EMPTY_MSG = "Parameter ``ranges`` must be specified."
     _MAPPING_OR_SEQUENCE_MSG = "Parameter ``ranges`` must be a mapping or a sequence."
@@ -65,7 +65,7 @@ class RangeSelectorMeta(gim_type):
         return super().__call__(MappingProxyType(ranges))
 
     @__call__.register(list)
-    def _(cls, ranges: Sequence, values=None):
+    def _(cls, ranges: Sequence, labels=None):
         assert ranges, cls._NON_EMPTY_MSG
 
         if has_instances(ranges, Iterable):
@@ -75,9 +75,9 @@ class RangeSelectorMeta(gim_type):
         elif has_instances(ranges, int):
             ranges = list(zip(ranges[:-1], ranges[1:]))
 
-        if values:
-            assert len(ranges) == len(values), "Number of ranges and values must be equal"
-            ranges = dict(zip(ranges, values))
+        if labels:
+            assert len(ranges) == len(labels), "Number of ranges and labels must be equal"
+            ranges = dict(zip(ranges, labels))
         else:
             ranges = dict(zip(ranges, range(len(ranges))))
 
@@ -174,18 +174,34 @@ class RangeSelector(gimmick, metaclass=RangeSelectorMeta):
         return [self._ranges[r] for r in ranges[first_index:last_index + 1]]
 
     def __getitem__(self, index):
-        """Returns the range at the given index.
+        """
+        Retrieves a specific range or a list of ranges based on the provided index.
+
+        This method can handle three types of inputs:
+        - An integer, which will return the label of the range containing this value.
+        - A tuple, which directly indexes into the underlying range dictionary.
+        - A slice, which returns a list of labels for all ranges that intersect with the slice.
 
         Parameters
         ----------
-        index : int | tuple
-            The index of the range to return. If a tuple is given, it is
-            used to select the range.
+        index : int | tuple | slice
+            The index used to retrieve the range(s).
+            - If an int, it is the value for which the containing range's label is returned.
+            - If a tuple, it directly indexes the range dictionary.
+            - If a slice, it specifies the start and stop values to retrieve a list of range labels.
 
         Returns
         -------
-        tuple
-            The range at the given index.
+        str | tuple | list
+            Depending on the type of `index`:
+            - If `index` is an int, returns the label of the range containing the value.
+            - If `index` is a tuple, returns the range associated with the tuple key.
+            - If `index` is a slice, returns a list of labels of ranges intersecting with the slice.
+
+        Raises
+        ------
+        GimError
+            If an int index does not fall within any defined range.
         """
         assert isinstance(index, (int, tuple, slice)), type_error_msg(index, (str, tuple))
 
