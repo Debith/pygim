@@ -14,6 +14,7 @@ from pygim.performance import dispatch, UnrecognizedTypeError
 
 __all__ = ["RangeSelector"]
 
+EXCEPTION = object()
 
 class RangeSelectorMeta(gim_type):
     """Metaclass for RangeSelector."""
@@ -137,27 +138,40 @@ class RangeSelector(gimmick, metaclass=RangeSelectorMeta):
         assert self._ranges, "Ranges must be specified"
         assert has_instances(self._ranges, tuple), "keys must be tuples"
 
-    def _find_first_range_index(self, index):
-        """Finds the index of the first range that contains the given index.
+    def _find_first_range_index(self, start):
+        ranges = list(self._ranges.keys())
+        low, high = 0, len(ranges) - 1
+        while low <= high:
+            mid = (low + high) // 2
+            if ranges[mid][1] <= start:
+                low = mid + 1
+            else:
+                high = mid - 1
+        return ranges[low] if low < len(ranges) else None
 
-        Parameters
-        ----------
-        index : int
-            The index to find the range for.
+    def _find_last_range_index(self, stop):
+        ranges = list(self._ranges.keys())
+        low, high = 0, len(ranges) - 1
+        while low <= high:
+            mid = (low + high) // 2
+            if ranges[mid][0] >= stop:
+                high = mid - 1
+            else:
+                low = mid + 1
+        return ranges[high] if high >= 0 else None
 
-        Returns
-        -------
-        int
-            The index of the first range that contains the given index.
-        """
-        first_range_index = 0
-        r_start, r_stop = tuple(self._ranges.keys())[first_range_index]
-        for i in range(len(self._ranges)):
-            r_start, r_stop = tuple(self._ranges.keys())[i]
-            if r_start <= index < r_stop:
-                first_range_index = i
-                break
-        return first_range_index
+    def _get_ranges_in_slice(self, index_slice):
+        first_range = self._find_first_range_index(index_slice.start)
+        last_range = self._find_last_range_index(index_slice.stop)
+
+        if not first_range or not last_range:
+            return []  # No valid ranges found
+
+        ranges = list(self._ranges.keys())
+        first_index = ranges.index(first_range)
+        last_index = ranges.index(last_range)
+
+        return [self._ranges[r] for r in ranges[first_index:last_index + 1]]
 
     def __getitem__(self, index):
         """Returns the range at the given index.
@@ -178,13 +192,7 @@ class RangeSelector(gimmick, metaclass=RangeSelectorMeta):
         if isinstance(index, tuple):
             return self._ranges[index]
         elif isinstance(index, slice):
-            first_range_index = 0
-            r_start, r_stop = tuple(self._ranges.keys())[first_range_index]
-            for i in range(len(self._ranges)):
-                r_start, r_stop = tuple(self._ranges.keys())[i]
-                if r_start <= index.start < r_stop:
-                    first_range_index = i
-                    break
+            return self._get_ranges_in_slice(index)
         return self.select(index)
 
     def __len__(self):
@@ -246,7 +254,7 @@ class RangeSelector(gimmick, metaclass=RangeSelectorMeta):
                 return _range
         raise GimOptionError(_content, self._ranges.values())
 
-    def select(self, input_value):
+    def select(self, input_value, *, default=EXCEPTION):
         ''' Match input value for range and get its content.
 
         Parameters
@@ -259,10 +267,17 @@ class RangeSelector(gimmick, metaclass=RangeSelectorMeta):
         int
             The index of the range that contains the given value.
         '''
-        for (lower, upper), content in self._ranges.items():
-            if lower <= input_value < upper:
-                return content
-        raise GimError(f'Value {input_value} is out of range of {self.start}-{self.end}')
+        try:
+            range_key = self._find_first_range_index(input_value)
+            if range_key and range_key[0] <= input_value < range_key[1]:
+                return self._ranges[range_key]
+            else:
+                raise KeyError
+        except KeyError:
+            if default is not EXCEPTION:
+                return default
+            emsg = f'Value {input_value} is out of range of {self.start}-{self.end}'
+            raise GimError(emsg) from None
 
 
 if __name__ == "__main__":

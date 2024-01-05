@@ -35,9 +35,9 @@ class GimOptionError(GimError):
     _choices: t.Iterable
 
     def __str__(self):
-        choices = ", ".join(self._choices)
+        choices = ", ".join(str(c) for c in self._choices)
         return f"Given input ``{self._input_value}`` not among: {choices}"
-    
+
 
 class EntangledError(GimError):
     """Base class for entanglement errors."""

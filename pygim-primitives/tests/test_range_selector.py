@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 import re
 import pytest
-from pygim.explib import GimError
+from pygim.explib import GimError, GimOptionError
 from pygim.primitives.range_selector import RangeSelector
 
 _TUPLE_RANGES = [
@@ -140,7 +140,7 @@ def test_selecting_out_of_range(value, expected):
 def test_super_long_range():
     rs = RangeSelector(list(range(0, 1000000, 5)))
     assert rs[1000] == 200
-    assert rs[100:50000] == list(range(20, 10000, 5))
+    assert rs[100:50000] == list(range(20, 10000))
 
 
 if __name__ == '__main__':

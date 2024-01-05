@@ -64,8 +64,6 @@ if platform.uname().system != "Windows":
         assert temp_files.clone([]) == PathSet([])
         assert temp_files.clone(['readme.txt']) == PathSet(['readme.txt'])
 
-
-
     def test_adding(temp_files):
         temp_dir = list(temp_files)[0].parent
         more_files = PathSet.prefixed(['fourth.txt', 'fifth.txt', 'sixth.txt'], prefix=temp_dir)
