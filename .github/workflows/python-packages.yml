@@ -60,11 +60,11 @@ jobs:
     - name: Remove source files (Windows)
       if: matrix.os == 'windows-latest'
       run: |
-        rmdir /s /q pygim-common\_pygim
-        rmdir /s /q pygim-common\pygim
-        rmdir /s /q pygim-ddd\pygim
-        rmdir /s /q pygim-primitives\pygim
-        rmdir /s /q pygim-cli\_pygim
+        rmdir /s /q pygim-common\\_pygim
+        rmdir /s /q pygim-common\\pygim
+        rmdir /s /q pygim-ddd\\pygim
+        rmdir /s /q pygim-primitives\\pygim
+        rmdir /s /q pygim-cli\\_pygim
         rmdir /s /q _pygim_build
 
     - name: Test with pytest
