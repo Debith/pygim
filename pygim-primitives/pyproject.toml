@@ -1,6 +1,6 @@
 [project]
 name = "pygim-primitives"
-version = "0.0.1"
+version = "0.0.1-beta"
 description = "Collection of various primitive types for Python"
 readme = "README.rst"
 requires-python = ">=3.7, <4"

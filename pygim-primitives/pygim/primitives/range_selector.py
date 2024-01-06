@@ -3,6 +3,8 @@
 This module implmements class RangeSelector.
 """
 
+from sys import version_info
+
 from collections.abc import Mapping, Iterable, Sequence
 from types import MappingProxyType
 from dataclasses import dataclass
@@ -219,9 +221,14 @@ class RangeSelector(gimmick, metaclass=RangeSelectorMeta):
         """Returns an iterator over the ranges."""
         yield from self._ranges.keys()
 
-    def __reversed__(self):
-        """Returns a reversed iterator over the ranges."""
-        yield from reversed(self._ranges.keys())
+    if version_info >= (3, 8):
+        def __reversed__(self):
+            """Returns a reversed iterator over the ranges."""
+            yield from reversed(self._ranges.keys())
+    else:
+        def __reversed__(self):
+            """Returns a reversed iterator over the ranges."""
+            yield from reversed(list(self._ranges.keys()))
 
     def __repr__(self):
         """Returns a string representation of the ranges."""

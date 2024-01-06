@@ -8,7 +8,7 @@ name = "python-gimmicks"
 version = "0.2.1"
 description = "Full Python Gimmicks project with all of its sub-projects."
 readme = "README.rst"
-requires-python = ">=3.7, <4"
+requires-python = ">=3.7, <3.12"
 authors = [
   {email = "debith-dev@outlook.com"},
   {name = "Teppo Perä"}
@@ -24,7 +24,6 @@ classifiers = [
   "Programming Language :: Python :: 3.9",
   "Programming Language :: Python :: 3.10",
   "Programming Language :: Python :: 3.11",
-  "Programming Language :: Python :: 3.12",
   "Topic :: Software Development :: Libraries :: Python Modules",
   "Topic :: Software Development :: Quality Assurance",
   "Typing :: Typed",
