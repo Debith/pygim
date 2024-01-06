@@ -1,11 +1,10 @@
 from typing import Iterable, Any, Union, Tuple, TypeAlias, Callable
 
-
 def has_instances(
     iterable: Iterable[Any],
     types: Union[TypeAlias, Tuple[TypeAlias]],
     how: Callable[[Iterable[object]], bool] = ...,
-    ) -> bool:
+) -> bool:
     """
     Check if all or any items in an iterable are instances of a specified type.
 
@@ -37,7 +36,6 @@ def has_instances(
     True
     """
     ...
-
 
 def is_subset(maybe_subset: Iterable[Any], fullset: Iterable[Any]) -> bool:
     """

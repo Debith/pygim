@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
-'''
+"""
 This module implmements class ``interface``.
-'''
+"""
 
 import abc
 from collections.abc import Iterable
@@ -12,16 +12,19 @@ from typing import TYPE_CHECKING
 from _pygim._magic._gimmick import gimmick, gim_type
 import _pygim._exceptions as e
 
-__all__ = ['interface']
+__all__ = ["interface"]
+
 
 def __empty_body__():
     pass
+
+
 _EMPTY_BODY = __empty_body__.__code__.co_code
 del __empty_body__
 
 
 def _is_dunder(attr):
-    return attr.startswith('__') and attr.endswith('__')
+    return attr.startswith("__") and attr.endswith("__")
 
 
 def _is_valid_interface_func(func) -> bool:
@@ -60,36 +63,39 @@ def reraise(func):
             return func(*args, **kwargs)
         except GimABCError as exc:
             raise GimABCError(str(exc)) from None
+
     return wrapper
 
 
 class InterfaceMeta(gim_type, abc.ABCMeta):
-    '''
-    '''
+    """ """
+
     _INJECT_ABC_MAP = dict(
         abc=abc,
         abstractmethod=abc.abstractmethod,
         abstractclassmethod=abc.abstractclassmethod,
         abstractstaticmethod=abc.abstractstaticmethod,
         abstractproperty=abc.abstractproperty,
-        )
+    )
 
     @classmethod
     def _ensure_abstract_bases(mcls, bases):
         if gimmick not in bases:
-            bases += (gimmick, )
+            bases += (gimmick,)
         if not bases:
-            return (abc.ABC, )
+            return (abc.ABC,)
         elif abc.ABC in bases:
             return bases
         else:
-            return bases + (abc.ABC, )
+            return bases + (abc.ABC,)
 
     @classmethod
     def _ensure_abstract_methods_and_properties(mcls, attrs, allow_empty_body):
         for attr_name, attr_value in attrs.items():
-            if attr_name in mcls._INJECT_ABC_MAP: continue
-            if _is_dunder(attr_name): continue
+            if attr_name in mcls._INJECT_ABC_MAP:
+                continue
+            if _is_dunder(attr_name):
+                continue
             if getattr(attr_value, "__isabstractmethod__", False):
                 continue
             if isinstance(attr_value, FunctionType):
@@ -110,15 +116,13 @@ class InterfaceMeta(gim_type, abc.ABCMeta):
                     "Interface functions are intended to be empty! "
                     f"Use ``{mcls.__module__}.AbstractClass`` if you need function "
                     "to contain body.",
-                    )
+                )
 
         return attrs
 
     @classmethod
     def _clean_attrs(mcls, attrs):
-        attrs = {
-            k: v for k, v in attrs.items() if k not in mcls._INJECT_ABC_MAP
-            }
+        attrs = {k: v for k, v in attrs.items() if k not in mcls._INJECT_ABC_MAP}
 
         return attrs
 
@@ -134,8 +138,7 @@ class InterfaceMeta(gim_type, abc.ABCMeta):
         return super().__dir__()
 
     @reraise
-    def __new__(mcls, name, bases=(), namespace=None, *,
-                allow_empty_body=False, **kwargs):
+    def __new__(mcls, name, bases=(), namespace=None, *, allow_empty_body=False, **kwargs):
         if name in ("Abstract", "Interface"):
             return super().__new__(mcls, name, bases, mcls._clean_attrs(namespace))
 
@@ -163,7 +166,7 @@ class InterfaceMeta(gim_type, abc.ABCMeta):
             raise GimABCError(
                 f"Can't instantiate interface ``{self.__name__}`` "
                 f"with abstract methods: {', '.join(sorted(self.__abstractmethods__))}"
-                ) from None
+            ) from None
 
 
 class Interface(metaclass=InterfaceMeta, allow_method_body=False):

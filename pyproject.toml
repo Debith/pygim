@@ -8,7 +8,7 @@ name = "python-gimmicks"
 version = "0.2.1"
 description = "Full Python Gimmicks project with all of its sub-projects."
 readme = "README.rst"
-requires-python = ">=3.7, <4"
+requires-python = ">=3.7, <3.12"
 authors = [
   {email = "debith-dev@outlook.com"},
   {name = "Teppo Perä"}
@@ -23,6 +23,7 @@ classifiers = [
   "Programming Language :: Python :: 3.8",
   "Programming Language :: Python :: 3.9",
   "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
   "Topic :: Software Development :: Libraries :: Python Modules",
   "Topic :: Software Development :: Quality Assurance",
   "Typing :: Typed",
@@ -30,6 +31,7 @@ classifiers = [
 dependencies = [
   "pygim-common @ file:///${PROJECT_ROOT}/pygim-common",
   "pygim-ddd @ file:///${PROJECT_ROOT}/pygim-ddd",
+  "pygim-primitives @ file:///${PROJECT_ROOT}/pygim-primitives",
 ]
 
 [project.urls]
@@ -62,12 +64,19 @@ minversion = "6.0"
 python_files = "test_*.py"
 addopts = '-ra -q --doctest-glob="**/*.py" --tb=short --doctest-modules --doctest-continue-on-failure'
 testpaths = [
-    "pygim-common/tests"
+    "pygim-common/pygim",       # doctests
+    "pygim-common/tests",
+    "pygim-ddd/tests",
+    "pygim-primitives/pygim",   # doctests
+    "pygim-primitives/tests",
 ]
 
 [tool.coverage.report]
 omit = ["./docs/**/*.*", "**/tests/**/*.*"]
-include = ["./pygim-common/**/*.py"]
+include = ["./pygim-common/**/*.py",
+           "./pygim-ddd/**/*.py",
+           "./pygim-primitives/**/*.py",
+           ]
 show_missing = true
 exclude_lines = [
     "pragma: no cover",

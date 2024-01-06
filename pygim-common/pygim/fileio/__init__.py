@@ -23,11 +23,9 @@ PathSet
 """
 
 from .fileops import *
-from .pathset import *
 
 __all__ = [
     "write_bytes",
     "pickle_and_compress",
     "decompress_and_unpickle",
-    "PathSet",
-    ]
+]

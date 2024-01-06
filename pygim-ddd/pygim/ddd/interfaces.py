@@ -246,7 +246,7 @@ class IValueObject(abc.ABC):
         NotImplementedError
             Always, because value objects are immutable.
         """
-        raise NotImplementedError('Value objects are immutable.')
+        raise NotImplementedError("Value objects are immutable.")
 
     @abc.abstractmethod
     def __eq__(self, value_object):
@@ -566,6 +566,7 @@ class IApplicationService(IService):
     ...         # Register a new user using domain objects
     ...         pass
     """
+
 
 class IInfrastructureService(IService):
     """

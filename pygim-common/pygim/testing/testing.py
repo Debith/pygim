@@ -26,6 +26,7 @@ def measure_coverage(*, include=None, show_missing: bool = True):
     #        The error appears to be originating from os.getcwd(), which
     #        indicates that some folder is interpreted as current is deleted.
     import coverage
+
     cov = coverage.Coverage()
     cov.start()
 
@@ -72,8 +73,8 @@ def run_tests(test_file, module_name, pytest_args=None, *, coverage: bool = True
         pytest.main(pytest_args)
         return
 
-    assert module, "When running the coverage, module must be specified!"
     module = sys.modules[module_name]
+    assert module, "When running the coverage, module must be specified!"
     assert isinstance(module.__file__, str), "No file for the module!"
 
     with measure_coverage(include=module.__file__):
