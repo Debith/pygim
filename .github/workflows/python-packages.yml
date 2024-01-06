@@ -46,10 +46,11 @@ jobs:
         python -m pip install .
         cd ..
         python -m pip install pytest
-        rm -rf pygim-common
-        rm -rf pygim-ddd
-        rm -rf pygim-primitives
-        rm -rf pygim-cli
+        rm -rf pygim-common/_pygim
+        rm -rf pygim-common/pygim
+        rm -rf pygim-ddd/pygim
+        rm -rf pygim-primitives/pygim
+        rm -rf pygim-cli/_pygim
         rm -rf _pygim_build
 
     - name: Test with pytest

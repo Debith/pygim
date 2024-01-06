@@ -108,14 +108,14 @@ class RangeSelector(gimmick, metaclass=RangeSelectorMeta):
     >>> rs.select(5)
     1
     >>> rs[0]
-    (-10, 0)
+    1
 
     With values:
     >>> rs = RangeSelector([-10, 0, 10], ['a', 'b'])
     >>> rs.select(2)
     'b'
     >>> rs[0]
-    (-10, 0)
+    'b'
 
     With a dictionary:
     >>> rs = RangeSelector({
@@ -128,7 +128,7 @@ class RangeSelector(gimmick, metaclass=RangeSelectorMeta):
     >>> rs.select(5)
     'b'
     >>> rs[0]
-    (-10, 0)
+    'b'
 
     """
 
