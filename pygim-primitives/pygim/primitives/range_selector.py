@@ -85,7 +85,7 @@ class RangeSelectorMeta(gim_type):
         return cls.__call__(ranges)
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True)  # This should be using slots but not all Python versions support it
 class RangeSelector(gimmick, metaclass=RangeSelectorMeta):
     """RangeSelector class.
 

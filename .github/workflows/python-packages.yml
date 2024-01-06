@@ -49,6 +49,8 @@ jobs:
         rm -rf pygim-common
         rm -rf pygim-ddd
         rm -rf pygim-primitives
+        rm -rf pygim-cli
+        rm -rf _pygim_build
 
     - name: Test with pytest
       run: |
