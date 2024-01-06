@@ -35,6 +35,7 @@ jobs:
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
+        python -m pip install .[test] -f .
         cd pygim-common
         python -m pip install .
         cd ..
@@ -44,8 +45,10 @@ jobs:
         cd pygim-primitives
         python -m pip install .
         cd ..
-        python -m pip install .[test] -f .
         python -m pip install pytest
+        rm -rf pygim-common
+        rm -rf pygim-ddd
+        rm -rf pygim-primitives
 
     - name: Test with pytest
       run: |

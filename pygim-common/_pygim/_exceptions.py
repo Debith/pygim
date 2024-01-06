@@ -7,10 +7,21 @@ from ._error_msgs import type_error_msg
 from dataclasses import dataclass
 import _pygim.typing as t
 
+__all__ = [
+    'GimException',
+    'GimError',
+    'GimOptionError',
+    'EntangledError',
+    'EntangledClassError',
+    'EntangledMethodError',
+    'ShaSumTargetNotFoundError',
+    'DispatchError',
+    'UnrecognizedTypeError',
+]
 
 class GimException(Exception):
     """Generic exception that can be used across Python projects."""
-    DEFAULT_MSG = "Gim error."
+    DEFAULT_MSG = "Gim Error."
 
     def __init__(self, msg=None, sep='\n'):
         assert isinstance(msg, (str, list, tuple))
