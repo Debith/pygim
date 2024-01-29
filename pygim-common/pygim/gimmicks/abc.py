@@ -162,7 +162,9 @@ class InterfaceMeta(gim_type, abc.ABCMeta):
 
         try:
             return super().__call__(*args, **kwargs)
-        except TypeError:
+        except TypeError as e:
+            if "missing" in str(e):
+                raise
             raise GimABCError(
                 f"Can't instantiate interface ``{self.__name__}`` "
                 f"with abstract methods: {', '.join(sorted(self.__abstractmethods__))}"

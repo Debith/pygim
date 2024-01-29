@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 # type: ignore
 import pytest
+from dataclasses import dataclass
 
 def test_interface_is_abstract():
     from pygim.gimmicks.abc import Interface, GimABCError
@@ -184,6 +185,61 @@ def test_abstract_class_with_body_containing_implementation():
 
     assert ExampleAbstractClass.test_func() == 1
 
+
+def test_interface_with_value_override_with_attribute_with_default():
+    from pygim.gimmicks.abc import Interface
+
+    class ExampleInterface(Interface):
+        @property
+        def test_prop_with_default(self):
+            pass
+    
+    
+    @dataclass
+    class ExampleImpl(ExampleInterface):
+        test_prop_with_default: int = 42
+
+    
+    example = ExampleImpl()
+    assert example.test_prop_with_default == 42
+
+
+def test_interface_with_value_override_with_attribute_without_default():
+    from pygim.gimmicks.abc import Interface
+
+    class ExampleInterface(Interface):
+        @property
+        def test_prop_with_default(self):
+            pass
+    
+    
+    @dataclass
+    class ExampleImpl(ExampleInterface):
+        test_prop: int
+
+    
+    example = ExampleImpl(42)
+    assert example.test_prop == 42
+
+
+def test_interface_with_override_with_class_attribute_throwing_an_error():
+    from pygim.gimmicks.abc import Interface, GimABCError
+
+    class ExampleInterface(Interface):
+        @property
+        def test_prop_with_default(self):
+            pass
+    
+
+    with pytest.raises(
+            GimABCError,
+            match="Can't instantiate interface ``Second`` with abstract methods: test_func1"):
+        class ExampleImpl(ExampleInterface):
+            test_prop_with_default = 42
+
+    
+    example = ExampleImpl()
+    assert example.test_prop_with_default == 42
 
 if __name__ == '__main__':
     from pygim.testing import run_tests
