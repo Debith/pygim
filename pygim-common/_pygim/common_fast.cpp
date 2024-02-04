@@ -4,7 +4,7 @@
 #include <pybind11/stl.h>
 
 #include "_iterlib_fast/iterutils.h"
-#include "_primitives_fast/id.h"
+#include "_gimmicks_fast/id.h"
 #include <iostream>         // std::string
 
 #define STRINGIFY(x) #x

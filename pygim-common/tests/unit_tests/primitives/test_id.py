@@ -1,5 +1,5 @@
 import pytest
-from pygim.primitives import ID
+from pygim.gimmicks import ID
 
 
 def test_two_ids_are_same():
