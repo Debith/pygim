@@ -15,13 +15,13 @@ namespace py = pybind11;
 template<typename T>
 void bindID(py::module_ &m, const char* className) {
     using IDType = ID<T>;
-    py::class_<IDType>(m, className)
+    py::class_<IDType>(m, className, "Unique ID class.")
         .def(py::init<T>(), "Constructor with ID value")
         .def_static("random",
                     &ID<T>::random,
-                    "Static method to generate a random ID"
+                    "Static method to generate a pseudo random ID."
                     )
-        .def("hash", &IDType::hash, "Get hash value of the ID")
+        .def("__hash__", &IDType::hash, "Get hash value of the ID")
         .def("__eq__", [](const IDType& a, const IDType& b) { return a == b; }, "Equality comparison")
         .def("__repr__", [className](const IDType& id) {
             return "<" + std::string(className) + ":" + std::to_string(id.hash()) + ">";

@@ -46,19 +46,6 @@ private:
     std::uniform_int_distribution<int64_t> dis;
 };
 
-/*
-int main() {
-    ChunkedNumberGenerator generator;
-
-    // Generate and print some numbers as a demonstration
-    for (int i = 0; i < 10; ++i) {
-        std::cout << generator.getNextNumber() << std::endl;
-    }
-
-    return 0;
-}
-*/
-
 
 template<typename T>
 class ID {
@@ -88,6 +75,7 @@ public:
     constexpr bool operator==(const ID& other)  const && noexcept { return mId == other.mId; };
     constexpr bool operator==(const ID&& other) const && noexcept { return mId == other.mId; };
 
+    // FIXME: ensure immutability!
     // Delete copy assignment operator and copy constructor to ensure immutability
     //ID(ID&&) = delete;
     //ID(const ID&) = delete;
