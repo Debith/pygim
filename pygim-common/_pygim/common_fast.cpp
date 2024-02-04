@@ -1,7 +1,10 @@
+#define PYBIND11_DETAILED_ERROR_MESSAGES
+
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 
 #include "_iterlib_fast/iterutils.h"
+#include "_primitives_fast/id.h"
 #include <iostream>         // std::string
 
 #define STRINGIFY(x) #x
@@ -9,6 +12,21 @@
 
 namespace py = pybind11;
 
+template<typename T>
+void bindID(py::module_ &m, const char* className) {
+    using IDType = ID<T>;
+    py::class_<IDType>(m, className)
+        .def(py::init<T>(), "Constructor with ID value")
+        .def_static("random",
+                    &ID<T>::random,
+                    "Static method to generate a random ID"
+                    )
+        .def("hash", &IDType::hash, "Get hash value of the ID")
+        .def("__eq__", [](const IDType& a, const IDType& b) { return a == b; }, "Equality comparison")
+        .def("__repr__", [className](const IDType& id) {
+            return "<" + std::string(className) + ":" + std::to_string(id.hash()) + ">";
+        }, "String representation");
+}
 
 PYBIND11_MODULE(common_fast, m)
 {
@@ -37,6 +55,9 @@ PYBIND11_MODULE(common_fast, m)
     m.def("tuplify", (py::tuple (*)(const py::dict&))       &tuplify, "A function that converts a dict to a tuple of key-value pairs.");
     m.def("tuplify", (py::tuple (*)(const py::iterable&))   &tuplify, "A function that converts an iterable to a tuple.");
     m.def("tuplify", (py::tuple (*)(const py::handle&))     &tuplify, "A function that converts a generic object to a single-element tuple.");
+
+    // Class ID
+    bindID<uint64_t>(m, "ID");
 
 #ifdef VERSION_INFO
     m.attr("__version__") = MACRO_STRINGIFY(VERSION_INFO);

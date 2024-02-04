@@ -4,10 +4,6 @@ Python Gimmicks Library.
 
 This module provides various classes and functions for working with Python gimmicks.
 
-Python Gimmicks Library.
-
-This module provides various classes and functions for working with Python gimmicks.
-
 Common Library (pip install pygim-common)
 ----------------------------------------------------------
 >>> from pygim.fileio import write_bytes, pickle_and_compress, decompress_and_unpickle
