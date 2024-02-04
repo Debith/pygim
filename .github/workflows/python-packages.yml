@@ -43,7 +43,7 @@ jobs:
         python -m pip install .
         cd ..
         cd pygim-primitives
-        python -m pip install -vvv .
+        python -m pip install .
         cd ..
         python -m pip install pytest
 
