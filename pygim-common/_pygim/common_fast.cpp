@@ -4,6 +4,7 @@
 #include <pybind11/stl.h>
 
 #include "_iterlib_fast/iterutils.h"
+#include "_gimmicks_fast/random.h"
 #include "_gimmicks_fast/id.h"
 #include <iostream>         // std::string
 
@@ -55,6 +56,10 @@ PYBIND11_MODULE(common_fast, m)
     m.def("tuplify", (py::tuple (*)(const py::dict&))       &tuplify, "A function that converts a dict to a tuple of key-value pairs.");
     m.def("tuplify", (py::tuple (*)(const py::iterable&))   &tuplify, "A function that converts an iterable to a tuple.");
     m.def("tuplify", (py::tuple (*)(const py::handle&))     &tuplify, "A function that converts a generic object to a single-element tuple.");
+
+    m.def("rand_integer", &Random::randomInteger64, "Generate a random 64-bit number");
+    m.def("randint", &Random::randomInteger, "Generate a random number within a given range inclusive", py::arg("min"), py::arg("max"));
+    m.def("randints", &Random::randomIntegers, "Generate a list of random 64-bit numbers", py::arg("count") = 1);
 
     // Class ID
     bindID<uint64_t>(m, "ID");

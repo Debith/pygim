@@ -3,7 +3,7 @@ requires = ["setuptools ~= 58.0", "wheel", "pdm-backend", "pybind11", "toml", "p
 
 [project]
 name = "pygim-common"
-version = "0.6.1"
+version = "0.6.2"
 description = "Common features for pygim"
 readme = "README.rst"
 requires-python = ">=3.7, <4"
