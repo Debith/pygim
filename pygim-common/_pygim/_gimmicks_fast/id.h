@@ -42,10 +42,10 @@ public:
 
 private:
     const T mId;
-    static ChunkedNumberGenerator generator;
+    static ChunkedNumberGenerator<T> generator;
 };
 
 template<typename T>
-inline ChunkedNumberGenerator ID<T>::generator;
+inline ChunkedNumberGenerator<T> ID<T>::generator;
 
 #endif // ID_H

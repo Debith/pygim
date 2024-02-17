@@ -1,48 +1,61 @@
 #ifndef CHUNKED_NUMBER_GENERATOR_H
 #define CHUNKED_NUMBER_GENERATOR_H
 
+#include <algorithm>
+#include <execution>
 #include <vector>
 #include <random>
 #include <iostream>
+#include <random>
 
-
+template <typename T>
 class ChunkedNumberGenerator {
 public:
-    // Assuming an L1 cache size of 32KB and each int64_t is 8 bytes, calculate chunk size
-    // This is a simplified calculation; consider your specific CPU cache size and structure
-    static constexpr size_t cacheLineSize = 64; // Common cache line size in bytes
-    static constexpr size_t int64Size = sizeof(int64_t);
+    static constexpr size_t cacheLineSize = 64;
+    static constexpr size_t int64Size = sizeof(uint64_t);
     static constexpr size_t numbersPerCacheLine = cacheLineSize / int64Size;
-    static constexpr size_t chunkSize = 4096; // Adjust based on cache size and experiment
+    static constexpr size_t bufferSize = 4096 / int64Size;
 
-    ChunkedNumberGenerator() : gen(rd()),
-                               dis(std::numeric_limits<int64_t>::min(),
-                               std::numeric_limits<int64_t>::max()) {
-        chunks.emplace_back();
-        chunks.back().reserve(chunkSize);
-        currentChunkIndex = 0;
+    ChunkedNumberGenerator() : rd(), gen(rd()), dis(std::numeric_limits<T>::min(), std::numeric_limits<T>::max()) {
+        buffer.resize(bufferSize);
+        reset();
     }
 
-    int64_t getNextNumber() {
-        if (chunks[currentChunkIndex].size() == chunkSize) {
-            currentChunkIndex++;
-            if (currentChunkIndex >= chunks.size()) {
-                chunks.emplace_back();
-                chunks.back().reserve(chunkSize);
+    void reset() {
+        std::for_each(std::execution::par, buffer.begin(), buffer.end(), [](T& n) {
+            ++n;
+        });
+        index = 0;
+    }
+
+    T getNextNumber() {
+        if (index >= bufferSize) {
+            reset();
+        }
+        return buffer[index++];
+    }
+
+    // New method to fill an external buffer directly
+    void fillBuffer(T* dest, size_t count) {
+        while (count > 0) {
+            size_t chunk = std::min(count, bufferSize - index);
+            std::memcpy(dest, buffer.data() + index, chunk * sizeof(T));
+            dest += chunk;
+            count -= chunk;
+            index += chunk;
+
+            if (index >= bufferSize) {
+                reset(); // Ensure the buffer is refilled and index is reset
             }
         }
-
-        int64_t number = dis(gen);
-        chunks[currentChunkIndex].push_back(number);
-        return number;
     }
 
 private:
-    std::vector<std::vector<int64_t>> chunks;
-    size_t currentChunkIndex;
     std::random_device rd;
     std::mt19937_64 gen;
-    std::uniform_int_distribution<int64_t> dis;
+    std::uniform_int_distribution<T> dis;
+    std::vector<T> buffer;
+    size_t index = 0;
 };
 
 
@@ -59,18 +72,15 @@ public:
     }
 
     static std::vector<uint64_t> randomIntegers(size_t count) {
-        std::vector<uint64_t> numbers;
-        numbers.reserve(count);
-        for (size_t i = 0; i < count; i++) {
-            numbers.push_back(generator.getNextNumber());
-        }
+        std::vector<uint64_t> numbers(count);
+        generator.fillBuffer(numbers.data(), count);
         return numbers;
     }
 
 private:
-    static ChunkedNumberGenerator generator;
+    static ChunkedNumberGenerator<uint64_t> generator;
 };
 
-inline ChunkedNumberGenerator Random::generator;
+inline ChunkedNumberGenerator<uint64_t> Random::generator;
 
 #endif // CHUNKED_NUMBER_GENERATOR_H
