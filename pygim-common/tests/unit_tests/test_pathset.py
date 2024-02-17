@@ -11,7 +11,7 @@ from pygim.primitives.pathset import PathSet, flatten_paths
 
 
 def test_flatten_paths_on_flat_dir(filled_temp_dir):
-    files = list(flatten_paths(filled_temp_dir, pattern="*"))
+    files = list(flatten_paths(filled_temp_dir, pattern="*", nested=True))
     files = sorted([d.name for d in files[1:]])
 
     assert files == ['AUTHORS.rst', 'readme.rst', 'readme.txt']
@@ -27,7 +27,7 @@ def test_flatten_paths_on_deep_dir(filled_temp_dir):
     (t_dir_1 / "test.txt").touch()
     (t_dir_2 / "test.txt").touch()
 
-    files = list(flatten_paths(filled_temp_dir, pattern="*"))
+    files = list(flatten_paths(filled_temp_dir, pattern="*", nested=True))
     files = sorted([d.name for d in files[1:]])
 
     expected = ['AUTHORS.rst', 'readme.rst', 'readme.txt',

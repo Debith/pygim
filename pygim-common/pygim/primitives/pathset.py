@@ -8,7 +8,7 @@ from pathlib import Path
 from dataclasses import dataclass
 
 from pygim.iterlib import is_container, flatten
-from pygim.utils import ggetattr
+from pygim.utils import smart_getattr
 
 __all__ = ["PathSet"]
 
@@ -272,20 +272,20 @@ class PathSet:
         assert filters, "No filters given!"
         assert self._paths is not None
 
+        def _should_drop(path_val, filter):
+            if callable(filter):
+                return filter(path_val)
+            return path_val == filter
+
         for p in self._paths:
             for path_attrname, val_filters in filters.items():
                 val_filters = val_filters if is_container(val_filters) else [val_filters]
-                path_attr = getattr(p, path_attrname)
-                path_val = path_attr() if callable(path_attr) else path_attr
+                path_val = smart_getattr(p, path_attrname)
 
-                for filter in val_filters:
-                    if callable(filter):
-                        if not filter(path_val):
-                            yield p
-                            break
-                    elif path_val != filter:
-                        yield p
-                        break
+                if any(_should_drop(path_val, filter) for filter in val_filters):
+                    break
+
+                yield p
 
     def filtered(self, **filters):
         """As filter() but returns new object."""
@@ -347,8 +347,20 @@ class PathSet:
         return container_type(path_type(p) for p in self)
 
     def __call__(self, attr_name):
-        """Get attribute from all paths."""
-        return [getattr(p, attr_name) for p in self]
+        """
+        Get attribute from all paths.
+
+        Parameters
+        ----------
+        attr_name : str
+            The name of the attribute to retrieve from each path.
+
+        Returns
+        -------
+        list
+            A list of attribute values from all paths.
+        """
+        return [smart_getattr(p, attr_name) for p in self]
 
 
 if __name__ == "__main__":

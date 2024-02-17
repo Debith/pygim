@@ -8,7 +8,7 @@ Functions
 ---------
 safedelattr(obj, attr_name)
     Safely delete an attribute from an object, ignoring errors if the attribute is missing.
-ggetattr(obj, attr_name, *, autocall=True, default=UNDEFINED)
+smart_getattr(obj, attr_name, *, autocall=True, default=UNDEFINED)
     Get an attribute from an object and optionally call it.
 """
 
@@ -18,5 +18,5 @@ from .attributes import *
 
 __all__ = [
     "safedelattr",
-    "ggetattr"
+    "smart_getattr"
 ]

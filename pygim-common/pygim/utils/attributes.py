@@ -3,7 +3,7 @@
 This module provides utilities for working with attributes.
 """
 
-__all__ = ["safedelattr", "ggetattr"]
+__all__ = ["safedelattr", "smart_getattr"]
 
 UNDEFINED = object()
 
@@ -24,7 +24,7 @@ def safedelattr(obj, name):
         pass  # It is already deleted and we are fine with it.
 
 
-def ggetattr(obj, name, *, autocall=True, default=UNDEFINED):
+def smart_getattr(obj, name, *, autocall=True, default=UNDEFINED):
     """ Get attribute from the object and optionally call it.
 
     Parameters

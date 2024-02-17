@@ -127,24 +127,68 @@ def test_key_iterator():
     assert list(reversed(rs)) == list(reversed(_TUPLE_RANGES))
 
 
-@pytest.mark.parametrize("value, expected", [
-    (40,    'Value 40 is out of range of -10-40'),
-    (-11,   'Value -11 is out of range of -10-40'),
+@pytest.mark.parametrize("value, ranges, expected", [
+    (40,    _TUPLE_RANGES, 'Value 40 is out of range of -10-40'),
+    (-11,   _TUPLE_RANGES, 'Value -11 is out of range of -10-40'),
+    (40,    _INT_RANGES, 'Value 40 is out of range of -10-10'),
+    (-11,   _INT_RANGES, 'Value -11 is out of range of -10-10'),
+    (40,    _DICT_RANGES, 'Value 40 is out of range of -10-40'),
+    (-11,   _DICT_RANGES, 'Value -11 is out of range of -10-40'),
+    (slice(50, 60), _TUPLE_RANGES,   'Slice 50 - 60 is out of range of -10-40'),
+    (slice(-50, -11), _TUPLE_RANGES, 'Slice -50 - -11 is out of range of -10-40'),
+    (slice(50, 60), _INT_RANGES,     'Slice 50 - 60 is out of range of -10-10'),
+    (slice(-50, -11), _INT_RANGES,   'Slice -50 - -11 is out of range of -10-10'),
+    (slice(50, 60), _DICT_RANGES,    'Slice 50 - 60 is out of range of -10-40'),
+    (slice(-50, -11), _DICT_RANGES,  'Slice -50 - -11 is out of range of -10-40'),
 ])
-def test_selecting_out_of_range(value, expected):
-    rs = RangeSelector(_TUPLE_RANGES)
+def test_selecting_out_of_range(value, ranges, expected):
+    rs = RangeSelector(ranges)
     with pytest.raises(GimError, match=expected):
         rs.select(value)
 
 
-def test_super_long_range():
+def test_pretty_long_range():
     rs = RangeSelector(list(range(0, 1000000, 5)))
     assert rs[1000] == 200
     assert rs[100:50000] == list(range(20, 10000))
+
+
+# tests for find() and index()
+@pytest.mark.parametrize("func, ranges, value, expected, default", [
+    (RangeSelector.find, _TUPLE_RANGES, -1, -1, None),
+    (RangeSelector.find, _TUPLE_RANGES, 4, (30, 40), None),
+    (RangeSelector.find, _TUPLE_RANGES, 5, -1, None),
+    (RangeSelector.index, _TUPLE_RANGES, -1, GimError, None),
+    (RangeSelector.index, _TUPLE_RANGES, 4, (30, 40), None),
+    (RangeSelector.index, _TUPLE_RANGES, 5, GimError, None),
+    (RangeSelector.find, _INT_RANGES, -1, -1, None),
+    (RangeSelector.find, _INT_RANGES, 1, (0, 10), None),
+    (RangeSelector.find, _INT_RANGES, 3, -1, None),
+    (RangeSelector.index, _INT_RANGES, -1, GimError, None),
+    (RangeSelector.index, _INT_RANGES, 1, (0, 10), None),
+    (RangeSelector.index, _INT_RANGES, 3, GimError, None),
+    (RangeSelector.find, _DICT_RANGES, 'z', -1, None),
+    (RangeSelector.find, _DICT_RANGES, 'b', (0, 10), None),
+    (RangeSelector.find, _DICT_RANGES, 'f', -1, None),
+    (RangeSelector.index, _DICT_RANGES, 'z', GimError, None),
+    (RangeSelector.index, _DICT_RANGES, 'b', (0, 10), None),
+    (RangeSelector.index, _DICT_RANGES, 'f', GimError, None),
+    (RangeSelector.index, _DICT_RANGES, 'f', -999, -999),
+])
+def test_find_and_index(func, ranges, value, expected, default):
+    rs = RangeSelector(ranges)
+    if expected == GimError:
+        with pytest.raises(GimError):
+            func(rs, value)
+    elif default is not None:
+        assert func(rs, value, default=default) == expected
+    else:
+        if func(rs, value) != expected:
+            raise AssertionError(f'{func(rs, value)} != {expected}')
 
 
 if __name__ == '__main__':
     from pygim.testing import run_tests
 
     # With coverage run, tests fail in meta.__call__ due to reload.
-    run_tests(__file__, RangeSelector.__module__, coverage=False)
+    run_tests(__file__, RangeSelector.__module__, coverage=True)
