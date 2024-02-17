@@ -24,7 +24,6 @@ inline std::enable_if_t<
         !std::is_same_v<T, py::type>,
     bool>
 is_container(const T& obj) {
-    std::cout << "is_container" << std::endl;
     if (py::isinstance<py::str>(obj) | py::isinstance<py::bytes>(obj)) {
         return false;
     }

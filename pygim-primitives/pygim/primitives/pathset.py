@@ -8,17 +8,21 @@ from pathlib import Path
 from dataclasses import dataclass
 
 from pygim.iterlib import is_container, flatten
+from pygim.utils import ggetattr
 
 __all__ = ["PathSet"]
 
 
-def flatten_paths(*paths, pattern):
+def flatten_paths(*paths, pattern, nested):
     for path in flatten(paths):
         path = Path(path)
 
         if path.is_dir():
             yield path
-            ps = list(path.rglob(pattern))
+            if nested:
+                ps = list(path.rglob(pattern))
+            else:
+                ps = list(path.glob(pattern))
             yield from ps
         else:
             yield path
@@ -90,6 +94,7 @@ class PathSet:
     # TODO: This class could allow multiple different path types (not just pathlib.Path).
     _paths: Path = None  # type: ignore    # this is invariant
     _pattern: str = "*"
+    _nested: bool = True
     FS = _FileSystemOps()  # File system
 
     def __post_init__(self):
@@ -101,7 +106,10 @@ class PathSet:
         # We just handled the optional part, let's make mypy happy.
         assert paths is not None
 
-        super().__setattr__("_paths", frozenset(flatten_paths(paths, pattern=self._pattern)))
+        super().__setattr__("_paths", frozenset(flatten_paths(paths,
+                                                              pattern=self._pattern,
+                                                              nested=self._nested,
+                                                              )))
         assert all([isinstance(p, Path) for p in self._paths])
         assert isinstance(self._paths, frozenset)
 
@@ -265,14 +273,19 @@ class PathSet:
         assert self._paths is not None
 
         for p in self._paths:
-            for func, value in filters.items():
-                value = value if is_container(value) else [value]
-                obj = getattr(p, func)
-                obj = obj() if callable(obj) else obj
+            for path_attrname, val_filters in filters.items():
+                val_filters = val_filters if is_container(val_filters) else [val_filters]
+                path_attr = getattr(p, path_attrname)
+                path_val = path_attr() if callable(path_attr) else path_attr
 
-                if obj not in value:
-                    yield p
-                    break
+                for filter in val_filters:
+                    if callable(filter):
+                        if not filter(path_val):
+                            yield p
+                            break
+                    elif path_val != filter:
+                        yield p
+                        break
 
     def filtered(self, **filters):
         """As filter() but returns new object."""
@@ -332,6 +345,10 @@ class PathSet:
         ['path1', 'path2']
         """
         return container_type(path_type(p) for p in self)
+
+    def __call__(self, attr_name):
+        """Get attribute from all paths."""
+        return [getattr(p, attr_name) for p in self]
 
 
 if __name__ == "__main__":
