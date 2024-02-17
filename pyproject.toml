@@ -31,7 +31,6 @@ classifiers = [
 dependencies = [
   "pygim-common @ file:///${PROJECT_ROOT}/pygim-common",
   "pygim-ddd @ file:///${PROJECT_ROOT}/pygim-ddd",
-  "pygim-primitives @ file:///${PROJECT_ROOT}/pygim-primitives",
 ]
 
 [project.urls]
