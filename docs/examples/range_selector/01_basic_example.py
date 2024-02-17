@@ -17,14 +17,16 @@ grade_selector = RangeSelector(grade_ranges)
 # We can now select a grade based on a score or range (as slice)
 assert grade_selector[75] == 'C'
 assert grade_selector[92] == 'A'
-assert grade_selector[75:85] == 'D'
+assert grade_selector[75:85] == ['C', 'B']
 
-# Interface of the RangeSelector is close to builtins' interfaces such as int and range.
+# Interface of the RangeSelector is close to builtins' interfaces such as str.find() and str.index().
 assert grade_selector.find('A') == (90, 100)
 assert grade_selector.index('A') == (90, 100)
 
 # Error messages are meaningful:
 try:
-    grade_selector.range_of('X')
+    grade_selector.index('X')
 except Exception as e:
-    assert str(e) == 'Given input ``A`` not among: F, D, C, B, A'
+    assert str(e) == 'Given input ``X`` not among: F, D, C, B, A'
+else:
+    raise AssertionError('Expected an exception')

@@ -51,18 +51,16 @@ Common Library (pip install pygim-common)
 - `is_container`: Check if an object is an iterable container but not a string or bytes.
 - `split`: Split an iterable into two based on a specified condition.
 
-Domain Driven Design Library (pip install pygim-ddd)
-----------------------------------------------------
->>> from pygim.ddd.interfaces import IEntity, IValueObject, IRootEntity, IRepository
-- Interface classes to help with Domain Driven Design.
-
-Primitives Library (pip install pygim-primitives)
--------------------------------------------------
 >>> from pygim.primitives import RangeSelector
 - `RangeSelector`: Category selector for ranges of values.
 
 >>> from pygim.primitives import PathSet
 - `PathSet`: Manages multiple Path objects.
+
+Domain Driven Design Library (pip install pygim-ddd)
+----------------------------------------------------
+>>> from pygim.ddd.interfaces import IEntity, IValueObject, IRootEntity, IRepository
+- Interface classes to help with Domain Driven Design.
 
 Example Usage
 -------------

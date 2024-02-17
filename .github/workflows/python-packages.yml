@@ -42,9 +42,6 @@ jobs:
         cd pygim-ddd
         python -m pip install .
         cd ..
-        cd pygim-primitives
-        python -m pip install .
-        cd ..
         python -m pip install pytest
 
     - name: Remove source files (Linux & MacOS)
@@ -53,7 +50,6 @@ jobs:
         rm -rf pygim-common/_pygim
         rm -rf pygim-common/pygim
         rm -rf pygim-ddd/pygim
-        rm -rf pygim-primitives/pygim
         rm -rf pygim-cli/_pygim
         rm -rf _pygim_build
 
@@ -63,7 +59,6 @@ jobs:
         Remove-Item "pygim-common/_pygim" -Recurse -Force
         Remove-Item "pygim-common/pygim" -Recurse -Force
         Remove-Item "pygim-ddd/pygim" -Recurse -Force
-        Remove-Item "pygim-primitives/pygim" -Recurse -Force
         Remove-Item "pygim-cli/_pygim" -Recurse -Force
         Remove-Item "_pygim_build" -Recurse -Force
       shell: pwsh

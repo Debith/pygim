@@ -135,6 +135,8 @@ class RangeSelector(gimmick, metaclass=RangeSelectorMeta):
     """
 
     _ranges: Mapping
+    # TODO: Could identify the type of the values and include smarter error messages
+    # TODO: For predictable ranges, finding the range could be calculated.
 
     def __post_init__(self):
         assert self._ranges, "Ranges must be specified"
@@ -272,12 +274,12 @@ class RangeSelector(gimmick, metaclass=RangeSelectorMeta):
         return list(self._ranges.keys())[-1][-1]
 
     def find(self, value):
-        for _range, _content in self._ranges.items():
-            if value == _content:
-                return _range
-        raise GimOptionError(_content, self._ranges.values())
+        try:
+            return self.index(value)
+        except GimError:
+            return -1
 
-    def select(self, input_value, *, default=EXCEPTION):
+    def index(self, input_value, *, default=EXCEPTION):
         ''' Match input value for range and get its content.
 
         Parameters
@@ -290,17 +292,39 @@ class RangeSelector(gimmick, metaclass=RangeSelectorMeta):
         int
             The index of the range that contains the given value.
         '''
-        try:
-            range_key = self._find_first_range_index(input_value)
-            if range_key and range_key[0] <= input_value < range_key[1]:
-                return self._ranges[range_key]
+        for index, content in self._ranges.items():
+            if input_value == content:
+                return index
+
+        if default is not EXCEPTION:
+            return default
+        emsg = f'Given input ``{input_value}`` not among: {", ".join(map(str, self._ranges.values()))}'
+        raise GimError(emsg) from None
+
+    def select(self, index):
+        ''' Match input value for range and get its content.
+
+        Parameters
+        ----------
+        value : int
+            The value to select the range for.
+
+        Returns
+        -------
+        int
+            The index of the range that contains the given value.
+        '''
+        if isinstance(index, slice):
+            range_key = self._get_ranges_in_slice(index)
+        else:
+            range_key = self._find_first_range_index(index)
+        if not range_key or index < range_key[0]:
+            if isinstance(index, slice):
+                index = f'Slice {index.start} - {index.stop}'
             else:
-                raise KeyError
-        except KeyError:
-            if default is not EXCEPTION:
-                return default
-            emsg = f'Value {input_value} is out of range of {self.start}-{self.end}'
-            raise GimError(emsg) from None
+                index = f'Value {index}'
+            raise GimError(f'{index} is out of range of {self.start}-{self.end}')
+        return self._ranges[range_key]
 
 
 if __name__ == "__main__":
