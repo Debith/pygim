@@ -5,7 +5,7 @@ backend-path = ["_pygim_build"]
 
 [project]
 name = "python-gimmicks"
-version = "0.2.1"
+version = "0.2.3"
 description = "Full Python Gimmicks project with all of its sub-projects."
 readme = "README.rst"
 requires-python = ">=3.7, <3.12"
