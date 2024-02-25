@@ -4,47 +4,7 @@
 #include <functional>
 #include <cstdint> // For uint64_t
 
-#include <vector>
-#include <random>
-#include <iostream>
-
-
-class ChunkedNumberGenerator {
-public:
-    // Assuming an L1 cache size of 32KB and each int64_t is 8 bytes, calculate chunk size
-    // This is a simplified calculation; consider your specific CPU cache size and structure
-    static constexpr size_t cacheLineSize = 64; // Common cache line size in bytes
-    static constexpr size_t int64Size = sizeof(int64_t);
-    static constexpr size_t numbersPerCacheLine = cacheLineSize / int64Size;
-    static constexpr size_t chunkSize = 4096; // Adjust based on cache size and experiment
-
-    ChunkedNumberGenerator() : gen(rd()), dis(std::numeric_limits<int64_t>::min(), std::numeric_limits<int64_t>::max()) {
-        chunks.emplace_back();
-        chunks.back().reserve(chunkSize);
-        currentChunkIndex = 0;
-    }
-
-    int64_t getNextNumber() {
-        if (chunks[currentChunkIndex].size() == chunkSize) {
-            currentChunkIndex++;
-            if (currentChunkIndex >= chunks.size()) {
-                chunks.emplace_back();
-                chunks.back().reserve(chunkSize);
-            }
-        }
-
-        int64_t number = dis(gen);
-        chunks[currentChunkIndex].push_back(number);
-        return number;
-    }
-
-private:
-    std::vector<std::vector<int64_t>> chunks;
-    size_t currentChunkIndex;
-    std::random_device rd;
-    std::mt19937_64 gen;
-    std::uniform_int_distribution<int64_t> dis;
-};
+#include "random.h"
 
 
 template<typename T>
@@ -64,6 +24,18 @@ public:
     static ID random() {
         T randomId = generator.getNextNumber();
         return ID(randomId);
+    }
+
+    // Method to directly generate a vector of ID objects
+    static std::vector<ID<T>> random(size_t count) {
+        std::vector<ID<T>> ids;
+        ids.reserve(count);
+        
+        // Temporary buffer for random numbers
+        generator.getNextNumber(ids.data(), count);
+        std::cout << "number: " << ids[143240].hash() << std::endl;
+        std::cout << "Generated " << ids.size() << " random numbers" << std::endl;
+        return ids;
     }
 
     [[nodiscard]] constexpr auto hash() const noexcept {

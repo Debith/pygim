@@ -18,8 +18,14 @@ def test_ids_can_created_pseudo_randomly():
 
 
 def test_multiple_random_numbers_are_still_unique():
-    ids = [ID(i) for i in range(100_000)]
+    ids = [ID.random() for _ in range(10_000)]
     assert len(ids) == len(set(ids))
+
+
+def test_create_long_id_array():
+    many_ids = ID.random(10_000_000)
+    assert len(many_ids) == 10_000_000
+    assert len(many_ids) == len(set(many_ids))
 
 
 # FIXME: True and False are converted to numbers?
