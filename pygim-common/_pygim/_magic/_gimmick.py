@@ -11,6 +11,7 @@ from ._patch import MutableFuncObject
 from .._utils import flatten
 from .._error_msgs import type_error_msg
 from ..common_fast import ID
+from ._gim_property import gim_property
 
 __all__ = ['gimmick']
 
@@ -24,7 +25,7 @@ class GimTypeMeta(type):
 class _NoTraits:
     def __setitem__(self, *args, **kwargs):
         raise NotImplementedError("Can't add traits to this object!")
-LOT = 2**64 - 1
+
 
 class gim_type(type, metaclass=GimTypeMeta):
     """
@@ -53,8 +54,12 @@ class gim_type(type, metaclass=GimTypeMeta):
     """
     __slots__ = ()
 
-    def __prepare__(*args):
-        return dict(__pygim_traits__=_NoTraits(), __gimdict__={})
+    @classmethod
+    def __prepare__(mcls, name, bases=(), **_):
+        return dict(__pygim_traits__=_NoTraits(),
+                    __gimdict__={},
+                    gim_property=gim_property,
+                    )
 
     def __new__(mcls, name, bases=(), namespace=None, **_):
         namespace = namespace or {}

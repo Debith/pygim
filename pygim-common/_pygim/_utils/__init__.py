@@ -5,6 +5,7 @@ Internal utilities package.
 
 from .._iterlib import *
 from ._inspect import *
+from _pygim._support import *
 
 
 def format_dict(dct, *, indent=0, value_formatter=repr):

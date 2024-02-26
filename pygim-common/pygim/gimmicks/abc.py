@@ -4,10 +4,7 @@ This module implmements class ``interface``.
 """
 
 import abc
-from collections.abc import Iterable
-from dataclasses import dataclass, field
 from types import FunctionType
-from typing import TYPE_CHECKING
 
 from _pygim._magic._gimmick import gimmick, gim_type
 import _pygim._exceptions as e

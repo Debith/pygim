@@ -3,9 +3,10 @@
 This module provides utilities for working with attributes.
 """
 
+from _pygim._support import UNDEFINED
+
 __all__ = ["safedelattr", "smart_getattr"]
 
-UNDEFINED = object()
 
 def safedelattr(obj, name):
     """Deletes attribute from the object and is happy if it is not there.
