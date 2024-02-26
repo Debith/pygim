@@ -13,6 +13,7 @@ import gc
 
 
 class GimPropertyMeta(type):
+    _cache = {}
     def __new__(mcls, name, bases, namespace, **_):
         return super().__new__(mcls, name, bases, namespace)
 
@@ -20,9 +21,8 @@ class GimPropertyMeta(type):
         super().__init__(*args)
 
     def __call__(self, *args: Any, cached=False, **kwargs: Any) -> Any:
-        instance = super().__call__(*args, **kwargs)
-        instance._cache = {}
-        gc.callbacks.append(instance._gc_callback)
+        instance = super().__call__(self._cache, *args, **kwargs)
+        #gc.callbacks.append(instance._gc_callback)
         return instance
 
 
@@ -48,9 +48,10 @@ class gim_property(metaclass=GimPropertyMeta):
     to calculate, or when you want to ensure that the result is consistent across multiple calls.
     """
 
-    def __init__(self):
+    def __init__(self, cache):
         self.__func = None
         self.__name = None
+        self._cache = cache
 
     def __set_name__(self, __class, __name):
         assert self.__name is None, f"__name already set to {self.__name!r}"
@@ -63,9 +64,11 @@ class gim_property(metaclass=GimPropertyMeta):
         self._instance = instance
 
         try:
-            cache = self._cache[id(instance)]
+            cache = self._cache[instance]
         except KeyError:
             self._cache[instance] = cache = {}
+        except AttributeError:
+            return self.__func(instance)
 
         value = cache.get(self.__name, UNDEFINED)
         if value is UNDEFINED:

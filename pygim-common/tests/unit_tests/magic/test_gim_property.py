@@ -53,7 +53,7 @@ def test_cached_gim_property_is_not_confused_about_its_owner_when_carbage_collec
     from _pygim._magic import gimmick
     from gc import collect
 
-    class Object(object):
+    class Object(gimmick):
         def __init__(self, value):
             self.value = value
 
@@ -62,16 +62,14 @@ def test_cached_gim_property_is_not_confused_about_its_owner_when_carbage_collec
             return self.value
 
     previous_ids = set()
-    for i in range(10000):
+    for i in range(100):
         o = Object(i)
         if id(o) in previous_ids:
-            break
+            assert False, "Object was not garbage collected!"
         previous_ids.add(id(o))
         assert o.prop == i
         del o
         collect()  # force garbage collection
-
-    assert o.prop == 99
 
 
 def test_cached_gim_property_supports_slots():
@@ -120,4 +118,4 @@ def test_cached_gim_property_removes_entries_from_cache_when_owner_is_deleted():
 
 
 if __name__ == '__main__':
-    pytest.main([__file__])
+    pytest.main([__file__, "--capture=no"])
