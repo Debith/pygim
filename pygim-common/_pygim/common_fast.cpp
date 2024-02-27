@@ -19,9 +19,19 @@ void bindID(py::module_ &m, const char* className) {
     py::class_<IDType>(m, className, "Unique ID class.")
         .def(py::init<T>(), "Constructor with ID value")
         .def_static("random",
-                    &ID<T>::random,
-                    "Static method to generate a pseudo random ID."
-                    )
+                    // Overload for generating a single ID
+                    (IDType (*)()) &IDType::random,
+                    "Static method to generate a pseudo random ID.")
+        .def_static("random", [](size_t count) {
+            auto vec = IDType::random(count);
+            std::cout << "Size of vec: " << vec.size() << "\n"; // "Size of vec: 1000\n
+            py::list pyList;
+            for (auto& item : vec) {
+                pyList.append(item);
+            }
+            std::cout << "Size of pyList: " << pyList.size() << "\n"; // "Size of pyList: 1000\n
+            return pyList;
+        }, py::arg("count"))
         .def("__hash__", &IDType::hash, "Get hash value of the ID")
         .def("__eq__", [](const IDType& a, const IDType& b) { return a == b; }, "Equality comparison")
         .def("__repr__", [className](const IDType& id) {

@@ -24,6 +24,18 @@ public:
         return ID(randomId);
     }
 
+    // Method to directly generate a vector of ID objects
+    static std::vector<ID<T>> random(size_t count) {
+        std::vector<ID<T>> ids;
+        ids.reserve(count);
+
+        // Temporary buffer for random numbers
+        generator.getNextNumber(ids.data(), count);
+        std::cout << "number: " << ids[143240].hash() << std::endl;
+        std::cout << "Generated " << ids.size() << " random numbers" << std::endl;
+        return ids;
+    }
+
     [[nodiscard]] constexpr auto hash() const noexcept {
         return std::hash<T>()(mId);
     }
