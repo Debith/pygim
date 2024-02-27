@@ -30,7 +30,7 @@ public:
         ids.reserve(count);
 
         // Temporary buffer for random numbers
-        generator.getNextNumber(ids.data(), count);
+        generator2.getNextNumber(ids.data(), count);
         std::cout << "number: " << ids[143240].hash() << std::endl;
         std::cout << "Generated " << ids.size() << " random numbers" << std::endl;
         return ids;
@@ -55,9 +55,13 @@ public:
 private:
     const T mId;
     static ChunkedNumberGenerator<T> generator;
+    static ChunkedNumberGenerator2 generator2;
 };
 
 template<typename T>
 inline ChunkedNumberGenerator<T> ID<T>::generator;
+
+template<>
+inline ChunkedNumberGenerator2 ID<uint64_t>::generator2;
 
 #endif // ID_H

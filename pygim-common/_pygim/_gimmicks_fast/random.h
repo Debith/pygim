@@ -7,6 +7,7 @@
 #include <vector>
 #include <random>
 #include <iostream>
+#include <execution>
 
 #include <immintrin.h> // Include for AVX2 intrinsics
 
