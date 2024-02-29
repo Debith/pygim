@@ -135,6 +135,7 @@ public:
 
     static std::vector<uint64_t> randomIntegers(size_t count) {
         std::vector<uint64_t> numbers(count);
+        numbers.resize(count);
         generator.fillBuffer(numbers.data(), count);
         return numbers;
     }

@@ -17,6 +17,7 @@ public:
         "ID can only be instantiated with unsigned integer types (uint8_t, uint16_t, uint32_t, uint64_t)"
     );
 
+    constexpr explicit ID() : mId(0) {}
     constexpr explicit ID(T id) : mId(id) {}
 
     static ID random() {
@@ -27,7 +28,7 @@ public:
     // Method to directly generate a vector of ID objects
     static std::vector<ID<T>> random(size_t count) {
         std::vector<ID<T>> ids;
-        ids.reserve(count);
+        ids.resize(count);
 
         // Temporary buffer for random numbers
         generator2.getNextNumber(ids.data(), count);
@@ -63,5 +64,25 @@ inline ChunkedNumberGenerator<T> ID<T>::generator;
 
 template<>
 inline ChunkedNumberGenerator2 ID<uint64_t>::generator2;
+
+template<typename T>
+class IDView {
+public:
+    IDView(const std::vector<T>& data) : mData(data) {}
+
+    // Access an ID object by index
+    ID<T> operator[](size_t index) const {
+        assert(index < mData.size());
+        return ID<T>(mData[index]);
+    }
+
+    // Get the size of the view
+    size_t size() const { return mData.size(); }
+
+    // Additional view functionalities as needed...
+
+private:
+    const std::vector<T>& mData;
+};
 
 #endif // ID_H
