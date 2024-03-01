@@ -3,12 +3,14 @@
 This module provides utilities for working with attributes.
 """
 
-__all__ = ["safedelattr", "smart_getattr"]
+from _pygim._utils import _field_explorer
 
-UNDEFINED = object()
+__all__ = ["safedelattr", "smart_getattr", "mgetattr"]
 
-def safedelattr(obj, name):
-    """Deletes attribute from the object and is happy if it is not there.
+
+safe_delattr = _field_explorer.safedelattr
+safe_delattr.__doc__ = """
+    Deletes attribute from the object and is happy if it is not there.
 
     Parameters
     ----------
@@ -16,16 +18,11 @@ def safedelattr(obj, name):
         Object containing the attribute.
     name : `str`
         Name of the attribute to be deleted.
-    """
+""".strip()
 
-    try:
-        delattr(obj, name)
-    except AttributeError:
-        pass  # It is already deleted and we are fine with it.
-
-
-def smart_getattr(obj, name, *, autocall=True, default=UNDEFINED):
-    """ Get attribute from the object and optionally call it.
+smart_getattr = _field_explorer.smart_getattr
+smart_getattr.__doc__ = """
+    Get attribute from the object and optionally call it.
 
     Parameters
     ----------
@@ -44,12 +41,6 @@ def smart_getattr(obj, name, *, autocall=True, default=UNDEFINED):
     -------
     `Any`
         The value of the attribute or the result of calling it if `autocall` is `True`.
-    """
-    if not hasattr(obj, name):
-        if default is UNDEFINED:
-            raise AttributeError(f"{obj!r} has no attribute {name!r}")
-        return default
-    value = getattr(obj, name)
-    if autocall and callable(value):
-        return value()
-    return value
+    """.strip()
+
+mgetattr = _field_explorer.mgetattr

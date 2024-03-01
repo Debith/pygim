@@ -5,11 +5,12 @@
 
 from types import FunctionType
 from dataclasses import dataclass, field
+from functools import update_wrapper
 import inspect
 
 from ._dispatcher import _Dispatcher
 from ._patch import MutableFuncObject
-from .._utils import flatten
+from .._utils import flatten, mgetattr, has_uniform_type
 from .._error_msgs import type_error_msg
 
 dispatch = _Dispatcher
@@ -77,3 +78,42 @@ def combine(*traits, class_name="NewType", bases=()):
     NewType << traits
 
     return NewType
+
+
+
+
+
+class MultiClassMeta(type):
+    def _fix_name(self, name, prefix, postfix):
+        if prefix:
+            name = f"{prefix}_{name}"
+        if postfix:
+            name = f"{name}_{postfix}"
+        return name
+
+    def _update_attrs(self, obj, prefix, postfix):
+        pass
+
+    def __call__(cls, *args, **kwargs):
+        return cls.__new__(cls, *args, **kwargs)
+
+
+class MultiClass(metaclass=MultiClassMeta):
+    """ Wrapper for calling multiple objects at once."""
+
+    def __post_init__(self):
+        # ensure that all objects are of the same type, for now.
+        # TODO: Add support for different types by collecting all functions found
+        #       from all objects and then adding them to the new class.
+        assert has_uniform_type(self._objects), "All objects must be of the same type."
+
+        for name in dir(self._objects[0]):
+            if name.startswith("_"):
+                continue
+            # For now, we only support functions.
+            if not callable(getattr(self._objects[0], name)):
+                continue
+
+            new_callable = MultiCall(name, self._objects)
+            setattr(self, self.__make_name(name), new_callable)
+            update_wrapper(new_callable, getattr(self._objects[0], name))

@@ -5,6 +5,7 @@ Internal utilities package.
 
 from .._iterlib import *
 from ._inspect import *
+from ._field_explorer import *
 
 
 def format_dict(dct, *, indent=0, value_formatter=repr):

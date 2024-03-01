@@ -9,7 +9,7 @@ import types
 
 from .._iterlib import flatten
 
-__all__ = ('TraitFunctions', 'has_instances', 'is_subset')
+__all__ = ('TraitFunctions', 'has_instances', 'is_subset', 'has_uniform_type')
 
 # This is an alias for the types that are used for traits. This is used
 # for the `has_instances` function. For example:
@@ -21,6 +21,10 @@ TraitFunctions = (types.FunctionType, types.MethodType)
 
 def has_instances(iterable, types, *, how=all):
     return how(isinstance(it, types) for it in iterable)
+
+
+def has_uniform_type(iterable):
+    return len(set(map(type, iterable))) == 1
 
 
 @dataclass
