@@ -28,8 +28,9 @@ from .attributes import *
 from .str_converters import *
 
 __all__ = [
-    "safedelattr",
+    "safe_delattr",
     "smart_getattr",
+    "mgetattr",
     "to_snake_case",
     "to_human_case",
     "to_kebab_case",

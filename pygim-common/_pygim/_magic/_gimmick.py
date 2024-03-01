@@ -10,7 +10,7 @@ from ._dispatcher import _Dispatcher
 from ._patch import MutableFuncObject
 from .._utils import flatten
 from .._error_msgs import type_error_msg
-from ..common_fast import ID
+#from ..common_fast import ID
 
 __all__ = ['gimmick']
 
@@ -24,7 +24,7 @@ class GimTypeMeta(type):
 class _NoTraits:
     def __setitem__(self, *args, **kwargs):
         raise NotImplementedError("Can't add traits to this object!")
-LOT = 2**64 - 1
+
 
 class gim_type(type, metaclass=GimTypeMeta):
     """

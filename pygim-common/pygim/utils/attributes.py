@@ -5,7 +5,7 @@ This module provides utilities for working with attributes.
 
 from _pygim._utils import _field_explorer
 
-__all__ = ["safedelattr", "smart_getattr", "mgetattr"]
+__all__ = ["safe_delattr", "smart_getattr", "mgetattr"]
 
 
 safe_delattr = _field_explorer.safedelattr
