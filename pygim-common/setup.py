@@ -25,7 +25,8 @@ if not psutil.Process().parent().cmdline()[-1] == "python_only":
             list(str(p) for p in Path(ROOT).rglob("*.cpp")),
             # Example: passing in the version to the compiled code
             define_macros = [('VERSION_INFO', __version__)],
-            extra_compile_args=["--std=c++17", "-O3"],
+            extra_compile_args=["--std=c++17", "-O3", "-mavx2", "-ltbb"],
+            libraries=["tbb"],
             #extra_compile_args=["-g", "-march=native", "-O3", "-fopenmp", "-std=c++17"],
             ),
     ]

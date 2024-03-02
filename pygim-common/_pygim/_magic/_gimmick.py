@@ -10,7 +10,7 @@ from ._dispatcher import _Dispatcher
 from ._patch import MutableFuncObject
 from .._utils import flatten
 from .._error_msgs import type_error_msg
-#from ..common_fast import ID
+from ..common_fast import ID
 
 __all__ = ['gimmick']
 
