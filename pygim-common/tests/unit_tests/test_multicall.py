@@ -3,46 +3,48 @@
 This module implmements .
 '''
 
+import pytest
 from pygim.testing import diff
 
 
-def test_multicall_calling_function_of_an_underlying_objects():
+@pytest.fixture
+def multiline_string_list():
+    return ["this   ", "  is   ", " a   ", " test   "]
+
+
+def test_multicall_calling_function_of_an_underlying_objects(multiline_string_list):
     from pygim.utils import mgetattr
 
-    objects = ["this   ", "  is   ", " a   ", " test   "]
-    actual_result = mgetattr(objects, "strip")
+    actual_result = mgetattr(multiline_string_list, "strip")
     expected_result = ["this", "is", "a", "test"]
     if actual_result != expected_result:
         raise AssertionError(diff(actual_result, expected_result))
 
 
-def test_multicall_calling_function_of_an_underlying_objects_with_args():
+def test_multicall_calling_function_of_an_underlying_objects_with_args(multiline_string_list):
     from pygim.utils import mgetattr
 
-    objects = ["this   ", "  is   ", " a   ", " test   "]
-    actual_result = mgetattr(objects, "replace", args=(" ", ""))
+    actual_result = mgetattr(multiline_string_list, "replace", args=(" ", ""))
     expected_result = ["this", "is", "a", "test"]
     if actual_result != expected_result:
         raise AssertionError(diff(actual_result, expected_result))
 
 
-def test_multicall_does_not_call_functions_when_autocall_is_disabled():
+def test_multicall_does_not_call_functions_when_autocall_is_disabled(multiline_string_list):
     from pygim.utils import mgetattr
 
-    objects = ["this   ", "  is   ", " a   ", " test   "]
-    actual_result = mgetattr(objects, "strip", autocall=False)
+    actual_result = mgetattr(multiline_string_list, "strip", autocall=False)
     # The result should be a list of functions, not the results of calling them.
-    expected_result = [o.strip for o in objects]
+    expected_result = [o.strip for o in multiline_string_list]
     if actual_result != expected_result:
         raise AssertionError(diff(actual_result, expected_result))
 
 
-def test_multicall_passing_ellipsis_returns_a_generator():
+def test_multicall_passing_ellipsis_returns_a_generator(multiline_string_list):
     from pygim.utils import mgetattr
 
-    objects = ["this   ", "  is   ", " a   ", " test   "]
-    actual_result = mgetattr(objects, "strip", ...)
-    expected_result = (o.strip() for o in objects)
+    actual_result = mgetattr(multiline_string_list, "strip", ...)
+    expected_result = (o.strip() for o in multiline_string_list)
     if not isinstance(actual_result, type(expected_result)):
         raise AssertionError(f"Expected a generator, got {type(actual_result)}")
     actual_result = list(actual_result)
@@ -51,12 +53,11 @@ def test_multicall_passing_ellipsis_returns_a_generator():
         raise AssertionError(diff(list(actual_result), list(expected_result)))
 
 
-def test_multicall_passing_dict_to_factory_returns_a_dict():
+def test_multicall_passing_dict_to_factory_returns_a_dict(multiline_string_list):
     from pygim.utils import mgetattr
 
-    objects = ["this   ", "  is   ", " a   ", " test   "]
-    actual_result = mgetattr(objects, "strip", dict)
-    expected_result = {o: o.strip() for o in objects}
+    actual_result = mgetattr(multiline_string_list, "strip", dict)
+    expected_result = {o: o.strip() for o in multiline_string_list}
     if actual_result != expected_result:
         raise AssertionError(diff(actual_result, expected_result))
 
@@ -76,21 +77,21 @@ def test_multicall_allows_accessing_attributes_of_objects():
         raise AssertionError(diff(actual_result, expected_result))
 
 
-def test_multicall_passing_default_returns_default_when_attribute_not_found():
+def test_multicall_passing_default_returns_default_when_attribute_not_found(multiline_string_list):
     from pygim.utils import mgetattr
 
-    objects = ["this   ", "  is   ", " a   ", " test   ", 123]
-    actual_result = mgetattr(objects, "strip", default=None)
+    multiline_string_list.append(123)
+    actual_result = mgetattr(multiline_string_list, "strip", default=None)
     expected_result = ["this", "is", "a", "test", None]
     if actual_result != expected_result:
         raise AssertionError(diff(actual_result, expected_result))
 
 
-def test_multicall_passing_ellipsis_as_default_drops_items():
+def test_multicall_passing_ellipsis_as_default_drops_items(multiline_string_list):
     from pygim.utils import mgetattr
 
-    objects = ["this   ", "  is   ", " a   ", " test   ", 123]
-    actual_result = mgetattr(objects, "strip", default=...)
+    multiline_string_list.append(123)
+    actual_result = mgetattr(multiline_string_list, "strip", default=...)
     expected_result = ["this", "is", "a", "test"]
     if actual_result != expected_result:
         raise AssertionError(diff(actual_result, expected_result))
