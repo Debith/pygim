@@ -7,7 +7,6 @@ try:
     from _pygim.common_fast import is_container
 except ImportError:
     from _pygim._iterlib import is_container
-from .._magic._dispatcher import _Dispatcher
 
 
 __all__ = ["safedelattr", "smart_getattr", "mgetattr"]
@@ -159,7 +158,6 @@ class MultiCall:
                 value = obj, value
             yield value
 
-    @_Dispatcher
     def __call__(self, *args, **kwargs):
         if len(args) >= 2 and is_container(args[0]) and isinstance(args[1], str):
             self.__objs = args[0]
@@ -169,10 +167,6 @@ class MultiCall:
             return self.__iter_values(args, kwargs)
         else:
             return self.__factory(self.__iter_values(args, kwargs))
-
-    @__call__.register(is_container, str)
-    def _(self, objects, func_name):
-        return self(objects, func_name)
 
 
 mgetattr = MultiCall(with_obj=False)
