@@ -31,6 +31,8 @@ if not psutil.Process().parent().cmdline()[-1] == "python_only":
             ),
     ]
 
+# Look into: https://github.com/Mysticial/FeatureDetector
+    
 pygim = map(lambda v: ('pygim.' + v), find_namespace_packages('pygim'))
 pygim_internal = map(lambda v: ('_pygim.' + v), find_namespace_packages('_pygim'))
 
