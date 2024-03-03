@@ -5,6 +5,7 @@
 
 #include "_iterlib_fast/iterutils.h"
 #include "_gimmicks_fast/id.h"
+#include "_utils_fast/attributes.h"
 #include <iostream>         // std::string
 
 #define STRINGIFY(x) #x
@@ -58,6 +59,19 @@ PYBIND11_MODULE(common_fast, m)
 
     // Class ID
     bindID<uint64_t>(m, "ID");
+
+    m.def("smart_getattr", &smart_getattr, py::arg("obj"), py::arg("name"), py::arg("autocall") = true, py::arg("default_value") = UNDEFINED, py::arg("args") = py::tuple(), py::arg("kwargs") = py::dict(), "A C++ implementation of smart_getattr using Pybind11");
+    m.attr("UNDEFINED") = UNDEFINED;
+
+    py::class_<MultiCall>(m, "MultiCall")
+        .def(py::init<py::list, std::string, py::object, bool, bool, py::object>(),
+             py::arg("objs"),
+             py::arg("func_name"),
+             py::arg("factory") = UNDEFINED,
+             py::arg("with_obj") = false,
+             py::arg("autocall") = true,
+             py::arg("default") = UNDEFINED)
+        .def("__call__", &MultiCall::operator(), py::arg("args"), py::arg("kwargs"));
 
 #ifdef VERSION_INFO
     m.attr("__version__") = MACRO_STRINGIFY(VERSION_INFO);
