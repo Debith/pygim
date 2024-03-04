@@ -7,19 +7,25 @@
 namespace py = pybind11;
 
 // Assuming UNDEFINED and DROPPED are defined elsewhere in the code, similar to the previous example
-extern const py::object DROPPED;
-static const py::object UNDEFINED; // = py::cast(new int(0), py::return_value_policy::take_ownership);
+static const py::object DROPPED = py::object();
+static const py::object UNDEFINED = py::object();
 
 namespace py = pybind11;
 
 // Create a unique object to serve as our UNDEFINED value.
 
-py::object smart_getattr(py::object obj, const std::string& name, bool autocall = true, py::object default_value = UNDEFINED, py::tuple args = py::tuple(), py::dict kwargs = py::dict()) {
+py::object smart_getattr(py::object& obj,
+                         const std::string& name,
+                         bool autocall = true,
+                         const py::object& defaultValue = UNDEFINED,
+                         py::tuple args = py::tuple(),
+                         py::dict kwargs = py::dict()
+                         ) {
     if (!py::hasattr(obj, name.c_str())) {
-        if (default_value.is(UNDEFINED)) {
+        if (defaultValue.is(UNDEFINED)) {
             throw std::runtime_error("AttributeError: '" + std::string(py::str(obj)) + "' object has no attribute '" + name + "'");
         }
-        return default_value;
+        return defaultValue;
     }
 
     py::object value = obj.attr(name.c_str());
@@ -33,20 +39,31 @@ py::object smart_getattr(py::object obj, const std::string& name, bool autocall 
 class MultiCall {
 public:
     // Constructor with default values and optional parameters
-    MultiCall(py::list objs = py::list(), std::string func_name = "", py::object factory = UNDEFINED, bool with_obj = false, bool autocall = true, py::object default_value = UNDEFINED)
-    : objs_(objs), func_name_(func_name), factory_(factory), with_obj_(with_obj || py::isinstance<py::dict>(factory)), autocall_(autocall), default_(default_value) {
-        if (default_value.is(py::ellipsis())) {
-            default_ = DROPPED;
+    MultiCall(py::list objs = py::list(),
+              std::string funcName = "",
+              const py::object& factory = UNDEFINED,
+              bool withObj = false,
+              bool autocall = true,
+              const py::object& defaultValue = UNDEFINED
+              )
+    : m_objs(objs),
+      m_funcName(funcName),
+      m_factory(factory),
+      m_withObj(withObj || py::isinstance<py::dict>(factory)),
+      m_autocall(autocall),
+      m_default(defaultValue) {
+        if (defaultValue.is(py::ellipsis())) {
+            m_default = DROPPED;
         }
     }
 
     // Method to iterate over attributes
     py::iterable iter_attributes() {
         py::list result;
-        for (auto obj : objs_) {
-            auto value = obj.attr(func_name_.c_str());
+        for (auto obj : m_objs) {
+            auto value = py::getattr(obj, m_funcName.c_str(), UNDEFINED);
             if (value.is(UNDEFINED)) {
-                throw std::runtime_error("AttributeError: '" + std::string(py::str(obj)) + "' has no attribute '" + func_name_ + "'");
+                throw std::runtime_error("AttributeError: '" + std::string(py::str(obj)) + "' has no attribute '" + m_funcName + "'");
             } else if (value.is(DROPPED)) {
                 continue;
             }
@@ -60,10 +77,10 @@ public:
         py::list result;
         for (auto attr : iter_attributes()) {
             auto[obj, value] = attr.template cast<std::tuple<py::object, py::object>>();
-            if (autocall_ && py::isinstance<py::function>(value)) {
+            if (m_autocall && py::isinstance<py::function>(value)) {
                 value = value(*args, **kwargs);
             }
-            if (with_obj_) {
+            if (m_withObj) {
                 result.append(py::make_tuple(obj, value));
             } else {
                 result.append(value);
@@ -75,22 +92,26 @@ public:
     // Call operator to apply arguments and keyword arguments
     py::object operator()(py::args args, py::kwargs kwargs) {
         if (py::len(args) >= 2 && py::isinstance<py::iterable>(args[0]) && py::isinstance<py::str>(args[1])) {
-            objs_ = args[0];
-            func_name_ = args[1].cast<std::string>();
-            args = args.slice(2, py::len(args)); // Slice args to remove the first two elements
+            m_objs = args[0];
+            m_funcName = args[1].cast<std::string>();
+            py::list new_args;
+            for (size_t i = 2; i < py::len(args); ++i) {
+                new_args.append(args[i]);
+            }
+            args = py::tuple(new_args);
         }
-        if (factory_.is(py::ellipsis())) {
+        if (m_factory.is(py::ellipsis())) {
             return iter_values(args, kwargs);
         } else {
-            return factory_(iter_values(args, kwargs));
+            return m_factory(iter_values(args, kwargs));
         }
     }
 
 private:
-    py::list objs_;
-    std::string func_name_;
-    py::object factory_;
-    bool with_obj_;
-    bool autocall_;
-    py::object default_;
+    py::list m_objs;
+    std::string m_funcName;
+    py::object m_factory;
+    bool m_withObj;
+    bool m_autocall;
+    py::object m_default;
 };

@@ -71,7 +71,9 @@ PYBIND11_MODULE(common_fast, m)
              py::arg("with_obj") = false,
              py::arg("autocall") = true,
              py::arg("default") = UNDEFINED)
-        .def("__call__", &MultiCall::operator(), py::arg("args"), py::arg("kwargs"));
+        .def("__call__", [](MultiCall& self, py::args args, py::kwargs kwargs) {
+            return self(args, kwargs);
+        });
 
 #ifdef VERSION_INFO
     m.attr("__version__") = MACRO_STRINGIFY(VERSION_INFO);
