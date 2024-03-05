@@ -58,10 +58,19 @@ PYBIND11_MODULE(common_fast, m)
     m.def("tuplify", (py::tuple (*)(const py::handle&))     &tuplify, "A function that converts a generic object to a single-element tuple.");
 
     // Class ID
+    //m.attr("UNDEFINED") = UNDEFINED;
+    m.def("smart_getattr", &smart_getattr,
+                           py::arg("obj"),
+                           py::arg("name"),
+                           py::arg("default_value"),
+                           py::arg("autocall") = true,
+                           py::arg("args") = py::tuple(),
+                           py::arg("kwargs") = py::dict(),
+          "A C++ implementation of smart_getattr using Pybind11");
+
     bindID<uint64_t>(m, "ID");
 
-    m.def("smart_getattr", &smart_getattr, py::arg("obj"), py::arg("name"), py::arg("autocall") = true, py::arg("default_value") = UNDEFINED, py::arg("args") = py::tuple(), py::arg("kwargs") = py::dict(), "A C++ implementation of smart_getattr using Pybind11");
-    m.attr("UNDEFINED") = UNDEFINED;
+    /*
 
     py::class_<MultiCall>(m, "MultiCall")
         .def(py::init<py::list, std::string, py::object, bool, bool, py::object>(),
@@ -74,6 +83,7 @@ PYBIND11_MODULE(common_fast, m)
         .def("__call__", [](MultiCall& self, py::args args, py::kwargs kwargs) {
             return self(args, kwargs);
         });
+    */
 
 #ifdef VERSION_INFO
     m.attr("__version__") = MACRO_STRINGIFY(VERSION_INFO);

@@ -153,20 +153,43 @@ class MultiCall:
     def __iter_values(self, args, kwargs):
         for obj, value in self.__iter_attributes():
             if self.__autocall and callable(value):
-                value = value(*args, **kwargs)
+                try:
+                    value = value(*args, **kwargs)
+                except Exception as e:
+                    print(e)
             if self.__with_obj:
                 value = obj, value
             yield value
 
-    def __call__(self, *args, **kwargs):
-        if len(args) >= 2 and is_container(args[0]) and isinstance(args[1], str):
-            self.__objs = args[0]
-            self.__func_name = args[1]
-            args = args[2:]
+    def _do_call(self, *args, **kwargs):
         if isinstance(self.__factory, EllipsisType):
             return self.__iter_values(args, kwargs)
         else:
             return self.__factory(self.__iter_values(args, kwargs))
 
+    def __call__(self, *args, **kwargs):
+        args = list(args)
+        objs = self.__objs
+        func_name = self.__func_name
+        new_args = []
+        if len(args) >= 2 and is_container(args[0]) and isinstance(args[1], str):
+            objs = args[0]
+            func_name = args[1]
+            new_args = args[2:]
+
+        factory = self.__factory
+        if len(args) >= 3:
+            factory = args[2]
+            new_args = args[3:]
+
+        new_callable = MultiCall(objs=kwargs.pop("objs", objs),
+                                 func_name=kwargs.pop("func_name", func_name),
+                                 factory=kwargs.pop("factory", factory),
+                                 with_obj=kwargs.pop("with_obj", self.__with_obj),
+                                 autocall=kwargs.pop("autocall", self.__autocall),
+                                 default=kwargs.pop("default", self.__default),
+                                 )
+        args = kwargs.pop("args", new_args)
+        return new_callable._do_call(*args, **kwargs)
 
 mgetattr = MultiCall(with_obj=False)
