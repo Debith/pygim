@@ -8,9 +8,12 @@
 #include <random>
 #include <iostream>
 #include <execution>
+#include <algorithm>
 
 #include <immintrin.h> // Include for AVX2 intrinsics
 
+
+/*
 __m256i xorshift_avx2(__m256i state) {
     // Example operation: XOR and shift left
     __m256i xor_result = _mm256_xor_si256(state, _mm256_slli_epi64(state, 13));
@@ -18,9 +21,10 @@ __m256i xorshift_avx2(__m256i state) {
     __m256i result = _mm256_xor_si256(xor_result, _mm256_srli_epi64(xor_result, 7));
     return result;
 }
+*/
 
 
-class ChunkedNumberGenerator2 {
+class RandomNumberGenerator {
 public:
     // Assuming an L1 cache size of 32KB and each int64_t is 8 bytes, calculate chunk size
     // This is a simplified calculation; consider your specific CPU cache size and structure
@@ -29,7 +33,7 @@ public:
     static constexpr size_t numbersPerCacheLine = cacheLineSize / int64Size;
     static constexpr size_t chunkSize = 4096; // Adjust based on cache size and experiment
 
-    ChunkedNumberGenerator2() : gen(rd()), dis(std::numeric_limits<int64_t>::min(), std::numeric_limits<int64_t>::max()) {
+    RandomNumberGenerator() : gen(rd()), dis(std::numeric_limits<int64_t>::min(), std::numeric_limits<int64_t>::max()) {
         chunks.emplace_back();
         chunks.back().reserve(chunkSize);
         curIdx = 0;
@@ -46,19 +50,36 @@ public:
         }
     }
 
-    const uint64_t getNextNumber() {
-        if (curIdx == chunks.back().size()) {
-            chunks.emplace_back();
-            chunks.back().reserve(chunkSize);
-            curIdx = 0;
+    // const uint64_t getNextNumber() {
+    //     if (curIdx == chunks.back().size()) {
+    //         chunks.emplace_back();
+    //         chunks.back().reserve(chunkSize);
+    //         curIdx = 0;
+    //     }
+    //     if (chunks.back().empty()) {
+    //         chunks.back().resize(chunkSize);
+    //         getNextNumber(chunks.back().data(), chunkSize);
+    //     }
+    //     const uint64_t result = chunks.back()[curIdx];
+    //     curIdx++;
+    //     return result;
+    // }
+
+    void fillBuffer(uint64_t* dest, size_t count) {
+        while (count > 0) {
+            size_t chunk = std::min(count, chunkSize - curIdx);
+            std::copy(chunks.back().begin() + curIdx, chunks.back().begin() + curIdx + chunk, dest);
+            //std::memcpy(dest, chunks.back().data() + curIdx, chunk * sizeof(uint64_t));
+            dest += chunk;
+            count -= chunk;
+            curIdx += chunk;
+
+            if (curIdx >= chunkSize) {
+                chunks.emplace_back();
+                chunks.back().reserve(chunkSize);
+                curIdx = 0;
+            }
         }
-        if (chunks.back().empty()) {
-            chunks.back().resize(chunkSize);
-            getNextNumber(chunks.back().data(), chunkSize);
-        }
-        const uint64_t result = chunks.back()[curIdx];
-        curIdx++;
-        return result;
     }
 
 private:
@@ -68,7 +89,7 @@ private:
     std::mt19937_64 gen;
     std::uniform_int_distribution<uint64_t> dis;
 };
-
+/*
 
 template <typename T>
 class ChunkedNumberGenerator {
@@ -120,11 +141,13 @@ private:
     size_t index = 0;
 };
 
+*/
 
 class Random {
 public:
     static int64_t randomInteger64() {
-        return generator.getNextNumber();
+        return 0;
+        //return generator.getNextNumber();
     }
 
     static int randomInteger(int min, int max) {
@@ -135,16 +158,15 @@ public:
 
     static std::vector<uint64_t> randomIntegers(size_t count) {
         std::vector<uint64_t> numbers(count);
-        numbers.resize(count);
-        generator.fillBuffer(numbers.data(), count);
+        generator.getNextNumber(numbers.data(), count);
         return numbers;
     }
 
 private:
-    static ChunkedNumberGenerator<uint64_t> generator;
+    static RandomNumberGenerator generator;
 };
 
-inline ChunkedNumberGenerator<uint64_t> Random::generator;
+inline RandomNumberGenerator Random::generator;
 
 
 
