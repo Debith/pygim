@@ -6,23 +6,45 @@
 
 namespace py = pybind11;
 
-// Assuming UNDEFINED and DROPPED are defined elsewhere in the code, similar to the previous example
-static const py::object DROPPED = py::object();
-static const py::object UNDEFINED = py::object();
 
-namespace py = pybind11;
+static const py::object DROPPED = py::object();
+
+
+static py::object sentinel_object() {
+  static py::object sentinel;
+
+  if (sentinel.ptr() == nullptr) {
+    sentinel = py::capsule(&sentinel);
+    sentinel.inc_ref();
+  }
+
+  return sentinel;
+}
+
+
+class Undefined : public py::object {
+public:
+    PYBIND11_OBJECT(Undefined, object, [](py::handle h) { return h.is(sentinel_object()); });
+    Undefined() : py::object(sentinel_object(), stolen_t{}) {}
+    ~Undefined() = default;
+
+    static py::object instance() {
+        static const py::object undefined = Undefined();
+        return undefined;
+    }
+};
 
 // Create a unique object to serve as our UNDEFINED value.
 
 py::object smart_getattr(py::object& obj,
                          const std::string& name,
                          bool autocall = true,
-                         const py::object& defaultValue = UNDEFINED,
+                         const py::object& defaultValue = Undefined(),
                          py::tuple args = py::tuple(),
                          py::dict kwargs = py::dict()
                          ) {
     if (!py::hasattr(obj, name.c_str())) {
-        if (defaultValue.is(UNDEFINED)) {
+        if (defaultValue.is(Undefined())) {
             throw std::runtime_error("AttributeError: '" + std::string(py::str(obj)) + "' object has no attribute '" + name + "'");
         }
         return defaultValue;
@@ -41,10 +63,10 @@ public:
     // Constructor with default values and optional parameters
     MultiCall(py::list objs = py::list(),
               std::string funcName = "",
-              const py::object& factory = UNDEFINED,
+              const py::object& factory = Undefined(),
               bool withObj = false,
               bool autocall = true,
-              const py::object& defaultValue = UNDEFINED
+              const py::object& defaultValue = Undefined()
               )
     : m_objs(objs),
       m_funcName(funcName),
@@ -61,8 +83,8 @@ public:
     py::iterable iter_attributes() {
         py::list result;
         for (auto obj : m_objs) {
-            auto value = py::getattr(obj, m_funcName.c_str(), UNDEFINED);
-            if (value.is(UNDEFINED)) {
+            auto value = py::getattr(obj, m_funcName.c_str(), Undefined());
+            if (value.is(Undefined())) {
                 throw std::runtime_error("AttributeError: '" + std::string(py::str(obj)) + "' has no attribute '" + m_funcName + "'");
             } else if (value.is(DROPPED)) {
                 continue;

@@ -13,7 +13,8 @@ def multiline_string_list():
 
 
 def test_multicall_calling_function_of_an_underlying_objects(multiline_string_list):
-    from pygim.utils import mgetattr
+    from _pygim.common_fast import MultiCall
+    mgetattr = MultiCall([], "")
 
     actual_result = mgetattr(multiline_string_list, "strip")
     expected_result = ["this", "is", "a", "test"]
@@ -95,6 +96,18 @@ def test_multicall_passing_ellipsis_as_default_drops_items(multiline_string_list
     expected_result = ["this", "is", "a", "test"]
     if actual_result != expected_result:
         raise AssertionError(diff(actual_result, expected_result))
+
+
+def xtest_multicall_for_long_list():
+    from pygim.utils import mgetattr
+    from _pygim.common_fast import MultiCall
+    mgetattr = MultiCall([], "", list)
+
+    actual_result = mgetattr([1] * 1000000, "__str__")
+    expected_result = [2] * 1000000
+    if actual_result != expected_result:
+        raise AssertionError(diff(actual_result, expected_result))
+
 
 
 if __name__ == '__main__':

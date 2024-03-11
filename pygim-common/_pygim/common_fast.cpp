@@ -29,6 +29,7 @@ void bindID(py::module_ &m, const char* className) {
         }, "String representation");
 }
 
+
 PYBIND11_MODULE(common_fast, m)
 {
     m.doc() = "Python Gimmicks Common library."; // optional module docstring
@@ -57,32 +58,44 @@ PYBIND11_MODULE(common_fast, m)
     m.def("tuplify", (py::tuple (*)(const py::iterable&))   &tuplify, "A function that converts an iterable to a tuple.");
     m.def("tuplify", (py::tuple (*)(const py::handle&))     &tuplify, "A function that converts a generic object to a single-element tuple.");
 
+
+    py::class_<Undefined>(m, "Undefined")
+        .def_static("__new__", [](const py::object &) {
+            return Undefined::instance(); })
+        .def(py::init<>([](const Undefined& self) { return self; }))
+        .def("__repr__", [](py::handle self) { return py::str("<Undefined>"); });
+        //.def("__str__", [](const Undefined& self) { return "undefined"; })
+        //.def("__bool__", []() { return false; });
+        //.def("__hash__", [](const Undefined& self) { return 0; });
+
+    //m.attr("UNDEFINED") = PyUndefined();
+
     // Class ID
-    //m.attr("UNDEFINED") = UNDEFINED;
+    bindID<uint64_t>(m, "ID");
     m.def("smart_getattr", &smart_getattr,
                            py::arg("obj"),
                            py::arg("name"),
-                           py::arg("default_value"),
+                           py::arg("default_value") = Undefined::instance(),
                            py::arg("autocall") = true,
                            py::arg("args") = py::tuple(),
                            py::arg("kwargs") = py::dict(),
           "A C++ implementation of smart_getattr using Pybind11");
 
-    bindID<uint64_t>(m, "ID");
-
-    /*
-
     py::class_<MultiCall>(m, "MultiCall")
         .def(py::init<py::list, std::string, py::object, bool, bool, py::object>(),
              py::arg("objs"),
              py::arg("func_name"),
-             py::arg("factory") = UNDEFINED,
+             py::arg("factory") = Undefined::instance(),
              py::arg("with_obj") = false,
              py::arg("autocall") = true,
-             py::arg("default") = UNDEFINED)
+             py::arg("default") = py::none())
         .def("__call__", [](MultiCall& self, py::args args, py::kwargs kwargs) {
             return self(args, kwargs);
         });
+
+
+    /*
+
     */
 
 #ifdef VERSION_INFO
