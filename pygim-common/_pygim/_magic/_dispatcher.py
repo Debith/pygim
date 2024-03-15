@@ -5,10 +5,11 @@ Dispatcher class internal implementation.
 
 from itertools import product
 from functools import wraps
+from types import FunctionType
 from dataclasses import dataclass, field
+import _pygim.typing as t
 from .._exceptions import GimError
-from .._utils._inspect import class_names
-
+from .._utils._inspect import class_names, has_instances
 
 def _arg_identifier(arg):
     """
@@ -33,7 +34,7 @@ def _arg_identifier(arg):
 class _Dispatcher:
     __callable: object
     __registry: dict = field(default_factory=dict)
-    __args: tuple = None
+    __args: t.Optional[tuple] = None
     __start_index: int = 0
 
     def __post_init__(self):
@@ -41,7 +42,10 @@ class _Dispatcher:
         Post-initialization method that sets the starting index for method calls
         if the callable object appears to be a method.
         """
-        if "." in self.__callable.__qualname__ and self.__callable.__code__.co_argcount > 0:
+        # Function that is defined inside another function has a ``.<locals>.`` in its
+        # qualname.
+        qualname = self.__callable.__qualname__.split(".<locals>.")[-1]
+        if "." in qualname and self.__callable.__code__.co_argcount > 0:
             # This looks like a method.
             self.__start_index = 1
         wraps(self.__callable)(self)
@@ -64,6 +68,7 @@ class _Dispatcher:
         function
             Decorator function that registers the given function for specific argument types.
         """
+        assert not has_instances(specs, FunctionType), "Argument types must be types!"
         if not self.__args:
             # Allow registering functions based on value and type.
             self.__args = tuple(_arg_identifier(a) for a in specs)
@@ -110,6 +115,8 @@ class _Dispatcher:
                 raise GimError(f"Multiple base class combinations: {class_names(common)}")
 
             if not common:
+                if self.__start_index:
+                    args = (self.__instance,) + args
                 return self.__callable(*args, **kwargs)
 
             func = self.__registry[list(common)[0]]

@@ -1,4 +1,4 @@
-import tabulate
+import tabulate  # type: ignore
 from pygim.performance.dispatch import dispatch
 
 
@@ -50,7 +50,7 @@ def _diff_dict(_left, _right, *, start="", end="\n"):
         matching = "!=" if left != right else ""
 
         lines.append((key, left, matching, right))
-    return start + tabulate.tabulate(lines, headers=['left', 'right']) + end
+    return start + tabulate.tabulate(lines, headers=["left", "right"]) + end
 
 
 @diff.register(list, list)
@@ -82,4 +82,4 @@ def _diff_list(_left, _right, *, start="", end="\n"):
     for left, right in zip(_left, _right):
         matching = "!=" if left != right else ""
         lines.append((left, matching, right))
-    return start + tabulate.tabulate(lines, headers=['left', '', 'right']) + end
+    return start + tabulate.tabulate(lines, headers=["left", "", "right"]) + end

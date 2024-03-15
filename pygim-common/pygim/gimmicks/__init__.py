@@ -21,10 +21,12 @@ Notes
 - Comprehensive examples for `gim_type` and `gimmick`can be found from `python-gimmicks/docs/examples/traits`.
 """
 
+from _pygim.common_fast import ID
 from _pygim._magic._gimmick import gim_type, gimmick
 from .entangled import *
 
 __all__ = [
+    "ID",
     "gim_type",
     "gimmick",
     "EntangledClass",

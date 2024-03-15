@@ -1,6 +1,11 @@
+import sys
 import pytest
 import tempfile
 import pathlib
+
+import importlib.util
+
+ROOT = pathlib.Path(__file__).parents[3]
 
 
 @pytest.fixture
@@ -25,12 +30,6 @@ def filled_temp_dir(temp_dir):
     assert all(f.is_file() for f in test_files)
 
     yield temp_dir
-
-
-import importlib.util
-import sys
-
-ROOT = pathlib.Path(__file__).parents[3]
 
 
 def to_module(relative_path):

@@ -7,10 +7,25 @@ import shutil
 from pathlib import Path
 from dataclasses import dataclass
 
-from pygim.iterlib import is_container
-from _pygim._utils._fileutils import flatten_paths
+from pygim.iterlib import is_container, flatten
+from pygim.utils import smart_getattr
 
 __all__ = ["PathSet"]
+
+
+def flatten_paths(*paths, pattern, nested):
+    for path in flatten(paths):
+        path = Path(path)
+
+        if path.is_dir():
+            yield path
+            if nested:
+                ps = list(path.rglob(pattern))
+            else:
+                ps = list(path.glob(pattern))
+            yield from ps
+        else:
+            yield path
 
 
 class _FileSystemOps:
@@ -79,6 +94,7 @@ class PathSet:
     # TODO: This class could allow multiple different path types (not just pathlib.Path).
     _paths: Path = None  # type: ignore    # this is invariant
     _pattern: str = "*"
+    _nested: bool = True
     FS = _FileSystemOps()  # File system
 
     def __post_init__(self):
@@ -90,7 +106,10 @@ class PathSet:
         # We just handled the optional part, let's make mypy happy.
         assert paths is not None
 
-        super().__setattr__("_paths", frozenset(flatten_paths(paths, pattern=self._pattern)))
+        super().__setattr__("_paths", frozenset(flatten_paths(paths,
+                                                              pattern=self._pattern,
+                                                              nested=self._nested,
+                                                              )))
         assert all([isinstance(p, Path) for p in self._paths])
         assert isinstance(self._paths, frozenset)
 
@@ -253,16 +272,20 @@ class PathSet:
         assert filters, "No filters given!"
         assert self._paths is not None
 
-        for p in self._paths:
-            for func, value in filters.items():
-                value = value if is_container(value) else [value]
-                obj = getattr(p, func)
-                obj = obj() if callable(obj) else obj
+        def _should_drop(path_val, filter):
+            if callable(filter):
+                return filter(path_val)
+            return path_val == filter
 
-                if obj not in value:
-                    yield p
+        for p in self._paths:
+            for path_attrname, val_filters in filters.items():
+                val_filters = val_filters if is_container(val_filters) else [val_filters]
+                path_val = smart_getattr(p, path_attrname)
+
+                if any(_should_drop(path_val, filter) for filter in val_filters):
                     break
 
+                yield p
 
     def filtered(self, **filters):
         """As filter() but returns new object."""
@@ -322,6 +345,22 @@ class PathSet:
         ['path1', 'path2']
         """
         return container_type(path_type(p) for p in self)
+
+    def __call__(self, attr_name):
+        """
+        Get attribute from all paths.
+
+        Parameters
+        ----------
+        attr_name : str
+            The name of the attribute to retrieve from each path.
+
+        Returns
+        -------
+        list
+            A list of attribute values from all paths.
+        """
+        return [smart_getattr(p, attr_name) for p in self]
 
 
 if __name__ == "__main__":

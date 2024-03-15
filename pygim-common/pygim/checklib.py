@@ -14,7 +14,7 @@ is_subset(set1, set2)
 
 from _pygim._utils import _inspect
 
-__all__ = ('has_instances', 'is_subset')
+__all__ = ("has_instances", "is_subset")
 
 has_instances = _inspect.has_instances
 has_instances.__doc__ = """

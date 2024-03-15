@@ -3,13 +3,13 @@
 Command-Line Interface Application for Python Gimmicks.
 """
 
-import subprocess
+from subprocess import Popen, DEVNULL
 import sys
 import functools
 from pathlib import Path
 from dataclasses import dataclass
 import click
-from pygim.fileio import PathSet
+from pygim.primitives import PathSet
 
 __all__ = ["GimmicksCliApp", "flag_opt"]
 
@@ -51,5 +51,5 @@ class GimmicksCliApp:
 
     def show_test_coverage(self):
         # TODO: Make this nicer
-        subprocess.Popen("python -m coverage run -m pytest".split(' ')).wait()
-        subprocess.Popen("python -m coverage report -m".split(' ')).wait()
+        Popen("python -m coverage run -m pytest".split(' '), stdout=DEVNULL, stderr=DEVNULL).wait()
+        Popen("python -m coverage report -m".split(' ')).wait()

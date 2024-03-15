@@ -11,6 +11,11 @@ from .._iterlib import flatten
 
 __all__ = ('TraitFunctions', 'has_instances', 'is_subset')
 
+# This is an alias for the types that are used for traits. This is used
+# for the `has_instances` function. For example:
+# >>> from pygim._utils import has_instances, TraitFunctions
+# >>> has_instances([1, 2, 3], TraitFunctions)
+# False
 TraitFunctions = (types.FunctionType, types.MethodType)
 
 

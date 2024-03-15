@@ -9,7 +9,6 @@ import pathlib
 from _pygim._error_msgs import file_error_msg
 from _pygim._exceptions import ShaSumTargetNotFoundError
 from _pygim.typing import PathLike
-from ..fileio.pathset import PathSet
 from ..performance.dispatch import dispatch
 
 __all__ = ["sha256sum", "sha256sum_file"]
@@ -99,6 +98,7 @@ try:
     def _(items: np.array, **_):
         content = np.vectorize(sha256sum)(items)
         return sha256sum(f"{items.__class__.__name__}({content})")
+
 except ImportError:
     pass
 
@@ -116,6 +116,7 @@ try:
         return sha256sum(f"{series.__class__.__name__}({content})")
 
     ROWS, COLS = 0, 1
+
     @sha256sum.register(pd.DataFrame)
     def _(df: pd.DataFrame, *, axis=ROWS, **_):
         content = df.apply(sha256sum, axis=axis)

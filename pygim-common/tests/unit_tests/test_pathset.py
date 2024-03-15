@@ -6,18 +6,44 @@ from pathlib import Path
 import platform
 import pytest
 
-from pygim.fileio import PathSet
+from pygim.testing import diff
+from pygim.primitives.pathset import PathSet, flatten_paths
+
+
+def test_flatten_paths_on_flat_dir(filled_temp_dir):
+    files = list(flatten_paths(filled_temp_dir, pattern="*", nested=True))
+    files = sorted([d.name for d in files[1:]])
+
+    assert files == ['AUTHORS.rst', 'readme.rst', 'readme.txt']
+
+
+def test_flatten_paths_on_deep_dir(filled_temp_dir):
+    t_dir_1 = filled_temp_dir / "test1"
+    t_dir_2 = filled_temp_dir / "test2"
+
+    t_dir_1.mkdir()
+    t_dir_2.mkdir()
+
+    (t_dir_1 / "test.txt").touch()
+    (t_dir_2 / "test.txt").touch()
+
+    files = list(flatten_paths(filled_temp_dir, pattern="*", nested=True))
+    files = sorted([d.name for d in files[1:]])
+
+    expected = ['AUTHORS.rst', 'readme.rst', 'readme.txt',
+                'test.txt', 'test.txt', 'test1', 'test2',
+                ]
+
+    assert files == expected, diff(files, expected, start="\n")
 
 
 # FIXME: TemporaryDirectory().cleanup() fails due to some weird
 #        PermissionError in Windows environment in GitHub.
 #        Therefore, Windows is relieved from testing duty for now.
 if platform.uname().system != "Windows":
-    _FILES = ['readme.txt', 'readme.rst', 'AUTHORS.rst']
-
     @pytest.fixture()
-    def filled_temp_dir(temp_dir):
-        test_files = PathSet.prefixed(_FILES, prefix=temp_dir)
+    def temp_files(temp_dir):
+        test_files = PathSet.prefixed(['readme.txt', 'readme.rst', 'AUTHORS.rst'], prefix=temp_dir)
         assert not any(f.is_file() for f in test_files)
 
         [f.touch() for f in test_files]
@@ -25,49 +51,46 @@ if platform.uname().system != "Windows":
 
         yield test_files
 
-
-    def test_basics(filled_temp_dir):
+    def test_basics(temp_files):
         assert len(PathSet([])) == 0
         assert bool(PathSet([])) is False
-        assert len(filled_temp_dir) == 3
-        assert bool(filled_temp_dir) is True
-        assert filled_temp_dir.clone() == filled_temp_dir
-        assert id(filled_temp_dir.clone()) != id(filled_temp_dir)
+        assert len(temp_files) == 3
+        assert bool(temp_files) is True
+        assert temp_files.clone() == temp_files
+        assert id(temp_files.clone()) != id(temp_files)
 
 
-    def test_cloning_with_override(filled_temp_dir):
-        assert filled_temp_dir.clone([]) == PathSet([])
-        assert filled_temp_dir.clone(['readme.txt']) == PathSet(['readme.txt'])
+    def test_cloning_with_override(temp_files):
+        assert temp_files.clone([]) == PathSet([])
+        assert temp_files.clone(['readme.txt']) == PathSet(['readme.txt'])
 
-
-
-    def test_adding(filled_temp_dir):
-        temp_dir = list(filled_temp_dir)[0].parent
+    def test_adding(temp_files):
+        temp_dir = list(temp_files)[0].parent
         more_files = PathSet.prefixed(['fourth.txt', 'fifth.txt', 'sixth.txt'], prefix=temp_dir)
 
-        new_paths = filled_temp_dir + more_files
+        new_paths = temp_files + more_files
 
-        assert new_paths != filled_temp_dir
+        assert new_paths != temp_files
         assert new_paths != more_files
         assert new_paths == PathSet.prefixed([
             'readme.txt', 'readme.rst', 'AUTHORS.rst', 'fourth.txt', 'fifth.txt', 'sixth.txt'], prefix=temp_dir)
 
 
-    def test_delete_all(filled_temp_dir):
-        assert len(filled_temp_dir) == 3
-        assert [f.is_file() for f in filled_temp_dir] == [True, True, True]
+    def test_delete_all(temp_files):
+        assert len(temp_files) == 3
+        assert [f.is_file() for f in temp_files] == [True, True, True]
 
-        filled_temp_dir.FS.delete_all()
+        temp_files.FS.delete_all()
 
-        assert len(filled_temp_dir) == 3
-        assert [f.is_file() for f in filled_temp_dir] == [False, False, False]
+        assert len(temp_files) == 3
+        assert [f.is_file() for f in temp_files] == [False, False, False]
 
 
     def test_delete_all_with_folders(temp_dir):
         sub_dir = temp_dir / "sub"
         sub_dir.mkdir()
-        test_files = PathSet.prefixed(_FILES, prefix=temp_dir)
-        sub_files = PathSet.prefixed(_FILES, prefix=sub_dir)
+        test_files = PathSet.prefixed(['readme.txt', 'readme.rst', 'AUTHORS.rst'], prefix=temp_dir)
+        sub_files = PathSet.prefixed(['readme.txt', 'readme.rst', 'AUTHORS.rst'], prefix=sub_dir)
 
         [p.touch() for p in test_files + sub_files]
 
@@ -97,36 +120,36 @@ if platform.uname().system != "Windows":
         os.chdir(old_cwd)
 
 
-    def test_basic_filters(filled_temp_dir):
-        temp_dir = list(filled_temp_dir)[0].parent
-        assert filled_temp_dir.by_suffix('.txt') == PathSet.prefixed(['readme.txt'], prefix=temp_dir)
-        assert filled_temp_dir.dirs() == PathSet.prefixed([], prefix=temp_dir)
-        assert filled_temp_dir.files() == PathSet.prefixed(_FILES, prefix=temp_dir)
+    def test_basic_filters(temp_files):
+        temp_dir = list(temp_files)[0].parent
+        assert temp_files.by_suffix('.txt') == PathSet.prefixed(['readme.txt'], prefix=temp_dir)
+        assert temp_files.dirs() == PathSet.prefixed([], prefix=temp_dir)
+        assert temp_files.files() == PathSet.prefixed(['readme.txt', 'readme.rst', 'AUTHORS.rst'], prefix=temp_dir)
 
 
-    def test_drop_files_based_on_filter(filled_temp_dir):
-        temp_dir = list(filled_temp_dir)[0].parent
-        new_paths = filled_temp_dir.drop(suffix='.rst')
+    def test_drop_files_based_on_filter(temp_files):
+        temp_dir = list(temp_files)[0].parent
+        new_paths = temp_files.drop(suffix='.rst')
 
-        assert filled_temp_dir != new_paths
+        assert temp_files != new_paths
         assert list(new_paths) == list(PathSet.prefixed(['readme.txt'], prefix=temp_dir))
 
-        new_paths = filled_temp_dir.drop(suffix=('.rst', '.txt'))
+        new_paths = temp_files.drop(suffix=('.rst', '.txt'))
 
-        assert filled_temp_dir != new_paths
+        assert temp_files != new_paths
         assert list(new_paths) == []
 
 
-    def test_dropped_files_based_on_filter(filled_temp_dir):
-        temp_dir = list(filled_temp_dir)[0].parent
-        new_paths = filled_temp_dir.dropped(suffix='.rst')
+    def test_dropped_files_based_on_filter(temp_files):
+        temp_dir = list(temp_files)[0].parent
+        new_paths = temp_files.dropped(suffix='.rst')
 
-        assert filled_temp_dir != new_paths
+        assert temp_files != new_paths
         assert new_paths == PathSet.prefixed(['readme.txt'], prefix=temp_dir)
 
-        new_paths = filled_temp_dir.dropped(suffix=('.rst', '.txt'))
+        new_paths = temp_files.dropped(suffix=('.rst', '.txt'))
 
-        assert filled_temp_dir != new_paths
+        assert temp_files != new_paths
         assert new_paths == PathSet([])
 
 
