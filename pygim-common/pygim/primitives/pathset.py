@@ -222,13 +222,17 @@ class PathSet:
         assert filters, "No filters given!"
         assert self._paths is not None
 
-        for p in self._paths:
-            for func, value in filters.items():
-                value = value if is_container(value) else [value]
-                obj = getattr(p, func)
-                obj = obj() if callable(obj) else obj
+        def _should_keep(path_val, filter):
+            if callable(filter):
+                return filter(path_val)
+            return path_val == filter
 
-                if obj in value:
+        for p in self._paths:
+            for path_attrname, val_filters in filters.items():
+                val_filters = val_filters if is_container(val_filters) else [val_filters]
+                path_val = smart_getattr(p, path_attrname)
+
+                if any(_should_keep(path_val, filter) for filter in val_filters):
                     yield p
                     break
 
@@ -360,7 +364,11 @@ class PathSet:
         list
             A list of attribute values from all paths.
         """
-        return [smart_getattr(p, attr_name) for p in self]
+        return {p: smart_getattr(p, attr_name) for p in self}
+
+    def contains(self, other):
+        """Combine paths together."""
+        return self.filtered(__str__=lambda filename: other in str(filename))
 
 
 if __name__ == "__main__":
