@@ -312,39 +312,39 @@ class PathSet:
         assert isinstance(other, self.__class__)
         return self.clone(set(self._paths) | set(other._paths))
 
-    def transform(self, container_type=list, path_type=str):
+    def transform(self, container_factory=list, path_factory=str):
         """
         Transform the container and elements of the instance to specified types.
 
         This function transforms the elements of the instance using the
-        `path_type` argument, and then packs them into a new container
-        specified by the `container_type` argument.
+        `path_factory` argument, and then packs them into a new container
+        specified by the `container_factory` argument.
 
         Parameters
         ----------
-        container_type : type, optional
+        container_factory : type, optional
             The type of the output container (default is `list`). This should
             be a type (like `list` or `set`), not an instance of a type (like `[]` or `{}`).
-        path_type : type, optional
+        path_factory : type, optional
             The type to convert each path in the instance (default is `str`).
             This should be a callable that takes a path as input and returns
             a new path of the desired type.
 
         Returns
         -------
-        container_type
-            The container filled with `path_type` objects.
+        container_factory
+            The container filled with `path_factory` objects.
 
         Examples
         --------
         Given a class `PathSet` that holds a list of `Path` objects:
 
         >>> paths = PathSet([Path('path1'), Path('path2')])
-        >>> transformed = paths.transform(container_type=set, path_type=str)
+        >>> transformed = paths.transform(container_factory=set, path_factory=str)
         >>> print(sorted(transformed))
         ['path1', 'path2']
         """
-        return container_type(path_type(p) for p in self)
+        return container_factory(path_factory(p) for p in self)
 
     def __call__(self, attr_name):
         """
