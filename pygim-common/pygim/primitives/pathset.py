@@ -222,13 +222,17 @@ class PathSet:
         assert filters, "No filters given!"
         assert self._paths is not None
 
-        for p in self._paths:
-            for func, value in filters.items():
-                value = value if is_container(value) else [value]
-                obj = getattr(p, func)
-                obj = obj() if callable(obj) else obj
+        def _should_keep(path_val, filter):
+            if callable(filter):
+                return filter(path_val)
+            return path_val == filter
 
-                if obj in value:
+        for p in self._paths:
+            for path_attrname, val_filters in filters.items():
+                val_filters = val_filters if is_container(val_filters) else [val_filters]
+                path_val = smart_getattr(p, path_attrname)
+
+                if any(_should_keep(path_val, filter) for filter in val_filters):
                     yield p
                     break
 
@@ -312,39 +316,39 @@ class PathSet:
         assert isinstance(other, self.__class__)
         return self.clone(set(self._paths) | set(other._paths))
 
-    def transform(self, container_type=list, path_type=str):
+    def transform(self, container_factory=list, path_factory=str):
         """
         Transform the container and elements of the instance to specified types.
 
         This function transforms the elements of the instance using the
-        `path_type` argument, and then packs them into a new container
-        specified by the `container_type` argument.
+        `path_factory` argument, and then packs them into a new container
+        specified by the `container_factory` argument.
 
         Parameters
         ----------
-        container_type : type, optional
+        container_factory : type, optional
             The type of the output container (default is `list`). This should
             be a type (like `list` or `set`), not an instance of a type (like `[]` or `{}`).
-        path_type : type, optional
+        path_factory : type, optional
             The type to convert each path in the instance (default is `str`).
             This should be a callable that takes a path as input and returns
             a new path of the desired type.
 
         Returns
         -------
-        container_type
-            The container filled with `path_type` objects.
+        container_factory
+            The container filled with `path_factory` objects.
 
         Examples
         --------
         Given a class `PathSet` that holds a list of `Path` objects:
 
         >>> paths = PathSet([Path('path1'), Path('path2')])
-        >>> transformed = paths.transform(container_type=set, path_type=str)
+        >>> transformed = paths.transform(container_factory=set, path_factory=str)
         >>> print(sorted(transformed))
         ['path1', 'path2']
         """
-        return container_type(path_type(p) for p in self)
+        return container_factory(path_factory(p) for p in self)
 
     def __call__(self, attr_name):
         """
@@ -360,7 +364,11 @@ class PathSet:
         list
             A list of attribute values from all paths.
         """
-        return [smart_getattr(p, attr_name) for p in self]
+        return {p: smart_getattr(p, attr_name) for p in self}
+
+    def contains(self, other):
+        """Combine paths together."""
+        return self.filtered(__str__=lambda filename: other in str(filename))
 
 
 if __name__ == "__main__":
