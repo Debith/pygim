@@ -2,10 +2,14 @@
 
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
+#include <span>             // std::span
+#include <iostream>         // std::string
+#include <array>            // std::array
 
 #include "_iterlib_fast/iterutils.h"
 #include "_gimmicks_fast/id.h"
-#include <iostream>         // std::string
+#include "_fast/timestamp.h"
+
 
 #define STRINGIFY(x) #x
 #define MACRO_STRINGIFY(x) STRINGIFY(x)
@@ -58,6 +62,23 @@ PYBIND11_MODULE(common_fast, m)
 
     // Class ID
     bindID<uint64_t>(m, "ID");
+
+    m.def("print_hours", []() {
+        // span over encoded_times
+        const std::array<uint32_t, 16> temp = {
+            0,     1,     2,     3,     4,     5,     6,     7,
+            8,     9,    10,    11,    12,    13,    14,    15,     
+            };   
+        auto encodedDateTime = std::span<const uint32_t>{encoded_times};
+        return "";
+    });
+
+    m.def("date_range", []() {
+        auto dates = extractDates(encoded_dates);
+        auto times = extractTimes(encoded_times);
+
+        return dates.size() + times.size();
+    });
 
 #ifdef VERSION_INFO
     m.attr("__version__") = MACRO_STRINGIFY(VERSION_INFO);
