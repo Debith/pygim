@@ -1,7 +1,7 @@
 [build-system]
-requires = ["setuptools ~= 58.0", "wheel", "toml"]
-build-backend = "build_backend"
-backend-path = ["_pygim_build"]
+requires = ["setuptools", "wheel", "toml"]
+build-backend = "setuptools.build_meta"
+backend-path = []
 
 [project]
 name = "python-gimmicks"
@@ -29,10 +29,7 @@ classifiers = [
   "Topic :: Software Development :: Quality Assurance",
   "Typing :: Typed",
 ]
-dependencies = [
-  "pygim-common @ file:///${PROJECT_ROOT}/pygim-common",
-  "pygim-ddd @ file:///${PROJECT_ROOT}/pygim-ddd",
-]
+dependencies = []
 
 [project.urls]
 homepage = "https://github.com/Debith/pygim"
@@ -49,6 +46,7 @@ dev = [
   'mypy',
   'coverage',
   'coverage[toml]',
+  'pybind11',
 ]
 
 test = [
@@ -58,6 +56,7 @@ test = [
 
 [project.scripts]
 pygim = "_pygim._cli.__main__:cli"
+oo = "_pygim._cli.__main__:cli_oo"
 
 [tool.pytest.ini_options]
 minversion = "6.0"
@@ -71,8 +70,7 @@ testpaths = [
 
 [tool.coverage.report]
 omit = ["./docs/**/*.*", "**/tests/**/*.*"]
-include = ["./pygim-common/**/*.py",
-           "./pygim-ddd/**/*.py",
+include = ["./src/**/*.py"
            ]
 show_missing = true
 exclude_lines = [
@@ -84,13 +82,6 @@ exclude_lines = [
 ]
 
 [tool.pygim.commands]
-lint = "mypy ."
-test = "pytest"
-
-[tool.pdm.build]
-includes = [
-    "pygim-cli",
-]
 
 [tool.mypy]
 exclude = [
