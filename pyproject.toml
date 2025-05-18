@@ -69,7 +69,10 @@ testpaths = [
 ]
 
 [tool.coverage.report]
-omit = ["./docs/**/*.*", "**/tests/**/*.*"]
+omit = [
+    "./docs/**/*.*",
+    "**/tests/**/*.*"
+    ]
 include = ["./src/**/*.py"
            ]
 show_missing = true

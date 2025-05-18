@@ -1,4 +1,5 @@
 #type: ignore
+import sys
 import pprint
 import sys
 from pathlib import Path
@@ -21,14 +22,25 @@ def get_cpp_files(path):
         cpp_file.touch()
     return [str(f) for f in cpp_files]
 
+
+# Pick sensible flags per‐compiler
+if sys.platform == "win32":
+    # MSVC: enable C++17 (or C++20 if your toolchain supports it) and optimize
+    extra_compile_args = ["/std:c++20", "/O2"]
+    # or for VC++2022 with C++20: ["/std:c++20", "/O2"]
+else:
+    extra_compile_args = ["-std=c++20", "-O3"]
+
+
 ext_modules = [
-    Pybind11Extension("pygim.pathset",
-        ['src/_pygim_fast/pathset.cpp'],
-        # Example: passing in the version to the compiled code
-        define_macros = [('VERSION_INFO', __version__)],
-        extra_compile_args=["--std=c++20", "-O3"],
-        #extra_compile_args=["-g", "-march=native", "-O3", "-fopenmp", "-std=c++17"],
-        ),
+    Pybind11Extension(
+        "pygim.pathset",
+        ["src/_pygim_fast/pathset.cpp"],
+        define_macros=[("VERSION_INFO", __version__)],
+        extra_compile_args=extra_compile_args,
+        # alternatively you can simply say:
+        # cxx_std=20
+    ),
 ]
 
 cfg = {**pyproject["project"]}
