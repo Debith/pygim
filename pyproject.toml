@@ -55,8 +55,8 @@ test = [
 ]
 
 [project.scripts]
-pygim = "_pygim._cli.__main__:cli"
-oo = "_pygim._cli.__main__:cli_oo"
+pygim = "pygim.__main__:cli"
+oo = "pygim.__main__:cli_oo"
 
 [tool.pytest.ini_options]
 minversion = "6.0"

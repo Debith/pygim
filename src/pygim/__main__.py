@@ -35,3 +35,17 @@ def clean_up(**kwargs):
 def show_test_coverage(**kwargs):
     """ Run test coverage in current folder. """
     GimmicksCliApp().show_test_coverage(**kwargs)
+
+
+@click.command()
+@click.argument("text", type=str, nargs=1)
+def cli_oo(text):
+    """\b
+     ___        ___ _
+    | _ \_  _  / __(_)_ __
+    |  _/ || || (_ | | '  \ \b
+    |_|  \_, / \___|_|_|_|_|
+          |_/ AI powered Python Gimmicks
+
+    """
+    GimmicksCliApp().ai(text)

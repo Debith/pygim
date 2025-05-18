@@ -54,7 +54,7 @@ IInfrastructureService:
 
 import abc
 from enum import Enum, unique
-from pygim.explib import type_error_msg
+from pygim.core.explib import type_error_msg
 
 
 class IService(abc.ABC):

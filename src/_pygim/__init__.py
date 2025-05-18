@@ -1,4 +1,4 @@
 # -*- coding: utf-8 -*-
-"""
-Private package for Python Gimmicks.
-"""
+'''
+Internal Python Gimmicks package.
+'''

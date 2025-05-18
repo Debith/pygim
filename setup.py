@@ -15,7 +15,6 @@ cfg['package_dir']={
     '': './src/',
     }
 cfg['ext_modules'] = ext_modules
-# Explicitly find packages in src directory
 cfg['packages'] = find_namespace_packages(where='src')
 cfg['install_requires'] = cfg.pop('dependencies')
 

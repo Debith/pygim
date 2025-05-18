@@ -52,3 +52,6 @@ class GimmicksCliApp:
         # TODO: Make this nicer
         Popen("python -m coverage run -m pytest".split(' '), stdout=DEVNULL, stderr=DEVNULL).wait()
         Popen("python -m coverage report -m".split(' ')).wait()
+
+    def ai(self, text):
+        print("AI is not implemented yet!")
