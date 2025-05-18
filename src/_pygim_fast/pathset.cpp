@@ -2,6 +2,7 @@
 
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
+#include <pybind11/operators.h>
 
 #include "pathset.h"
 #include <iostream>         // std::string
@@ -26,14 +27,17 @@ PYBIND11_MODULE(pathset, m)
         .def(py::init<const std::vector<fs::path>&>())
         .def(py::init<const std::initializer_list<fs::path>&>())
         .def_static("cwd", &PathSet::cwd)
-        .def("__len__", &PathSet::size)
-        .def("__bool__", [](const PathSet &ps) { return !ps.empty(); })
-        .def("__repr__", &PathSet::repr)
-        .def("__str__", &PathSet::str)
-        .def("__contains__", &PathSet::contains)
-        .def("__add__", &PathSet::operator+)
+        .def("__len__",         &PathSet::size)
+        .def("__bool__",        [](const PathSet &ps) { return !ps.empty(); })
+        .def("__repr__",        &PathSet::repr)
+        .def("__str__",         &PathSet::str)
+        .def("__contains__",    &PathSet::contains)
+        .def("__add__",         &PathSet::operator+)
+        .def(py::self -= py::str())    // operator-=(string)
+        .def(py::self -= py::self)     // operator-=(PathSet)
+        .def("__eq__",          &PathSet::operator==)
         .def("__iter__", [](const PathSet &ps) {
-            return py::make_iterator(ps.paths.begin(), ps.paths.end());
+            return py::make_iterator(ps.m_paths.begin(), ps.m_paths.end());
         }, py::keep_alive<0, 1>())
         .def("clone", &PathSet::clone)
         .def("filter_by_extension", &PathSet::filter_by_extension, py::arg("extension"))
