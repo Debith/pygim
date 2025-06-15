@@ -65,11 +65,49 @@ bool match_pattern(const std::string& pattern, const std::string& str) {
 }
 
 
+namespace fs = std::filesystem;
+using entry   = fs::directory_entry;
+
+/*-------------  A “callable” filter  ----------------*/
+struct Filter
+{
+    std::function<bool(const entry&)> pred;
+
+    bool operator()(const entry& e) const { return pred(e); }
+
+    /* Boolean algebra */
+    friend Filter operator&(Filter a, Filter b)
+    { return { [=](auto& e){ return a(e) && b(e); } }; }
+
+    friend Filter operator|(Filter a, Filter b)
+    { return { [=](auto& e){ return a(e) || b(e); } }; }
+
+    friend Filter operator!(Filter a)
+    { return { [=](auto& e){ return !a(e); } }; }
+};
+
+/* small helpers (“ext", “size_gt”, …) */
+inline Filter ext(std::string_view x)
+{
+    return { [x](const entry& e){ return e.path().extension() == x; } };
+}
+
+
+
 class PathSet {
 public:
     // TODO: m_paths is being accessed by pybind11 bindings. Ideally,
     // this should be private, but then need to find a way to expose iterators.
     std::set<fs::path> m_paths;
+
+    auto begin() const { return m_paths.begin(); }
+    auto end()   const { return m_paths.end();   }
+
+    friend std::ostream& operator<<(std::ostream& os, PathSet const& s)
+    {
+        for (auto& p : s.m_paths) os << p << '\n';
+        return os;
+    }
 
     // Constructors
     PathSet() = default;
@@ -167,39 +205,6 @@ public:
         return *this;
     }
 
-    // Filter by extension
-    PathSet filter_by_extension(const std::string& ext) const {
-        PathSet result;
-        for (const auto& p : m_paths) {
-            if (p.extension() == ext) {
-                result.m_paths.insert(p);
-            }
-        }
-        return result;
-    }
-
-    // Filter by multiple extensions
-    PathSet filter_by_extensions(const std::vector<std::string>& exts) const {
-        PathSet result;
-        for (const auto& p : m_paths) {
-            if (std::find(exts.begin(), exts.end(), p.extension()) != exts.end()) {
-                result.m_paths.insert(p);
-            }
-        }
-        return result;
-    }
-
-    // Filter existing m_paths
-    PathSet filter_existing() const {
-        PathSet result;
-        for (const auto& p : m_paths) {
-            if (fs::exists(p)) {
-                result.m_paths.insert(p);
-            }
-        }
-        return result;
-    }
-
     // Read all files
     std::vector<std::string> read_all_files() const {
         std::vector<std::string> contents;
@@ -218,3 +223,44 @@ public:
 
     // Other methods as needed
 };
+
+/*------------  Lazy query = source + predicate  -------------*/
+template<class Source>
+class Query
+{
+
+    Source const* src_;   // we do NOT copy the path list
+    Filter        f_;     // combined predicate
+
+public:
+    Query(Source const* s, Filter f) : src_(s), f_(std::move(f)) {}
+
+    /* keep piling filters with & and | */
+    friend Query operator&(Query q, Filter g) { return { q.src_, q.f_ & g }; }
+    friend Query operator|(Query q, Filter g) { return { q.src_, q.f_ | g }; }
+
+    /* evaluate on demand */
+    [[nodiscard]] PathSet eval() const
+    {
+        std::vector<fs::path> out;
+        for (auto& p : *src_) {
+            entry e(p);
+            if (f_(e))
+                out.push_back(p);
+        }
+        return PathSet{std::move(out)};
+    }
+
+    /* implicit conversion lets you write: PathSet s = paths & … | … ; */
+    operator PathSet() const { return eval(); }
+};// end of template<class Source> class Query
+
+using QueryPS = Query<PathSet>;  // alias for binding
+
+/* first kick-off operators: PathSet &/| Filter → Query */
+inline Query<PathSet> operator&(PathSet const& s, Filter f) {
+    return { &s, std::move(f) };
+}
+inline Query<PathSet> operator|(PathSet const& s, Filter f) {
+    return { &s, std::move(f) };
+}

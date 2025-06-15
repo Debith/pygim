@@ -32,22 +32,54 @@ PYBIND11_MODULE(pathset, m)
         .def("__repr__",        &PathSet::repr)
         .def("__str__",         &PathSet::str)
         .def("__contains__",    &PathSet::contains)
-        .def("__add__",         &PathSet::operator+)
-        .def(py::self -= py::str())    // operator-=(string)
-        .def(py::self -= py::self)     // operator-=(PathSet)
-        .def("__eq__",          &PathSet::operator==)
+        // Iterator over PathSet using internal m_paths
         .def("__iter__", [](const PathSet &ps) {
-            return py::make_iterator(ps.m_paths.begin(), ps.m_paths.end());
-        }, py::keep_alive<0, 1>())
+             return py::make_iterator(ps.m_paths.begin(), ps.m_paths.end(), py::return_value_policy::reference_internal);
+         }, py::keep_alive<0,1>())
+        // heterogeneous operators: PathSet  &/|  Filter  → Query
+        .def("__and__",
+             [](const PathSet& s, const Filter& f) { return s & f; },
+             py::is_operator())
+        .def("__or__",
+             [](const PathSet& s, const Filter& f) { return s | f; },
+             py::is_operator())
+        .def("__add__", &PathSet::operator+)
+        // removal operators: PathSet -= PathSet and PathSet -= str
+        .def(py::self -= py::self)
+        .def(py::self -= py::str())
+        .def("__eq__",          &PathSet::operator==)
         .def("clone", &PathSet::clone)
-        .def("filter_by_extension", &PathSet::filter_by_extension, py::arg("extension"))
-        .def("filter_by_extensions", &PathSet::filter_by_extensions, py::arg("extensions"))
-        .def("filter_existing", &PathSet::filter_existing)
         .def("read_all_files", &PathSet::read_all_files);
 
-#ifdef VERSION_INFO
+
+    /* ----------------  Filter  ----------------- */
+    py::class_<Filter>(m, "Filter")
+        // Boolean algebra between filters
+        .def(py::self & py::self)                   //  f1 & f2
+        .def(py::self | py::self)                   //  f1 | f2
+        .def("__invert__",                          //  ~f   (maps to !f in C++)
+             [](const Filter& f) { return !f; },
+             py::is_operator());
+
+    /* ----------------  Query<PathSet> ---------- */
+    py::class_<QueryPS>(m, "Query")
+        .def("__and__", [](const QueryPS& q, const Filter& f) { return q & f; }, py::is_operator())
+        .def("__or__",  [](const QueryPS& q, const Filter& f) { return q | f; }, py::is_operator())
+        .def("eval", &QueryPS::eval, "Materialise the filtered paths as a new PathSet")
+        // iterating in Python triggers a lazy eval under the hood
+        .def("__iter__", [](const QueryPS& q) {
+             auto ps = std::make_shared<PathSet>(q.eval());
+             return py::make_iterator(ps->m_paths.begin(), ps->m_paths.end(), py::return_value_policy::reference_internal);
+         }, py::keep_alive<0,1>());
+
+    /* -------------  helper factory functions ------------- */
+    m.def("ext", &ext, "Return a Filter matching a file extension");
+
+    /* ...add size_gt(), newer_than(), etc. the same way… */
+
+    #ifdef VERSION_INFO
     m.attr("__version__") = MACRO_STRINGIFY(VERSION_INFO);
-#else
+    #else
     m.attr("__version__") = "dev";
-#endif
+    #endif
 }
