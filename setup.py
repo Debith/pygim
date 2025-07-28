@@ -17,10 +17,10 @@ pyproject = toml.loads(Path('pyproject.toml').read_text())
 ext_modules = []
 
 def get_cpp_files(path):
-    cpp_files = list(p.resolve() for p in Path(path).rglob("*.cpp"))
+    cpp_files = list(p for p in Path(path).rglob("*.cpp"))
     for cpp_file in cpp_files:
         cpp_file.touch()
-    return [str(f) for f in cpp_files]
+    return cpp_files
 
 
 # Pick sensible flags per‐compiler
@@ -32,16 +32,16 @@ else:
     extra_compile_args = ["-std=c++20", "-O3"]
 
 
-ext_modules = [
-    Pybind11Extension(
-        "pygim.pathset",
-        ["src/_pygim_fast/pathset.cpp"],
-        define_macros=[("VERSION_INFO", __version__)],
-        extra_compile_args=extra_compile_args,
-        # alternatively you can simply say:
-        # cxx_std=20
-    ),
-]
+ext_modules = []
+for cpp_file in get_cpp_files("src/_pygim_fast"):
+    ext_modules.append(
+        Pybind11Extension(
+            f"pygim.{cpp_file.stem}",
+            [str(cpp_file)],
+            define_macros=[("VERSION_INFO", __version__)],
+            extra_compile_args=extra_compile_args,
+        )
+    )
 
 cfg = {**pyproject["project"]}
 cfg['package_dir']={
