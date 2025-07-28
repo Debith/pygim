@@ -7,16 +7,9 @@ backend-path = []
 name = "python-gimmicks"
 version = "0.2.3"
 description = "Full Python Gimmicks project with all of its sub-projects."
-readme = "README.rst"
-requires-python = ">=3.8, <4.0"
-authors = [
-  {email = "debith-dev@outlook.com"},
-  {name = "Teppo Perä"}
-]
 classifiers = [
   "Development Status :: 4 - Beta",
   "Intended Audience :: Developers",
-  "License :: OSI Approved :: MIT License",
   "Programming Language :: Python",
   "Programming Language :: Python :: 3",
   "Programming Language :: Python :: 3.8",

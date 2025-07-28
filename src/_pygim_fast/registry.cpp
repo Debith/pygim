@@ -28,5 +28,6 @@ PYBIND11_MODULE(registry, m) {
         .def("__delitem__", &Registry::remove, py::arg("name"), "Remove a registered callable by name.")
         .def("__contains__", &Registry::contains, py::arg("name"), "Check if a callable is registered.")
         .def("__len__", &Registry::size, "Number of registered callables.")
-        .def("__getitem__", &Registry::getitem, py::arg("name"), "Get a registered callable by name.");
+        .def("__getitem__", &Registry::getitem, py::arg("name"), "Get a registered callable by name.")
+        .def("registered_names", &Registry::registered_names, "Return a list of all registered callable names.");
 }

@@ -6,6 +6,8 @@
 #include <unordered_map>
 #include <functional>
 
+#include "utils.h"
+
 // Simple Registry for callables only
 class Registry {
 public:
@@ -38,12 +40,23 @@ public:
         if (it != m_callables.end()) {
             return it->second;
         }
-        throw std::runtime_error("Callable not found: " + name);
+        throw std::runtime_error("Callable not found: " + name
+            + ". Available callables: " + to_csv(registered_names(), true));
     }
 
     // Remove/unregister a callable by name. Returns true if removed, false if not found.
     bool remove(const std::string& name) noexcept {
         return m_callables.erase(name) > 0;
+    }
+
+    // Returns a list of all registered callable names
+    std::vector<std::string> registered_names() const {
+        std::vector<std::string> names;
+        names.reserve(m_callables.size());
+        for (const auto& pair : m_callables) {
+            names.push_back(pair.first);
+        }
+        return names;
     }
 
 private:
