@@ -1,8 +1,7 @@
 # -*- coding: utf-8 -*-
-'''
-'''
+""" """
 
-__all__ = ('type_error_msg', 'file_error_msg')
+__all__ = ("type_error_msg", "file_error_msg")
 
 
 def type_error_msg(obj_or_type, expected_type):
@@ -26,7 +25,7 @@ def type_error_msg(obj_or_type, expected_type):
     >>> type_error_msg(2, str)
     'Expected to get type `str`, got `2 [int]`'
     >>> type_error_msg([], (tuple, list))
-    'Expected to get type `tuple,list`, got `[] [list]`'
+    'Expected to get type `tuple, list`, got `[] [list]`'
     """
     if isinstance(expected_type, tuple):
         type_names = []
