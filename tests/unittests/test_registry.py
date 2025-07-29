@@ -5,7 +5,7 @@ from pygim.registry import Registry
 @pytest.fixture
 def registry():
     return Registry()
-pygim-common
+
 
 def test_register_and_getitem(registry):
     def foo():
