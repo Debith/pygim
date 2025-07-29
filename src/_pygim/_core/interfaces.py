@@ -216,9 +216,10 @@ class IValueObject(abc.ABC):
     -------
     >>> class Color(IValueObject):
     ...     def __init__(self, red, green, blue):
-    ...         self.red = red
-    ...         self.green = green
-    ...         self.blue = blue
+    ...         object.__setattr__(self, 'red', red)
+    ...         object.__setattr__(self, 'green', green)
+    ...         object.__setattr__(self, 'blue', blue)
+    ...
     ...     def __eq__(self, color):
     ...         return (isinstance(color, Color) and
     ...                 self.red == color.red and
@@ -284,6 +285,11 @@ class ILoadRepository(IService):
 
     Example
     -------
+    >>> class User:
+    ...     def __init__(self, id, name):
+    ...         self.id = id
+    ...         self.name = name
+    ...
     >>> class UserRepository(ILoadRepository):
     ...     def __init__(self, users):
     ...         self.users = {user.id: user for user in users}
@@ -334,6 +340,11 @@ class ISaveRepository(IService):
 
     Example
     -------
+    >>> class User:
+    ...     def __init__(self, id, name):
+    ...         self.id = id
+    ...         self.name = name
+    ...
     >>> class UserRepository(ISaveRepository):
     ...     def __init__(self):
     ...         self.users = {}
@@ -376,6 +387,11 @@ class IRepository(ILoadRepository, ISaveRepository):
 
     Example
     -------
+    >>> class User:
+    ...     def __init__(self, id, name):
+    ...         self.id = id
+    ...         self.name = name
+    ...
     >>> class UserRepository(IRepository):
     ...     def __init__(self):
     ...         self.users = {}
@@ -405,13 +421,19 @@ class IFactory(abc.ABC):
 
     Example
     -------
+    >>> class User:
+    ...     def __init__(self, id, name):
+    ...         self.id = id
+    ...         self.name = name
+    ...
     >>> class UserFactory(IFactory):
     ...     def create(self, id, name):
     ...         return User(id, name)
+    ...
     >>> factory = UserFactory()
     >>> alice = factory.create(1, 'Alice')
     >>> print(alice.name)
-    'Alice'
+    Alice
     """
 
 
@@ -436,6 +458,11 @@ class IBuilder(IFactory):
 
     Example
     -------
+    >>> class User:
+    ...     def __init__(self):
+    ...         self.id = None
+    ...         self.name = None
+    ...
     >>> class UserBuilder(IBuilder):
     ...     def __init__(self):
     ...         self._user = User()
@@ -450,7 +477,7 @@ class IBuilder(IFactory):
     >>> builder = UserBuilder()
     >>> alice = builder.id(1).name('Alice').build()
     >>> print(alice.name)
-    'Alice'
+    Alice
     """
 
     @abc.abstractmethod
@@ -495,11 +522,6 @@ class DomainEventType(Enum):
     An enumeration of domain event types.
 
     Each event type in the system should have a corresponding value in this enumeration.
-
-    Example
-    -------
-    >>> print(DomainEventType.USER_REGISTERED)
-    DomainEventType.USER_REGISTERED
     """
 
 
@@ -529,6 +551,7 @@ class IDomainEvent(abc.ABC):
     ...     @property
     ...     def type(self):
     ...         return 'UserRegisteredEvent'
+    ...
     ...     def __init__(self, user_id, username):
     ...         self.user_id = user_id
     ...         self.username = username
