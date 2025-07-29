@@ -30,31 +30,16 @@ jobs:
       run: |
         python -m pip install --upgrade pip
         python -m pip install .[test] -f .
-        cd pygim-common
-        python -m pip install .
-        cd ..
-        cd pygim-ddd
-        python -m pip install .
-        cd ..
-        python -m pip install pytest
 
     - name: Remove source files (Linux & MacOS)
       if: matrix.os != 'windows-latest'
       run: |
-        rm -rf pygim-common/_pygim
-        rm -rf pygim-common/pygim
-        rm -rf pygim-ddd/pygim
-        rm -rf pygim-cli/_pygim
-        rm -rf _pygim_build
+        rm -rf src/
 
     - name: Remove source files (Windows)
       if: matrix.os == 'windows-latest'
       run: |
-        Remove-Item "pygim-common/_pygim" -Recurse -Force
-        Remove-Item "pygim-common/pygim" -Recurse -Force
-        Remove-Item "pygim-ddd/pygim" -Recurse -Force
-        Remove-Item "pygim-cli/_pygim" -Recurse -Force
-        Remove-Item "_pygim_build" -Recurse -Force
+        Remove-Item "src/" -Recurse -Force
       shell: pwsh
 
     - name: Test with pytest
