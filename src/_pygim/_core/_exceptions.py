@@ -8,22 +8,24 @@ from dataclasses import dataclass
 from . import _typing as t
 
 __all__ = [
-    'GimException',
-    'GimError',
-    'GimOptionError',
-    'EntangledError',
-    'EntangledClassError',
-    'EntangledMethodError',
-    'ShaSumTargetNotFoundError',
-    'DispatchError',
-    'UnrecognizedTypeError',
+    "GimException",
+    "GimError",
+    "GimOptionError",
+    "EntangledError",
+    "EntangledClassError",
+    "EntangledMethodError",
+    "ShaSumTargetNotFoundError",
+    "DispatchError",
+    "UnrecognizedTypeError",
 ]
+
 
 class GimException(Exception):
     """Generic exception that can be used across Python projects."""
+
     DEFAULT_MSG = "Gim Error."
 
-    def __init__(self, msg=None, sep='\n'):
+    def __init__(self, msg=None, sep="\n"):
         assert isinstance(msg, (str, list, tuple))
         self._msg = msg or self.DEFAULT_MSG
         self._sep = sep
@@ -41,7 +43,8 @@ class GimError(GimException):
 
 @dataclass
 class GimOptionError(GimError):
-    """ Raised when value not among options. """
+    """Raised when value not among options."""
+
     _input_value: t.Any
     _choices: t.Iterable
 
@@ -68,10 +71,12 @@ class ShaSumTargetNotFoundError(GimError, FileNotFoundError):
 
 class DispatchError(GimError):
     """Base class for dispatch errors."""
+
     DEFAULT_MSG = "Dispatch error."
 
 
 class UnrecognizedTypeError(DispatchError):
     """Raised when a type is not recognized."""
+
     def __init__(self, given_type, expected_types):
         super().__init__(type_error_msg(given_type, expected_types))

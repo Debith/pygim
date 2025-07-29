@@ -1,11 +1,10 @@
-#type: ignore
+# type: ignore
 import sys
 import pprint
-import sys
 from pathlib import Path
 
 # Available at setup time due to pyproject.toml
-from pybind11.setup_helpers import Pybind11Extension, build_ext
+from pybind11.setup_helpers import Pybind11Extension
 from setuptools import setup, find_namespace_packages
 import toml
 
@@ -13,8 +12,9 @@ ROOT = Path(__file__).parent
 sys.path.append(str(ROOT / "src"))
 from pygim.__version__ import __version__
 
-pyproject = toml.loads(Path('pyproject.toml').read_text())
+pyproject = toml.loads(Path("pyproject.toml").read_text())
 ext_modules = []
+
 
 def get_cpp_files(path):
     cpp_files = list(p for p in Path(path).rglob("*.cpp"))
@@ -44,22 +44,24 @@ for cpp_file in get_cpp_files("src/_pygim_fast"):
     )
 
 cfg = {**pyproject["project"]}
-cfg['package_dir']={
-    '': './src/',
-    }
-cfg['ext_modules'] = ext_modules
-cfg['packages'] = find_namespace_packages(where='src')
-cfg['install_requires'] = cfg.pop('dependencies')
+cfg["package_dir"] = {
+    "": "./src/",
+}
+cfg["ext_modules"] = ext_modules
+cfg["packages"] = find_namespace_packages(where="src")
+cfg["install_requires"] = cfg.pop("dependencies")
 
 # Map PEP 621 scripts to setuptools entry_points
-scripts = cfg.pop('scripts', None)
+scripts = cfg.pop("scripts", None)
 if scripts:
-    cfg['entry_points'] = {'console_scripts': [f'{name}={entry}' for name, entry in scripts.items()]}
+    cfg["entry_points"] = {
+        "console_scripts": [f"{name}={entry}" for name, entry in scripts.items()]
+    }
 
 # Map PEP 621 optional-dependencies to setuptools extras_require
-extras = cfg.pop('optional-dependencies', None)
+extras = cfg.pop("optional-dependencies", None)
 if extras:
-    cfg['extras_require'] = extras
+    cfg["extras_require"] = extras
 
 pprint.pprint(cfg)
 setup(**cfg)

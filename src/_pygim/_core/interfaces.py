@@ -51,7 +51,6 @@ IInfrastructureService:
 
 """
 
-
 import abc
 from enum import Enum, unique
 from pygim.core.explib import type_error_msg
@@ -264,7 +263,9 @@ class IValueObject(abc.ABC):
         AssertionError
             If `value_object` is not an instance of `IValueObject`.
         """
-        assert isinstance(value_object, IValueObject), type_error_msg(value_object, IValueObject)
+        assert isinstance(value_object, IValueObject), type_error_msg(
+            value_object, IValueObject
+        )
         raise NotImplementedError()
 
 

@@ -1,8 +1,7 @@
 # -*- coding: utf-8 -*-
-'''
-'''
+""" """
 
-__all__ = ('type_error_msg', 'file_error_msg')
+__all__ = ("type_error_msg", "file_error_msg")
 
 
 def type_error_msg(obj_or_type, expected_type):

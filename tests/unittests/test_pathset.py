@@ -1,6 +1,5 @@
 # -*- coding: utf-8 -*-
-""" Tests PathSet. """
-
+"""Tests PathSet."""
 
 from pathlib import Path
 import pytest
@@ -11,9 +10,9 @@ from pygim.pathset import PathSet
 @pytest.fixture()
 def temp_files(temp_dir):
     test_files = [
-        temp_dir / 'readme.txt',
-        temp_dir / 'readme.rst',
-        temp_dir / 'AUTHORS.rst',
+        temp_dir / "readme.txt",
+        temp_dir / "readme.rst",
+        temp_dir / "AUTHORS.rst",
     ]
 
     assert not any(f.is_file() for f in test_files)
@@ -40,7 +39,7 @@ def test_equality(temp_files):
 
 def test_substraction(temp_dir, temp_files):
     temp_files = PathSet(temp_files)
-    temp_files -= str(temp_dir / 'readme.txt')
+    temp_files -= str(temp_dir / "readme.txt")
     assert len(temp_files) == 2
 
 
@@ -54,21 +53,32 @@ def test_cloning(temp_files):
 def test_modification_after_cloning(temp_dir, temp_files):
     temp_files = PathSet(temp_files)
     cloned = temp_files.clone()
-    temp_files -= str(temp_dir / 'readme.txt')
+    temp_files -= str(temp_dir / "readme.txt")
     assert len(temp_files) == 2
     assert len(cloned) == 3
 
 
 def x_test_adding(temp_files):
     temp_dir = list(temp_files)[0].parent
-    more_files = PathSet.prefixed(['fourth.txt', 'fifth.txt', 'sixth.txt'], prefix=temp_dir)
+    more_files = PathSet.prefixed(
+        ["fourth.txt", "fifth.txt", "sixth.txt"], prefix=temp_dir
+    )
 
     new_paths = temp_files + more_files
 
     assert new_paths != temp_files
     assert new_paths != more_files
-    assert new_paths == PathSet.prefixed([
-        'readme.txt', 'readme.rst', 'AUTHORS.rst', 'fourth.txt', 'fifth.txt', 'sixth.txt'], prefix=temp_dir)
+    assert new_paths == PathSet.prefixed(
+        [
+            "readme.txt",
+            "readme.rst",
+            "AUTHORS.rst",
+            "fourth.txt",
+            "fifth.txt",
+            "sixth.txt",
+        ],
+        prefix=temp_dir,
+    )
 
 
 def x_test_delete_all(temp_files):
@@ -84,8 +94,12 @@ def x_test_delete_all(temp_files):
 def x_test_delete_all_with_folders(temp_dir):
     sub_dir = temp_dir / "sub"
     sub_dir.mkdir()
-    test_files = PathSet.prefixed(['readme.txt', 'readme.rst', 'AUTHORS.rst'], prefix=temp_dir)
-    sub_files = PathSet.prefixed(['readme.txt', 'readme.rst', 'AUTHORS.rst'], prefix=sub_dir)
+    test_files = PathSet.prefixed(
+        ["readme.txt", "readme.rst", "AUTHORS.rst"], prefix=temp_dir
+    )
+    sub_files = PathSet.prefixed(
+        ["readme.txt", "readme.rst", "AUTHORS.rst"], prefix=sub_dir
+    )
 
     [p.touch() for p in test_files + sub_files]
 
@@ -101,14 +115,15 @@ def x_test_delete_all_with_folders(temp_dir):
 
 def x_test_current_working_dir(temp_dir):
     import os
+
     old_cwd = os.curdir
     os.chdir(temp_dir)
 
     _cur_dir = Path(os.curdir).resolve()
     assert list(PathSet())[0].name == list(PathSet(_cur_dir))[0].name
 
-    actual_path = list(PathSet.prefixed(['readme.txt']))[0]
-    expected_path = list(PathSet.prefixed(['readme.txt'], prefix=_cur_dir))[0]
+    actual_path = list(PathSet.prefixed(["readme.txt"]))[0]
+    expected_path = list(PathSet.prefixed(["readme.txt"], prefix=_cur_dir))[0]
 
     assert actual_path.parts[-2:] == expected_path.parts[-2:]
 
@@ -117,19 +132,23 @@ def x_test_current_working_dir(temp_dir):
 
 def x_test_basic_filters(temp_files):
     temp_dir = list(temp_files)[0].parent
-    assert temp_files.by_suffix('.txt') == PathSet.prefixed(['readme.txt'], prefix=temp_dir)
+    assert temp_files.by_suffix(".txt") == PathSet.prefixed(
+        ["readme.txt"], prefix=temp_dir
+    )
     assert temp_files.dirs() == PathSet.prefixed([], prefix=temp_dir)
-    assert temp_files.files() == PathSet.prefixed(['readme.txt', 'readme.rst', 'AUTHORS.rst'], prefix=temp_dir)
+    assert temp_files.files() == PathSet.prefixed(
+        ["readme.txt", "readme.rst", "AUTHORS.rst"], prefix=temp_dir
+    )
 
 
 def x_test_drop_files_based_on_filter(temp_files):
     temp_dir = list(temp_files)[0].parent
-    new_paths = temp_files.drop(suffix='.rst')
+    new_paths = temp_files.drop(suffix=".rst")
 
     assert temp_files != new_paths
-    assert list(new_paths) == list(PathSet.prefixed(['readme.txt'], prefix=temp_dir))
+    assert list(new_paths) == list(PathSet.prefixed(["readme.txt"], prefix=temp_dir))
 
-    new_paths = temp_files.drop(suffix=('.rst', '.txt'))
+    new_paths = temp_files.drop(suffix=(".rst", ".txt"))
 
     assert temp_files != new_paths
     assert list(new_paths) == []
@@ -137,12 +156,12 @@ def x_test_drop_files_based_on_filter(temp_files):
 
 def x_test_dropped_files_based_on_filter(temp_files):
     temp_dir = list(temp_files)[0].parent
-    new_paths = temp_files.dropped(suffix='.rst')
+    new_paths = temp_files.dropped(suffix=".rst")
 
     assert temp_files != new_paths
-    assert new_paths == PathSet.prefixed(['readme.txt'], prefix=temp_dir)
+    assert new_paths == PathSet.prefixed(["readme.txt"], prefix=temp_dir)
 
-    new_paths = temp_files.dropped(suffix=('.rst', '.txt'))
+    new_paths = temp_files.dropped(suffix=(".rst", ".txt"))
 
     assert temp_files != new_paths
     assert new_paths == PathSet([])
@@ -150,4 +169,5 @@ def x_test_dropped_files_based_on_filter(temp_files):
 
 if __name__ == "__main__":
     from pygim.core.testing import run_tests
+
     run_tests(__file__, PathSet.__module__, coverage=False)
