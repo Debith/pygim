@@ -6,7 +6,6 @@ backend-path = []
 [project]
 name = "python-gimmicks"
 dynamic = ["version"]
-version = "0.2.3"
 description = "Full Python Gimmicks project with all of its sub-projects."
 classifiers = [
   "Development Status :: 4 - Beta",

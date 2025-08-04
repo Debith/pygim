@@ -2,12 +2,14 @@
 import sys
 import pprint
 from pathlib import Path
+from setuptools_scm import get_version
 
 # Available at setup time due to pyproject.toml
 from pybind11.setup_helpers import Pybind11Extension
 from setuptools import setup, find_namespace_packages
 import toml
 
+scm_version = get_version(root='.', relative_to=__file__)
 ROOT = Path(__file__).parent
 sys.path.append(str(ROOT / "src"))
 
@@ -37,7 +39,7 @@ for cpp_file in get_cpp_files("src/_pygim_fast"):
         Pybind11Extension(
             f"pygim.{cpp_file.stem}",
             [str(cpp_file)],
-            define_macros=[("VERSION_INFO", "0.1.0")],
+            define_macros=[("VERSION_INFO", repr(scm_version))],
             extra_compile_args=extra_compile_args,
         )
     )
