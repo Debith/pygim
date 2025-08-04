@@ -10,7 +10,6 @@ import toml
 
 ROOT = Path(__file__).parent
 sys.path.append(str(ROOT / "src"))
-from pygim.__version__ import __version__
 
 pyproject = toml.loads(Path("pyproject.toml").read_text())
 ext_modules = []
@@ -38,7 +37,7 @@ for cpp_file in get_cpp_files("src/_pygim_fast"):
         Pybind11Extension(
             f"pygim.{cpp_file.stem}",
             [str(cpp_file)],
-            define_macros=[("VERSION_INFO", __version__)],
+            define_macros=[("VERSION_INFO", "0.1.0")],
             extra_compile_args=extra_compile_args,
         )
     )
