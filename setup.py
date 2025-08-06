@@ -19,8 +19,8 @@ ext_modules = []
 
 def get_cpp_files(path):
     cpp_files = list(p for p in Path(path).rglob("*.cpp"))
-    for cpp_file in cpp_files:
-        cpp_file.touch()
+    #for cpp_file in cpp_files:
+    #    cpp_file.touch()
     return cpp_files
 
 
