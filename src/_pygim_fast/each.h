@@ -29,9 +29,13 @@
 
 #include <iostream>
 #include <optional>
+#include <string>
+#include <memory>
+#include <vector>
+
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
-#include <string>
+#include "utils.h"
 
 namespace py = pybind11;
 
@@ -41,7 +45,7 @@ class Proxy;
 // ---------------------------------------------------------------------------
 //                               Proxy helper
 // ---------------------------------------------------------------------------
-class Proxy {
+class Proxy : public std::enable_shared_from_this<Proxy> {
 public:
     //! Construct a proxy bound to a given Python iterable.
     explicit Proxy(const py::object &iterable)
@@ -64,32 +68,32 @@ public:
      *     element and return it.
      */
     py::object getattr(const std::string &name) {
-        py::list results;
-        std::cout << "Proxy::getattr(" << name << ")\n";
+        std::vector<py::object> collected;
+        const py::object attr_err_cls =
+            py::module_::import("builtins").attr("AttributeError");
 
         for (const py::handle &item : m_iterable) {
-            std::cout << "Checking attribute '" << name << "' on item: " << py::repr(item).cast<std::string>() << "\n";
             if (!py::hasattr(item, name.c_str())) {
-                throw py::attribute_error(
-                    (std::string("'") + py::str(item.get_type()).cast<std::string>() +
-                     "' object has no attribute '" + name + "'").c_str());
+                std::ostringstream msg;
+                msg << '\'' << py::str(item.get_type()).cast<std::string>()
+                    << "' object has no attribute '" << name << '\'';
+                collected.emplace_back(attr_err_cls(msg.str()));
+                continue;
             }
-            std::cout << "Attribute '" << name << "' exists on item.\n";
+
             py::object attr = item.attr(name.c_str());
-            std::cout << "Attribute type: " << py::str(attr.get_type()).cast<std::string>() << "\n";
-            if (py::isinstance<py::function>(attr) || py::isinstance<py::cpp_function>(attr) ||
+            if (py::isinstance<py::function>(attr) ||
+                py::isinstance<py::cpp_function>(attr) ||
                 PyCallable_Check(attr.ptr())) {
-                std::cout << "Attribute '" << name << "' is callable.\n";
-                m_funcName = name;  // Cache the callable name
-                return py::cast(this);
-            } else {
-                std::cout << "Attribute '" << name << "' is not callable, adding to results.\n";
-                results.append(attr);
+
+                std::cout << "Proxy::getattr(" << name << ") is callable, caching for __call__\n";
+                m_funcName = name;                         // enter “method” mode
+                return py::cast(shared_from_this());
             }
+            collected.emplace_back(std::move(attr));      // data attribute
         }
 
-        // Empty iterable ⇒ return None (to stay consistent with Python impl.)
-        return results.size() ? py::object(results) : py::none();
+        return collected.empty() ? py::none() : py::cast(collected);
     }
 
     /** __call__(*args, **kwargs) – broadcast previously cached method */
@@ -103,7 +107,7 @@ public:
         for (const py::handle &item : m_iterable) {
             std::cout << "Calling method '" << m_funcName.value() << "' on item: " << py::repr(item).cast<std::string>() << "\n";
             py::object method = item.attr(m_funcName.value().c_str());
-            std::cout << "Method type: " << py::str(method.get_type()).cast<std::string>() << "\n";
+            std::cout << "Method type: " << py::str(py::type::of(method)).cast<std::string>() << "\n";
             results.append(method(*args, **kwargs));
         }
 
@@ -135,12 +139,19 @@ public:
                                               .attr("WeakKeyDictionary")()) {}
 
     // --------------------------- factory mode --------------------------- //
+
+    // ---------- Each::getattr (factory mode path only) ------------------------
     py::object getattr(const std::string &name) {
         if (m_iterable.is_none()) {
             throw std::runtime_error(
-                "When using `each` directly you must pass an iterable: each(iterable).attr");
+                "Direct use: call each(iterable).attr");
         }
-        return Proxy(m_iterable).getattr(name);
+        if (is_dunder(name))
+            throw py::attribute_error("Cannot access dunder attributes with `each`");
+
+        // Allocate the proxy on the heap so its lifetime is managed by Python.
+        auto proxy_sp = std::make_shared<Proxy>(m_iterable);
+        return proxy_sp->getattr(name);    // returns the proxy or list
     }
 
     // --------------------------- descriptor hooks ----------------------- //
@@ -165,6 +176,30 @@ public:
         }
         if (!py::isinstance<py::iterable>(instance)) {
             throw py::type_error("`each` can only be used on iterable instances");
+        }
+        if (is_generator(instance)) {
+            // NOTE: We deliberately reject **generator objects** here.
+            //
+            // Generators are *single-pass* iterators: once you consume a value,
+            // it is gone forever and the generator’s internal state has advanced.
+            // The proxy logic needs to traverse the collection multiple times:
+            //
+            //   • first pass – probe each element to see whether `name` exists and
+            //     whether it is callable;
+            //   • second pass – (if it is callable) invoke that attribute on every
+            //     element, or (if it is data) gather the attribute values.
+            //
+            // With a generator the second pass would see **zero** elements,
+            // yielding wrong or empty results.  Fixing that would require forcing
+            // full materialisation (e.g. `list(gen)` or a tee/peekable wrapper),
+            // which defeats the whole point of using a lazy generator in the first
+            // place and risks large, unbounded memory use.
+            //
+            // Rather than surprise the caller with silent consumption or
+            // inconsistent behaviour, we raise an explicit error and document that
+            // the helper expects a *re-iterable* container such as a list, tuple,
+            // set, or any custom class that can be traversed repeatedly.
+            throw py::type_error("`each` cannot be used on generator instances");
         }
 
         // m_weakDict.get(instance) or None
