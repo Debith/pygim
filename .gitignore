@@ -178,3 +178,6 @@ cython_debug/
 
 # LLM
 instructions/
+
+# Private files
+__*__/

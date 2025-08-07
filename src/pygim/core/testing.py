@@ -37,7 +37,7 @@ def measure_coverage(*, include=None, show_missing: bool = True):
     cov.report(include=include, show_missing=show_missing)
 
 
-def run_tests(test_file, module_name, pytest_args=None, *, coverage: bool = True):
+def run_tests(test_file, module_name=None, pytest_args=None, *, coverage: bool = True):
     """Run tests on given file.
 
     Examples
@@ -69,7 +69,7 @@ def run_tests(test_file, module_name, pytest_args=None, *, coverage: bool = True
     """
     pytest_args = [str(test_file), "--tb=short"] or pytest_args
 
-    if not coverage:
+    if not coverage or not module_name:
         pytest.main(pytest_args)
         return
 
