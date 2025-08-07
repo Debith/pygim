@@ -1,11 +1,11 @@
 [build-system]
-requires = ["setuptools", "wheel", "toml", "pybind11"]
+requires = ["setuptools", "wheel", "toml", "pybind11", "setuptools_scm[toml]>=8"]
 build-backend = "setuptools.build_meta"
 backend-path = []
 
 [project]
 name = "python-gimmicks"
-version = "0.2.3"
+dynamic = ["version"]
 description = "Full Python Gimmicks project with all of its sub-projects."
 classifiers = [
   "Development Status :: 4 - Beta",
@@ -86,3 +86,7 @@ exclude = [
     'tests/.*',
     'build/.*',
 ]
+
+[tool.setuptools_scm]
+version_scheme = "no-guess-dev"
+local_scheme   = "dirty-tag"
