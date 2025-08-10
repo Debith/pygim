@@ -86,7 +86,6 @@ public:
                 py::isinstance<py::cpp_function>(attr) ||
                 PyCallable_Check(attr.ptr())) {
 
-                std::cout << "Proxy::getattr(" << name << ") is callable, caching for __call__\n";
                 m_funcName = name;                         // enter “method” mode
                 return py::cast(shared_from_this());
             }
@@ -102,12 +101,9 @@ public:
             throw py::type_error("Proxy object is not in callable mode (missing attribute access)");
         }
 
-        std::cout << "Proxy::call(" << m_funcName.value() << ", args=" << py::repr(args) << ", kwargs=" << py::repr(kwargs) << ")\n";
         py::list results;
         for (const py::handle &item : m_iterable) {
-            std::cout << "Calling method '" << m_funcName.value() << "' on item: " << py::repr(item).cast<std::string>() << "\n";
             py::object method = item.attr(m_funcName.value().c_str());
-            std::cout << "Method type: " << py::str(py::type::of(method)).cast<std::string>() << "\n";
             results.append(method(*args, **kwargs));
         }
 

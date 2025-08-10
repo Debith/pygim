@@ -1,5 +1,5 @@
 import pytest
-from pygim.registry import Registry
+from pygim import Registry
 
 
 @pytest.fixture
