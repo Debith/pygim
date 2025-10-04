@@ -2,6 +2,7 @@
 #include <pybind11/functional.h>
 #include "factory.h"
 
+namespace pygim {
 namespace py = pybind11;
 
 PYBIND11_MODULE(factory, m) {
@@ -42,3 +43,5 @@ PYBIND11_MODULE(factory, m) {
              "Import a Python module by name to trigger registration side effects.")
         ;
 }
+
+} // namespace pygim

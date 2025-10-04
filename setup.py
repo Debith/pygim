@@ -9,7 +9,7 @@ from pybind11.setup_helpers import Pybind11Extension
 from setuptools import setup, find_namespace_packages
 import toml
 
-scm_version = get_version(root='.', relative_to=__file__)
+scm_version = get_version(root=".", relative_to=__file__)
 ROOT = Path(__file__).parent
 sys.path.append(str(ROOT / "src"))
 
@@ -19,7 +19,7 @@ ext_modules = []
 
 def get_cpp_files(path):
     cpp_files = list(p for p in Path(path).rglob("*.cpp"))
-    #for cpp_file in cpp_files:
+    # for cpp_file in cpp_files:
     #    cpp_file.touch()
     return cpp_files
 

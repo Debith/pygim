@@ -39,3 +39,8 @@ Sub-modules
 This library is divided into multiple different smaller packages.
 
   * pygim: This is the main project that contains the CLI and all the examples.
+
+Changelog
+=========
+
+See the detailed list of changes in ``CHANGELOG.rst``. For upcoming (unreleased) work, consult the top "Unreleased" section before the next version tag.
