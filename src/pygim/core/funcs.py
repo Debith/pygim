@@ -6,6 +6,7 @@ import typing as t
 # JSON‑Schema helpers
 ###############################################################################
 
+
 def _type_to_schema(tp: t.Any) -> t.Dict[str, t.Any]:
     """Minimal Python‑type → JSON‑Schema mapping."""
     origin = t.get_origin(tp) or tp
@@ -45,6 +46,8 @@ def get_schema(func: t.Callable[..., t.Any]) -> t.Dict[str, t.Any]:
             required.append(p.name)
 
     if issues:
-        raise TypeError("\n • ".join([f"{func.__name__} — schema generation failed:"] + issues))
+        raise TypeError(
+            "\n • ".join([f"{func.__name__} — schema generation failed:"] + issues)
+        )
 
     return {"type": "object", "properties": props, "required": required}
