@@ -16,6 +16,9 @@
 namespace pygim {
 namespace py = pybind11;
 
+// Forward declaration so RegistryT can befriend Registry for optimized access
+class Registry;
+
 // ─────────────────────────────── Key Policies ────────────────────────────────
 // Each policy defines: key_type, Hash, Eq, and builders from Python inputs.
 
@@ -175,6 +178,10 @@ public:
 private:
     std::unordered_map<key_type, Value, Hash, Eq> m_map;
     [[no_unique_address]] Hooks<key_type, Value, EnableHooks> m_hooks;
+
+    // Allow outer Registry wrapper to implement optimized override logic with
+    // a single map probe without exposing these members publicly.
+    friend class Registry;
 };
 
 // ───────────────────────────── Python-facing wrapper ─────────────────────────
@@ -241,6 +248,22 @@ class Registry {
         }
     }
 
+    // Register with a single 2-tuple key
+    void register_key(py::object key, py::object value) {
+        std::visit([&](auto& r){
+            auto k = make_key<std::decay_t<decltype(r)>>(key);
+            r.register_value(k, std::move(value));
+        }, m_var);
+    }
+
+    // Upsert with the same single-arg key
+    void upsert_key(py::object key, py::object value) {
+        std::visit([&](auto& r){
+            auto k = make_key<std::decay_t<decltype(r)>>(key);
+            r.upsert_value(k, std::move(value));
+        }, m_var);
+    }
+
 public:
     Registry(bool hooks=false, KeyPolicyKind policy=KeyPolicyKind::Qualname)
       : m_policy(policy), m_hooks(hooks)
@@ -256,22 +279,6 @@ public:
 
     size_t size() const {
         return std::visit([](auto const& r){ return r.size(); }, m_var);
-    }
-
-    // Register with a single 2-tuple key
-    void register_key(py::object key, py::object value) {
-        std::visit([&](auto& r){
-            auto k = make_key<std::decay_t<decltype(r)>>(key);
-            r.register_value(k, std::move(value));
-        }, m_var);
-    }
-
-    // Upsert with the same single-arg key
-    void upsert_key(py::object key, py::object value) {
-        std::visit([&](auto& r){
-            auto k = make_key<std::decay_t<decltype(r)>>(key);
-            r.upsert_value(k, std::move(value));
-        }, m_var);
     }
 
     // Lookup (works for __getitem__ binding)
@@ -292,6 +299,36 @@ public:
                 return false;
             }
         }, m_var);
+    }
+
+    // Override-aware register path used by Python binding
+    void register_or_override(py::object key, py::object value, bool override) {
+        // Single variant visit: build key once and perform at most one hash lookup.
+        // Semantics: duplicate + override=False -> error; missing + override=True -> error.
+        // On successful override we fire register hooks (consistent with upsert_value) then replace in place.
+        std::visit([&](auto& r){
+            using R = std::decay_t<decltype(r)>;
+            auto k = make_key<R>(key);
+            auto it = r.m_map.find(k);
+            bool exists = (it != r.m_map.end());
+            if (exists) {
+                if (!override)
+                    throw std::runtime_error("Duplicate key registration (use override=True)");
+                // override path
+                r.m_hooks.run_register(k, value);
+                it->second = value;
+            } else {
+                if (override)
+                    throw std::runtime_error("override=True requires existing key");
+                r.register_value(k, value);
+            }
+        }, m_var);
+    }
+
+    std::string repr() const {
+        // Stable, parseable contract: used in tests & potential diagnostics.
+        std::string policy_str = (m_policy == KeyPolicyKind::Qualname) ? "qualname" : "identity";
+        return "Registry(policy=" + policy_str + ", hooks=" + (m_hooks?"True":"False") + ", size=" + std::to_string(size()) + ")";
     }
 
     // Run post hooks with a given key and Python object
