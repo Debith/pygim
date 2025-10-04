@@ -14,8 +14,11 @@ PYBIND11_MODULE(registry, m) {
         .value("identity", pygim::KeyPolicyKind::Identity)
         .export_values();
 
-    py::class_<pygim::Registry>(m, "Registry")
-        .def(py::init<bool, pygim::KeyPolicyKind>(), py::arg("hooks")=false, py::arg("policy")=pygim::KeyPolicyKind::Qualname)
+  py::class_<pygim::Registry>(m, "Registry")
+    .def(py::init<bool, pygim::KeyPolicyKind, std::size_t>(),
+       py::arg("hooks")=false, py::arg("policy")=pygim::KeyPolicyKind::Qualname, py::arg("capacity")=0,
+       "Create a Registry.\n\n"
+       "Parameters:\n  hooks: enable lifecycle hooks.\n  policy: qualname|identity key policy.\n  capacity: optional map reserve size.")
         .def("__getitem__", &pygim::Registry::get)
         .def("__len__", &pygim::Registry::size)
         .def("__contains__", &pygim::Registry::contains)
@@ -42,6 +45,10 @@ PYBIND11_MODULE(registry, m) {
         .def("on_register", &pygim::Registry::on_register)
         .def("on_pre", &pygim::Registry::on_pre)
         .def("on_post", &pygim::Registry::on_post)
+    .def("registered_keys", &pygim::Registry::registered_keys,
+      "Return list of (id_or_object, name) for all registered entries.")
+    .def("find_id", &pygim::Registry::find_id, py::arg("id"), py::arg("name")=py::none(),
+      "Direct lookup by string id (qualname policy only); returns value or None.")
       .def("__repr__", &pygim::Registry::repr,
           "Stable representation exposing policy, hooks flag, and size.\n"
           "Used by tests; do not change field order without updating tests.")

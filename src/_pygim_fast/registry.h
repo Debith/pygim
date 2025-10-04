@@ -14,6 +14,31 @@
 #include <utility>
 
 namespace pygim {
+/*!
+ * \file registry.h
+ * \brief High-level, policy-based registry supporting optional lifecycle hooks.
+ *
+ * Core Concepts
+ * -------------
+ * - Two key policies:
+ *   * QualnameKeyPolicy: Uses fully qualified name (module.qualname) OR a provided string id.
+ *   * PyIdentityKeyPolicy: Uses object identity (PyObject*). Rejects string ids.
+ * - Optional compile-time enabled hooks (OnRegister, OnPre, OnPost) specialized away when disabled.
+ * - Runtime wrapper (pygim::Registry) selects concrete template instantiation (policy × hooks) via std::variant.
+ *
+ * Design Goals
+ * ------------
+ * - Zero extra hook overhead when disabled (no virtual dispatch inside RegistryT path; only variant visit overhead).
+ * - Stable & parseable __repr__ for diagnostics and tests.
+ * - Override semantics mirroring Factory rules: override=True requires existing key; duplicates without override raise.
+ * - Extensible: new policies or hook types can be added without changing user-facing Python semantics.
+ *
+ * Learning Notes
+ * --------------
+ * - Hooks use a small vector (std::vector) intentionally; if you expect thousands of callbacks, consider reserving.
+ * - register_or_override performs a single map probe (optimized) and fires register hooks on both insert and override.
+ * - Qualname collisions (re-import / shadow modules) deliberately collide—users can disambiguate via name variant segment.
+ */
 namespace py = pybind11;
 
 // Forward declaration so RegistryT can befriend Registry for optimized access
@@ -265,8 +290,8 @@ class Registry {
     }
 
 public:
-    Registry(bool hooks=false, KeyPolicyKind policy=KeyPolicyKind::Qualname)
-      : m_policy(policy), m_hooks(hooks)
+        Registry(bool hooks=false, KeyPolicyKind policy=KeyPolicyKind::Qualname, std::size_t capacity=0)
+            : m_policy(policy), m_hooks(hooks)
     {
         if (policy == KeyPolicyKind::Qualname) {
             m_var = hooks ? std::variant<R_QN_No,R_QN_Yes,R_ID_No,R_ID_Yes>(R_QN_Yes{})
@@ -275,6 +300,9 @@ public:
             m_var = hooks ? std::variant<R_QN_No,R_QN_Yes,R_ID_No,R_ID_Yes>(R_ID_Yes{})
                           : std::variant<R_QN_No,R_QN_Yes,R_ID_No,R_ID_Yes>(R_ID_No{});
         }
+                if (capacity) {
+                        std::visit([&](auto& r){ r.m_map.reserve(capacity); }, m_var);
+                }
     }
 
     size_t size() const {
@@ -329,6 +357,41 @@ public:
         // Stable, parseable contract: used in tests & potential diagnostics.
         std::string policy_str = (m_policy == KeyPolicyKind::Qualname) ? "qualname" : "identity";
         return "Registry(policy=" + policy_str + ", hooks=" + (m_hooks?"True":"False") + ", size=" + std::to_string(size()) + ")";
+    }
+
+    // Return Python-friendly list of (id_or_object, name) tuples for introspection / testing.
+    py::list registered_keys() const {
+        py::list out;
+        std::visit([&](auto const& r){
+            using R = std::decay_t<decltype(r)>;
+            for (auto const& kv : r.m_map) {
+                out.append(detail::to_py_tuple(kv.first));
+            }
+        }, m_var);
+        return out;
+    }
+
+    // Fast path direct find by string id (qualname policy only). Name (variant) must match provided tuple's second element or None.
+    py::object find_id(const std::string& id, const py::object& name=py::none()) {
+        if (m_policy != KeyPolicyKind::Qualname)
+            throw std::runtime_error("find_id only valid for qualname policy");
+        std::string variant_name;
+        if (!name.is_none()) variant_name = py::cast<std::string>(name);
+        return std::visit([&](auto& r)->py::object {
+            using R = std::decay_t<decltype(r)>;
+            if constexpr (std::is_same_v<typename R::Policy, QualnameKeyPolicy>) {
+                // Try the explicit variant; if empty and miss, also try default empty second attempt unnecessary.
+                typename R::Policy::key_type key{ id, variant_name };
+                if (auto* v = r.try_get(key)) return *v;
+                if (variant_name.empty()) return py::none();
+                // Fallback: treat variant as nonexistent and attempt empty variant
+                typename R::Policy::key_type fallback{ id, std::string{} };
+                if (auto* vf = r.try_get(fallback)) return *vf;
+                return py::none();
+            } else {
+                return py::none();
+            }
+        }, m_var);
     }
 
     // Run post hooks with a given key and Python object

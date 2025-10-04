@@ -34,6 +34,9 @@ def test_len_and_registered_names(registry):
     registry.register("bar", bar)
     # assert set(registry.registered_names()) == {"foo", "bar"}
     assert len(registry) == 2
+    # New API: registered_keys should list 2 entries
+    keys = registry.registered_keys()
+    assert len(keys) == 2
 
 
 def test_contains(registry):
@@ -202,6 +205,34 @@ def test_qualname_string_id_duplicate(registry):
         registry.register(id_str, lambda: 2)
     registry.register(id_str, lambda: 3, override=True)
     assert registry[id_str]() == 3
+
+
+def test_registered_keys_and_find_id():
+    r = Registry(hooks=False, policy=KeyPolicyKind.qualname)
+    def f(): return 1
+    # Register using the function object so stored id is module.qualname
+    r.register(f, f)
+    fid = f.__module__ + "." + f.__qualname__
+    assert r.find_id(fid) is f
+    # missing returns None
+    assert r.find_id(fid+"_missing") is None
+    # Also test explicit custom string id path
+    def g(): return 2
+    r.register("custom.id", g)
+    assert r.find_id("custom.id") is g
+
+
+def test_find_id_wrong_policy(identity_registry):
+    with pytest.raises(RuntimeError):
+        identity_registry.find_id("some.id")
+
+
+def test_capacity_reserve():
+    # Not directly observable; ensure constructing with capacity still works.
+    r = Registry(hooks=False, policy=KeyPolicyKind.qualname, capacity=128)
+    def f(): return 1
+    r.register("f", f)
+    assert "f" in r
 
 
 def test_hooks_disabled_noop_callbacks():
