@@ -40,6 +40,51 @@ This library is divided into multiple different smaller packages.
 
   * pygim: This is the main project that contains the CLI and all the examples.
 
+Repository (Experimental)
+-------------------------
+
+An experimental high-performance Repository abstraction (DDD-style) now exists as a C++ extension:
+
+* Strategies: pluggable objects with ``fetch(key)->data|None`` and ``save(key,value)``.
+* Optional transformer pipeline (pre-save / post-load) when enabled at construction.
+* Optional factory callable to turn raw data into rich entities.
+* Native MSSQL strategy skeleton (ODBC) guarded by ``PYGIM_ENABLE_MSSQL`` macro.
+* Fluent ``QueryBuilder`` for lightweight SQL assembly using ``std::stringstream``.
+
+Example (read):
+
+.. code-block:: python
+
+        from pygim import repository, mssql_strategy
+        from pygim.repo_helpers import MemoryStrategy
+        from pygim.query import QueryBuilder
+
+        repo = repository.Repository(transformers=False)
+        repo.add_strategy(MemoryStrategy())
+        repo.add_strategy(mssql_strategy.MssqlStrategyNative("Driver={ODBC Driver 17 for SQL Server};Server=localhost;Database=test;UID=sa;PWD=Passw0rd!;"))
+
+        q = QueryBuilder().select(["id","name"]).from_table("users").where("id=?", 1).build()
+        row = repo.get(("users", 1))  # Strategy interprets key
+        print(row)
+
+Write (upsert) example: ``docs/examples/repository/mssql_write_example.py``.
+
+Architecture Diagram:
+
+See PlantUML: ``docs/design/repository_architecture.puml`` for component relationships.
+
+.. note:: The MSSQL native logic is a skeleton and NOT production-ready (no parameterization, simplified upsert). It establishes extension points; expect API refinements.
+
+Query Security & Dialect Notes
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Passing a built ``Query`` object (from ``QueryBuilder``) directly to ``MssqlStrategyNative.fetch(query)``
+will bind parameters using ODBC (when compiled with ``PYGIM_ENABLE_MSSQL``). The builder emits
+``LIMIT n`` which is naively rewritten to ``TOP n`` for SQL Server; more sophisticated dialect
+adaptation (ORDER BY preservation, OFFSET emulation) is planned.
+
+
+
 Changelog
 =========
 

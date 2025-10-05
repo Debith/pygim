@@ -1,0 +1,228 @@
+@startuml OptionB_CurrentLayout
+skinparam shadowing false
+skinparam classAttributeIconSize 0
+title Repository Layout (Current + Planned Policy/Template Layer)
+
+package "_pygim_fast/repository/generic" as generic_generic {
+  class Query {
+    +sql() : const std::string&
+    +params() : std::vector<PyObj>
+  }
+  class QueryBuilder {
+    +select(cols)
+    +from_table(t)
+    +where(clause, param)
+    +limit(n)
+    +build() : Query
+  }
+  QueryBuilder --> Query
+}
+
+package "generic::row (planned)" as generic_row {
+  class Row {
+    +col_names() : const std::vector<std::string>&
+    +get(i:int) : PyObj
+    +as_dict() : py::dict
+  }
+  class RowSet {
+    +rows() : const std::vector<Row>&
+    +size() : size_t
+    +empty() : bool
+  }
+  RowSet *-- Row
+}
+
+package "generic::policies (planned)" as generic_policies {
+  interface IConnectionPolicy {
+    +acquire()
+    +release()
+  }
+
+  interface IExecutionPolicy {
+    +prepare(query:Query)
+    +execute(query:Query) : RowSet
+  }
+
+  interface ICachePolicy {
+    +lookup(hash) : const RowSet*
+    +store(hash, RowSet)
+    +invalidate(hash)
+    +clear()
+  }
+
+  interface IPreparedCachePolicy {
+    +get_or_prepare(sql) : PreparedHandle
+    +evict(sql)
+  }
+
+  interface IRowMapperPolicy {
+    +map_row(Row) : PyObj
+  }
+
+  class NoCachePolicy implements ICachePolicy
+  class LRUCachePolicy implements ICachePolicy
+  class NoPreparedCache implements IPreparedCachePolicy
+  class PreparedStmtCache implements IPreparedCachePolicy
+  class DictRowMapperPolicy implements IRowMapperPolicy
+  class CustomRowMapperPolicy implements IRowMapperPolicy
+}
+
+package "generic::strategy (planned)" as generic_strategy {
+  class Canonicalizer {
+    +hash(query:Query) : size_t
+    +canonical_sql(query) : std::string
+  }
+
+  ' Main CRTP / Template Host
+  class StrategyBase<Impl,\
+                     bool EnableRowCache,\
+                     class CachePolicy,\
+                     class PreparedPolicy,\
+                     class RowMapperPolicy,\
+                     bool EnableValidation> <<template>> {
+    -CachePolicy m_cache
+    -PreparedPolicy m_prepared
+    -RowMapperPolicy m_mapper
+    -Canonicalizer m_norm
+    +execute(query:Query) : std::vector<PyObj>
+    +execute_one(query:Query) : PyObj
+    +raw(query:Query) : RowSet
+    +invalidate(query)
+    +clear_cache()
+    --
+    # fetch_rows(query) : RowSet            ' calls derived Impl
+    # map_rows(RowSet) : std::vector<PyObj>
+    # maybe_cache(hash, RowSet)
+    # maybe_lookup(hash) : RowSet*
+    # validate(query) (constexpr-removed if !EnableValidation)
+  }
+
+  StrategyBase ..> "policy" ICachePolicy
+  StrategyBase ..> IPreparedCachePolicy
+  StrategyBase ..> IRowMapperPolicy
+  StrategyBase ..> Canonicalizer
+}
+
+package "repository/mssql_strategy::driver (planned)" as mssql_driver {
+  class OdbcHandle {
+    -env
+    -dbc
+    +connected() : bool
+    +connect(conn_str)
+    +disconnect()
+  }
+
+  class MssqlExecutionPolicy implements generic::policies::IExecutionPolicy {
+    -OdbcHandle m_handle
+    +prepare(query)
+    +execute(query) : RowSet
+  }
+
+  class MssqlConnectionPolicy implements generic::policies::IConnectionPolicy {
+    -pool : vector<OdbcHandle>
+    +acquire()
+    +release()
+  }
+}
+
+package "repository/mssql_strategy" as mssql_strategy_pkg {
+  class MssqlStrategyImpl <<CRTP Impl>> {
+    +fetch_rows(query:Query) : RowSet
+    -bind_params(...)
+    -rewrite_limit_offset(...)
+  }
+
+  class MssqlStrategy  {
+    +MssqlStrategy(conn_str)
+  }
+
+  MssqlStrategyImpl ..> mssql::driver::MssqlExecutionPolicy
+  MssqlStrategyImpl ..> mssql::driver::MssqlConnectionPolicy
+}
+
+package "mapping (planned)" as mapping_pkg {
+  class ClassMap {
+    +name : std::string
+    +table : std::string
+    +pk : std::string
+    +columns : std::vector<std::string>
+    +factory(py::dict) : PyObj
+    +to_data(PyObj) : py::dict
+  }
+
+  class MapperService {
+    -maps : unordered_map<std::string, ClassMap>
+    +register(map:ClassMap)
+    +map_entity(map_name, row_dict) : PyObj
+  }
+
+  MapperService o-- ClassMap
+}
+
+package "identity (planned)" as identity_pkg {
+  class IdentityMap {
+    -store : unordered_map<std::string, PyObj>
+    +get(key) : PyObj
+    +put(key, PyObj)
+    +contains(key) : bool
+    +evict(key)
+    +clear()
+  }
+}
+
+package "domain repository (planned)" as domain_repo_pkg {
+  class DomainRepository {
+    -strategy_registry : map<string, StrategyBase<>*>
+    -mapper : MapperService
+    -identity : IdentityMap
+    +get(map_name, id) : PyObj
+    +query(map_name, Query) : std::vector<PyObj>
+    +load_raw(Query) : RowSet
+    +add(PyObj)
+    +remove(map_name, id)
+  }
+
+  DomainRepository ..> mapping::MapperService
+  DomainRepository ..> identity::IdentityMap
+  DomainRepository ..> generic::strategy::StrategyBase
+}
+
+' ---------------- Relationships / Notes ----------------
+mssql_strategy_pkg.MssqlStrategy ..> generic_generic.Query
+mssql_strategy_pkg.MssqlStrategyImpl ..> generic_row.RowSet
+mapping_pkg.MapperService ..> generic_row.Row
+
+note right of StrategyBase
+  Compile-time flags:
+    EnableRowCache
+    EnableValidation
+  Policies supply:
+    - Cache storage (LRU / None)
+    - Prepared statement caching
+    - Row mapping (dict -> entity)
+  CRTP lets Impl supply fetch_rows()
+end note
+
+note right of MssqlStrategyImpl
+  DB-specific concerns:
+    - ODBC binding
+    - Dialect rewrites (LIMIT -> TOP)
+    - Column metadata extraction
+end note
+
+note bottom of DomainRepository
+  Flow (Option B):
+    Query -> Strategy.execute (RowSet raw)
+          -> map rows via MapperService/ClassMap
+          -> identity merge
+          -> return domain objects
+end note
+
+note top of ClassMap
+  Metadata Mapping:
+    - Table/column layout
+    - PK & factory
+    - Domain <-> raw translation
+end note
+
+@enduml
