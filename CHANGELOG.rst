@@ -20,6 +20,8 @@ Added
 - Registry: Optional ``capacity`` constructor arg for upfront map reservation.
 - Registry: Explicit ``post(key, value)`` trigger to manually invoke post hooks.
 - Examples: Two runnable registry examples under ``docs/examples/registry/`` (basic & hooks).
+- CI: Add release workflow that builds wheels via ``cibuildwheel`` and publishes tagged releases to PyPI.
+- CI: Auto-tag main whenever the ``dev`` branch is merged, driven by PR labels ``release:major``/``release:minor``/default patch.
 
 Changed
 ~~~~~~~

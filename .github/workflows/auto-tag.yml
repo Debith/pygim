@@ -1,0 +1,91 @@
+name: Auto tag release
+
+on:
+  pull_request:
+    types: [closed]
+    branches:
+      - main
+
+jobs:
+  tag:
+    if: >-
+      github.event.pull_request.merged == true &&
+      github.event.pull_request.head.ref == 'dev'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Determine release bump kind
+        id: bump
+        env:
+          PR_LABELS: ${{ toJson(github.event.pull_request.labels) }}
+        run: |
+          python - <<'PY'
+          import json
+          import os
+
+          labels = {item["name"] for item in json.loads(os.environ.get("PR_LABELS", "[]"))}
+
+          bump = "patch"
+          if "release:major" in labels:
+              bump = "major"
+          elif "release:minor" in labels:
+              bump = "minor"
+
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as fh:
+              fh.write(f"kind={bump}\n")
+          PY
+
+      - name: Discover latest tag
+        id: latest
+        run: |
+          latest=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
+          echo "latest=${latest}" >> "$GITHUB_OUTPUT"
+
+      - name: Compute next version
+        id: version
+        env:
+          LATEST: ${{ steps.latest.outputs.latest }}
+          KIND: ${{ steps.bump.outputs.kind }}
+        run: |
+          python - <<'PY'
+          import os
+
+          latest = os.environ.get("LATEST", "v0.0.0").lstrip("v")
+          pieces = [int(part) for part in latest.split(".") if part]
+          while len(pieces) < 3:
+              pieces.append(0)
+
+          kind = os.environ.get("KIND", "patch")
+          if kind == "major":
+              pieces[0] += 1
+              pieces[1] = 0
+              pieces[2] = 0
+          elif kind == "minor":
+              pieces[1] += 1
+              pieces[2] = 0
+          else:
+              pieces[2] += 1
+
+          version = ".".join(str(part) for part in pieces)
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as fh:
+              fh.write(f"version={version}\n")
+          PY
+
+      - name: Create and push tag
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          tag_name="v${VERSION}"
+          if git rev-parse "${tag_name}" >/dev/null 2>&1; then
+              echo "Tag ${tag_name} already exists. Skipping." >&2
+              exit 0
+          fi
+
+          git tag -a "${tag_name}" -m "Release ${tag_name}"
+          git push origin "${tag_name}"
