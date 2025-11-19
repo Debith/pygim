@@ -22,8 +22,14 @@ jobs:
       - name: Install test dependencies
         run: |
           python -m pip install --upgrade pip
-          python -m pip install .[test]
+          if [[ "$RUNNER_OS" == "macOS" ]]; then
+            MACOSX_DEPLOYMENT_TARGET=10.15 python -m pip install .[test] -f .
+          else
+            python -m pip install .[test] -f .
+          fi
 
+      - name: Remove source files
+        run: rm -rf src/
       - name: Run pytest
         run: pytest
 
@@ -53,8 +59,8 @@ jobs:
         env:
           CIBW_BUILD: "cp38-* cp39-* cp310-* cp311-* cp312-* cp313-*"
           CIBW_SKIP: "pp* *_musllinux_*"
-          CIBW_ARCHS_MACOS: universal2
-          CIBW_ENVIRONMENT: MACOSX_DEPLOYMENT_TARGET=10.15
+          CIBW_ARCHS_MACOS: ${{ matrix.os == 'macos-latest' && 'universal2' || '' }}
+          CIBW_ENVIRONMENT_MACOS: MACOSX_DEPLOYMENT_TARGET=10.15
 
       - name: Upload wheel artifacts
         uses: actions/upload-artifact@v4

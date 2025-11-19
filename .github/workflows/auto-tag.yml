@@ -18,6 +18,7 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
         with:
+          ref: main
           fetch-depth: 0
 
       - name: Determine release bump kind
@@ -55,11 +56,14 @@ jobs:
         run: |
           python - <<'PY'
           import os
+          import re
 
           latest = os.environ.get("LATEST", "v0.0.0").lstrip("v")
-          pieces = [int(part) for part in latest.split(".") if part]
-          while len(pieces) < 3:
-              pieces.append(0)
+          match = re.match(r'^(\d+)\.(\d+)\.(\d+)', latest)
+          if match:
+              pieces = [int(match.group(1)), int(match.group(2)), int(match.group(3))]
+          else:
+              pieces = [0, 0, 0]
 
           kind = os.environ.get("KIND", "patch")
           if kind == "major":
@@ -87,5 +91,7 @@ jobs:
               exit 0
           fi
 
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
           git tag -a "${tag_name}" -m "Release ${tag_name}"
           git push origin "${tag_name}"
