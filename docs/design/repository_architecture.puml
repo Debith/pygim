@@ -7,15 +7,12 @@ package "_pygim_fast/repository/generic" as generic_generic {
   class Query {
     +sql() : const std::string&
     +params() : std::vector<PyObj>
-  }
-  class QueryBuilder {
     +select(cols)
     +from_table(t)
     +where(clause, param)
     +limit(n)
     +build() : Query
   }
-  QueryBuilder --> Query
 }
 
 package "generic::row (planned)" as generic_row {
@@ -224,5 +221,73 @@ note top of ClassMap
     - PK & factory
     - Domain <-> raw translation
 end note
+
+@enduml
+
+
+
+@startuml
+title Policy-based Query with Runtime Factory (C++20)
+
+skinparam classAttributeIconSize 0
+
+' === Packages ===
+package "DB Policies" {
+    class MssqlPolicy {
+        +append_select(sql : std::string&, cols : std::string_view) : void
+        +append_where(sql : std::string&, expr : std::string_view) : void
+        +to_string(conn : std::string_view, sql : std::string_view) : Result
+    }
+
+    class PostgresPolicy {
+        +append_select(sql : std::string&, cols : std::string_view) : void
+        +append_where(sql : std::string&, expr : std::string_view) : void
+        +to_string(conn : std::string_view, sql : std::string_view) : Result
+    }
+}
+
+package "Query Core" {
+    interface IQuery {
+        +select(cols : std::string_view) : IQuery&
+        +where(expr : std::string_view) : IQuery&
+        +to_string() : Result
+    }
+
+    class "QueryT<Policy>" <<template>> {
+        -m_conn : std::string
+        -m_sql  : std::string
+        -m_policy : Policy
+        +QueryT(conn : std::string, policy : Policy)
+        +select(cols : std::string_view) : QueryT<Policy>&
+        +where(expr : std::string_view) : QueryT<Policy>&
+        +to_string() : Result
+    }
+
+    class "Query<Policy>" <<final>> {
+        -m_impl : QueryT<Policy>
+        +Query(conn : std::string)
+        +select(cols : std::string_view) : IQuery&
+        +where(expr : std::string_view) : IQuery&
+        +to_string() : Result
+    }
+
+    IQuery <|.. "Query<Policy>"
+    "Query<Policy>" *- "QueryT<Policy>"
+}
+
+package "Factory" {
+    class QueryFactory {
+        {static} +make_query(conn : std::string) : std::unique_ptr<IQuery>
+    }
+}
+
+' === Policy bindings ===
+"Query<MssqlPolicy>" -down- MssqlPolicy : uses >
+"Query<PostgresPolicy>" -down- PostgresPolicy : uses >
+
+' === Factory selection logic ===
+QueryFactory ..> IQuery : create()
+QueryFactory ..> "Query<MssqlPolicy>" : if conn starts_with(\"mssql://\")
+QueryFactory ..> "Query<PostgresPolicy>" : if conn starts_with(\"postgres://\")
 
 @enduml

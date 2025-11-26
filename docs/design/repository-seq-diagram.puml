@@ -1,0 +1,60 @@
+@startuml
+actor Operator
+
+actor Operator
+
+participant "stresss_test.py" as StressScript
+participant argparse as ArgparseModule
+participant "build_repository()" as BuildRepoFn
+participant "repository.Repository" as RepositoryClass
+participant "mssql_strategy.MssqlStrategyNative" as StrategyClass
+participant Query as QueryClass
+participant "gen_data" as GenDataModule
+participant Polars as PolarsFrame
+participant "persist_dataframe()" as PersistFn
+participant "pygim.arrow_bridge" as ArrowBridgeModule
+participant utils as UtilsModule
+
+Operator -> StressScript: invoke main()
+StressScript -> ArgparseModule: build_parser()/parse_args
+ArgparseModule --> StressScript: args
+
+StressScript -> BuildRepoFn: connection string
+BuildRepoFn -> RepositoryClass: __init__(transformers=False)
+BuildRepoFn -> StrategyClass: __init__(connection string)
+BuildRepoFn --> StressScript: (Repository, Strategy)
+
+loop determine start id
+  StressScript -> QueryClass: Query()
+  QueryClass -> QueryClass: select/from_table/limit
+  QueryClass -> QueryClass: build()
+  StressScript -> RepositoryClass: fetch_raw(query)
+  RepositoryClass -> StrategyClass: fetch(query)
+  StrategyClass --> RepositoryClass: row(s)
+  RepositoryClass --> StressScript: row(s)
+end
+
+Operator -> StressScript: await generation
+StressScript -> GenDataModule: generate_polars_dataset(n)
+GenDataModule --> StressScript: Polars DataFrame
+StressScript -> PolarsFrame: with_columns(id + start_id)
+
+StressScript -> PersistFn: (Strategy, DataFrame, table)
+PersistFn -> StrategyClass: has bulk_insert_arrow_bcp?
+alt Arrow path
+  PersistFn -> ArrowBridgeModule: prepare_for_bcp(DataFrame)
+  ArrowBridgeModule --> PersistFn: Arrow IPC bytes
+  PersistFn -> StrategyClass: bulk_insert_arrow_bcp(table, payload,...)
+else Fallback path
+  PersistFn -> StrategyClass: bulk_upsert(table, columns, DataFrame,...)
+  alt No bulk_upsert
+    PersistFn -> StrategyClass: bulk_insert(table, columns, DataFrame,...)
+  end
+end
+StrategyClass --> PersistFn: completion
+PersistFn --> StressScript: done
+
+StressScript -> UtilsModule: calculate_rate(bytes, seconds)
+UtilsModule --> StressScript: throughput string
+StressScript --> Operator: progress + final metrics
+@enduml

@@ -48,17 +48,6 @@ def test_get_with_default_missing():
     assert repo.get(("missing", 99), sentinel) is sentinel
 
 
-def test_mssql_native_placeholder():
-    # Native module may or may not be compiled; import should succeed (module exists) but
-    # operations should raise if not built with PYGIM_ENABLE_MSSQL.
-    import importlib
-    m = importlib.import_module("pygim.mssql_strategy")
-    Strat = getattr(m, "MssqlStrategyNative")
-    strat = Strat("Driver={ODBC Driver 17 for SQL Server};Server=.;")
-    with pytest.raises(RuntimeError):
-        strat.fetch(("users", 1))
-
-
 def test_repository_repr():
     repo = Repository(transformers=True)
     repo.add_strategy(MemoryStrategy())

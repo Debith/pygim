@@ -49,7 +49,8 @@ An experimental high-performance Repository abstraction (DDD-style) now exists a
 * Optional transformer pipeline (pre-save / post-load) when enabled at construction.
 * Optional factory callable to turn raw data into rich entities.
 * Native MSSQL strategy skeleton (ODBC) guarded by ``PYGIM_ENABLE_MSSQL`` macro.
-* Fluent ``QueryBuilder`` for lightweight SQL assembly using ``std::stringstream``.
+* Fluent ``Query`` for lightweight SQL assembly without manual string concatenation.
+* Arrow IPC utilities for zero-copy hand-off between Polars and C++ pipelines.
 
 Example (read):
 
@@ -57,13 +58,13 @@ Example (read):
 
         from pygim import repository, mssql_strategy
         from pygim.repo_helpers import MemoryStrategy
-        from pygim.query import QueryBuilder
+        from pygim.query import Query
 
         repo = repository.Repository(transformers=False)
         repo.add_strategy(MemoryStrategy())
         repo.add_strategy(mssql_strategy.MssqlStrategyNative("Driver={ODBC Driver 17 for SQL Server};Server=localhost;Database=test;UID=sa;PWD=Passw0rd!;"))
 
-        q = QueryBuilder().select(["id","name"]).from_table("users").where("id=?", 1).build()
+        q = Query().select(["id","name"]).from_table("users").where("id=?", 1).build()
         row = repo.get(("users", 1))  # Strategy interprets key
         print(row)
 
@@ -78,10 +79,33 @@ See PlantUML: ``docs/design/repository_architecture.puml`` for component relatio
 Query Security & Dialect Notes
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Passing a built ``Query`` object (from ``QueryBuilder``) directly to ``MssqlStrategyNative.fetch(query)``
+Passing a built ``Query`` object directly to ``MssqlStrategyNative.fetch(query)``
 will bind parameters using ODBC (when compiled with ``PYGIM_ENABLE_MSSQL``). The builder emits
 ``LIMIT n`` which is naively rewritten to ``TOP n`` for SQL Server; more sophisticated dialect
 adaptation (ORDER BY preservation, OFFSET emulation) is planned.
+
+Arrow IPC Bridge
+~~~~~~~~~~~~~~~~
+
+The helper module :mod:`pygim.arrow_bridge` wraps the workflow recommended in the
+accompanying article: export a Polars ``DataFrame`` to Apache Arrow IPC (Feather v2) and
+let C++ consume the memory-mappable columnar payload.  Example:
+
+.. code-block:: python
+
+    import polars as pl
+    from pygim.arrow_bridge import to_ipc_bytes, write_ipc_file
+
+    df = pl.DataFrame({"id": [1, 2], "value": [3.14, 2.72]})
+
+    # In-memory transfer (e.g. via socket/Flight)
+    payload = to_ipc_bytes(df)
+
+    # Or persist for a C++ process to memory-map and read with Arrow C++ APIs
+    write_ipc_file(df, "payload.arrow")
+
+Downstream C++ code can memory-map ``payload.arrow`` and read it using Arrow's C++
+``RecordBatchFileReader`` for near zero-copy ingestion.
 
 
 

@@ -8,6 +8,7 @@ import sys
 import functools
 from pathlib import Path
 from dataclasses import dataclass
+from importlib import import_module
 import click
 
 __all__ = ["GimmicksCliApp", "flag_opt"]
@@ -59,3 +60,17 @@ class GimmicksCliApp:
 
     def ai(self, text):
         print("AI is not implemented yet!")
+
+    def show_support(self):
+        rows = []
+        try:
+            mssql_mod = import_module("pygim.mssql_strategy")
+            rows.append(("mssql strategy extension", True))
+            rows.append(("odbc", bool(getattr(mssql_mod, "HAVE_ODBC", False))))
+            rows.append(("arrow (c++)", bool(getattr(mssql_mod, "HAVE_ARROW", False))))
+        except ImportError:
+            rows.append(("mssql strategy extension", False))
+        click.echo("Feature support:")
+        for name, supported in rows:
+            status = "supported" if supported else "missing"
+            click.echo(f"- {name}: {status}")

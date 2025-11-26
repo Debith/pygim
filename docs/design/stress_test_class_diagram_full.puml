@@ -1,0 +1,148 @@
+@startuml StressTestAllClasses
+
+package "Python Script" {
+class StressTestScript {
+  -- members --
+  -connection_string: str
+  -args: argparse.Namespace
+  -repo: Repository
+  -strategy: MssqlStrategyNative
+  -- operations --
+  +build_parser()
+  +default_connection_string()
+  +build_repository(conn)
+  +resolve_start_id(repo, table, start_id)
+  +estimate_dataframe_size_bytes(frame)
+  +persist_dataframe(strategy, frame, table, ...)
+  +main()
+}
+}
+
+package "Python Modules" {
+class ArgparseModule <<module>> {
+  +ArgumentParser
+}
+class GenDataModule <<module>> {
+  +DEFAULT_ROW_COUNT: int
+  +generate_polars_dataset(n)
+}
+class Polars <<library>> {
+  +DataFrame
+  +LazyFrame
+}
+class PolarsDataFrame <<library>> {
+  +columns
+  +with_columns(...)
+}
+class ArrowBridge <<module>> {
+  +prepare_for_bcp(frame)
+}
+class Utils <<module>> {
+  +calculate_rate(bytes, unit, seconds, unit)
+}
+class TimingProfiling <<module>> {
+  +quick_timer(label)
+}
+}
+
+package "Python Extension Bindings" {
+class Repository {
+  -m_strategies: list[strategy]
+  -m_enable_transformers: bool
+  -m_factory: callable
+  +add_strategy(strategy)
+  +fetch_raw(query)
+  +save(key, value)
+  +bulk_insert(...)
+  +bulk_upsert(...)
+}
+class Query {
+  -m_columns: list[str]
+  -m_table: str
+  -m_whereClauses: list[str]
+  -m_limit: int?
+  +select(columns)
+  +from_table(name)
+  +where(clause, param)
+  +limit(n)
+  +build()
+}
+class ConnectionStringFactory {
+  +coerce(value)
+}
+class MemoryStrategy {
+  -_store: dict
+  +fetch(key)
+  +save(key, value)
+}
+}
+
+package "C++ Native" {
+class MssqlStrategyNative {
+  -m_dbc: SQLHDBC
+  -connection_string: str
+  +fetch(key)
+  +save(key, value)
+  +bulk_insert_arrow_bcp(...)
+  +bulk_upsert(...)
+  +bulk_insert(...)
+}
+class BatchDescriptor {
+  -spec: TableSpec
+  -options: BatchOptions
+}
+class TableSpec {
+  +name
+  +columns
+  +key_column
+  +table_hint
+}
+class BatchOptions {
+  +batch_size
+  +param_limit
+}
+class InsertSqlBuilder {
+  +build(rows_per_stmt)
+}
+class MergeSqlBuilder {
+  +build(rows_this)
+}
+class StatementTemplate {
+  -dbc: SQLHDBC
+  -table_spec: TableSpec
+  +get_or_prepare(rows)
+}
+class QueryEnvelope {
+  +query: Query
+  +label: str
+}
+class StatementBinder {
+  +bind_all(params)
+}
+}
+
+StressTestScript --> ArgparseModule : parser usage
+StressTestScript --> Repository : creates via bindings
+StressTestScript --> Query : build queries
+StressTestScript --> ConnectionStringFactory : coerce()
+StressTestScript --> MemoryStrategy : optional
+StressTestScript --> GenDataModule : generate_polars_dataset()
+GenDataModule --> PolarsDataFrame
+StressTestScript --> PolarsDataFrame : with_columns
+StressTestScript --> ArrowBridge : prepare_for_bcp()
+StressTestScript --> Utils : calculate_rate()
+StressTestScript --> TimingProfiling : quick_timer()
+
+Repository o--> MssqlStrategyNative
+Repository --> Query : uses Query result
+MssqlStrategyNative --> InsertSqlBuilder
+MssqlStrategyNative --> MergeSqlBuilder
+MssqlStrategyNative --> StatementTemplate
+MssqlStrategyNative --> BatchDescriptor
+BatchDescriptor --> TableSpec
+BatchDescriptor --> BatchOptions
+StatementTemplate --> TableSpec
+MssqlStrategyNative --> QueryEnvelope
+MssqlStrategyNative --> StatementBinder
+
+@enduml

@@ -1,0 +1,98 @@
+@startuml StressTestClasses
+
+package "Python Script" {
+class StressTestScript {
+  -- members --
+  -connection_string: str
+  -args: argparse.Namespace
+  -repo: Repository
+  -strategy: MssqlStrategyNative
+  -- operations --
+  +build_parser()
+  +default_connection_string()
+  +build_repository(conn)
+  +resolve_start_id(repo, table, start_id)
+  +estimate_dataframe_size_bytes(frame)
+  +persist_dataframe(strategy, frame, table, ...)
+  +main()
+}
+}
+
+package "Python Extension Bindings" {
+class Repository {
+  -- members --
+  -m_strategies: list[strategy]
+  -m_enable_transformers: bool
+  -m_factory: callable
+  -- operations --
+  +add_strategy(strategy)
+  +fetch_raw(query)
+}
+
+class Query {
+  -- members --
+  -m_columns: list[str]
+  -m_table: str
+  -m_whereClauses: list[str]
+  -m_limit: int?
+  -- operations --
+  +select(columns)
+  +from_table(name)
+  +where(clause, param)
+  +limit(n)
+  +build()
+}
+}
+
+package "C++ Native" {
+class MssqlStrategyNative {
+  -- members --
+  -m_dbc: SQLHDBC
+  -connection_string: str
+  -- operations --
+  +fetch(key)
+  +bulk_insert_arrow_bcp(table, payload, batch_size, hint)
+  +bulk_upsert(table, columns, rows, key_column, batch_size, hint)
+  +bulk_insert(table, columns, rows, batch_size, hint)
+}
+}
+
+package "Python Modules" {
+class GenDataModule <<module>> {
+  -- data --
+  +DEFAULT_ROW_COUNT: int
+  -- operations --
+  +generate_polars_dataset(n)
+}
+
+class PolarsDataFrame <<library>> {
+  -- members --
+  +columns: Sequence[str]
+  -- operations --
+  +with_columns(...)
+}
+
+class ArrowBridge <<module>> {
+  -- operations --
+  +prepare_for_bcp(frame)
+}
+
+class Utils <<module>> {
+  -- operations --
+  +calculate_rate(bytes, label, seconds, unit)
+}
+}
+
+StressTestScript --> Repository : creates
+StressTestScript --> MssqlStrategyNative : instantiates (build_repository)
+Repository o--> MssqlStrategyNative : strategy list
+StressTestScript --> Query : builds start-id + smoke queries
+StressTestScript --> GenDataModule : generate_polars_dataset()
+GenDataModule --> PolarsDataFrame : returns frame
+StressTestScript --> PolarsDataFrame : adjust ids/inspect columns
+StressTestScript --> ArrowBridge : prepare_for_bcp(frame)
+StressTestScript --> Utils : calculate_rate()
+MssqlStrategyNative --> PolarsDataFrame : bulk_upsert/bulk_insert data
+MssqlStrategyNative --> ArrowBridge : consumes Arrow payload
+
+@enduml

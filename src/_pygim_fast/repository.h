@@ -106,6 +106,31 @@ public:
         if (!any) throw std::runtime_error("Repository: no strategy accepted save() call");
     }
 
+    // Optional bulk insert broadcast; strategies without bulk_insert are skipped.
+    void bulk_insert(const std::string& table, const std::vector<std::string>& columns,
+                     const py::object& rows, int batch_size=1000, const std::string& table_hint="TABLOCK") {
+        bool any = false;
+        for (auto & strat : m_strategies) {
+            if (py::hasattr(strat, "bulk_insert")) {
+                strat.attr("bulk_insert")(table, columns, rows, batch_size, table_hint);
+                any = true;
+            }
+        }
+        if (!any) throw std::runtime_error("Repository: no strategy supports bulk_insert()");
+    }
+
+    void bulk_upsert(const std::string& table, const std::vector<std::string>& columns,
+                     const py::object& rows, const std::string& key_column="id", int batch_size=500, const std::string& table_hint="TABLOCK") {
+        bool any = false;
+        for (auto & strat : m_strategies) {
+            if (py::hasattr(strat, "bulk_upsert")) {
+                strat.attr("bulk_upsert")(table, columns, rows, key_column, batch_size, table_hint);
+                any = true;
+            }
+        }
+        if (!any) throw std::runtime_error("Repository: no strategy supports bulk_upsert()");
+    }
+
     std::vector<py::object> strategies() const { return m_strategies; }
     std::vector<py::function> pre_transforms() const { return m_pre_save; }
     std::vector<py::function> post_transforms() const { return m_post_load; }

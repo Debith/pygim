@@ -17,4 +17,19 @@ PYBIND11_MODULE(utils, m) {
     m.def("to_csv",
           py::overload_cast<std::vector<std::string>, bool>(&to_csv),
           "Convert a vector of strings to a CSV string");
+
+    m.def("format_bytes_per_second",
+          &format_bytes_per_second,
+          py::arg("bytes_per_second"),
+          py::arg("precision") = 2,
+          "Format a bytes-per-second value using human-readable units with configurable precision.");
+
+    m.def("calculate_rate",
+          &calculate_rate,
+          py::arg("quantity"),
+          py::arg("quantity_unit"),
+          py::arg("duration"),
+          py::arg("duration_unit"),
+          py::arg("precision") = 2,
+          "Compute a throughput string from quantity+unit over duration+unit.");
 }
