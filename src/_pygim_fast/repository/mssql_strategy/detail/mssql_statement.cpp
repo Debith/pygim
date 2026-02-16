@@ -3,6 +3,7 @@
 #include <stdexcept>
 
 #include "../mssql_strategy.h"
+#include "../../../utils/logging.h"
 
 namespace pygim::detail {
 
@@ -19,6 +20,7 @@ StatementTemplate::~StatementTemplate() {
 }
 
 SQLHSTMT StatementTemplate::get_or_prepare(int rows_this) {
+    PYGIM_SCOPE_LOG_TAG("repo.statement");
     if (rows_this <= 0) {
         throw std::runtime_error("rows_this must be positive");
     }
@@ -37,6 +39,7 @@ SQLHSTMT StatementTemplate::get_or_prepare(int rows_this) {
 }
 
 SQLHSTMT StatementTemplate::prepare_statement(int rows_this) {
+    PYGIM_SCOPE_LOG_TAG_MSG("repo.statement", "prepare_statement");
     if (SQLHSTMT stmt = SQL_NULL_HSTMT; true) {
         if (SQLAllocHandle(SQL_HANDLE_STMT, dbc_, &stmt) != SQL_SUCCESS) {
             throw std::runtime_error("ODBC: alloc stmt failed");
@@ -56,6 +59,7 @@ SQLHSTMT StatementTemplate::prepare_statement(int rows_this) {
 }
 
 void StatementTemplate::release(SQLHSTMT &stmt) {
+    PYGIM_SCOPE_LOG_TAG_MSG("repo.statement", "release");
     if (stmt != SQL_NULL_HSTMT) {
         SQLFreeHandle(SQL_HANDLE_STMT, stmt);
         stmt = SQL_NULL_HSTMT;

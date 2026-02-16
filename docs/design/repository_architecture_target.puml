@@ -1,0 +1,91 @@
+@startuml RepositoryArchitecture_Target
+skinparam shadowing false
+skinparam classAttributeIconSize 0
+title Repository Architecture (Target)
+
+package "generic::query" as query_pkg {
+  class QuerySpec {
+    +sql : std::string
+    +params : std::vector<Param>
+    +layout_id : std::string
+    +cache_key() : size_t
+  }
+}
+
+package "generic::row" as row_pkg {
+  class Row
+  class RowSet
+  RowSet *-- Row
+}
+
+package "generic::policies" as policy_pkg {
+  interface IConnectionPolicy
+  interface IExecutionPolicy
+  interface ICachePolicy
+  interface IPreparedCachePolicy
+  interface IRowMapperPolicy
+}
+
+package "generic::strategy" as strategy_pkg {
+  class StrategyBase<Impl, CachePolicy, PreparedPolicy, RowMapperPolicy> <<template>> {
+    +execute(query:QuerySpec) : RowSet
+    +raw(query:QuerySpec) : RowSet
+    # fetch_rows(query:QuerySpec) : RowSet
+  }
+}
+
+package "repository/facade" as facade_pkg {
+  class RepositoryFacade {
+    +get<T>(id) : T
+    +save<T>(entity) : void
+    +query<T>(QuerySpec) : std::vector<T>
+  }
+
+  class AggregateRepository<T> {
+    +get(id) : T
+    +save(entity : T)
+    +query(QuerySpec) : std::vector<T>
+  }
+
+  class RepositoryBuilder {
+    +add_policy(name, policy)
+    +set_strategy(strategy)
+    +set_mapper(mapper)
+    +set_identity(identity)
+    +build() : RepositoryFacade
+  }
+
+  class ConnectionString {
+    +vendor() : std::string_view
+  }
+
+  class acquire_repository <<function>> {
+    +acquire_repository(conn_str, recipe="default") : RepositoryFacade
+  }
+}
+
+package "core registry/factory" as core_rf {
+  class RecipeRegistry
+  class StrategyFactory
+}
+
+query_pkg -down-> row_pkg
+row_pkg -down-> policy_pkg
+policy_pkg -down-> strategy_pkg
+strategy_pkg -down-> facade_pkg
+
+facade_pkg.RepositoryBuilder -down-> strategy_pkg.StrategyBase
+facade_pkg.AggregateRepository -down-> strategy_pkg.StrategyBase
+facade_pkg.AggregateRepository -down-> row_pkg.RowSet
+
+facade_pkg.acquire_repository -down-> facade_pkg.ConnectionString
+facade_pkg.acquire_repository -down-> core_rf.RecipeRegistry
+facade_pkg.acquire_repository -down-> core_rf.StrategyFactory
+facade_pkg.acquire_repository -down-> facade_pkg.RepositoryBuilder
+
+note right of core_rf
+  Core C++ registry/factory
+  Optional pybind facade only
+end note
+
+@enduml

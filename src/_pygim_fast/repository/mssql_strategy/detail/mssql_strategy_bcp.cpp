@@ -1,5 +1,6 @@
 #include "../mssql_strategy.h"
 #include "helpers.h"
+#include "../../../utils/logging.h"
 
 #if PYGIM_HAVE_ODBC && PYGIM_HAVE_ARROW
 #if !defined(_WIN32) && !defined(_WIN64)
@@ -72,6 +73,7 @@ void MssqlStrategyNative::bulk_insert_arrow_bcp(const std::string &table,
                                                 const py::bytes &arrow_ipc_bytes,
                                                 int batch_size,
                                                 const std::string &table_hint) {
+    PYGIM_SCOPE_LOG_TAG("repo.bcp");
 #if PYGIM_HAVE_ODBC && PYGIM_HAVE_ARROW
 (void)table_hint;
 #if !defined(_WIN32) && !defined(_WIN64)

@@ -1,0 +1,28 @@
+@startuml
+skinparam classAttributeIconSize 0
+
+class Repository<QueryPolicy, ConnectionPolicy> {
+    +run(sql)
+}
+
+class QueryPolicy <<policy>>
+class ConnectionPolicy <<policy>>
+
+class MssqlQueryPolicy
+class PostgresQueryPolicy
+class OdbcConnectionPolicy
+class ArrowConnectionPolicy
+
+Repository<QueryPolicy, ConnectionPolicy> ..|> QueryPolicy
+Repository<QueryPolicy, ConnectionPolicy> ..|> ConnectionPolicy
+
+QueryPolicy <|-- MssqlQueryPolicy
+QueryPolicy <|-- PostgresQueryPolicy
+ConnectionPolicy <|-- OdbcConnectionPolicy
+ConnectionPolicy <|-- ArrowConnectionPolicy
+
+class ArrowMssqlRepository
+ArrowMssqlRepository --> Repository<QueryPolicy, ConnectionPolicy>
+ArrowMssqlRepository ..> MssqlQueryPolicy
+ArrowMssqlRepository ..> ArrowConnectionPolicy
+@enduml

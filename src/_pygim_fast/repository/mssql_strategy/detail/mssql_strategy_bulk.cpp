@@ -7,6 +7,7 @@
 #include "helpers.h"
 #include "sql_builders.h"
 #include "value_objects.h"
+#include "../../../utils/logging.h"
 
 namespace py = pybind11;
 
@@ -31,12 +32,14 @@ struct ColumnAccess {
 
 template <typename ModeTag>
 void prepare_accessors(const detail::BatchDescriptor<ModeTag> &, std::vector<ColumnAccess> &accs) {
+    PYGIM_SCOPE_LOG_TAG("repo.bulk");
     accs.clear();
 }
 
 template <>
 inline void prepare_accessors(const detail::BatchDescriptor<detail::PolarsTag> &batch,
                               std::vector<ColumnAccess> &accs) {
+    PYGIM_SCOPE_LOG_TAG("repo.bulk");
     const auto &columns = batch.spec.columns;
     accs.reserve(columns.size());
     for (const auto &name : columns) {
@@ -56,6 +59,7 @@ inline void prepare_accessors(const detail::BatchDescriptor<detail::PolarsTag> &
 
 template <typename ModeTag>
 void run_bulk_insert(MssqlStrategyNative &self, detail::BatchDescriptor<ModeTag> &batch) {
+    PYGIM_SCOPE_LOG_TAG("repo.bulk");
     constexpr bool polars_mode = is_polars_mode_v<ModeTag>;
     const auto &spec = batch.spec;
     const size_t ncols = spec.column_count();
@@ -300,6 +304,7 @@ void MssqlStrategyNative::bulk_insert(const std::string &table,
                                       const py::object &rows,
                                       int batch_size,
                                       const std::string &table_hint) {
+    PYGIM_SCOPE_LOG_TAG("repo.bulk");
 #if PYGIM_HAVE_ODBC
     ensure_connected();
     auto build_spec = [&]() {

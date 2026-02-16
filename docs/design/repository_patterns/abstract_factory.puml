@@ -1,0 +1,25 @@
+@startuml
+skinparam classAttributeIconSize 0
+interface RepositoryFamily {
+    +make_connection()
+    +make_query(sql)
+}
+
+class Repository {
+    - RepositoryFamily factory
+    +run(sql)
+}
+
+class PostgresFamily
+class MssqlFamily
+
+abstract class Query
+abstract class Connection
+
+Repository --> RepositoryFamily : uses
+RepositoryFamily <|-- PostgresFamily
+RepositoryFamily <|-- MssqlFamily
+RepositoryFamily ..> Query : creates
+RepositoryFamily ..> Connection : creates
+Query --> Connection : run()
+@enduml

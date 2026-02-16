@@ -7,10 +7,12 @@
 #include <pybind11/numpy.h>
 
 #include "mssql_strategy.h"
+#include "../../utils/logging.h"
 
 namespace py = pybind11;
 
 PYBIND11_MODULE(mssql_strategy, m) {
+    PYGIM_SCOPE_LOG_TAG("repo.module");
     using namespace pygim;
 
     py::class_<MssqlStrategyNative>(m, "MssqlStrategyNative")

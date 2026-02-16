@@ -6,6 +6,7 @@
 
 #include "helpers.h"
 #include "value_objects.h"
+#include "../../../utils/logging.h"
 
 namespace py = pybind11;
 
@@ -21,11 +22,13 @@ struct StatementBinder {
 
     StatementBinder(SQLHSTMT handle, size_t reserve)
         : stmt(handle), indicators(reserve, 0) {
+        PYGIM_SCOPE_LOG_TAG("repo.fetch");
         int_storage.reserve(reserve);
         str_storage.reserve(reserve);
     }
 
     void bind_all(const std::vector<py::object> &params) {
+        PYGIM_SCOPE_LOG_TAG("repo.fetch");
         indicators.assign(params.size(), 0);
         for (size_t i = 0; i < params.size(); ++i) {
             bind_one(static_cast<SQLUSMALLINT>(i + 1), params[i], indicators[i]);
@@ -33,6 +36,7 @@ struct StatementBinder {
     }
 
     void bind_one(SQLUSMALLINT position, const py::object &value, SQLLEN &indicator) {
+        PYGIM_SCOPE_LOG_TAG("repo.fetch");
         SQLRETURN ret = SQL_SUCCESS;
         if (value.is_none()) {
             indicator = SQL_NULL_DATA;
@@ -62,6 +66,7 @@ struct NonQueryResult {
 };
 
 NonQueryResult execute_non_query(SQLHDBC dbc, const detail::QueryEnvelope &env) {
+    PYGIM_SCOPE_LOG_TAG("repo.fetch");
     NonQueryResult result;
     SQLHSTMT stmt = SQL_NULL_HSTMT;
     if (SQLAllocHandle(SQL_HANDLE_STMT, dbc, &stmt) != SQL_SUCCESS) {
@@ -90,6 +95,7 @@ detail::QueryEnvelope build_update_envelope(const std::string &table,
                                             const std::vector<std::string> &columns,
                                             const std::vector<py::object> &values,
                                             const py::object &pk) {
+    PYGIM_SCOPE_LOG_TAG("repo.fetch");
     std::string sql = "UPDATE " + table + " SET ";
     std::vector<py::object> params;
     params.reserve(values.size() + 1);
@@ -108,6 +114,7 @@ detail::QueryEnvelope build_insert_envelope(const std::string &table,
                                             const std::vector<std::string> &columns,
                                             const std::vector<py::object> &values,
                                             const py::object &pk) {
+    PYGIM_SCOPE_LOG_TAG("repo.fetch");
     std::string sql = "INSERT INTO " + table + " (id";
     std::vector<py::object> params;
     params.reserve(values.size() + 1);
@@ -125,6 +132,7 @@ detail::QueryEnvelope build_insert_envelope(const std::string &table,
 }
 
 detail::QueryEnvelope envelope_from_pyquery(const py::object &query_obj) {
+    PYGIM_SCOPE_LOG_TAG("repo.fetch");
     std::string sql = query_obj.attr("sql").cast<std::string>();
     py::list params_list = query_obj.attr("params")();
     std::vector<py::object> params;
@@ -139,6 +147,7 @@ detail::QueryEnvelope envelope_from_pyquery(const py::object &query_obj) {
 } // namespace
 
 py::object MssqlStrategyNative::fetch(const py::object &key) {
+    PYGIM_SCOPE_LOG_TAG("repo.fetch");
 #if PYGIM_HAVE_ODBC
     ensure_connected();
     if (py::hasattr(key, "sql") && py::hasattr(key, "params")) {
@@ -163,6 +172,7 @@ py::object MssqlStrategyNative::fetch(const py::object &key) {
 }
 
 void MssqlStrategyNative::save(const py::object &key, const py::object &value) {
+    PYGIM_SCOPE_LOG_TAG("repo.fetch");
 #if PYGIM_HAVE_ODBC
     ensure_connected();
     std::string table = detail::extract_table(key);
@@ -177,6 +187,7 @@ void MssqlStrategyNative::save(const py::object &key, const py::object &value) {
 
 #if PYGIM_HAVE_ODBC
 py::object MssqlStrategyNative::fetch_impl(const std::string &table, const py::object &pk) {
+    PYGIM_SCOPE_LOG_TAG("repo.fetch");
     SQLHSTMT stmt = SQL_NULL_HSTMT;
     if (SQLAllocHandle(SQL_HANDLE_STMT, m_dbc, &stmt) != SQL_SUCCESS)
         throw std::runtime_error("ODBC: alloc stmt failed");
@@ -226,6 +237,7 @@ py::object MssqlStrategyNative::fetch_impl(const std::string &table, const py::o
 }
 
 void MssqlStrategyNative::upsert_impl(const std::string &table, const py::object &pk, const py::object &value_mapping) {
+    PYGIM_SCOPE_LOG_TAG("repo.fetch");
     if (!py::isinstance<py::dict>(value_mapping))
         throw std::runtime_error("MssqlStrategyNative.save expects a dict-like value");
     py::dict d = value_mapping.cast<py::dict>();
@@ -249,6 +261,7 @@ void MssqlStrategyNative::upsert_impl(const std::string &table, const py::object
 }
 
 py::object MssqlStrategyNative::execute_query_object(const py::object &query_obj) {
+    PYGIM_SCOPE_LOG_TAG("repo.fetch");
     auto env = envelope_from_pyquery(query_obj);
     SQLHSTMT stmt = SQL_NULL_HSTMT;
     if (SQLAllocHandle(SQL_HANDLE_STMT, m_dbc, &stmt) != SQL_SUCCESS)

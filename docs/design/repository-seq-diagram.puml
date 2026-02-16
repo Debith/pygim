@@ -1,60 +1,116 @@
 @startuml
 actor Operator
 
-actor Operator
-
 participant "stresss_test.py" as StressScript
+participant "build_parser()" as BuildParserFn
 participant argparse as ArgparseModule
+participant "default_connection_string()" as DefaultConnFn
 participant "build_repository()" as BuildRepoFn
 participant "repository.Repository" as RepositoryClass
 participant "mssql_strategy.MssqlStrategyNative" as StrategyClass
-participant Query as QueryClass
+participant "Query (pygim.query)" as QueryClass
+participant "resolve_start_id()" as ResolveStartIdFn
 participant "gen_data" as GenDataModule
 participant Polars as PolarsFrame
+participant "quick_timer()" as QuickTimer
+participant "estimate_dataframe_size_bytes()" as EstimateFn
 participant "persist_dataframe()" as PersistFn
 participant "pygim.arrow_bridge" as ArrowBridgeModule
 participant utils as UtilsModule
 
-Operator -> StressScript: invoke main()
-StressScript -> ArgparseModule: build_parser()/parse_args
+Operator -> StressScript: main()
+StressScript -> BuildParserFn: build_parser()
+BuildParserFn -> ArgparseModule: ArgumentParser(...)
+BuildParserFn -> ArgparseModule: add_argument(...)
+BuildParserFn --> StressScript: parser
+StressScript -> ArgparseModule: parse_args()
 ArgparseModule --> StressScript: args
 
-StressScript -> BuildRepoFn: connection string
-BuildRepoFn -> RepositoryClass: __init__(transformers=False)
-BuildRepoFn -> StrategyClass: __init__(connection string)
-BuildRepoFn --> StressScript: (Repository, Strategy)
-
-loop determine start id
-  StressScript -> QueryClass: Query()
-  QueryClass -> QueryClass: select/from_table/limit
-  QueryClass -> QueryClass: build()
-  StressScript -> RepositoryClass: fetch_raw(query)
-  RepositoryClass -> StrategyClass: fetch(query)
-  StrategyClass --> RepositoryClass: row(s)
-  RepositoryClass --> StressScript: row(s)
+alt args.conn or STRESS_CONN provided
+  StressScript -> StressScript: conn = args.conn or env
+else no connection override
+  StressScript -> DefaultConnFn: default_connection_string()
+  DefaultConnFn --> StressScript: conn
 end
 
-Operator -> StressScript: await generation
-StressScript -> GenDataModule: generate_polars_dataset(n)
-GenDataModule --> StressScript: Polars DataFrame
-StressScript -> PolarsFrame: with_columns(id + start_id)
+alt missing polars or generator
+  StressScript -> StressScript: print(...) + sys.exit(1)
+else dependencies ok
+  StressScript -> BuildRepoFn: build_repository(conn)
+  BuildRepoFn -> RepositoryClass: Repository(transformers=False)
+  BuildRepoFn -> StrategyClass: MssqlStrategyNative(conn)
+  BuildRepoFn -> RepositoryClass: add_strategy(strategy)
+  BuildRepoFn --> StressScript: (repo, strategy)
 
-StressScript -> PersistFn: (Strategy, DataFrame, table)
-PersistFn -> StrategyClass: has bulk_insert_arrow_bcp?
-alt Arrow path
-  PersistFn -> ArrowBridgeModule: prepare_for_bcp(DataFrame)
-  ArrowBridgeModule --> PersistFn: Arrow IPC bytes
-  PersistFn -> StrategyClass: bulk_insert_arrow_bcp(table, payload,...)
-else Fallback path
-  PersistFn -> StrategyClass: bulk_upsert(table, columns, DataFrame,...)
-  alt No bulk_upsert
-    PersistFn -> StrategyClass: bulk_insert(table, columns, DataFrame,...)
+  group pre-flight query
+    StressScript -> QueryClass: Query()
+    QueryClass -> QueryClass: select(["id"])
+    QueryClass -> QueryClass: from_table(args.table)
+    QueryClass -> QueryClass: where("id=?", -123456789)
+    QueryClass -> QueryClass: limit(1)
+    QueryClass -> QueryClass: build()
+    StressScript -> RepositoryClass: fetch_raw(query)
+    RepositoryClass -> StrategyClass: fetch(query)
+    StrategyClass --> RepositoryClass: row(s) or None
+    RepositoryClass --> StressScript: row(s) or None
   end
-end
-StrategyClass --> PersistFn: completion
-PersistFn --> StressScript: done
 
-StressScript -> UtilsModule: calculate_rate(bytes, seconds)
-UtilsModule --> StressScript: throughput string
-StressScript --> Operator: progress + final metrics
+  StressScript -> ResolveStartIdFn: resolve_start_id(repo, table, args.start_id)
+  alt explicit start id provided
+    ResolveStartIdFn --> StressScript: explicit start_id
+  else auto-detect
+    ResolveStartIdFn -> QueryClass: Query()
+    QueryClass -> QueryClass: select(["COALESCE(MAX(id), 0) AS max_id"])
+    QueryClass -> QueryClass: from_table(table)
+    QueryClass -> QueryClass: limit(1)
+    QueryClass -> QueryClass: build()
+    ResolveStartIdFn -> RepositoryClass: fetch_raw(query)
+    RepositoryClass -> StrategyClass: fetch(query)
+    StrategyClass --> RepositoryClass: row(s) or None
+    RepositoryClass --> ResolveStartIdFn: rows
+    ResolveStartIdFn --> StressScript: next start_id
+  end
+
+  StressScript -> QuickTimer: quick_timer(gen_label)
+  QuickTimer --> StressScript: timer context
+  StressScript -> GenDataModule: generate_polars_dataset(n)
+  GenDataModule --> StressScript: Polars DataFrame
+  alt start_id != 0
+    StressScript -> PolarsFrame: with_columns(id=pl.col("id") + start_id)
+  end
+  StressScript -> QuickTimer: __exit__()
+
+  StressScript -> EstimateFn: estimate_dataframe_size_bytes(df)
+  EstimateFn --> StressScript: bytes
+  alt bytes > 0 and gen_duration > 0
+    StressScript -> UtilsModule: calculate_rate(bytes, seconds)
+    UtilsModule --> StressScript: throughput string
+  end
+
+  StressScript -> QuickTimer: quick_timer(save_label)
+  QuickTimer --> StressScript: timer context
+  StressScript -> PersistFn: persist_dataframe(strategy, df, table)
+  PersistFn -> PersistFn: _collect_columns(df)
+  PersistFn -> StrategyClass: hasattr bulk_insert_arrow_bcp?
+  alt Arrow path
+    PersistFn -> PersistFn: _prepare_arrow_payload(df)
+    PersistFn -> ArrowBridgeModule: prepare_for_bcp(df)
+    ArrowBridgeModule --> PersistFn: Arrow IPC bytes
+    PersistFn -> StrategyClass: bulk_insert_arrow_bcp(table, payload, batch_size, table_hint)
+  else fallback
+    PersistFn -> StrategyClass: bulk_upsert(table, columns, df, key_column, batch_size, table_hint)
+    alt bulk_upsert missing
+      PersistFn -> StrategyClass: bulk_insert(table, columns, df, batch_size, table_hint)
+    end
+  end
+  PersistFn --> StressScript: done
+  StressScript -> QuickTimer: __exit__()
+
+  alt bytes > 0 and save_duration > 0
+    StressScript -> UtilsModule: calculate_rate(bytes, seconds)
+    UtilsModule --> StressScript: throughput string
+  end
+
+  StressScript --> Operator: progress + final metrics
+end
 @enduml

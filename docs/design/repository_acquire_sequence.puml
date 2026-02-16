@@ -1,0 +1,61 @@
+@startuml RepositoryAcquireSequence
+skinparam shadowing false
+skinparam classAttributeIconSize 0
+autonumber
+
+actor Caller
+participant "acquire_repository(conn)" as AcquireFn
+participant "ConnectionString" as ConnParser
+participant "RepositoryBuilder" as Builder
+participant "Registry (recipes)" as RecipeRegistry
+participant "Factory (strategies)" as StrategyFactory
+participant "PolicyRegistry" as PolicyRegistry
+participant "QueryPolicy" as QueryPolicy
+participant "ConnectionPolicy" as ConnPolicy
+participant "ExecutionPolicy" as ExecPolicy
+participant "RepositoryFacade" as Facade
+
+Caller -> AcquireFn: acquire_repository(conn)
+AcquireFn -> ConnParser: ConnectionString(conn)
+ConnParser --> AcquireFn: DbTarget{vendor, options}
+AcquireFn -> Builder: RepositoryBuilder()
+
+AcquireFn -> PolicyRegistry: resolve(DbTarget.vendor)
+PolicyRegistry --> AcquireFn: PolicySet{QueryPolicy, ConnectionPolicy, ExecutionPolicy}
+AcquireFn -> Builder: add_policy(QueryPolicy)
+AcquireFn -> Builder: add_policy(ConnectionPolicy)
+AcquireFn -> Builder: add_policy(ExecutionPolicy)
+
+AcquireFn -> RecipeRegistry: get(recipe)
+RecipeRegistry --> AcquireFn: RecipeFn
+AcquireFn -> StrategyFactory: create(strategy_key, conn)
+StrategyFactory --> AcquireFn: Strategy
+AcquireFn -> Builder: set_strategy(Strategy)
+
+AcquireFn -> Builder: build()
+Builder --> AcquireFn: RepositoryFacade
+AcquireFn --> Caller: RepositoryFacade
+
+alt vendor == "mssql"
+  QueryPolicy -> QueryPolicy: MssqlQueryPolicy
+  ConnPolicy -> ConnPolicy: OdbcConnectionPolicy
+  ExecPolicy -> ExecPolicy: MssqlExecutionPolicy
+else vendor == "postgres"
+  QueryPolicy -> QueryPolicy: PostgresQueryPolicy
+  ConnPolicy -> ConnPolicy: PgConnectionPolicy
+  ExecPolicy -> ExecPolicy: PostgresExecutionPolicy
+end
+
+note right of RecipeRegistry
+  Registry uses pybind11 today.
+  Target: C++ core registry
+  with optional Python facade.
+end note
+
+note right of StrategyFactory
+  Factory uses pybind11 today.
+  Target: C++ core factory
+  with optional Python facade.
+end note
+
+@enduml

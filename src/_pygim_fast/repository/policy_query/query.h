@@ -164,6 +164,7 @@ public:
     static Query make_for_connection(std::string_view conn);
 
 private:
+    friend class Query;
     template <typename Policy>
     static std::unique_ptr<Query::Concept> make_model();
 };

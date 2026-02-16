@@ -1,0 +1,30 @@
+@startuml
+skinparam classAttributeIconSize 0
+
+class Repository<Provider> {
+    +run(sql)
+}
+
+class ProviderConcept <<concept>>
+class QueryConcept <<concept>>
+class ConnectionConcept <<concept>>
+
+class MssqlProvider
+class PostgresProvider
+class MssqlQuery
+class PostgresQuery
+class MssqlConnection
+class PostgresConnection
+
+Repository<Provider> --> ProviderConcept
+ProviderConcept --> QueryConcept
+ProviderConcept --> ConnectionConcept
+QueryConcept <|-- MssqlQuery
+QueryConcept <|-- PostgresQuery
+ConnectionConcept <|-- MssqlConnection
+ConnectionConcept <|-- PostgresConnection
+MssqlProvider --> MssqlQuery
+MssqlProvider --> MssqlConnection
+PostgresProvider --> PostgresQuery
+PostgresProvider --> PostgresConnection
+@enduml

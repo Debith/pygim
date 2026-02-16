@@ -2,14 +2,18 @@
 
 #include <stdexcept>
 
+#include "../../../utils/logging.h"
+
 namespace pygim::detail {
 
 IterableRowSource::IterableRowSource(py::object rows, size_t expected_columns)
     : expected_columns_(expected_columns) {
+    PYGIM_SCOPE_LOG_TAG("repo.batch_source");
     consume_rows(std::move(rows));
 }
 
 void IterableRowSource::consume_rows(py::object rows) {
+    PYGIM_SCOPE_LOG_TAG("repo.batch_source");
     for (py::handle handle : rows) {
         py::object row_obj = py::reinterpret_borrow<py::object>(handle);
         if (!py::isinstance<py::sequence>(row_obj)) {
@@ -24,6 +28,7 @@ void IterableRowSource::consume_rows(py::object rows) {
 }
 
 py::object IterableRowSource::get_value(size_t row, size_t col) const {
+    PYGIM_SCOPE_LOG_TAG("repo.batch_source");
     if (row >= rows_.size() || col >= expected_columns_) {
         throw std::out_of_range("IterableRowSource index out of range");
     }
@@ -32,6 +37,7 @@ py::object IterableRowSource::get_value(size_t row, size_t col) const {
 
 PolarsRowSource::PolarsRowSource(py::object df, std::vector<std::string> columns)
     : df_(std::move(df)), columns_(std::move(columns)) {
+    PYGIM_SCOPE_LOG_TAG("repo.batch_source");
     row_count_ = df_.attr("height").cast<size_t>();
     views_.reserve(columns_.size());
     for (const auto &col_name : columns_) {
@@ -44,6 +50,7 @@ PolarsRowSource::PolarsRowSource(py::object df, std::vector<std::string> columns
 PolarsRowSource::ColumnView PolarsRowSource::build_column_view(const py::object &series,
                                                                const std::string &dtype,
                                                                size_t total_rows) const {
+    PYGIM_SCOPE_LOG_TAG("repo.batch_source");
     if (dtype.find("Int") != std::string::npos) {
         py::array arr = series.attr("to_numpy")().cast<py::array>();
         return ColumnView{ColumnKind::I64, arr, {}};
@@ -66,6 +73,7 @@ PolarsRowSource::ColumnView PolarsRowSource::build_column_view(const py::object 
 }
 
 py::object PolarsRowSource::get_value(size_t row, size_t col) const {
+    PYGIM_SCOPE_LOG_TAG("repo.batch_source");
     if (row >= row_count_ || col >= columns_.size()) {
         throw std::out_of_range("PolarsRowSource index out of range");
     }

@@ -1,0 +1,30 @@
+@startuml
+skinparam classAttributeIconSize 0
+
+class RepositoryBridge {
+    - DbProvider provider
+    +run(QuerySpec)
+}
+
+interface DbProvider {
+    +connections() : ConnectionStrategy
+    +execute(QuerySpec) : QueryResult
+}
+
+interface ConnectionStrategy {
+    +acquire() : ConnectionHandle
+}
+
+class PostgresProvider
+class MssqlProvider
+class PgConnectionStrategy
+class MsConnectionStrategy
+
+RepositoryBridge --> DbProvider
+DbProvider <|-- PostgresProvider
+DbProvider <|-- MssqlProvider
+PostgresProvider --> PgConnectionStrategy
+MssqlProvider --> MsConnectionStrategy
+ConnectionStrategy <|-- PgConnectionStrategy
+ConnectionStrategy <|-- MsConnectionStrategy
+@enduml

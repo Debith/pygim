@@ -57,23 +57,13 @@ class Repository {
   +bulk_upsert(...)
 }
 class Query {
-  -m_columns: list[str]
-  -m_table: str
-  -m_whereClauses: list[str]
-  -m_limit: int?
   +select(columns)
   +from_table(name)
   +where(clause, param)
   +limit(n)
   +build()
-}
-class ConnectionStringFactory {
-  +coerce(value)
-}
-class MemoryStrategy {
-  -_store: dict
-  +fetch(key)
-  +save(key, value)
+  +sql()
+  +params()
 }
 }
 
@@ -124,8 +114,6 @@ class StatementBinder {
 StressTestScript --> ArgparseModule : parser usage
 StressTestScript --> Repository : creates via bindings
 StressTestScript --> Query : build queries
-StressTestScript --> ConnectionStringFactory : coerce()
-StressTestScript --> MemoryStrategy : optional
 StressTestScript --> GenDataModule : generate_polars_dataset()
 GenDataModule --> PolarsDataFrame
 StressTestScript --> PolarsDataFrame : with_columns

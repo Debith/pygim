@@ -7,7 +7,7 @@
 
 #include <pybind11/pybind11.h>
 
-#include "../../generic/query.h"
+#include "../../policy_query/query.h"
 
 namespace pygim::detail {
 

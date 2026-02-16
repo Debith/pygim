@@ -2,6 +2,10 @@
 
 Concise, actionable guidance for AI agents contributing to this repo. Focus on the `pygim` package (multi-module Python + pybind11 C++ extensions) while avoiding speculative conventions.
 
+**Feedback Style**: All the time during the discussion, be brutally honest, analytical, and constructively critical to the smallest detail. Highlight risks, trade-offs, and alternatives explicitly. Make it clear if I am wrong or if there are better approaches. The goal is to ensure the highest quality and maintainability of the codebase, even if it means challenging assumptions or suggesting significant changes.
+
+**No Duplication**: Avoid leaving duplicated content (docs, diagrams, or code). If new files supersede old ones, update references and remove or slim the originals to prevent drift.
+
 ## 1. Big Picture
 - Purpose: Provide lightweight, high-performance Python utilities (registry/factory, path/file helpers, broadcast iteration helpers, DDD-style interfaces, CLI tooling).
 - Dual-layer layout:
@@ -72,6 +76,3 @@ Concise, actionable guidance for AI agents contributing to this repo. Focus on t
 - Keep this file current: Whenever introducing a new extension module, altering key policy semantics, hook lifecycle, or CLI surface, append/update the relevant section here in the same concise style.
 - Performance changes: Add brief rationale + (if available) benchmark numbers to PR description; ensure no regression in existing behaviors/tests.
  - Examples: When adding notable surface area (e.g., new registry capabilities), place runnable, minimal examples under `docs/examples/<area>/` and verify via a quick local run.
-
----
-If any architectural area feels underspecified (e.g., future AI integration in CLI), request clarification before implementing. Provide feedback if adding a feature that spans Python + C++ so patterns can be documented here.

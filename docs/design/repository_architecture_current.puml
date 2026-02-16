@@ -1,0 +1,47 @@
+@startuml RepositoryArchitecture_Current
+skinparam shadowing false
+skinparam classAttributeIconSize 0
+title Repository Architecture (Current)
+
+package "pygim (pybind bindings)" as pybind_pkg {
+  class Repository {
+    -m_strategies : list
+    -m_enable_transformers : bool
+    -m_factory : callable
+    +add_strategy(strategy)
+    +fetch_raw(key)
+    +save(key, value)
+    +bulk_insert(...)
+    +bulk_upsert(...)
+  }
+
+  class Query {
+    +select(cols)
+    +from_table(table)
+    +where(clause, param)
+    +limit(n)
+    +build() : Query
+    +sql() : const std::string&
+    +params() : std::vector<PyObj>
+  }
+}
+
+package "mssql_strategy (pybind)" as mssql_pkg {
+  class MssqlStrategyNative {
+    +fetch(key)
+    +save(key, value)
+    +bulk_insert(table, columns, rows, batch_size, table_hint)
+    +bulk_upsert(table, columns, rows, key_column, batch_size, table_hint)
+    +bulk_insert_arrow_bcp(table, arrow_ipc_bytes, batch_size, table_hint)
+  }
+}
+
+Repository -down-> MssqlStrategyNative : add_strategy/dispatch
+Repository -down-> Query : fetch_raw(query)
+
+note right of Repository
+  Current implementation uses pybind11
+  and Python objects in the hot path.
+end note
+
+@enduml

@@ -3,16 +3,19 @@
 #include <stdexcept>
 
 #include "../mssql_strategy.h"
+#include "../../../utils/logging.h"
 
 namespace pygim::detail {
 
 TransactionGuard::TransactionGuard(SQLHDBC dbc) : dbc_(dbc) {
+    PYGIM_SCOPE_LOG_TAG("repo.transaction");
     SQLINTEGER outlen = 0;
     SQLGetConnectAttr(dbc_, SQL_ATTR_AUTOCOMMIT, &previous_mode_, 0, &outlen);
     SQLSetConnectAttr(dbc_, SQL_ATTR_AUTOCOMMIT, (SQLPOINTER)SQL_AUTOCOMMIT_OFF, 0);
 }
 
 TransactionGuard::~TransactionGuard() {
+    PYGIM_SCOPE_LOG_TAG("repo.transaction");
     if (active_) {
         rollback();
     }
@@ -20,6 +23,7 @@ TransactionGuard::~TransactionGuard() {
 }
 
 void TransactionGuard::commit() {
+    PYGIM_SCOPE_LOG_TAG("repo.transaction");
     if (!active_) {
         return;
     }
@@ -31,6 +35,7 @@ void TransactionGuard::commit() {
 }
 
 void TransactionGuard::rollback() {
+    PYGIM_SCOPE_LOG_TAG("repo.transaction");
     if (!active_) {
         return;
     }

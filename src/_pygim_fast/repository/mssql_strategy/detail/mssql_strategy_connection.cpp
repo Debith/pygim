@@ -1,21 +1,25 @@
 #include "../mssql_strategy.h"
 #include "helpers.h"
+#include "../../../utils/logging.h"
 
 namespace pygim {
 
 MssqlStrategyNative::MssqlStrategyNative(std::string conn) : m_conn_str(std::move(conn)) {
+    PYGIM_SCOPE_LOG_TAG("repo.connection");
 #if PYGIM_HAVE_ODBC
     init_handles();
 #endif
 }
 
 MssqlStrategyNative::~MssqlStrategyNative() {
+    PYGIM_SCOPE_LOG_TAG("repo.connection");
 #if PYGIM_HAVE_ODBC
     cleanup_handles();
 #endif
 }
 
 std::string MssqlStrategyNative::repr() const {
+    PYGIM_SCOPE_LOG_TAG("repo.connection");
 #if PYGIM_HAVE_ODBC
     return "MssqlStrategyNative(conn_str=***hidden***)";
 #else
@@ -25,6 +29,7 @@ std::string MssqlStrategyNative::repr() const {
 
 #if PYGIM_HAVE_ODBC
 void MssqlStrategyNative::init_handles() {
+    PYGIM_SCOPE_LOG_TAG("repo.connection");
     if (SQLAllocHandle(SQL_HANDLE_ENV, SQL_NULL_HANDLE, &m_env) != SQL_SUCCESS) {
         throw std::runtime_error("ODBC: Failed to allocate env handle");
     }
@@ -35,6 +40,7 @@ void MssqlStrategyNative::init_handles() {
 }
 
 void MssqlStrategyNative::cleanup_handles() {
+    PYGIM_SCOPE_LOG_TAG("repo.connection");
     if (m_dbc != SQL_NULL_HDBC) {
         SQLDisconnect(m_dbc);
         SQLFreeHandle(SQL_HANDLE_DBC, m_dbc);
@@ -51,6 +57,7 @@ void MssqlStrategyNative::cleanup_handles() {
 }
 
 void MssqlStrategyNative::ensure_connected() {
+    PYGIM_SCOPE_LOG_TAG("repo.connection");
     SQLRETURN ret;
     SQLSMALLINT outstrlen = 0;
     if (m_dbc == SQL_NULL_HDBC)
@@ -73,6 +80,7 @@ void MssqlStrategyNative::ensure_connected() {
 }
 
 void MssqlStrategyNative::raise_if_error(SQLRETURN ret, SQLSMALLINT type, SQLHANDLE handle, const char *what) {
+    PYGIM_SCOPE_LOG_TAG("repo.connection");
     if (SQL_SUCCEEDED(ret))
         return;
     SQLCHAR state[6];
@@ -89,6 +97,7 @@ void MssqlStrategyNative::raise_if_error(SQLRETURN ret, SQLSMALLINT type, SQLHAN
 }
 
 bool MssqlStrategyNative::is_valid_identifier(const std::string &s) {
+    PYGIM_SCOPE_LOG_TAG("repo.connection");
     return detail::is_valid_identifier(s);
 }
 #endif

@@ -3,6 +3,8 @@
 #include <algorithm>
 #include <stdexcept>
 
+#include "../../../utils/logging.h"
+
 namespace pygim::detail {
 
 namespace {
@@ -26,6 +28,7 @@ BatchSpec::BatchSpec(std::string table,
       table_hint_(std::move(table_hint)),
       batch_size_(batch_size > 0 ? batch_size : kDefaultBatchSize),
       param_limit_(param_limit > 0 ? param_limit : kDefaultParamLimit) {
+        PYGIM_SCOPE_LOG_TAG("repo.batch_spec");
     if (table_.empty()) {
         throw std::invalid_argument("BatchSpec: table name cannot be empty");
     }
@@ -41,10 +44,12 @@ BatchSpec::BatchSpec(std::string table,
 }
 
 size_t BatchSpec::column_count() const noexcept {
+    PYGIM_SCOPE_LOG_TAG("repo.batch_spec");
     return columns_.size();
 }
 
 int BatchSpec::rows_per_stmt() const noexcept {
+    PYGIM_SCOPE_LOG_TAG("repo.batch_spec");
     const int cols = static_cast<int>(column_count());
     if (cols <= 0) {
         return 0;
@@ -54,6 +59,7 @@ int BatchSpec::rows_per_stmt() const noexcept {
 }
 
 TableSpec BatchSpec::to_table_spec() const {
+    PYGIM_SCOPE_LOG_TAG("repo.batch_spec");
     TableSpec spec;
     spec.name = table_;
     spec.columns = columns_;

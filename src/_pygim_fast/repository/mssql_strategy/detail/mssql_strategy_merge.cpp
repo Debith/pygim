@@ -4,6 +4,7 @@
 #include "mssql_batch_source.h"
 #include "mssql_batch_spec.h"
 #include "mssql_bulk_upsert_impl.h"
+#include "../../../utils/logging.h"
 
 namespace py = pybind11;
 
@@ -17,6 +18,7 @@ void MssqlStrategyNative::bulk_upsert(const std::string &table,
                                       const std::string &key_column,
                                       int batch_size,
                                       const std::string &table_hint) {
+    PYGIM_SCOPE_LOG_TAG("repo.merge");
     ensure_connected();
     if (!is_valid_identifier(table)) {
         throw std::runtime_error("Invalid table identifier");
@@ -47,6 +49,7 @@ void MssqlStrategyNative::upsert_polars_impl(const std::string &table,
                                              const std::string &key_column,
                                              int batch_size,
                                              const std::string &table_hint) {
+    PYGIM_SCOPE_LOG_TAG("repo.merge");
     detail::BatchSpec spec(table, columns, key_column, table_hint, batch_size);
     detail::PolarsRowSource source(df, columns);
     detail::bulk_upsert_impl(m_dbc, spec, source);
