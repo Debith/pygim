@@ -1,0 +1,102 @@
+@startuml FactoryCurrentSequenceDiagram
+skinparam shadowing false
+hide footbox
+skinparam sequenceMessageAlign center
+autonumber
+title Factory Current Sequence (1-to-1 from factory.h)
+
+actor "Python Caller" as Caller
+participant "Factory" as Factory
+participant "CreatorRegistry (RegistryT<...,false>)" as Registry
+participant "unordered_map m_map" as Map
+participant "py::function creator" as Creator
+participant "py::module_" as PyModule
+
+== register_creator ==
+group register_creator(name, func, override)
+  Caller -> Factory : register_creator(name, func, override)
+  alt override == true
+    Factory -> Registry : contains(name)
+    Registry -> Map : find(name)
+    alt missing
+      Factory --> Caller : throw Cannot override non-existent creator
+    else exists
+      Factory -> Registry : upsert_value(name, func)
+      Registry -> Map : insert_or_assign(name, func)
+      Factory --> Caller : success
+    end
+  else override == false
+    Factory -> Registry : contains(name)
+    Registry -> Map : find(name)
+    alt exists
+      Factory --> Caller : throw Creator already registered
+    else missing
+      Factory -> Registry : register_value(name, func)
+      Registry -> Map : emplace(name, func)
+      Factory --> Caller : success
+    end
+  end
+end
+
+note right of Factory
+Group purpose:
+- Enforces override contract.
+- Delegates creator persistence to RegistryT backend.
+end note
+
+== getitem / create ==
+group create(name, args, kwargs)
+  Caller -> Factory : create(name, args, kwargs)
+  Factory -> Factory : getitem(name)
+  Factory -> Registry : try_get(name)
+  Registry -> Map : find(name)
+  alt found
+    Registry --> Factory : py::function*
+    Factory -> Creator : creator(*args, **kwargs)
+    Creator --> Factory : py::object obj
+    alt m_interface set
+      Factory -> Factory : py::isinstance(obj, *m_interface)
+      alt validation fails
+        Factory --> Caller : throw interface/protocol error
+      else validation passes
+        Factory --> Caller : obj
+      end
+    else m_interface not set
+      Factory --> Caller : obj
+    end
+  else not found
+    Registry --> Factory : nullptr
+    Factory --> Caller : throw Unknown creator
+  end
+end
+
+note right of Factory
+Group purpose:
+- Resolves callable from registry.
+- Executes creator with Python args/kwargs.
+- Optionally validates created object.
+end note
+
+== introspection ==
+group registered_callables()
+  Caller -> Factory : registered_callables()
+  Factory -> Registry : keys()
+  Registry -> Map : iterate keys
+  Registry --> Factory : vector<string>
+  Factory --> Caller : vector<string>
+end
+
+== module side-effect registration ==
+group use_module(module_name)
+  Caller -> Factory : use_module(module_name)
+  Factory -> PyModule : import(module_name)
+  PyModule --> Factory : module loaded (or throws)
+  Factory --> Caller : success
+end
+
+note right of PyModule
+Group purpose:
+- Allows plugin-style registration via import side effects.
+end note
+
+@enduml

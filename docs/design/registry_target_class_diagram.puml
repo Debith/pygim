@@ -1,0 +1,114 @@
+@startuml RegistryTargetClassDiagram
+skinparam shadowing false
+skinparam classAttributeIconSize 0
+title Registry Target State (compile-time first, pybind isolated)
+
+package "core::registry (pybind-free)" {
+  class StringKey {
+    +id : std::string
+    +variant : std::string
+  }
+
+  class QualnameKeyBuilder {
+    {static} +from_type(T, variant="") : StringKey
+    {static} +from_id(id, variant="") : StringKey
+  }
+
+  class IdentityKeyBuilder {
+    {static} +from_address(addr, variant="") : StringKey
+  }
+
+  class NoHooks {
+    +on_register(k,v)
+    +on_pre(k,v)
+    +on_post(k,v)
+  }
+
+  class HooksBundle {
+    +template<Key, Value>
+    +on_register : vector<fn>
+    +on_pre : vector<fn>
+    +on_post : vector<fn>
+    +run_register(k,v)
+    +run_pre(k,v)
+    +run_post(k,v)
+  }
+
+  class RegistryCore {
+    +template<Key, Value, Hooks=NoHooks>
+    -m_map : unordered_map(Key,Value)
+    -m_hooks : Hooks
+    +contains(k) : bool
+    +try_get(k) : Value*
+    +try_get_const(k) : const Value* (no_pre_hook)
+    +register_or_override(k,v,override)
+    +size() : size_t
+    +keys() : vector(Key)
+  }
+
+  class KeyPolicyConcept <<concept>> {
+    +requires hashable key
+    +requires equality comparable
+    +requires builder(key input -> key)
+  }
+
+  class HookPolicyConcept <<concept>> {
+    +requires on_register/on_pre/on_post signatures
+  }
+
+  class CompileTimeConfig {
+    +EnableHooks : bool constexpr
+    +EnablePreHook : bool constexpr
+  }
+}
+
+package "adapter::python (thin)" {
+  class PyRegistryAdapter {
+    -m_core : RegistryCore(StringKey, PyObject, Hooks)
+    +register_or_override(py_key, py_value, override)
+    +get(py_key) : py::object
+    +contains(py_key) : bool
+    +registered_keys() : py::list
+    +on_register(py::function)
+    +on_pre(py::function)
+    +on_post(py::function)
+  }
+
+  class PyKeyTranslator {
+    +to_core_key(py::object) : StringKey
+    +to_py_key(StringKey) : py::tuple
+  }
+}
+
+RegistryCore -down-> KeyPolicyConcept : constrained by
+RegistryCore -down-> HookPolicyConcept : constrained by
+RegistryCore -down-> CompileTimeConfig : constexpr behavior gates
+RegistryCore -down-> NoHooks : default hooks policy
+RegistryCore -down-> HooksBundle : optional hooks policy
+QualnameKeyBuilder -down-> StringKey
+IdentityKeyBuilder -down-> StringKey
+PyRegistryAdapter -down-> RegistryCore : delegates operations
+PyRegistryAdapter -down-> PyKeyTranslator : converts keys only
+
+note right of RegistryCore
+Compile-time requirements:
+- Key satisfies KeyPolicyConcept
+- Hooks satisfy HookPolicyConcept
+- Const try_get only when no pre-hook mutation path
+- Hook code paths compiled out with NoHooks policy
+end note
+
+note right of PyRegistryAdapter
+Runtime boundary only:
+- Python key/value conversion
+- Python callback registration
+- No core storage logic in adapter
+end note
+
+legend bottom right
+|= Layer |= Meaning |
+| core::registry | C++20 compile-time core |
+| adapter::python | Thin pybind-facing adapter |
+endlegend
+
+@enduml

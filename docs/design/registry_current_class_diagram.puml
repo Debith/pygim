@@ -1,0 +1,167 @@
+@startuml RegistryCurrentClassDiagram
+skinparam shadowing false
+skinparam classAttributeIconSize 0
+title Registry (Current Implementation, 1-to-1 from registry.h)
+
+package "pygim" {
+
+  class "PyIdentityKeyPolicy" as PyIdentityKeyPolicy {
+    +key_type { ptr: PyObject*, name: std::string }
+    +Hash::operator()(key_type) : size_t
+    +Eq::operator()(key_type,key_type) : bool
+    +make_from_python(py::object, std::string) : key_type
+  }
+
+  class "QualnameKeyPolicy" as QualnameKeyPolicy {
+    +key_type { id: std::string, name: std::string }
+    +Hash::operator()(key_type) : size_t
+    +Eq::operator()(key_type,key_type) : bool
+    +make_from_python(py::object, std::string) : key_type
+    +make_from_id(std::string, std::string) : key_type
+  }
+
+  class "Hooks<K,V,true>" as HooksEnabled {
+    +on_register : vector<OnRegister>
+    +on_pre : vector<OnPre>
+    +on_post : vector<OnPost>
+    +run_register(k,v)
+    +run_pre(k,v)
+    +run_post(k,obj)
+    +add_on_register(f)
+    +add_on_pre(f)
+    +add_on_post(f)
+  }
+
+  class "Hooks<K,V,false>" as HooksDisabled {
+    +run_register(...)
+    +run_pre(...)
+    +run_post(...)
+    +add_on_register(...)
+    +add_on_pre(...)
+    +add_on_post(...)
+  }
+
+  class "RegistryT<KeyPolicy,Value,EnableHooks=false>" as RegistryT {
+    -m_map : unordered_map<key_type, Value, Hash, Eq>
+    -m_hooks : Hooks<key_type,Value,EnableHooks>
+    +register_value(k,v)
+    +upsert_value(k,v)
+    +contains(k) : bool
+    +try_get(k) : Value*
+    +try_get(k) const requires(!EnableHooks) : const Value*
+    +post(k,obj)
+    +size() : size_t
+    +keys() : vector<key_type>
+    +for_each_key(f)
+    +add_on_register(f)
+    +add_on_pre(f)
+    +add_on_post(f)
+  }
+
+  enum "KeyPolicyKind" as KeyPolicyKind {
+    Qualname = 0
+    Identity = 1
+  }
+
+  class "detail::to_py_tuple (utility overloads)" as ToPyTuple {
+    +to_py_tuple(QualnameKeyPolicy::key_type) : py::object
+    +to_py_tuple(PyIdentityKeyPolicy::key_type) : py::object
+  }
+
+  class "Registry" as Registry {
+    -m_var : variant<R_QN_No,R_QN_Yes,R_ID_No,R_ID_Yes>
+    -m_policy : KeyPolicyKind
+    -m_hooks : bool
+    -make_key<R>(py::object) : R::Policy::key_type
+    -register_key(key,value)
+    -upsert_key(key,value)
+    +Registry(hooks=false, policy=Qualname, capacity=0)
+    +size() : size_t
+    +get(key) : py::object
+    +contains(key) : bool
+    +register_or_override(key,value,override)
+    +repr() : std::string
+    +registered_keys() : py::list
+    +find_id(id,name=None) : py::object
+    +post(key,obj)
+    +on_register(py::function)
+    +on_pre(py::function)
+    +on_post(py::function)
+  }
+
+    note right of PyIdentityKeyPolicy
+    Why needed:
+    - Key model based on PyObject identity
+    - Prevents string-id path for identity mode
+    - Stable hashing/equality for (ptr,name)
+    end note
+
+    note right of QualnameKeyPolicy
+    Why needed:
+    - Key model based on module.qualname
+    - Supports direct string ids for ergonomic lookup
+    - Deterministic hashing/equality for (id,name)
+    end note
+
+    note right of HooksEnabled
+    Why needed:
+    - Stores lifecycle callbacks
+    - Executes register/pre/post hooks
+    - Keeps hook behavior local and composable
+    end note
+
+    note right of HooksDisabled
+    Why needed:
+    - Compiles hook paths away
+    - Preserves API surface with no-op methods
+    - Enables zero-overhead non-hook builds
+    end note
+
+    note right of RegistryT
+    Why needed:
+    - Single generic storage + key policy abstraction
+    - Optional compile-time hook integration
+    - Core operations are policy-agnostic
+    - Uses [[no_unique_address]] on hooks storage
+    - Const try_get gated by requires(!EnableHooks)
+    end note
+
+    note right of KeyPolicyKind
+    Why needed:
+    - Runtime selector for wrapper construction
+    - Drives variant choice (qualname vs identity)
+    end note
+
+    note right of ToPyTuple
+    Why needed:
+    - Adapts C++ key structs to Python-visible tuples
+    - Normalizes hook callback key payload
+    end note
+
+    note right of Registry
+    Why needed:
+    - Python-facing façade over template variants
+    - Enforces Python key semantics and errors
+    - Provides stable repr/introspection API
+    - make_key<R> uses if constexpr by policy type
+    end note
+
+    note bottom of Registry
+    Compile-time mechanisms currently used:
+    - template policy/value/hooks specialization
+    - if constexpr policy dispatch in make_key<R>
+    - requires-clause on const try_get
+    - [[no_unique_address]] for hook storage elision
+    end note
+
+}
+
+RegistryT -down-> PyIdentityKeyPolicy : Policy alias may resolve to
+RegistryT -down-> QualnameKeyPolicy : Policy alias may resolve to
+RegistryT -down-> HooksEnabled : m_hooks when EnableHooks=true
+RegistryT -down-> HooksDisabled : m_hooks when EnableHooks=false
+Registry -down-> RegistryT : m_var stores concrete RegistryT variants
+Registry -down-> KeyPolicyKind : runtime policy selector
+Registry -down-> ToPyTuple : hook/introspection tuple conversion
+
+@enduml

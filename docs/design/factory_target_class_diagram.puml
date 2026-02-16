@@ -1,0 +1,94 @@
+@startuml FactoryTargetClassDiagram
+skinparam shadowing false
+skinparam classAttributeIconSize 0
+title Factory Target State (compile-time core, pybind isolated)
+
+package "core::factory (pybind-free)" {
+  class CreatorConcept <<concept>> {
+    +template<Product, Args...>
+    +requires invocable(args...)
+    +requires result convertible_to<Product>
+  }
+
+  class ProductPolicyConcept <<concept>> {
+    +template<Product>
+    +requires validator(obj) returns bool
+  }
+
+  class RegistryCore {
+    +template<Key, Creator>
+    +register_value(key, creator, override=false)
+    +contains(key) : bool
+    +try_get(key) : Creator*
+    +keys() : vector(Key)
+  }
+
+  class FactoryCore {
+    +template<Key, Product, Creator, Validator, Args...>
+    -m_registry : RegistryCore(Key, Creator)
+    -m_validator : Validator
+    +register_creator(name, creator, override=false)
+    +create(name, args...) : Product
+    +registered_names() : vector(Key)
+  }
+
+  class NoValidation {
+    +template<Product>
+    +operator()(const Product&) : bool
+  }
+
+  class TypeValidator {
+    +template<Product, InterfaceTag>
+    +operator()(const Product&) : bool
+  }
+}
+
+package "adapter::python (thin)" {
+  class "PyFactoryAdapter" as PyFactoryAdapter {
+    -m_core : FactoryCore(...)
+    -m_py_interface : optional(PyObject)
+    +register_creator(name, py::function, override=false)
+    +create(name, py::args, py::kwargs) : py::object
+    +registered_callables() : py::list
+    +use_module(module_name)
+  }
+
+  class "PyCreatorBridge" as PyCreatorBridge {
+    +from_py_function(py::function) : Creator
+  }
+
+  class "PyObjectValidator" as PyObjectValidator {
+    +validate(obj, interface) : bool
+  }
+}
+
+FactoryCore -down-> RegistryCore : creator storage backend
+FactoryCore -down-> CreatorConcept : creator constraints
+FactoryCore -down-> ProductPolicyConcept : validator constraints
+FactoryCore -down-> NoValidation : default policy option
+FactoryCore -down-> TypeValidator : typed validation option
+PyFactoryAdapter -down-> FactoryCore : delegates construction
+PyFactoryAdapter -down-> PyCreatorBridge : converts py::function
+PyFactoryAdapter -down-> PyObjectValidator : python-specific isinstance check
+
+note right of FactoryCore
+Compile-time requirements:
+- Creator satisfies invocable contract.
+- Product + validator satisfy policy concept.
+- Validation strategy selected via template parameter.
+end note
+
+note right of PyFactoryAdapter
+Runtime boundary only:
+- Python call bridging (args/kwargs).
+- Optional Python protocol/interface checks.
+- No creator registry semantics in adapter.
+end note
+
+legend bottom right
+|= Layer |= Meaning |
+| core::factory | C++20 compile-time core |
+| adapter::python | Thin pybind-facing adapter |
+endlegend
+
+@enduml
