@@ -1,0 +1,69 @@
+@startuml RegistryTargetSequenceDiagram
+skinparam shadowing false
+hide footbox
+autonumber
+title Registry Target Sequence (compile-time core + runtime adapter)
+
+actor "Python Caller" as Caller
+participant "PyRegistryAdapter" as PyAdapter
+participant "PyKeyTranslator" as Translator
+participant "RegistryCore<Key,Value,HooksPolicy>" as Core
+participant "HooksPolicy (NoHooks|HooksBundle)" as Hooks
+participant "unordered_map" as Map
+
+group register_or_override(py_key, py_value, override)
+  Caller -> PyAdapter : register_or_override(py_key, py_value, override)
+  PyAdapter -> Translator : to_core_key(py_key)
+  Translator --> PyAdapter : core_key
+  PyAdapter -> Core : register_or_override(core_key, py_value, override)
+  Core -> Map : find(core_key)
+  alt exists && !override
+    Core --> PyAdapter : duplicate error
+    PyAdapter --> Caller : raise
+  else !exists && override
+    Core --> PyAdapter : override-missing error
+    PyAdapter --> Caller : raise
+  else valid path
+    Core -> Hooks : on_register(core_key, value)
+    Core -> Map : emplace/assign
+    Core --> PyAdapter : success
+    PyAdapter --> Caller : success
+  end
+end
+
+group get(py_key)
+  Caller -> PyAdapter : get(py_key)
+  PyAdapter -> Translator : to_core_key(py_key)
+  Translator --> PyAdapter : core_key
+  PyAdapter -> Core : try_get(core_key)
+  Core -> Map : find(core_key)
+  alt found
+    Core -> Hooks : on_pre(core_key, value) [compiled out when NoHooks]
+    Core --> PyAdapter : Value*
+    PyAdapter --> Caller : py::object
+  else missing
+    Core --> PyAdapter : nullptr
+    PyAdapter --> Caller : raise key-not-found
+  end
+end
+
+group registered_keys()
+  Caller -> PyAdapter : registered_keys()
+  PyAdapter -> Core : keys()
+  Core -> Map : iterate keys
+  Core --> PyAdapter : vector<Key>
+  loop each key
+    PyAdapter -> Translator : to_py_key(key)
+    Translator --> PyAdapter : py::tuple
+  end
+  PyAdapter --> Caller : py::list
+end
+
+note right of Core
+Compile-time behavior:
+- Hook calls are policy-bound.
+- NoHooks removes hook overhead.
+- Key semantics fixed by Key type + translator.
+end note
+
+@enduml
