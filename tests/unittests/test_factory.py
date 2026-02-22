@@ -98,6 +98,16 @@ def test_missing(factory):
         factory.create("nope")
 
 
+def test_getitem_missing_raises(factory):
+    with pytest.raises(RuntimeError):
+        _ = factory["missing"]
+
+
+def test_override_missing_raises(factory):
+    with pytest.raises(RuntimeError):
+        factory.register("missing", lambda: 1, override=True)
+
+
 def test_registered_callables(factory):
     factory.register("a", lambda: 1)
     factory.register("b", lambda: 2)

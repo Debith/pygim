@@ -1,0 +1,185 @@
+@startuml RegistryCurrentSequenceDiagram
+skinparam shadowing false
+hide footbox
+skinparam sequenceMessageAlign center
+autonumber
+title Registry Current Sequence (1-to-1 from registry.h)
+
+actor "Python Caller" as Caller
+participant "Registry::Registry(...)" as Ctor
+participant "Registry" as Wrapper
+participant "std::variant m_var" as Variant
+participant "make_key<R>(py::object)" as MakeKey
+participant "RegistryT<...>" as RegistryT
+participant "Hooks<...,true|false>" as Hooks
+participant "unordered_map m_map" as Map
+participant "detail::to_py_tuple" as ToPyTuple
+
+== Construction ==
+
+group Construct Registry
+  Caller -> Ctor : Registry(hooks, policy, capacity)
+  Ctor -> Wrapper : set m_policy, m_hooks
+  alt policy == Qualname
+    alt hooks == true
+      Ctor -> Variant : assign R_QN_Yes
+    else hooks == false
+      Ctor -> Variant : assign R_QN_No
+    end
+  else policy == Identity
+    alt hooks == true
+      Ctor -> Variant : assign R_ID_Yes
+    else hooks == false
+      Ctor -> Variant : assign R_ID_No
+    end
+  end
+  alt capacity > 0
+    Ctor -> Variant : visit(lambda r)
+    Variant -> Map : reserve(capacity)
+  end
+end
+
+note right of Ctor
+Why this section exists:
+- Chooses one concrete RegistryT variant
+  from (policy x hooks) at runtime.
+- Applies optional reserve(capacity).
+end note
+
+== Mutation / Lookup ==
+
+group register_or_override(key, value, override)
+  Caller -> Wrapper : register_or_override(key,value,override)
+  Wrapper -> Variant : visit(lambda r)
+  Variant -> MakeKey : make_key<R>(key)
+  MakeKey --> Variant : typed key
+  Variant -> Map : find(key)
+  alt exists && !override
+    Variant --> Caller : throw Duplicate key registration
+  else !exists && override
+    Variant --> Caller : throw override=True requires existing key
+  else exists && override
+    Variant -> Hooks : run_register(key,value)
+    Variant -> Map : it->second = value
+    Variant --> Caller : success
+  else !exists && !override
+    Variant -> RegistryT : register_value(key,value)
+    RegistryT -> Hooks : run_register(key,value)
+    RegistryT -> Map : emplace(key,value)
+    RegistryT --> Variant : done
+    Variant --> Caller : success
+  end
+end
+
+group get(key)
+  Caller -> Wrapper : get(key)
+  Wrapper -> Variant : visit(lambda r)
+  Variant -> MakeKey : make_key<R>(key)
+  MakeKey --> Variant : typed key
+  Variant -> RegistryT : try_get(key)
+  RegistryT -> Map : find(key)
+  alt found
+    RegistryT -> Hooks : run_pre(key,value)
+    RegistryT --> Variant : Value*
+    Variant --> Caller : py::object value
+  else not found
+    RegistryT --> Variant : nullptr
+    Variant --> Caller : throw Key not found in Registry
+  end
+end
+
+note right of Wrapper
+Why this section exists:
+- Enforces wrapper-level key semantics.
+- Uses one variant visit per call path.
+end note
+
+== Hook Wiring ==
+
+group on_register(f)
+  Caller -> Wrapper : on_register(py::function f)
+  Wrapper -> Variant : visit(lambda r)
+  Variant -> RegistryT : add_on_register(lambda)
+  note right of RegistryT
+  Why this callback adapter exists:
+  - Converts C++ key struct -> Python tuple
+    via detail::to_py_tuple.
+  - Calls Python function with stable key payload.
+  end note
+  RegistryT -> Hooks : push callback
+  RegistryT --> Variant : done
+  Variant --> Caller : success
+end
+
+group contains(key)
+  Caller -> Wrapper : contains(key)
+  Wrapper -> Variant : visit(const lambda r)
+  Variant -> MakeKey : make_key<R>(key)
+  MakeKey --> Variant : typed key
+  Variant -> RegistryT : contains(key)
+  RegistryT -> Map : find(key)
+  RegistryT --> Variant : bool
+  Variant --> Caller : bool
+end
+
+note right of Wrapper
+Group purpose (contains):
+- Fast existence check via make_key + contains.
+- No value retrieval, no post processing.
+end note
+
+== Introspection ==
+
+group post(key,obj)
+  Caller -> Wrapper : post(key,obj)
+  Wrapper -> Variant : visit(lambda r)
+  Variant -> MakeKey : make_key<R>(key)
+  MakeKey --> Variant : typed key
+  Variant -> RegistryT : post(key,obj)
+  RegistryT -> Hooks : run_post(key,obj)
+  RegistryT --> Variant : done
+  Variant --> Caller : success
+end
+
+note right of Wrapper
+Group purpose (post):
+- Triggers post hooks for an explicit key/object pair.
+end note
+
+group on_pre(f) / on_post(f)
+  Caller -> Wrapper : on_pre(f) or on_post(f)
+  Wrapper -> Variant : visit(lambda r)
+  Variant -> RegistryT : add_on_pre(lambda) / add_on_post(lambda)
+  RegistryT -> Hooks : push callback
+  RegistryT --> Variant : done
+  Variant --> Caller : success
+end
+
+note right of Wrapper
+Group purpose (on_pre/on_post):
+- Registers hook adapters into concrete RegistryT variant.
+end note
+
+group registered_keys()
+  Caller -> Wrapper : registered_keys()
+  Wrapper -> Variant : visit(const lambda r)
+  loop each kv in r.m_map
+    Variant -> ToPyTuple : to_py_tuple(kv.first)
+    ToPyTuple --> Variant : py::tuple
+    Variant -> Wrapper : append(tuple)
+  end
+  Wrapper --> Caller : py::list
+end
+
+note right of Wrapper
+Group purpose (registered_keys):
+- Iterates internal map and materializes Python tuples.
+end note
+
+note right of ToPyTuple
+Why this section exists:
+- Exposes internal keys as Python tuples
+  for hooks/testing/introspection.
+end note
+
+@enduml

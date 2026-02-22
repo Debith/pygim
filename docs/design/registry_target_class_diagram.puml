@@ -1,0 +1,196 @@
+@startuml RegistryTargetClassDiagram
+skinparam shadowing false
+skinparam classAttributeIconSize 0
+title Registry Target State (compile-time first, pybind isolated)
+
+package "core::registry (pybind-free)" {
+  class StringKey {
+    +id : std::string
+    +variant : std::string
+  }
+
+  class QualnameKeyBuilder {
+    {static} +from_type(T, variant="") : StringKey
+    {static} +from_id(id, variant="") : StringKey
+  }
+
+  class IdentityKeyBuilder {
+    {static} +from_address(addr, variant="") : StringKey
+  }
+
+  class NoHooks {
+    +on_register(k,v)
+    +on_pre(k,v)
+    +on_post(k,v)
+  }
+
+  class "HooksBundle<Key, Value>" as HooksBundle <<template>> {
+    +on_register : vector<fn>
+    +on_pre : vector<fn>
+    +on_post : vector<fn>
+    +run_register(k,v)
+    +run_pre(k,v)
+    +run_post(k,v)
+  }
+
+  class "RegistryCore<Key, Value, Hooks=NoHooks>" as RegistryCore <<template>> {
+    -m_map : unordered_map(Key,Value)
+    -m_hooks : Hooks
+    +contains(k) : bool
+    +try_get(k) : Value*
+    +try_get_const(k) : const Value* (no_pre_hook)
+    +register_or_override(k,v,override)
+    +size() : size_t
+    +keys() : vector(Key)
+  }
+
+  class KeyPolicyConcept <<concept>> {
+    +requires hashable key
+    +requires equality comparable
+    +requires builder(key input -> key)
+  }
+
+  class HookPolicyConcept <<concept>> {
+    +requires on_register/on_pre/on_post signatures
+  }
+
+  class CompileTimeConfig {
+    +EnableHooks : bool constexpr
+    +EnablePreHook : bool constexpr
+  }
+
+  note bottom of StringKey
+  What:
+  - Canonical key value object.
+  - Normalized id/variant pair used across policies.
+  Why:
+  - Keeps core key semantics stable and hashable.
+  - Prevents policy drift between qualname and identity paths.
+  end note
+
+  note top of QualnameKeyBuilder
+  What:
+  - Builder for qualname/id-based keys.
+  - Accepts type objects or explicit ids.
+  Why:
+  - Centralizes key construction rules.
+  - Ensures consistent string formatting for registry lookup.
+  end note
+
+  note top of IdentityKeyBuilder
+  What:
+  - Builder for identity-address keys.
+  - Uses object address or stable identity token.
+  Why:
+  - Enables identity-based policy without Python types.
+  - Avoids RTTI or Python-only inspection in core.
+  end note
+
+  note bottom of NoHooks
+  What:
+  - Null hook policy.
+  - Implements same hook API with no-op bodies.
+  Why:
+  - Compiles hook overhead away on hot paths.
+  - Keeps registry core codepath uniform.
+  end note
+
+  note bottom of HooksBundle
+  What:
+  - Concrete callback container policy.
+  - Stores register/pre/post vectors.
+  Why:
+  - Enables lifecycle hooks when explicitly configured.
+  - Keeps hook dispatch in policy, not in registry core.
+  end note
+
+  note bottom of KeyPolicyConcept
+  What:
+  - Compile-time key contract.
+  - Requires hashing, equality, and builder mapping.
+  Why:
+  - Rejects invalid key policies at compile time.
+  - Prevents runtime surprises during lookups.
+  end note
+
+  note bottom of HookPolicyConcept
+  What:
+  - Compile-time hook contract.
+  - Enforces signature and call availability.
+  Why:
+  - Enforces hook method signatures statically.
+  - Keeps hook wiring consistent across policies.
+  end note
+
+  note bottom of CompileTimeConfig
+  What:
+  - Static feature flags container.
+  - Encodes compile-time toggles for fast builds.
+  Why:
+  - Documents/tunes compile-time behavior gates.
+  - Explains when hooks and pre-hooks are present.
+  end note
+
+  note top of RegistryCore
+  Compile-time requirements:
+  - Key satisfies KeyPolicyConcept
+  - Hooks satisfy HookPolicyConcept
+  - Const try_get only when no pre-hook mutation path
+  - Hook code paths compiled out with NoHooks policy
+  - Explicit override semantics: override must replace existing
+  end note
+}
+
+package "adapter::python (thin)" {
+  class PyRegistryAdapter {
+    -m_core : RegistryCore(StringKey, PyObject, Hooks)
+    +register_or_override(py_key, py_value, override)
+    +get(py_key) : py::object
+    +contains(py_key) : bool
+    +registered_keys() : py::list
+    +on_register(py::function)
+    +on_pre(py::function)
+    +on_post(py::function)
+  }
+
+  class PyKeyTranslator {
+    +to_core_key(py::object) : StringKey
+    +to_py_key(StringKey) : py::tuple
+  }
+
+  note bottom of PyKeyTranslator
+  What:
+  - Python/core key conversion helper.
+  - Handles tuple/string/object translation.
+  Why:
+  - Isolates conversion logic from core registry.
+  - Keeps pybind boundary small and testable.
+  end note
+
+  note top of PyRegistryAdapter
+  Runtime boundary only:
+  - Python key/value conversion
+  - Python callback registration
+  - No core storage logic in adapter
+  - Delegates all lookup semantics to RegistryCore
+  end note
+
+  legend bottom right
+  |= Layer |= Meaning |
+  | core::registry | C++20 compile-time core |
+  | adapter::python | Thin pybind-facing adapter |
+  endlegend
+}
+
+RegistryCore -down-> KeyPolicyConcept : constrained by
+RegistryCore -down-> HookPolicyConcept : constrained by
+RegistryCore -down-> CompileTimeConfig : constexpr behavior gates
+RegistryCore -down-> NoHooks : default hooks policy
+RegistryCore -down-> HooksBundle : optional hooks policy
+QualnameKeyBuilder -down-> StringKey
+IdentityKeyBuilder -down-> StringKey
+PyRegistryAdapter -down-> RegistryCore : delegates operations
+PyRegistryAdapter -down-> PyKeyTranslator : converts keys only
+
+
+@enduml

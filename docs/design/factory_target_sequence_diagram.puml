@@ -1,0 +1,74 @@
+@startuml FactoryTargetSequenceDiagram
+skinparam shadowing false
+hide footbox
+autonumber
+title Factory Target Sequence (compile-time core + runtime adapter)
+
+actor "Python Caller" as Caller
+participant "PyFactoryAdapter" as PyAdapter
+participant "PyCreatorBridge" as Bridge
+participant "FactoryCore<Key,Product,...>" as Core
+participant "RegistryCore<Key,Creator>" as Registry
+participant "ValidatorPolicy" as Validator
+participant "py::module_" as PyModule
+
+group register_creator(name, py_func, override)
+  Caller -> PyAdapter : register_creator(name, py_func, override)
+  PyAdapter -> Bridge : from_py_function(py_func)
+  Bridge --> PyAdapter : Creator
+  PyAdapter -> Core : register_creator(name, Creator, override)
+  Core -> Registry : contains(name)
+  alt invalid override state
+    Core --> PyAdapter : duplicate/override-missing error
+    PyAdapter --> Caller : raise
+  else valid
+    Core -> Registry : register_value/upsert_value
+    Core --> PyAdapter : success
+    PyAdapter --> Caller : success
+  end
+end
+
+group create(name, py_args, py_kwargs)
+  Caller -> PyAdapter : create(name, py_args, py_kwargs)
+  PyAdapter -> Core : create(name, bridged_args...)
+  Core -> Registry : try_get(name)
+  alt missing creator
+    Core --> PyAdapter : unknown creator error
+    PyAdapter --> Caller : raise
+  else found
+    Core -> Core : creator(args...)
+    Core -> Validator : validate(product)
+    alt validation fails
+      Core --> PyAdapter : validation error
+      PyAdapter --> Caller : raise
+    else validation ok
+      Core --> PyAdapter : Product
+      PyAdapter --> Caller : py::object
+    end
+  end
+end
+
+group registered_callables()
+  Caller -> PyAdapter : registered_callables()
+  PyAdapter -> Core : registered_names()
+  Core -> Registry : keys()
+  Registry --> Core : vector<Key>
+  Core --> PyAdapter : vector<Key>
+  PyAdapter --> Caller : py::list
+end
+
+group use_module(module_name)
+  Caller -> PyAdapter : use_module(module_name)
+  PyAdapter -> PyModule : import(module_name)
+  PyModule --> PyAdapter : loaded or throws
+  PyAdapter --> Caller : success
+end
+
+note right of Core
+Compile-time behavior:
+- Creator invocation shape is template constrained.
+- Validation policy is compile-time selected.
+- Registry backend is core-only C++ type.
+end note
+
+@enduml

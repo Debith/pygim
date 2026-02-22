@@ -1,0 +1,66 @@
+@startuml FactoryCurrentClassDiagram
+skinparam shadowing false
+skinparam classAttributeIconSize 0
+title Factory (Current Implementation, 1-to-1 from factory.h)
+
+package "pygim" {
+
+  class "StringKeyPolicy" as StringKeyPolicy {
+    +key_type : std::string
+    +Hash::operator()(key_type) : size_t
+    +Eq::operator()(key_type,key_type) : bool
+  }
+
+  class "RegistryT<StringKeyPolicy, py::function, false>" as CreatorRegistry {
+    +register_value(k,v)
+    +upsert_value(k,v)
+    +contains(k) : bool
+    +try_get(k) : Value*
+    +keys() : vector<key_type>
+  }
+
+  class "Factory" as Factory {
+    -m_registry : CreatorRegistry
+    -m_interface : std::optional<py::object>
+    +Factory(interface = nullopt)
+    +register_creator(name, func, override=false)
+    +getitem(name) : py::function
+    +create(name, args, kwargs) : py::object
+    +registered_callables() : vector<string>
+    +use_module(module_name)
+  }
+
+  note right of StringKeyPolicy
+  Why needed:
+  - Key policy specialized for creator names.
+  - Provides hash/equality for std::string keys.
+  end note
+
+  note right of CreatorRegistry
+  Why needed:
+  - Reuses generic RegistryT as storage backend.
+  - Hooks disabled at compile time (EnableHooks=false).
+  - Stores creator callables as py::function.
+  end note
+
+  note right of Factory
+  Why needed:
+  - Python-facing object construction API.
+  - Enforces override semantics.
+  - Optionally validates created objects against interface/protocol.
+  - Triggers module import side effects for registration.
+  end note
+
+  note bottom of Factory
+  Compile-time mechanisms currently used:
+  - Alias to RegistryT<..., false> disables hook machinery.
+  - StringKeyPolicy selected at compile time.
+  Runtime mechanisms:
+  - Optional interface validation via py::isinstance.
+  end note
+}
+
+Factory -down-> CreatorRegistry : owns storage
+CreatorRegistry -down-> StringKeyPolicy : key semantics
+
+@enduml
