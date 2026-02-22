@@ -93,6 +93,20 @@ def test_missing_key_raises(registry):
         _ = registry["missing"]
 
 
+def test_key_tuple_len_must_be_2(registry):
+    def f():
+        return 1
+    with pytest.raises(TypeError):
+        registry.register(("id.only",), f)
+
+
+def test_key_name_must_be_str_or_none(registry):
+    def f():
+        return 1
+    with pytest.raises(TypeError):
+        registry.register(("id.only", 123), f)
+
+
 def test_hooks_invocation(registry):
     """Validate that hook callbacks fire only when hooks=True.
 
@@ -220,6 +234,17 @@ def test_registered_keys_and_find_id():
     def g(): return 2
     r.register("custom.id", g)
     assert r.find_id("custom.id") is g
+
+
+def test_find_id_variant_fallback_to_empty_variant():
+    r = Registry(hooks=False, policy=KeyPolicyKind.qualname)
+
+    def f():
+        return 1
+
+    # Register with empty variant name and query with non-empty variant.
+    r.register("custom.fallback", f)
+    assert r.find_id("custom.fallback", "nonempty") is f
 
 
 def test_find_id_wrong_policy(identity_registry):

@@ -4,27 +4,23 @@ skinparam classAttributeIconSize 0
 title Factory Target State (compile-time core, pybind isolated)
 
 package "core::factory (pybind-free)" {
-  class CreatorConcept <<concept>> {
-    +template<Product, Args...>
+  class "CreatorConcept<Product, Args...>" as CreatorConcept <<concept>> {
     +requires invocable(args...)
     +requires result convertible_to<Product>
   }
 
-  class ProductPolicyConcept <<concept>> {
-    +template<Product>
+  class "ProductPolicyConcept<Product>" as ProductPolicyConcept <<concept>> {
     +requires validator(obj) returns bool
   }
 
-  class RegistryCore {
-    +template<Key, Creator>
+  class "RegistryCore<Key, Creator>" as RegistryCore <<template>> {
     +register_value(key, creator, override=false)
     +contains(key) : bool
     +try_get(key) : Creator*
     +keys() : vector(Key)
   }
 
-  class FactoryCore {
-    +template<Key, Product, Creator, Validator, Args...>
+  class "FactoryCore<Key, Product, Creator, Validator, Args...>" as FactoryCore <<template>> {
     -m_registry : RegistryCore(Key, Creator)
     -m_validator : Validator
     +register_creator(name, creator, override=false)
@@ -32,15 +28,66 @@ package "core::factory (pybind-free)" {
     +registered_names() : vector(Key)
   }
 
-  class NoValidation {
-    +template<Product>
+  class "NoValidation<Product>" as NoValidation <<template>> {
     +operator()(const Product&) : bool
   }
 
-  class TypeValidator {
-    +template<Product, InterfaceTag>
+  class "TypeValidator<Product, InterfaceTag>" as TypeValidator <<template>> {
     +operator()(const Product&) : bool
   }
+
+  note bottom of CreatorConcept
+  What:
+  - Compile-time creator callable contract.
+  - Accepts Args... and returns Product-compatible type.
+  Why:
+  - Guarantees creator invocation/result shape.
+  - Eliminates runtime type probing for creators.
+  end note
+
+  note bottom of ProductPolicyConcept
+  What:
+  - Compile-time product validation contract.
+  - Validator must accept Product (or compatible) input.
+  Why:
+  - Ensures validation policy compatibility.
+  - Keeps validation pluggable without runtime RTTI.
+  end note
+
+  note bottom of RegistryCore
+  What:
+  - Creator storage backend abstraction.
+  - Keyed map of creators with override rules.
+  Why:
+  - Reuses key-based registry semantics for factory lookup.
+  - Keeps factory logic focused on construction/validation.
+  end note
+
+  note bottom of NoValidation
+  What:
+  - Default pass-through validator policy.
+  - Always returns true for created products.
+  Why:
+  - Zero-friction path when validation is unnecessary.
+  - Avoids overhead when interface checks are not needed.
+  end note
+
+  note bottom of TypeValidator
+  What:
+  - Typed validator policy.
+  - Enforces interface conformance at creation time.
+  Why:
+  - Supports strict product/interface validation.
+  - Keeps checks composable via template parameters.
+  end note
+
+  note top of FactoryCore
+  Compile-time requirements:
+  - Creator satisfies invocable contract.
+  - Product + validator satisfy policy concept.
+  - Validation strategy selected via template parameter.
+  - Override semantics mirror registry core rules.
+  end note
 }
 
 package "adapter::python (thin)" {
@@ -60,6 +107,38 @@ package "adapter::python (thin)" {
   class "PyObjectValidator" as PyObjectValidator {
     +validate(obj, interface) : bool
   }
+
+  note bottom of PyCreatorBridge
+  What:
+  - Adapter from py::function to core Creator callable.
+  - Captures GIL/arg forwarding logic for call.
+  Why:
+  - Keeps Python callable mechanics out of core factory.
+  - Minimizes pybind surface area in templates.
+  end note
+
+  note bottom of PyObjectValidator
+  What:
+  - Python-side interface/protocol validator.
+  - Wraps isinstance/duck-typing checks.
+  Why:
+  - Localizes Python checks in the adapter layer.
+  - Keeps core validation policy C++-only.
+  end note
+
+  note top of PyFactoryAdapter
+  Runtime boundary only:
+  - Python call bridging (args/kwargs).
+  - Optional Python protocol/interface checks.
+  - No creator registry semantics in adapter.
+  - Delegates creator storage and lookup to FactoryCore.
+  end note
+
+  legend bottom right
+  |= Layer |= Meaning |
+  | core::factory | C++20 compile-time core |
+  | adapter::python | Thin pybind-facing adapter |
+  endlegend
 }
 
 FactoryCore -down-> RegistryCore : creator storage backend
@@ -71,24 +150,6 @@ PyFactoryAdapter -down-> FactoryCore : delegates construction
 PyFactoryAdapter -down-> PyCreatorBridge : converts py::function
 PyFactoryAdapter -down-> PyObjectValidator : python-specific isinstance check
 
-note right of FactoryCore
-Compile-time requirements:
-- Creator satisfies invocable contract.
-- Product + validator satisfy policy concept.
-- Validation strategy selected via template parameter.
-end note
 
-note right of PyFactoryAdapter
-Runtime boundary only:
-- Python call bridging (args/kwargs).
-- Optional Python protocol/interface checks.
-- No creator registry semantics in adapter.
-end note
-
-legend bottom right
-|= Layer |= Meaning |
-| core::factory | C++20 compile-time core |
-| adapter::python | Thin pybind-facing adapter |
-endlegend
 
 @enduml
