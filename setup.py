@@ -24,6 +24,12 @@ def get_cpp_files(path):
     return cpp_files
 
 
+def extension_name_from_cpp(cpp_file: Path) -> str:
+    if cpp_file.stem == "bindings":
+        return f"pygim.{cpp_file.parent.name}"
+    return f"pygim.{cpp_file.stem}"
+
+
 # Pick sensible flags per‐compiler
 if sys.platform == "win32":
     # MSVC: enable C++17 (or C++20 if your toolchain supports it) and optimize
@@ -150,10 +156,10 @@ for cpp_file in get_cpp_files("src/_pygim_fast"):
 
     ext_modules.append(
         Pybind11Extension(
-            f"pygim.{stem}",
+            extension_name_from_cpp(cpp_file),
             sources,
             define_macros=macros,
-            **kwargs
+            **kwargs,
         )
     )
 

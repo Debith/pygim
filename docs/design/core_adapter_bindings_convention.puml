@@ -1,0 +1,67 @@
+@startuml CoreAdapterBindingsConvention
+skinparam shadowing false
+skinparam classAttributeIconSize 0
+title Core / Adapter / Bindings Naming Convention
+
+package "Registry" {
+  class "registry/core.h" as RCore {
+    +Pybind-free policies and storage
+  }
+
+  class "registry/adapter.h" as RAdapter {
+    +Python translation
+    +Boundary orchestration
+  }
+
+  class "registry/bindings.cpp" as RBindings {
+    +PYBIND11_MODULE(registry, ...)
+  }
+
+  RCore -down-> RAdapter
+  RAdapter -down-> RBindings
+}
+
+package "Factory" {
+  class "factory/core.h" as FCore {
+    +Pybind-free creator/validator core
+  }
+
+  class "factory/adapter.h" as FAdapter {
+    +Python callable + args bridge
+  }
+
+  class "factory/bindings.cpp" as FBindings {
+    +PYBIND11_MODULE(factory, ...)
+  }
+
+  FCore -down-> FAdapter
+  FAdapter -down-> FBindings
+}
+
+class "Python API" as Py
+Py -down-> RBindings
+Py -down-> FBindings
+
+note right of RCore
+Core = no pybind includes
+Template/policy logic lives here
+end note
+
+note right of RAdapter
+Adapter = boundary translator
+May use pybind types
+end note
+
+note right of RBindings
+Bindings/module file = export surface only
+Keep it thin
+end note
+
+legend bottom right
+|= Layer |= Responsibility |
+| core | Domain logic, policy, storage |
+| adapter | Translation/orchestration |
+| bindings.cpp | PYBIND11_MODULE exports |
+endlegend
+
+@enduml

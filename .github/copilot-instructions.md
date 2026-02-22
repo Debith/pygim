@@ -73,6 +73,7 @@ Concise, actionable guidance for AI agents contributing to this repo. Focus on t
 - Imports: public modules import from `pygim.*`, internals from `_pygim.*`.
 - C++ changes: rebuild locally (e.g., `pip install -e .` triggers). Run `pytest` after rebuild to confirm ABI compatibility.
 - Preserve exception types & invariant semantics (registry duplicates, factory override rule, hook enabling gate).
+- Changelog: update `CHANGELOG.rst` under `Unreleased` for meaningful user-facing, architecture, testing, performance, or workflow changes.
 - Keep this file current: Whenever introducing a new extension module, altering key policy semantics, hook lifecycle, or CLI surface, append/update the relevant section here in the same concise style.
 - Performance changes: Add brief rationale + (if available) benchmark numbers to PR description; ensure no regression in existing behaviors/tests.
  - Examples: When adding notable surface area (e.g., new registry capabilities), place runnable, minimal examples under `docs/examples/<area>/` and verify via a quick local run.
