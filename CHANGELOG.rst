@@ -22,6 +22,8 @@ Added
 - Examples: Two runnable registry examples under ``docs/examples/registry/`` (basic & hooks).
 - Added dedicated implementation folders for factory and registry under ``src/_pygim_fast/{factory,registry}/``.
 - Added PlantUML architecture reference ``docs/design/core_adapter_bindings_convention.puml`` for core/adapter/bindings layering.
+- CI: Add release workflow that builds wheels via ``cibuildwheel`` and publishes tagged releases to PyPI.
+- CI: Auto-tag main whenever the ``dev`` branch is merged, driven by PR labels ``release:major``/``release:minor``/default patch.
 
 Changed
 ~~~~~~~
