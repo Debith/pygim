@@ -24,6 +24,7 @@ Added
 - Added PlantUML architecture reference ``docs/design/core_adapter_bindings_convention.puml`` for core/adapter/bindings layering.
 - CI: Add release workflow that builds wheels via ``cibuildwheel`` and publishes tagged releases to PyPI.
 - CI: Auto-tag main whenever the ``dev`` branch is merged, driven by PR labels ``release:major``/``release:minor``/default patch.
+- Added native C++ ``QuickTimer`` utility (`src/_pygim_fast/utils/quick_timer.h`) with ordered subtimers, immediate stop reporting, and destructor summary output.
 
 Changed
 ~~~~~~~
@@ -33,11 +34,16 @@ Changed
 - Project instructions updated to reflect new registry surface area (PR #4).
 - Refactored factory and registry internals into explicit ``core`` (pybind-free) and ``adapter`` (pybind boundary) headers.
 - Renamed pybind module translation units to ``bindings.cpp`` and updated build naming logic so modules remain ``pygim.factory`` and ``pygim.registry``.
+- Repository/MSSQL: Simplified native ``persist_dataframe`` Arrow path to prefer DataFrame ``__arrow_c_stream__`` for direct native ingestion, with IPC serialization (``write_ipc``) as fallback, removing Python-side Arrow orchestration from the hot path.
+- Repository/MSSQL: Process Arrow input batch-by-batch in BCP ingestion to avoid full-table materialization and preserve correctness for multi-batch data.
+- Playground stress harness: Add explicit ``--arrow`` CLI flag (mutually exclusive with ``--no-arrow``) to set ``PYGIM_ENABLE_ARROW_BCP`` for reproducible Arrow-path runs.
 
 Fixed
 ~~~~~
 - Tests: Ensured override semantics correctly raise when ``override=True`` and key is missing.
 - Added edge-case tests for factory missing getitem/override behavior and registry key tuple validation + ``find_id`` variant fallback.
+- Repository/MSSQL Arrow persist: Export Polars IPC payloads with legacy-compatible ``compat_level=oldest`` to avoid unsupported Arrow view encodings in mixed Arrow-runtime environments.
+- Repository/MSSQL Arrow BCP: Fix variable-length text/date/timestamp binding requirements (terminator metadata) and per-row fixed-width column pointer binding to prevent fallback/duplicate-row insertion behavior.
 
 Performance
 ~~~~~~~~~~~

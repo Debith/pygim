@@ -13,6 +13,7 @@
 #include <array>
 #include <stdexcept>
 #include <cctype>
+#include "quick_timer.h"
 
 namespace py = pybind11;
 

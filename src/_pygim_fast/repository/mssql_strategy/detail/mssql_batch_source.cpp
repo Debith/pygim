@@ -52,16 +52,31 @@ PolarsRowSource::ColumnView PolarsRowSource::build_column_view(const py::object 
                                                                size_t total_rows) const {
     PYGIM_SCOPE_LOG_TAG("repo.batch_source");
     if (dtype.find("Int") != std::string::npos) {
-        py::array arr = series.attr("to_numpy")().cast<py::array>();
-        return ColumnView{ColumnKind::I64, arr, {}};
+        py::array_t<long long, py::array::c_style | py::array::forcecast> arr =
+            series.attr("to_numpy")().cast<py::array_t<long long, py::array::c_style | py::array::forcecast>>();
+        const py::buffer_info info = arr.request();
+        if (info.ndim != 1 || static_cast<size_t>(info.shape[0]) < total_rows) {
+            throw std::runtime_error("Invalid Int column shape for PolarsRowSource");
+        }
+        return ColumnView{ColumnKind::I64, py::array(arr), {}};
     }
     if (dtype.find("Float") != std::string::npos) {
-        py::array arr = series.attr("to_numpy")().cast<py::array>();
-        return ColumnView{ColumnKind::F64, arr, {}};
+        py::array_t<double, py::array::c_style | py::array::forcecast> arr =
+            series.attr("to_numpy")().cast<py::array_t<double, py::array::c_style | py::array::forcecast>>();
+        const py::buffer_info info = arr.request();
+        if (info.ndim != 1 || static_cast<size_t>(info.shape[0]) < total_rows) {
+            throw std::runtime_error("Invalid Float column shape for PolarsRowSource");
+        }
+        return ColumnView{ColumnKind::F64, py::array(arr), {}};
     }
     if (dtype.find("Boolean") != std::string::npos) {
-        py::array arr = series.attr("to_numpy")().cast<py::array>();
-        return ColumnView{ColumnKind::BOOL_T, arr, {}};
+        py::array_t<std::uint8_t, py::array::c_style | py::array::forcecast> arr =
+            series.attr("to_numpy")().cast<py::array_t<std::uint8_t, py::array::c_style | py::array::forcecast>>();
+        const py::buffer_info info = arr.request();
+        if (info.ndim != 1 || static_cast<size_t>(info.shape[0]) < total_rows) {
+            throw std::runtime_error("Invalid Boolean column shape for PolarsRowSource");
+        }
+        return ColumnView{ColumnKind::BOOL_T, py::array(arr), {}};
     }
     py::list lst = series.attr("to_list")().cast<py::list>();
     std::vector<std::string> strings;
@@ -93,6 +108,9 @@ py::object PolarsRowSource::get_value(size_t row, size_t col) const {
     }
     case ColumnKind::STR:
     default:
+        if (row >= view.strings.size()) {
+            throw std::out_of_range("PolarsRowSource string index out of range");
+        }
         return py::str(view.strings[row]);
     }
 }

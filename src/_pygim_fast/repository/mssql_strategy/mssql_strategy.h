@@ -61,7 +61,7 @@ public:
                      int batch_size = 1000,
                      const std::string& table_hint = "TABLOCK");
     void bulk_insert_arrow_bcp(const std::string& table,
-                               const py::bytes& arrow_ipc_bytes,
+                               const py::object& arrow_ipc_payload,
                                int batch_size = 100000,
                                const std::string& table_hint = "TABLOCK");
     std::string repr() const;

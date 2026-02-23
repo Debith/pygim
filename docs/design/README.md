@@ -26,3 +26,7 @@ This folder contains architecture diagrams split by **current implementation** a
 - **Current** diagrams are 1-to-1 reflections of existing headers/flow.
 - **Target** diagrams describe the pybind-isolated architecture with compile-time constraints.
 - Keep this index as the single navigation entry-point to avoid duplicated diagram summaries elsewhere.
+
+## Repository Performance
+
+- `repository_performance_findings.md` — measured throughput baselines, bottleneck analysis, and remediation priorities for MSSQL Arrow/BCP write paths.

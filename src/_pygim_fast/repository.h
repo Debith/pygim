@@ -131,6 +131,24 @@ public:
         if (!any) throw std::runtime_error("Repository: no strategy supports bulk_upsert()");
     }
 
+    py::object persist_dataframe(const std::string& table,
+                                 const py::object& data_frame,
+                                 const std::string& key_column="id",
+                                 bool prefer_arrow=true,
+                                 const std::string& table_hint="TABLOCK",
+                                 int batch_size=1000) {
+        for (auto & strat : m_strategies) {
+            if (py::hasattr(strat, "persist_dataframe")) {
+                return strat.attr("persist_dataframe")(table, data_frame,
+                    py::arg("key_column")=key_column,
+                    py::arg("prefer_arrow")=prefer_arrow,
+                    py::arg("table_hint")=table_hint,
+                    py::arg("batch_size")=batch_size);
+            }
+        }
+        throw std::runtime_error("Repository: no strategy supports persist_dataframe()");
+    }
+
     std::vector<py::object> strategies() const { return m_strategies; }
     std::vector<py::function> pre_transforms() const { return m_pre_save; }
     std::vector<py::function> post_transforms() const { return m_post_load; }

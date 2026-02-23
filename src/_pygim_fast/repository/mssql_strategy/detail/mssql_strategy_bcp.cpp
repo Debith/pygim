@@ -2,6 +2,8 @@
 #include "helpers.h"
 #include "../../../utils/logging.h"
 
+#define PYGIM_HAVE_ARROW 1
+#define PYGIM_HAVE_ODBC 1
 #if PYGIM_HAVE_ODBC && PYGIM_HAVE_ARROW
 #if !defined(_WIN32) && !defined(_WIN64)
 #include <dlfcn.h>
@@ -11,10 +13,21 @@
 #include <arrow/table.h>
 #include <arrow/array.h>
 #include <arrow/buffer.h>
+#if __has_include(<arrow/c/bridge.h>)
+#include <arrow/c/bridge.h>
+#define PYGIM_HAVE_ARROW_C_BRIDGE 1
+#else
+#define PYGIM_HAVE_ARROW_C_BRIDGE 0
+#endif
 #include <chrono>
-#include <codecvt>
+#include <cstdio>
 #include <limits>
-#include <locale>
+
+#if defined(ARROW_VERSION_MAJOR) && (ARROW_VERSION_MAJOR >= 15)
+#define PYGIM_HAVE_ARROW_STRING_VIEW 1
+#else
+#define PYGIM_HAVE_ARROW_STRING_VIEW 0
+#endif
 
 #if defined(_WIN32) || defined(_WIN64)
 #include <msodbcsql.h>
@@ -26,7 +39,7 @@
 #define SQL_BCP_OFF ((SQLULEN)0L)
 #endif
 #define DB_IN 1
-typedef short DBINT;
+typedef int DBINT;
 typedef unsigned char BYTE;
 typedef BYTE* LPCBYTE;
 #define SUCCEED 1
@@ -70,7 +83,7 @@ namespace py = pybind11;
 namespace pygim {
 
 void MssqlStrategyNative::bulk_insert_arrow_bcp(const std::string &table,
-                                                const py::bytes &arrow_ipc_bytes,
+                                                const py::object &arrow_ipc_payload,
                                                 int batch_size,
                                                 const std::string &table_hint) {
     PYGIM_SCOPE_LOG_TAG("repo.bcp");
@@ -91,7 +104,7 @@ void MssqlStrategyNative::bulk_insert_arrow_bcp(const std::string &table,
             g_bcp_colptr = (bcp_colptr_t)dlsym(handle, "bcp_colptr");
         }
     }
-    if (!g_bcp_init || !g_bcp_bind || !g_bcp_sendrow || !g_bcp_batch || !g_bcp_done) {
+    if (!g_bcp_init || !g_bcp_bind || !g_bcp_sendrow || !g_bcp_batch || !g_bcp_done || !g_bcp_collen || !g_bcp_colptr) {
         throw std::runtime_error(
             "BCP functions not available. SQL Server ODBC Driver 17/18+ required.\n"
             "Install: sudo ACCEPT_EULA=Y apt-get install -y msodbcsql18");
@@ -125,33 +138,12 @@ void MssqlStrategyNative::bulk_insert_arrow_bcp(const std::string &table,
     if (qualified_table.find('.') == std::string::npos) {
         qualified_table = "dbo." + qualified_table;
     }
-    std::string ipc_data = arrow_ipc_bytes;
-    auto buffer = arrow::Buffer::FromString(std::move(ipc_data));
-    auto reader = std::make_shared<arrow::io::BufferReader>(buffer);
-    auto reader_result = arrow::ipc::RecordBatchFileReader::Open(reader);
-    if (!reader_result.ok()) {
-        throw std::runtime_error("Failed to open Arrow IPC: " + reader_result.status().ToString());
-    }
-    auto file_reader = reader_result.ValueOrDie();
-    std::vector<std::shared_ptr<arrow::RecordBatch>> batches;
-    const int num_batches = file_reader->num_record_batches();
-    for (int i = 0; i < num_batches; ++i) {
-        auto batch_result = file_reader->ReadRecordBatch(i);
-        if (!batch_result.ok()) {
-            throw std::runtime_error("Failed to read batch " + std::to_string(i) + ": " + batch_result.status().ToString());
-        }
-        batches.push_back(batch_result.ValueOrDie());
-    }
-    auto table_result = arrow::Table::FromRecordBatches(file_reader->schema(), batches);
-    if (!table_result.ok()) {
-        throw std::runtime_error("Failed to create Arrow table: " + table_result.status().ToString());
-    }
-    std::shared_ptr<arrow::Table> arrow_table = table_result.ValueOrDie();
-    const int64_t num_rows = arrow_table->num_rows();
-    const int num_cols = arrow_table->num_columns();
-    if (num_rows == 0 || num_cols == 0) {
-        return;
-    }
+    std::shared_ptr<arrow::Buffer> buffer;
+    py::object payload_owner = py::none();
+
+    const bool is_arrow_c_stream_capsule =
+        PyCapsule_CheckExact(arrow_ipc_payload.ptr()) &&
+        PyCapsule_IsValid(arrow_ipc_payload.ptr(), "arrow_array_stream");
 
     SQLRETURN ret = SQL_SUCCESS;
     std::u16string table_w;
@@ -175,6 +167,7 @@ void MssqlStrategyNative::bulk_insert_arrow_bcp(const std::string &table,
         const uint8_t *str_data{nullptr};
         DBINT max_length{0};
         std::shared_ptr<std::vector<std::u16string>> utf16_cache;
+        std::shared_ptr<std::vector<std::string>> utf8_cache;
         size_t value_stride{0};
         std::shared_ptr<std::vector<SQL_DATE_STRUCT>> date_buffer;
         std::shared_ptr<std::vector<SQL_TIMESTAMP_STRUCT>> timestamp_buffer;
@@ -216,197 +209,381 @@ void MssqlStrategyNative::bulk_insert_arrow_bcp(const std::string &table,
         return out;
     };
 
-    std::vector<ColumnBinding> bindings;
-    bindings.reserve(num_cols);
+    const int64_t batch = (batch_size > 0) ? static_cast<int64_t>(batch_size) : 100000;
+    int64_t sent_rows = 0;
+    int64_t processed_rows = 0;
 
-    for (int col_idx = 0; col_idx < num_cols; ++col_idx) {
-        auto column = arrow_table->column(col_idx);
-        auto field = arrow_table->schema()->field(col_idx);
-        auto array = column->chunk(0);
-        ColumnBinding binding;
-        binding.ordinal = col_idx + 1;
-        binding.arrow_type = field->type()->id();
-        binding.array = array;
-        switch (binding.arrow_type) {
-        case arrow::Type::INT64: {
-            auto typed = std::static_pointer_cast<arrow::Int64Array>(array);
-            binding.data_ptr = typed->raw_values();
-            binding.value_stride = sizeof(int64_t);
-            ret = bcp_bind(m_dbc, (LPCBYTE)binding.data_ptr, 0, sizeof(int64_t), nullptr, 0, SQLBIGINT, binding.ordinal);
-            break;
+    auto process_record_batch = [&](const std::shared_ptr<arrow::RecordBatch> &record_batch) {
+        if (!record_batch) {
+            return;
         }
-        case arrow::Type::INT32: {
-            auto typed = std::static_pointer_cast<arrow::Int32Array>(array);
-            binding.data_ptr = typed->raw_values();
-            binding.value_stride = sizeof(int32_t);
-            ret = bcp_bind(m_dbc, (LPCBYTE)binding.data_ptr, 0, sizeof(int32_t), nullptr, 0, SQLINT4, binding.ordinal);
-            break;
-        }
-        case arrow::Type::UINT8: {
-            auto typed = std::static_pointer_cast<arrow::UInt8Array>(array);
-            binding.data_ptr = typed->raw_values();
-            binding.value_stride = sizeof(uint8_t);
-            ret = bcp_bind(m_dbc, (LPCBYTE)binding.data_ptr, 0, sizeof(uint8_t), nullptr, 0, SQLBIT, binding.ordinal);
-            break;
-        }
-        case arrow::Type::DOUBLE: {
-            auto typed = std::static_pointer_cast<arrow::DoubleArray>(array);
-            binding.data_ptr = typed->raw_values();
-            binding.value_stride = sizeof(double);
-            ret = bcp_bind(m_dbc, (LPCBYTE)binding.data_ptr, 0, sizeof(double), nullptr, 0, SQLFLT8, binding.ordinal);
-            break;
-        }
-        case arrow::Type::DATE32: {
-            auto typed = std::static_pointer_cast<arrow::Date32Array>(array);
-            auto buffer = std::make_shared<std::vector<SQL_DATE_STRUCT>>(typed->length());
-            const int32_t *raw = typed->raw_values();
-            for (int64_t i = 0; i < typed->length(); ++i) {
-                (*buffer)[static_cast<size_t>(i)] = days_to_sql_date(raw[i]);
-            }
-            binding.date_buffer = buffer;
-            binding.data_ptr = buffer->data();
-            binding.value_stride = sizeof(SQL_DATE_STRUCT);
-            ret = bcp_bind(m_dbc,
-                           (LPCBYTE)binding.data_ptr,
-                           0,
-                           sizeof(SQL_DATE_STRUCT),
-                           nullptr,
-                           0,
-                           SQLDATEN,
-                           binding.ordinal);
-            break;
-        }
-        case arrow::Type::TIMESTAMP: {
-            auto typed = std::static_pointer_cast<arrow::TimestampArray>(array);
-            auto buffer = std::make_shared<std::vector<SQL_TIMESTAMP_STRUCT>>(typed->length());
-            const int64_t *raw = typed->raw_values();
-            for (int64_t i = 0; i < typed->length(); ++i) {
-                (*buffer)[static_cast<size_t>(i)] = micros_to_sql_timestamp(raw[i]);
-            }
-            binding.timestamp_buffer = buffer;
-            binding.data_ptr = buffer->data();
-            binding.value_stride = sizeof(SQL_TIMESTAMP_STRUCT);
-            ret = bcp_bind(m_dbc,
-                           (LPCBYTE)binding.data_ptr,
-                           0,
-                           sizeof(SQL_TIMESTAMP_STRUCT),
-                           nullptr,
-                           0,
-                           SQLDATETIME2N,
-                           binding.ordinal);
-            break;
-        }
-        case arrow::Type::STRING: {
-            auto typed = std::static_pointer_cast<arrow::StringArray>(array);
-            binding.offsets32 = typed->raw_value_offsets();
-            binding.str_data = typed->value_data()->data();
-            DBINT max_len = 0;
-            int64_t value_count = typed->length();
-            auto utf16_values = std::make_shared<std::vector<std::u16string>>();
-            utf16_values->reserve(static_cast<size_t>(value_count));
-            std::wstring_convert<std::codecvt_utf8_utf16<char16_t>, char16_t> converter;
-            for (int64_t i = 0; i < value_count; ++i) {
-                const char *start = reinterpret_cast<const char *>(binding.str_data + binding.offsets32[i]);
-                const char *end = reinterpret_cast<const char *>(binding.str_data + binding.offsets32[i + 1]);
-                std::u16string converted = converter.from_bytes(start, end);
-                DBINT byte_len = static_cast<DBINT>(converted.size() * sizeof(char16_t));
-                if (byte_len > max_len) {
-                    max_len = byte_len;
-                }
-                utf16_values->push_back(std::move(converted));
-            }
-            binding.utf16_cache = utf16_values;
-            binding.max_length = std::max<DBINT>(static_cast<DBINT>(sizeof(char16_t)), max_len);
-            const uint8_t *initial_ptr = nullptr;
-            if (!utf16_values->empty()) {
-                initial_ptr = reinterpret_cast<const uint8_t *>((*utf16_values)[0].data());
-            } else {
-                static const char16_t empty_char = u'\0';
-                initial_ptr = reinterpret_cast<const uint8_t *>(&empty_char);
-            }
-            ret = bcp_bind(m_dbc, (LPCBYTE)initial_ptr, 0, binding.max_length, nullptr, 0, SQLNCHAR, binding.ordinal);
-            break;
-        }
-        case arrow::Type::LARGE_STRING: {
-            auto typed = std::static_pointer_cast<arrow::LargeStringArray>(array);
-            binding.offsets64 = typed->raw_value_offsets();
-            binding.str_data = typed->value_data()->data();
-            DBINT max_len = 0;
-            int64_t value_count = typed->length();
-            auto utf16_values = std::make_shared<std::vector<std::u16string>>();
-            utf16_values->reserve(static_cast<size_t>(value_count));
-            std::wstring_convert<std::codecvt_utf8_utf16<char16_t>, char16_t> converter;
-            for (int64_t i = 0; i < value_count; ++i) {
-                int64_t len64 = binding.offsets64[i + 1] - binding.offsets64[i];
-                if (len64 > static_cast<int64_t>(std::numeric_limits<DBINT>::max())) {
-                    throw std::runtime_error("String length exceeds DBINT limits for BCP");
-                }
-                const char *start = reinterpret_cast<const char *>(binding.str_data + binding.offsets64[i]);
-                const char *end = reinterpret_cast<const char *>(binding.str_data + binding.offsets64[i + 1]);
-                std::u16string converted = converter.from_bytes(start, end);
-                DBINT byte_len = static_cast<DBINT>(converted.size() * sizeof(char16_t));
-                if (byte_len > max_len) {
-                    max_len = byte_len;
-                }
-                utf16_values->push_back(std::move(converted));
-            }
-            binding.utf16_cache = utf16_values;
-            binding.max_length = std::max<DBINT>(static_cast<DBINT>(sizeof(char16_t)), max_len);
-            const uint8_t *initial_ptr = nullptr;
-            if (!utf16_values->empty()) {
-                initial_ptr = reinterpret_cast<const uint8_t *>((*utf16_values)[0].data());
-            } else {
-                static const char16_t empty_char = u'\0';
-                initial_ptr = reinterpret_cast<const uint8_t *>(&empty_char);
-            }
-            ret = bcp_bind(m_dbc, (LPCBYTE)initial_ptr, 0, binding.max_length, nullptr, 0, SQLNCHAR, binding.ordinal);
-            break;
-        }
-        default:
-            throw std::runtime_error("Unsupported Arrow type: " + field->type()->ToString());
-        }
-        if (ret != SUCCEED) {
-            std::string label = "bcp_bind(" + field->name() + ")";
-            raise_if_error(SQL_ERROR, SQL_HANDLE_DBC, m_dbc, label.c_str());
-        }
-        bindings.push_back(binding);
-    }
 
-    const DBINT batch = (batch_size > 0) ? batch_size : 100000;
-    for (DBINT row_idx = 0; row_idx < static_cast<DBINT>(num_rows); ++row_idx) {
-        for (auto &binding : bindings) {
-            if (binding.utf16_cache) {
-                const auto &value = (*binding.utf16_cache)[row_idx];
-                DBINT len = static_cast<DBINT>(value.size() * sizeof(char16_t));
-                const uint8_t *ptr = reinterpret_cast<const uint8_t *>(value.data());
-                ret = bcp_collen(m_dbc, len, binding.ordinal);
-                if (ret != SUCCEED) {
-                    raise_if_error(SQL_ERROR, SQL_HANDLE_DBC, m_dbc, "bcp_collen");
+        const int64_t num_rows = record_batch->num_rows();
+        const int num_cols = record_batch->num_columns();
+        if (num_rows == 0 || num_cols == 0) {
+            return;
+        }
+
+        processed_rows += num_rows;
+
+        std::vector<ColumnBinding> bindings;
+        bindings.reserve(num_cols);
+
+        for (int col_idx = 0; col_idx < num_cols; ++col_idx) {
+            auto field = record_batch->schema()->field(col_idx);
+            auto array = record_batch->column(col_idx);
+            ColumnBinding binding;
+            binding.ordinal = col_idx + 1;
+            binding.arrow_type = field->type()->id();
+            binding.array = array;
+            switch (binding.arrow_type) {
+            case arrow::Type::INT64: {
+                auto typed = std::static_pointer_cast<arrow::Int64Array>(array);
+                binding.data_ptr = typed->raw_values();
+                binding.value_stride = sizeof(int64_t);
+                ret = bcp_bind(m_dbc, (LPCBYTE)binding.data_ptr, 0, sizeof(int64_t), nullptr, 0, SQLBIGINT, binding.ordinal);
+                break;
+            }
+            case arrow::Type::INT32: {
+                auto typed = std::static_pointer_cast<arrow::Int32Array>(array);
+                binding.data_ptr = typed->raw_values();
+                binding.value_stride = sizeof(int32_t);
+                ret = bcp_bind(m_dbc, (LPCBYTE)binding.data_ptr, 0, sizeof(int32_t), nullptr, 0, SQLINT4, binding.ordinal);
+                break;
+            }
+            case arrow::Type::UINT8: {
+                auto typed = std::static_pointer_cast<arrow::UInt8Array>(array);
+                binding.data_ptr = typed->raw_values();
+                binding.value_stride = sizeof(uint8_t);
+                ret = bcp_bind(m_dbc, (LPCBYTE)binding.data_ptr, 0, sizeof(uint8_t), nullptr, 0, SQLBIT, binding.ordinal);
+                break;
+            }
+            case arrow::Type::DOUBLE: {
+                auto typed = std::static_pointer_cast<arrow::DoubleArray>(array);
+                binding.data_ptr = typed->raw_values();
+                binding.value_stride = sizeof(double);
+                ret = bcp_bind(m_dbc, (LPCBYTE)binding.data_ptr, 0, sizeof(double), nullptr, 0, SQLFLT8, binding.ordinal);
+                break;
+            }
+            case arrow::Type::DATE32: {
+                auto typed = std::static_pointer_cast<arrow::Date32Array>(array);
+                auto date_values = std::make_shared<std::vector<SQL_DATE_STRUCT>>(typed->length());
+                auto text_values = std::make_shared<std::vector<std::string>>(typed->length());
+                const int32_t *raw = typed->raw_values();
+                for (int64_t i = 0; i < typed->length(); ++i) {
+                    const auto d = days_to_sql_date(raw[i]);
+                    (*date_values)[static_cast<size_t>(i)] = d;
+                    char buffer_text[16]{};
+                    std::snprintf(buffer_text,
+                                  sizeof(buffer_text),
+                                  "%04d-%02u-%02u",
+                                  static_cast<int>(d.year),
+                                  static_cast<unsigned>(d.month),
+                                  static_cast<unsigned>(d.day));
+                    (*text_values)[static_cast<size_t>(i)] = buffer_text;
                 }
-                ret = bcp_colptr(m_dbc, (LPCBYTE)ptr, binding.ordinal);
-                if (ret != SUCCEED) {
-                    raise_if_error(SQL_ERROR, SQL_HANDLE_DBC, m_dbc, "bcp_colptr");
+                binding.date_buffer = date_values;
+                binding.utf8_cache = text_values;
+                static const uint8_t dummy = 0;
+                static const uint8_t term = 0;
+                ret = bcp_bind(m_dbc,
+                               (LPCBYTE)&dummy,
+                               0,
+                               SQL_VARLEN_DATA,
+                               (LPCBYTE)&term,
+                               1,
+                               SQLCHARACTER,
+                               binding.ordinal);
+                break;
+            }
+            case arrow::Type::TIMESTAMP: {
+                auto typed = std::static_pointer_cast<arrow::TimestampArray>(array);
+                auto timestamp_values = std::make_shared<std::vector<SQL_TIMESTAMP_STRUCT>>(typed->length());
+                auto text_values = std::make_shared<std::vector<std::string>>(typed->length());
+                const int64_t *raw = typed->raw_values();
+                for (int64_t i = 0; i < typed->length(); ++i) {
+                    const auto t = micros_to_sql_timestamp(raw[i]);
+                    (*timestamp_values)[static_cast<size_t>(i)] = t;
+                    const unsigned micros = static_cast<unsigned>(t.fraction / 1000U);
+                    char buffer_text[40]{};
+                    std::snprintf(buffer_text,
+                                  sizeof(buffer_text),
+                                  "%04d-%02u-%02u %02u:%02u:%02u.%06u",
+                                  static_cast<int>(t.year),
+                                  static_cast<unsigned>(t.month),
+                                  static_cast<unsigned>(t.day),
+                                  static_cast<unsigned>(t.hour),
+                                  static_cast<unsigned>(t.minute),
+                                  static_cast<unsigned>(t.second),
+                                  micros);
+                    (*text_values)[static_cast<size_t>(i)] = buffer_text;
                 }
-            } else if (binding.data_ptr && binding.value_stride > 0) {
-                auto base = reinterpret_cast<const uint8_t *>(binding.data_ptr);
-                const uint8_t *ptr = base + (row_idx * binding.value_stride);
-                ret = bcp_colptr(m_dbc, (LPCBYTE)ptr, binding.ordinal);
-                if (ret != SUCCEED) {
-                    raise_if_error(SQL_ERROR, SQL_HANDLE_DBC, m_dbc, "bcp_colptr");
+                binding.timestamp_buffer = timestamp_values;
+                binding.utf8_cache = text_values;
+                static const uint8_t dummy = 0;
+                static const uint8_t term = 0;
+                ret = bcp_bind(m_dbc,
+                               (LPCBYTE)&dummy,
+                               0,
+                               SQL_VARLEN_DATA,
+                               (LPCBYTE)&term,
+                               1,
+                               SQLCHARACTER,
+                               binding.ordinal);
+                break;
+            }
+            case arrow::Type::STRING: {
+                auto typed = std::static_pointer_cast<arrow::StringArray>(array);
+                auto text_values = std::make_shared<std::vector<std::string>>(typed->length());
+                for (int64_t i = 0; i < typed->length(); ++i) {
+                    if (typed->IsNull(i)) {
+                        continue;
+                    }
+                    (*text_values)[static_cast<size_t>(i)] = typed->GetString(i);
+                }
+                binding.utf8_cache = text_values;
+                static const uint8_t dummy = 0;
+                static const uint8_t term = 0;
+                ret = bcp_bind(m_dbc,
+                               (LPCBYTE)&dummy,
+                               0,
+                               SQL_VARLEN_DATA,
+                               (LPCBYTE)&term,
+                               1,
+                               SQLCHARACTER,
+                               binding.ordinal);
+                break;
+            }
+            case arrow::Type::LARGE_STRING: {
+                auto typed = std::static_pointer_cast<arrow::LargeStringArray>(array);
+                auto text_values = std::make_shared<std::vector<std::string>>(typed->length());
+                for (int64_t i = 0; i < typed->length(); ++i) {
+                    if (typed->IsNull(i)) {
+                        continue;
+                    }
+                    (*text_values)[static_cast<size_t>(i)] = typed->GetString(i);
+                }
+                binding.utf8_cache = text_values;
+                static const uint8_t dummy = 0;
+                static const uint8_t term = 0;
+                ret = bcp_bind(m_dbc,
+                               (LPCBYTE)&dummy,
+                               0,
+                               SQL_VARLEN_DATA,
+                               (LPCBYTE)&term,
+                               1,
+                               SQLCHARACTER,
+                               binding.ordinal);
+                break;
+            }
+#if PYGIM_HAVE_ARROW_STRING_VIEW
+            case arrow::Type::STRING_VIEW: {
+                auto typed = std::static_pointer_cast<arrow::StringViewArray>(array);
+                auto text_values = std::make_shared<std::vector<std::string>>(typed->length());
+                for (int64_t i = 0; i < typed->length(); ++i) {
+                    if (typed->IsNull(i)) {
+                        continue;
+                    }
+                    auto view = typed->GetView(i);
+                    (*text_values)[static_cast<size_t>(i)] = std::string(view.data(), view.size());
+                }
+                binding.utf8_cache = text_values;
+                static const uint8_t dummy = 0;
+                static const uint8_t term = 0;
+                ret = bcp_bind(m_dbc,
+                               (LPCBYTE)&dummy,
+                               0,
+                               SQL_VARLEN_DATA,
+                               (LPCBYTE)&term,
+                               1,
+                               SQLCHARACTER,
+                               binding.ordinal);
+                break;
+            }
+#endif
+            default:
+                throw std::runtime_error("Unsupported Arrow type: " + field->type()->ToString());
+            }
+            if (ret != SUCCEED) {
+                std::string label = "bcp_bind(" + field->name() + ")";
+                raise_if_error(SQL_ERROR, SQL_HANDLE_DBC, m_dbc, label.c_str());
+            }
+            bindings.push_back(binding);
+        }
+
+        for (int64_t row_idx = 0; row_idx < num_rows; ++row_idx) {
+            for (auto &binding : bindings) {
+                if (binding.utf8_cache) {
+                    if (binding.array->IsNull(row_idx)) {
+                        ret = bcp_collen(m_dbc, SQL_NULL_DATA, binding.ordinal);
+                        if (ret != SUCCEED) {
+                            raise_if_error(SQL_ERROR, SQL_HANDLE_DBC, m_dbc, "bcp_collen");
+                        }
+                        ret = bcp_colptr(m_dbc, nullptr, binding.ordinal);
+                        if (ret != SUCCEED) {
+                            raise_if_error(SQL_ERROR, SQL_HANDLE_DBC, m_dbc, "bcp_colptr");
+                        }
+                        continue;
+                    }
+
+                    const auto &value = (*binding.utf8_cache)[static_cast<size_t>(row_idx)];
+                    if (value.size() > static_cast<size_t>(std::numeric_limits<DBINT>::max())) {
+                        throw std::runtime_error("Text value exceeds DBINT length limits for BCP");
+                    }
+                    DBINT len = static_cast<DBINT>(value.size());
+                    const uint8_t *ptr = reinterpret_cast<const uint8_t *>(value.c_str());
+                    ret = bcp_collen(m_dbc, len, binding.ordinal);
+                    if (ret != SUCCEED) {
+                        raise_if_error(SQL_ERROR, SQL_HANDLE_DBC, m_dbc, "bcp_collen");
+                    }
+                    ret = bcp_colptr(m_dbc, (LPCBYTE)ptr, binding.ordinal);
+                    if (ret != SUCCEED) {
+                        raise_if_error(SQL_ERROR, SQL_HANDLE_DBC, m_dbc, "bcp_colptr");
+                    }
+                } else if (binding.value_stride > 0) {
+                    if (binding.array->IsNull(row_idx)) {
+                        ret = bcp_collen(m_dbc, SQL_NULL_DATA, binding.ordinal);
+                        if (ret != SUCCEED) {
+                            raise_if_error(SQL_ERROR, SQL_HANDLE_DBC, m_dbc, "bcp_collen");
+                        }
+                        ret = bcp_colptr(m_dbc, nullptr, binding.ordinal);
+                        if (ret != SUCCEED) {
+                            raise_if_error(SQL_ERROR, SQL_HANDLE_DBC, m_dbc, "bcp_colptr");
+                        }
+                        continue;
+                    }
+
+                    const uint8_t *ptr = static_cast<const uint8_t *>(binding.data_ptr)
+                                       + (static_cast<size_t>(row_idx) * binding.value_stride);
+                    if (binding.value_stride > static_cast<size_t>(std::numeric_limits<DBINT>::max())) {
+                        throw std::runtime_error("Fixed-width value exceeds DBINT length limits for BCP");
+                    }
+                    DBINT len = static_cast<DBINT>(binding.value_stride);
+                    ret = bcp_collen(m_dbc, len, binding.ordinal);
+                    if (ret != SUCCEED) {
+                        raise_if_error(SQL_ERROR, SQL_HANDLE_DBC, m_dbc, "bcp_collen");
+                    }
+                    ret = bcp_colptr(m_dbc, (LPCBYTE)ptr, binding.ordinal);
+                    if (ret != SUCCEED) {
+                        raise_if_error(SQL_ERROR, SQL_HANDLE_DBC, m_dbc, "bcp_colptr");
+                    }
+                }
+            }
+            ret = bcp_sendrow(m_dbc);
+            if (ret != SUCCEED) {
+                raise_if_error(SQL_ERROR, SQL_HANDLE_DBC, m_dbc, "bcp_sendrow");
+                throw std::runtime_error("bcp_sendrow failed at row " + std::to_string(static_cast<long long>(row_idx)));
+            }
+            ++sent_rows;
+            if (sent_rows > 0 && (sent_rows % batch == 0)) {
+                ret = bcp_batch(m_dbc);
+                if (ret == -1) {
+                    raise_if_error(SQL_ERROR, SQL_HANDLE_DBC, m_dbc, "bcp_batch");
                 }
             }
         }
-        ret = bcp_sendrow(m_dbc);
-        if (ret != SUCCEED) {
-            raise_if_error(SQL_ERROR, SQL_HANDLE_DBC, m_dbc, "bcp_sendrow");
-            throw std::runtime_error("bcp_sendrow failed at row " + std::to_string(row_idx));
-        }
-        if (row_idx > 0 && (row_idx % batch == 0)) {
+
+        if (sent_rows > 0 && (sent_rows % batch != 0)) {
             ret = bcp_batch(m_dbc);
             if (ret == -1) {
                 raise_if_error(SQL_ERROR, SQL_HANDLE_DBC, m_dbc, "bcp_batch");
             }
         }
+    };
+
+    if (is_arrow_c_stream_capsule) {
+#if PYGIM_HAVE_ARROW_C_BRIDGE
+        auto *stream = static_cast<ArrowArrayStream *>(
+            PyCapsule_GetPointer(arrow_ipc_payload.ptr(), "arrow_array_stream"));
+        if (stream == nullptr) {
+            throw std::runtime_error("Invalid Arrow C stream capsule (null pointer)");
+        }
+
+        auto reader_result = arrow::ImportRecordBatchReader(stream);
+        if (!reader_result.ok()) {
+            throw std::runtime_error(
+                "Failed to import Arrow C stream: " + reader_result.status().ToString());
+        }
+
+        std::shared_ptr<arrow::RecordBatchReader> record_batch_reader = reader_result.ValueOrDie();
+        while (true) {
+            std::shared_ptr<arrow::RecordBatch> batch_data;
+            auto read_status = record_batch_reader->ReadNext(&batch_data);
+            if (!read_status.ok()) {
+                throw std::runtime_error(
+                    "Failed reading Arrow C stream batch: " + read_status.ToString());
+            }
+            if (!batch_data) {
+                break;
+            }
+            process_record_batch(batch_data);
+        }
+#else
+        throw std::runtime_error(
+            "Arrow C stream capsule provided, but Arrow C bridge headers are unavailable at build time");
+#endif
+    } else {
+        // Stability-first path: normalize to owned bytes and parse from owned memory.
+        py::bytes payload_bytes;
+        if (py::isinstance<py::bytes>(arrow_ipc_payload)) {
+            payload_bytes = py::reinterpret_borrow<py::bytes>(arrow_ipc_payload);
+        } else {
+            try {
+                py::object normalized = py::bytes(arrow_ipc_payload);
+                payload_bytes = py::reinterpret_borrow<py::bytes>(normalized);
+            } catch (const py::error_already_set &) {
+                throw std::runtime_error(
+                    "arrow_ipc_payload must be bytes or bytes-convertible for IPC parsing");
+            }
+        }
+
+        std::string ipc_data = payload_bytes.cast<std::string>();
+        if (ipc_data.empty()) {
+            return;
+        }
+        buffer = arrow::Buffer::FromString(std::move(ipc_data));
+        payload_owner = payload_bytes;
+
+        auto reader = std::make_shared<arrow::io::BufferReader>(buffer);
+        auto file_reader_result = arrow::ipc::RecordBatchFileReader::Open(reader);
+        if (file_reader_result.ok()) {
+            auto file_reader = file_reader_result.ValueOrDie();
+            const int num_batches = file_reader->num_record_batches();
+            for (int i = 0; i < num_batches; ++i) {
+                auto batch_result = file_reader->ReadRecordBatch(i);
+                if (!batch_result.ok()) {
+                    throw std::runtime_error(
+                        "Failed to read file batch " + std::to_string(i) + ": " + batch_result.status().ToString());
+                }
+                process_record_batch(batch_result.ValueOrDie());
+            }
+        } else {
+            reader = std::make_shared<arrow::io::BufferReader>(buffer);
+            auto stream_reader_result = arrow::ipc::RecordBatchStreamReader::Open(reader);
+            if (!stream_reader_result.ok()) {
+                throw std::runtime_error(
+                    "Failed to open Arrow IPC as file or stream: file=" +
+                    file_reader_result.status().ToString() +
+                    ", stream=" + stream_reader_result.status().ToString());
+            }
+
+            auto stream_reader = stream_reader_result.ValueOrDie();
+            while (true) {
+                std::shared_ptr<arrow::RecordBatch> batch_data;
+                auto read_status = stream_reader->ReadNext(&batch_data);
+                if (!read_status.ok()) {
+                    throw std::runtime_error(
+                        "Failed reading Arrow IPC stream batch: " + read_status.ToString());
+                }
+                if (!batch_data) {
+                    break;
+                }
+                process_record_batch(batch_data);
+            }
+        }
+    }
+    if (processed_rows == 0) {
+        throw std::runtime_error("Arrow BCP received zero rows from payload");
     }
     DBINT done = bcp_done(m_dbc);
     if (done == -1) {

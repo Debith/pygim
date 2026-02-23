@@ -13,7 +13,7 @@ class StressTestScript {
   +build_repository(conn)
   +resolve_start_id(repo, table, start_id)
   +estimate_dataframe_size_bytes(frame)
-  +persist_dataframe(strategy, frame, table, ...)
+  +persist_dataframe(repo, frame, table, ...)
   +main()
 }
 }
@@ -72,11 +72,6 @@ class PolarsDataFrame <<library>> {
   +with_columns(...)
 }
 
-class ArrowBridge <<module>> {
-  -- operations --
-  +prepare_for_bcp(frame)
-}
-
 class Utils <<module>> {
   -- operations --
   +calculate_rate(bytes, label, seconds, unit)
@@ -90,9 +85,8 @@ StressTestScript --> Query : builds start-id + smoke queries
 StressTestScript --> GenDataModule : generate_polars_dataset()
 GenDataModule --> PolarsDataFrame : returns frame
 StressTestScript --> PolarsDataFrame : adjust ids/inspect columns
-StressTestScript --> ArrowBridge : prepare_for_bcp(frame)
 StressTestScript --> Utils : calculate_rate()
 MssqlStrategyNative --> PolarsDataFrame : bulk_upsert/bulk_insert data
-MssqlStrategyNative --> ArrowBridge : consumes Arrow payload
+MssqlStrategyNative --> PolarsDataFrame : consumes DataFrame for native Arrow persist
 
 @enduml

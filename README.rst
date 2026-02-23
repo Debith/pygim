@@ -108,28 +108,25 @@ will bind parameters using ODBC (when compiled with ``PYGIM_ENABLE_MSSQL``). The
 ``LIMIT n`` which is naively rewritten to ``TOP n`` for SQL Server; more sophisticated dialect
 adaptation (ORDER BY preservation, OFFSET emulation) is planned.
 
-Arrow IPC Bridge
-~~~~~~~~~~~~~~~~
+Native Arrow Persist Path
+~~~~~~~~~~~~~~~~~~~~~~~~~
 
-The helper module :mod:`pygim.arrow_bridge` wraps the workflow recommended in the
-accompanying article: export a Polars ``DataFrame`` to Apache Arrow IPC (Feather v2) and
-let C++ consume the memory-mappable columnar payload.  Example:
+Bulk DataFrame persistence is handled inside native bindings via
+``Repository.persist_dataframe(...)``. The strategy prefers Arrow C Data
+Interface (``__arrow_c_stream__``) and falls back to IPC serialization only
+when needed.
 
 .. code-block:: python
 
-    import polars as pl
-    from pygim.arrow_bridge import to_ipc_bytes, write_ipc_file
+    from pygim import repository
+    from gen_data import generate_polars_dataset
 
-    df = pl.DataFrame({"id": [1, 2], "value": [3.14, 2.72]})
+    conn = "Driver={ODBC Driver 18 for SQL Server};Server=localhost;..."
+    repo = repository.acquire_repository(conn, transformers=False)
+    df = generate_polars_dataset(n=100_000)
 
-    # In-memory transfer (e.g. via socket/Flight)
-    payload = to_ipc_bytes(df)
-
-    # Or persist for a C++ process to memory-map and read with Arrow C++ APIs
-    write_ipc_file(df, "payload.arrow")
-
-Downstream C++ code can memory-map ``payload.arrow`` and read it using Arrow's C++
-``RecordBatchFileReader`` for near zero-copy ingestion.
+    stats = repo.persist_dataframe("stress_data", df, key_column="id", prefer_arrow=True)
+    print(stats["mode"])  # arrow_c_stream_bcp | arrow_ipc_bcp | bulk_upsert
 
 
 

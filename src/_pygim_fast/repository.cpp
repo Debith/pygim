@@ -56,10 +56,30 @@ PYBIND11_MODULE(repository, m) {
              "Bulk insert helper: forward to strategies supporting bulk_insert(table, columns, rows, batch_size)")
         .def("bulk_upsert", &pygim::Repository::bulk_upsert, py::arg("table"), py::arg("columns"), py::arg("rows"), py::arg("key_column")="id", py::arg("batch_size")=500, py::arg("table_hint")="TABLOCK",
              "Bulk upsert helper: forward to strategies supporting bulk_upsert(table, columns, rows, key_column, batch_size)")
+        .def("persist_dataframe", &pygim::Repository::persist_dataframe,
+             py::arg("table"),
+             py::arg("data_frame"),
+             py::arg("key_column") = "id",
+             py::arg("prefer_arrow") = true,
+             py::arg("table_hint") = "TABLOCK",
+             py::arg("batch_size") = 1000,
+             "Persist a dataframe via the first strategy that provides persist_dataframe(...).")
         .def("__getitem__", &pygim::Repository::get, py::arg("key"))
         .def("__setitem__", &pygim::Repository::save, py::arg("key"), py::arg("value"))
         .def("strategies", &pygim::Repository::strategies)
         .def("pre_transforms", &pygim::Repository::pre_transforms)
         .def("post_transforms", &pygim::Repository::post_transforms)
         .def("__repr__", &pygim::Repository::repr);
+
+    m.def("acquire_repository",
+          [](const std::string &connection_string, bool transformers) {
+              pygim::Repository repo(transformers);
+              py::module_ strategy_mod = py::module_::import("pygim.mssql_strategy");
+              py::object native = strategy_mod.attr("MssqlStrategyNative")(connection_string);
+              repo.add_strategy(std::move(native));
+              return repo;
+          },
+          py::arg("connection_string"),
+          py::arg("transformers") = false,
+          "Create a Repository wired with MssqlStrategyNative for the provided connection string.");
 }

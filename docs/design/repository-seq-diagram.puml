@@ -15,7 +15,6 @@ participant Polars as PolarsFrame
 participant "quick_timer()" as QuickTimer
 participant "estimate_dataframe_size_bytes()" as EstimateFn
 participant "persist_dataframe()" as PersistFn
-participant "pygim.arrow_bridge" as ArrowBridgeModule
 participant utils as UtilsModule
 
 Operator -> StressScript: main()
@@ -89,19 +88,15 @@ else dependencies ok
 
   StressScript -> QuickTimer: quick_timer(save_label)
   QuickTimer --> StressScript: timer context
-  StressScript -> PersistFn: persist_dataframe(strategy, df, table)
-  PersistFn -> PersistFn: _collect_columns(df)
-  PersistFn -> StrategyClass: hasattr bulk_insert_arrow_bcp?
-  alt Arrow path
-    PersistFn -> PersistFn: _prepare_arrow_payload(df)
-    PersistFn -> ArrowBridgeModule: prepare_for_bcp(df)
-    ArrowBridgeModule --> PersistFn: Arrow IPC bytes
-    PersistFn -> StrategyClass: bulk_insert_arrow_bcp(table, payload, batch_size, table_hint)
-  else fallback
-    PersistFn -> StrategyClass: bulk_upsert(table, columns, df, key_column, batch_size, table_hint)
-    alt bulk_upsert missing
-      PersistFn -> StrategyClass: bulk_insert(table, columns, df, batch_size, table_hint)
-    end
+  StressScript -> PersistFn: repo.persist_dataframe(table, df, ...)
+  PersistFn -> RepositoryClass: persist_dataframe(...)
+  RepositoryClass -> StrategyClass: persist_dataframe(...)
+  alt native Arrow path
+    StrategyClass -> StrategyClass: __arrow_c_stream__ -> bulk_insert_arrow_bcp
+  else native IPC fallback
+    StrategyClass -> StrategyClass: write_ipc -> bulk_insert_arrow_bcp
+  else non-arrow fallback
+    StrategyClass -> StrategyClass: bulk_upsert(...)
   end
   PersistFn --> StressScript: done
   StressScript -> QuickTimer: __exit__()

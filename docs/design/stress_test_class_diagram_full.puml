@@ -13,7 +13,7 @@ class StressTestScript {
   +build_repository(conn)
   +resolve_start_id(repo, table, start_id)
   +estimate_dataframe_size_bytes(frame)
-  +persist_dataframe(strategy, frame, table, ...)
+  +persist_dataframe(repo, frame, table, ...)
   +main()
 }
 }
@@ -33,9 +33,6 @@ class Polars <<library>> {
 class PolarsDataFrame <<library>> {
   +columns
   +with_columns(...)
-}
-class ArrowBridge <<module>> {
-  +prepare_for_bcp(frame)
 }
 class Utils <<module>> {
   +calculate_rate(bytes, unit, seconds, unit)
@@ -117,7 +114,6 @@ StressTestScript --> Query : build queries
 StressTestScript --> GenDataModule : generate_polars_dataset()
 GenDataModule --> PolarsDataFrame
 StressTestScript --> PolarsDataFrame : with_columns
-StressTestScript --> ArrowBridge : prepare_for_bcp()
 StressTestScript --> Utils : calculate_rate()
 StressTestScript --> TimingProfiling : quick_timer()
 
