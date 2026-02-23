@@ -1,111 +1,118 @@
-@startuml
-actor Operator
+@startuml RepositoryPersistDataFrameSequence
 
-participant "stresss_test.py" as StressScript
-participant "build_parser()" as BuildParserFn
-participant argparse as ArgparseModule
-participant "default_connection_string()" as DefaultConnFn
-participant "build_repository()" as BuildRepoFn
-participant "repository.Repository" as RepositoryClass
-participant "mssql_strategy.MssqlStrategyNative" as StrategyClass
-participant "Query (pygim.query)" as QueryClass
-participant "resolve_start_id()" as ResolveStartIdFn
-participant "gen_data" as GenDataModule
-participant Polars as PolarsFrame
-participant "quick_timer()" as QuickTimer
-participant "estimate_dataframe_size_bytes()" as EstimateFn
-participant "persist_dataframe()" as PersistFn
-participant utils as UtilsModule
+skinparam backgroundColor #FCFCFF
+skinparam shadowing false
+skinparam sequence {
+  ArrowColor #4C6FFF
+  LifeLineBorderColor #64748B
+  LifeLineBackgroundColor #F8FAFC
+  ParticipantBorderColor #334155
+  ParticipantBackgroundColor #E2E8F0
+  ActorBorderColor #1E293B
+  ActorBackgroundColor #DBEAFE
+  GroupBorderColor #93C5FD
+  GroupBackgroundColor #EFF6FF
+}
 
-Operator -> StressScript: main()
-StressScript -> BuildParserFn: build_parser()
-BuildParserFn -> ArgparseModule: ArgumentParser(...)
-BuildParserFn -> ArgparseModule: add_argument(...)
-BuildParserFn --> StressScript: parser
-StressScript -> ArgparseModule: parse_args()
-ArgparseModule --> StressScript: args
+autonumber
 
-alt args.conn or STRESS_CONN provided
-  StressScript -> StressScript: conn = args.conn or env
-else no connection override
-  StressScript -> DefaultConnFn: default_connection_string()
-  DefaultConnFn --> StressScript: conn
+actor Caller
+
+participant "Repository.persist_dataframe\n(src/_pygim_fast/repository.h)" as RepoPersist
+participant "MssqlStrategyNative.persist_dataframe\n(pybind lambda in mssql_strategy.cpp)" as StratPersist
+participant "env_true(PYGIM_ENABLE_ARROW_BCP)" as EnvGate
+participant "try_arrow_c_stream_bcp(...)" as TryCStream
+participant "try_arrow_ipc_bcp(...)" as TryIpc
+participant "bulk_insert_arrow_bcp(...)\n(mssql_strategy_bcp.cpp)" as BulkArrow
+participant "run_bulk_upsert(...)" as RunFallback
+participant "bulk_upsert(...)" as BulkUpsert
+participant "to_py_dict(...)" as ToDict
+
+Caller -> RepoPersist: persist_dataframe(table, data_frame, key_column, prefer_arrow, table_hint, batch_size)
+
+loop for each strategy in m_strategies
+  RepoPersist -> RepoPersist: if hasattr(strat, "persist_dataframe")
+  RepoPersist -> StratPersist: strat.persist_dataframe(...)
+
+  alt prefer_arrow == true
+    StratPersist -> EnvGate: env_true("PYGIM_ENABLE_ARROW_BCP")
+
+    alt env gate disabled
+      StratPersist -> StratPersist: arrow_error = "disabled by default..."
+      StratPersist -> RunFallback: run_bulk_upsert(...)
+      RunFallback -> BulkUpsert: self.bulk_upsert(...)
+      BulkUpsert --> RunFallback: success/failure
+      RunFallback --> StratPersist: PersistAttempt(mode=bulk_upsert)
+      StratPersist -> ToDict: to_py_dict(fallback, arrow_error)
+      ToDict --> RepoPersist: dict(mode=bulk_upsert, arrow_error=...)
+
+    else env gate enabled
+      StratPersist -[#red]> TryCStream: try_arrow_c_stream_bcp(...)
+      note over StratPersist, TryCStream #FFCDD2
+        BOTTLENECK A:
+        c-stream often fails in this environment,
+        adding failed-attempt overhead before fallback.
+      end note
+      TryCStream -> TryCStream: data_frame.__arrow_c_stream__() or to_arrow(...)
+      TryCStream -[#red]> BulkArrow: bulk_insert_arrow_bcp(c_stream_capsule,...)
+      note over TryCStream, BulkArrow #FFCDD2
+        BOTTLENECK B:
+        hot BCP path is ODBC-call heavy.
+      end note
+
+      alt c-stream success
+        BulkArrow --> TryCStream: success
+        TryCStream --> StratPersist: PersistAttempt(success=true, mode=arrow_c_stream_bcp)
+        StratPersist -> ToDict: to_py_dict(c_stream_attempt, none)
+        ToDict --> RepoPersist: dict(mode=arrow_c_stream_bcp)
+
+      else c-stream failed
+        BulkArrow --> TryCStream: throw/py error
+        TryCStream --> StratPersist: PersistAttempt(success=false, error=...)
+
+        StratPersist -[#red]> TryIpc: try_arrow_ipc_bcp(...)
+        TryIpc -[#red]> TryIpc: data_frame.write_ipc(file=None, compat_level=oldest)
+        note over TryIpc #FFCDD2
+          BOTTLENECK C:
+          IPC serialization/materialization cost
+          before BCP write.
+        end note
+        TryIpc -[#red]> BulkArrow: bulk_insert_arrow_bcp(ipc_payload,...)
+
+        alt ipc success
+          BulkArrow --> TryIpc: success
+          TryIpc --> StratPersist: PersistAttempt(success=true, mode=arrow_ipc_bcp)
+          StratPersist -> ToDict: to_py_dict(ipc_attempt, c_stream_error?)
+          ToDict --> RepoPersist: dict(mode=arrow_ipc_bcp)
+
+        else ipc failed
+          BulkArrow --> TryIpc: throw/py error
+          TryIpc --> StratPersist: PersistAttempt(success=false, error=...)
+          StratPersist -> StratPersist: combined_error = c_stream_error | ipc_error
+          StratPersist -> RunFallback: run_bulk_upsert(...)
+          RunFallback -> BulkUpsert: self.bulk_upsert(...)
+          BulkUpsert --> RunFallback: success/failure
+          RunFallback --> StratPersist: PersistAttempt(mode=bulk_upsert)
+          StratPersist -> ToDict: to_py_dict(fallback, combined_error)
+          ToDict --> RepoPersist: dict(mode=bulk_upsert, arrow_error=combined_error)
+        end
+      end
+    end
+
+  else prefer_arrow == false
+    StratPersist -[#red]> RunFallback: run_bulk_upsert(...)
+    RunFallback -[#red]> BulkUpsert: self.bulk_upsert(...)
+    note over RunFallback, BulkUpsert #FFCDD2
+      BOTTLENECK D:
+      fallback path is typically slower than Arrow BCP.
+    end note
+    BulkUpsert --> RunFallback: success/failure
+    RunFallback --> StratPersist: PersistAttempt(mode=bulk_upsert)
+    StratPersist -> ToDict: to_py_dict(fallback, none)
+    ToDict --> RepoPersist: dict(mode=bulk_upsert)
+  end
+
+  RepoPersist --> Caller: persist_stats dict
 end
 
-alt missing polars or generator
-  StressScript -> StressScript: print(...) + sys.exit(1)
-else dependencies ok
-  StressScript -> BuildRepoFn: build_repository(conn)
-  BuildRepoFn -> RepositoryClass: Repository(transformers=False)
-  BuildRepoFn -> StrategyClass: MssqlStrategyNative(conn)
-  BuildRepoFn -> RepositoryClass: add_strategy(strategy)
-  BuildRepoFn --> StressScript: (repo, strategy)
-
-  group pre-flight query
-    StressScript -> QueryClass: Query()
-    QueryClass -> QueryClass: select(["id"])
-    QueryClass -> QueryClass: from_table(args.table)
-    QueryClass -> QueryClass: where("id=?", -123456789)
-    QueryClass -> QueryClass: limit(1)
-    QueryClass -> QueryClass: build()
-    StressScript -> RepositoryClass: fetch_raw(query)
-    RepositoryClass -> StrategyClass: fetch(query)
-    StrategyClass --> RepositoryClass: row(s) or None
-    RepositoryClass --> StressScript: row(s) or None
-  end
-
-  StressScript -> ResolveStartIdFn: resolve_start_id(repo, table, args.start_id)
-  alt explicit start id provided
-    ResolveStartIdFn --> StressScript: explicit start_id
-  else auto-detect
-    ResolveStartIdFn -> QueryClass: Query()
-    QueryClass -> QueryClass: select(["COALESCE(MAX(id), 0) AS max_id"])
-    QueryClass -> QueryClass: from_table(table)
-    QueryClass -> QueryClass: limit(1)
-    QueryClass -> QueryClass: build()
-    ResolveStartIdFn -> RepositoryClass: fetch_raw(query)
-    RepositoryClass -> StrategyClass: fetch(query)
-    StrategyClass --> RepositoryClass: row(s) or None
-    RepositoryClass --> ResolveStartIdFn: rows
-    ResolveStartIdFn --> StressScript: next start_id
-  end
-
-  StressScript -> QuickTimer: quick_timer(gen_label)
-  QuickTimer --> StressScript: timer context
-  StressScript -> GenDataModule: generate_polars_dataset(n)
-  GenDataModule --> StressScript: Polars DataFrame
-  alt start_id != 0
-    StressScript -> PolarsFrame: with_columns(id=pl.col("id") + start_id)
-  end
-  StressScript -> QuickTimer: __exit__()
-
-  StressScript -> EstimateFn: estimate_dataframe_size_bytes(df)
-  EstimateFn --> StressScript: bytes
-  alt bytes > 0 and gen_duration > 0
-    StressScript -> UtilsModule: calculate_rate(bytes, seconds)
-    UtilsModule --> StressScript: throughput string
-  end
-
-  StressScript -> QuickTimer: quick_timer(save_label)
-  QuickTimer --> StressScript: timer context
-  StressScript -> PersistFn: repo.persist_dataframe(table, df, ...)
-  PersistFn -> RepositoryClass: persist_dataframe(...)
-  RepositoryClass -> StrategyClass: persist_dataframe(...)
-  alt native Arrow path
-    StrategyClass -> StrategyClass: __arrow_c_stream__ -> bulk_insert_arrow_bcp
-  else native IPC fallback
-    StrategyClass -> StrategyClass: write_ipc -> bulk_insert_arrow_bcp
-  else non-arrow fallback
-    StrategyClass -> StrategyClass: bulk_upsert(...)
-  end
-  PersistFn --> StressScript: done
-  StressScript -> QuickTimer: __exit__()
-
-  alt bytes > 0 and save_duration > 0
-    StressScript -> UtilsModule: calculate_rate(bytes, seconds)
-    UtilsModule --> StressScript: throughput string
-  end
-
-  StressScript --> Operator: progress + final metrics
-end
 @enduml

@@ -161,6 +161,7 @@ void MssqlStrategyNative::bulk_insert_arrow_bcp(const std::string &table,
         int ordinal;
         arrow::Type::type arrow_type;
         std::shared_ptr<arrow::Array> array;
+        bool has_nulls{false};
         const void *data_ptr{nullptr};
         const int32_t *offsets32{nullptr};
         const int64_t *offsets64{nullptr};
@@ -236,6 +237,7 @@ void MssqlStrategyNative::bulk_insert_arrow_bcp(const std::string &table,
             binding.ordinal = col_idx + 1;
             binding.arrow_type = field->type()->id();
             binding.array = array;
+            binding.has_nulls = array->null_count() > 0;
             switch (binding.arrow_type) {
             case arrow::Type::INT64: {
                 auto typed = std::static_pointer_cast<arrow::Int64Array>(array);
@@ -268,67 +270,48 @@ void MssqlStrategyNative::bulk_insert_arrow_bcp(const std::string &table,
             case arrow::Type::DATE32: {
                 auto typed = std::static_pointer_cast<arrow::Date32Array>(array);
                 auto date_values = std::make_shared<std::vector<SQL_DATE_STRUCT>>(typed->length());
-                auto text_values = std::make_shared<std::vector<std::string>>(typed->length());
                 const int32_t *raw = typed->raw_values();
                 for (int64_t i = 0; i < typed->length(); ++i) {
+                    if (binding.has_nulls && typed->IsNull(i)) {
+                        continue;
+                    }
                     const auto d = days_to_sql_date(raw[i]);
                     (*date_values)[static_cast<size_t>(i)] = d;
-                    char buffer_text[16]{};
-                    std::snprintf(buffer_text,
-                                  sizeof(buffer_text),
-                                  "%04d-%02u-%02u",
-                                  static_cast<int>(d.year),
-                                  static_cast<unsigned>(d.month),
-                                  static_cast<unsigned>(d.day));
-                    (*text_values)[static_cast<size_t>(i)] = buffer_text;
                 }
                 binding.date_buffer = date_values;
-                binding.utf8_cache = text_values;
-                static const uint8_t dummy = 0;
-                static const uint8_t term = 0;
+                binding.data_ptr = date_values->data();
+                binding.value_stride = sizeof(SQL_DATE_STRUCT);
                 ret = bcp_bind(m_dbc,
-                               (LPCBYTE)&dummy,
+                               (LPCBYTE)binding.data_ptr,
                                0,
-                               SQL_VARLEN_DATA,
-                               (LPCBYTE)&term,
-                               1,
-                               SQLCHARACTER,
+                               sizeof(SQL_DATE_STRUCT),
+                               nullptr,
+                               0,
+                               SQLDATEN,
                                binding.ordinal);
                 break;
             }
             case arrow::Type::TIMESTAMP: {
                 auto typed = std::static_pointer_cast<arrow::TimestampArray>(array);
                 auto timestamp_values = std::make_shared<std::vector<SQL_TIMESTAMP_STRUCT>>(typed->length());
-                auto text_values = std::make_shared<std::vector<std::string>>(typed->length());
                 const int64_t *raw = typed->raw_values();
                 for (int64_t i = 0; i < typed->length(); ++i) {
+                    if (binding.has_nulls && typed->IsNull(i)) {
+                        continue;
+                    }
                     const auto t = micros_to_sql_timestamp(raw[i]);
                     (*timestamp_values)[static_cast<size_t>(i)] = t;
-                    const unsigned micros = static_cast<unsigned>(t.fraction / 1000U);
-                    char buffer_text[40]{};
-                    std::snprintf(buffer_text,
-                                  sizeof(buffer_text),
-                                  "%04d-%02u-%02u %02u:%02u:%02u.%06u",
-                                  static_cast<int>(t.year),
-                                  static_cast<unsigned>(t.month),
-                                  static_cast<unsigned>(t.day),
-                                  static_cast<unsigned>(t.hour),
-                                  static_cast<unsigned>(t.minute),
-                                  static_cast<unsigned>(t.second),
-                                  micros);
-                    (*text_values)[static_cast<size_t>(i)] = buffer_text;
                 }
                 binding.timestamp_buffer = timestamp_values;
-                binding.utf8_cache = text_values;
-                static const uint8_t dummy = 0;
-                static const uint8_t term = 0;
+                binding.data_ptr = timestamp_values->data();
+                binding.value_stride = sizeof(SQL_TIMESTAMP_STRUCT);
                 ret = bcp_bind(m_dbc,
-                               (LPCBYTE)&dummy,
+                               (LPCBYTE)binding.data_ptr,
                                0,
-                               SQL_VARLEN_DATA,
-                               (LPCBYTE)&term,
-                               1,
-                               SQLCHARACTER,
+                               sizeof(SQL_TIMESTAMP_STRUCT),
+                               nullptr,
+                               0,
+                               SQLDATETIME2N,
                                binding.ordinal);
                 break;
             }
@@ -336,7 +319,7 @@ void MssqlStrategyNative::bulk_insert_arrow_bcp(const std::string &table,
                 auto typed = std::static_pointer_cast<arrow::StringArray>(array);
                 auto text_values = std::make_shared<std::vector<std::string>>(typed->length());
                 for (int64_t i = 0; i < typed->length(); ++i) {
-                    if (typed->IsNull(i)) {
+                    if (binding.has_nulls && typed->IsNull(i)) {
                         continue;
                     }
                     (*text_values)[static_cast<size_t>(i)] = typed->GetString(i);
@@ -358,7 +341,7 @@ void MssqlStrategyNative::bulk_insert_arrow_bcp(const std::string &table,
                 auto typed = std::static_pointer_cast<arrow::LargeStringArray>(array);
                 auto text_values = std::make_shared<std::vector<std::string>>(typed->length());
                 for (int64_t i = 0; i < typed->length(); ++i) {
-                    if (typed->IsNull(i)) {
+                    if (binding.has_nulls && typed->IsNull(i)) {
                         continue;
                     }
                     (*text_values)[static_cast<size_t>(i)] = typed->GetString(i);
@@ -381,7 +364,7 @@ void MssqlStrategyNative::bulk_insert_arrow_bcp(const std::string &table,
                 auto typed = std::static_pointer_cast<arrow::StringViewArray>(array);
                 auto text_values = std::make_shared<std::vector<std::string>>(typed->length());
                 for (int64_t i = 0; i < typed->length(); ++i) {
-                    if (typed->IsNull(i)) {
+                    if (binding.has_nulls && typed->IsNull(i)) {
                         continue;
                     }
                     auto view = typed->GetView(i);
@@ -414,7 +397,7 @@ void MssqlStrategyNative::bulk_insert_arrow_bcp(const std::string &table,
         for (int64_t row_idx = 0; row_idx < num_rows; ++row_idx) {
             for (auto &binding : bindings) {
                 if (binding.utf8_cache) {
-                    if (binding.array->IsNull(row_idx)) {
+                    if (binding.has_nulls && binding.array->IsNull(row_idx)) {
                         ret = bcp_collen(m_dbc, SQL_NULL_DATA, binding.ordinal);
                         if (ret != SUCCEED) {
                             raise_if_error(SQL_ERROR, SQL_HANDLE_DBC, m_dbc, "bcp_collen");
@@ -441,7 +424,7 @@ void MssqlStrategyNative::bulk_insert_arrow_bcp(const std::string &table,
                         raise_if_error(SQL_ERROR, SQL_HANDLE_DBC, m_dbc, "bcp_colptr");
                     }
                 } else if (binding.value_stride > 0) {
-                    if (binding.array->IsNull(row_idx)) {
+                    if (binding.has_nulls && binding.array->IsNull(row_idx)) {
                         ret = bcp_collen(m_dbc, SQL_NULL_DATA, binding.ordinal);
                         if (ret != SUCCEED) {
                             raise_if_error(SQL_ERROR, SQL_HANDLE_DBC, m_dbc, "bcp_collen");
@@ -458,10 +441,12 @@ void MssqlStrategyNative::bulk_insert_arrow_bcp(const std::string &table,
                     if (binding.value_stride > static_cast<size_t>(std::numeric_limits<DBINT>::max())) {
                         throw std::runtime_error("Fixed-width value exceeds DBINT length limits for BCP");
                     }
-                    DBINT len = static_cast<DBINT>(binding.value_stride);
-                    ret = bcp_collen(m_dbc, len, binding.ordinal);
-                    if (ret != SUCCEED) {
-                        raise_if_error(SQL_ERROR, SQL_HANDLE_DBC, m_dbc, "bcp_collen");
+                    if (binding.has_nulls) {
+                        DBINT len = static_cast<DBINT>(binding.value_stride);
+                        ret = bcp_collen(m_dbc, len, binding.ordinal);
+                        if (ret != SUCCEED) {
+                            raise_if_error(SQL_ERROR, SQL_HANDLE_DBC, m_dbc, "bcp_collen");
+                        }
                     }
                     ret = bcp_colptr(m_dbc, (LPCBYTE)ptr, binding.ordinal);
                     if (ret != SUCCEED) {
