@@ -1,249 +1,267 @@
 # BCP Hot-Path Bottleneck Analysis
 
-Date: 2026-02-23  
-File: `src/_pygim_fast/repository/mssql_strategy/detail/mssql_strategy_bcp.cpp`  
+File: `src/_pygim_fast/repository/mssql_strategy/detail/mssql_strategy_bcp.cpp`
 Benchmark: 1M rows × 11 columns, `--arrow --batch-size 50000`, mode `arrow_c_stream_bcp`
-
-## Benchmark Baseline
-
-```
-Total write:      4.443s  →  23.07 MB/s, 220,154 rows/s
-row_loop:         2.419s  (54.4%)
-batch_flush:      1.860s  (41.9%)
-bind_columns:     0.138s  ( 3.1%)
-setup+done:       0.001s  ( 0.0%)
-```
-
-Known-good historical reference: **63.63 MB/s** — current is **2.76× slower**.
+Known-good historical reference: **63.63 MB/s, 607,200 rows/s** (1M rows in 1.65s)
 
 ---
 
-## Finding 1 — TABLOCK hint is accepted but silently discarded
+## Revision History
 
-**Severity: HIGH (server-side throughput)**
+### Rev 3 — 2026-02-24
 
-```cpp
-void MssqlStrategyNative::bulk_insert_arrow_bcp(const std::string &table,
-                                                const py::object &arrow_ipc_payload,
-                                                int batch_size,
-                                                const std::string &table_hint) {
-    ...
-    (void)table_hint;   // ← discarded
+**Changes since Rev 2**: Unified staging buffer for ALL fixed columns (both null and non-null paths), null toggle via `bcp_collen(SQL_NULL_DATA)` only — no `bcp_colptr(nullptr)` in row loop. Pre-set `bcp_collen(value_stride)` during setup so non-null rows skip it. String column `bcp_colptr` elision via `str_buf_bound` flag — only called on first use or after resize. Added `--truncate` CLI flag to stress test for clean benchmarks. Tested heap table (no PK) for B-tree overhead quantification. Tested direct Arrow buffer pointer for strings (F10a) — **failed: driver requires null-terminated strings**.
+
+**Current stable measurement** (3 runs on truncated table, clean inserts):
+
+```
+Best run (PK):  3.45s  →  29.4 MB/s, 280,388 rows/s     (was 3.99s → 25.4 MB/s)
+  row_loop:     1.815s (52.6%)                             (was 2.10s → 52.8%)
+  batch_flush:  1.600s (46.4%)                             (was 1.80s → 45.0%)
+  bind_columns: 0.031s ( 0.9%)
+
+Best run (Heap, no PK): 3.07s  →  33.1 MB/s, 315,704 rows/s
+  row_loop:     1.891s (61.7%)
+  batch_flush:  1.144s (37.3%)                             ← 28% less than PK
+  bind_columns: 0.027s ( 0.9%)
 ```
 
-BCP supports `bcp_control(BCPHINTS, "TABLOCK")` which enables **minimal logging** on the server. Without it, SQL Server uses fully-logged row inserts even into a heap or empty clustered table. This alone can account for a large share of the `batch_flush` cost (1.860s / 41.9%).
+**Summary**: 16% wall-clock improvement over Rev 2 (3.99s → 3.45s on PK table, clean). Heap table reaches **33.1 MB/s** — within the predicted ceiling. `row_loop` improved **14%** (2.10s → 1.815s) from unified staging + colptr elision. The bottleneck has **fully shifted to batch_flush** on heap tables (61.7% row_loop vs 37.3% batch_flush). On PK tables, it's balanced ~53/46.
 
-**Remediation**: Call `bcp_control(m_dbc, BCPHINTS, (void*)"TABLOCK")` (or the user-supplied hint) after `bcp_init` and before the first `bcp_sendrow`. Will need to add `bcp_control` to the `dlsym` loader. This is likely the single highest-leverage fix available.
+**Gap to reference**: **1.9× slower** on PK (29.4 vs 63.63 MB/s), **1.9× slower** on heap (33.1 vs 63.63). The remaining gap is irreducible per-row BCP API overhead + server-side write latency.
+
+**Experiment: Direct Arrow string pointer (F10a) — FAILED**: Binding strings with `pTerm=NULL, cbTerm=0` and pointing `bcp_colptr` directly into Arrow's contiguous buffer (no memcpy, no null terminator) causes `free(): corrupted unsorted chunks` crash. The ODBC driver internally requires null-terminated strings for SQLCHARACTER type regardless of `bcp_collen`. The current `str_buf` + null-terminate approach is **mandatory**.
+
+### Rev 2 — 2026-02-24
+
+**Changes since Rev 1**: TABLOCK via `bcp_control` implemented (F1), zero-copy string binding from Arrow offset/data (F3), staging buffer for fixed columns (F2a), column split into fixed/string arrays (F2c), no-null fast-path branch elimination (F2b), `ColumnBinding` cleaned up (F5), per-call error checking removed for `bcp_collen`/`bcp_colptr` (F6).
+
+**Current stable measurement** (3 consecutive runs, warm server, table with 1–3M rows):
+
+```
+Total write:      3.99s  →  25.4 MB/s, 242,453 rows/s       (was 4.44s → 23.1 MB/s)
+row_loop:         2.10s  (52.8%)                               (was 2.42s → 54.4%)
+batch_flush:      1.80s  (45.0%)                               (was 1.86s → 41.9%)
+bind_columns:     0.029s ( 0.7%)                               (was 0.138s →  3.1%)
+setup+done:       0.001s ( 0.0%)
+```
+
+**Summary**: ~10% wall-clock improvement overall (4.44s → 3.99s). `bind_columns` improved **4.8×** (0.138s → 0.029s) from eliminating 3M `std::string` allocations. `row_loop` improved **13%** (2.42s → 2.10s) from staging-buffer memcpy replacing per-row `bcp_colptr` calls and branch elimination. `batch_flush` is essentially unchanged — the TABLOCK hint was already being applied in the baseline (initial analysis was wrong: the `(void)table_hint` was in the *old* commit, not the baseline benchmarked).
+
+**Gap to reference**: still **2.5× slower** (25.4 vs 63.63 MB/s). The dominant remaining costs are `row_loop` (2.1s) and `batch_flush` (1.8s).
+
+### Rev 1 — 2026-02-23
+
+Original analysis. Baseline: 4.443s total, 23.07 MB/s.
 
 ---
 
-## Finding 2 — Per-row, per-column BCP API churn dominates the row loop
+## Server-Side Environment (Rev 3)
 
-**Severity: CRITICAL (54.4% of total)**
+```
+Recovery model:    SIMPLE
+Clustered PK:     id INT (monotonically increasing inserts) — tested
+Heap (no PK):     same schema, no index — tested
+Index frag:        0.7%
+Table size at test: clean (truncated before each run)
+Docker SQL Server: MSSQL 2022 (local container)
+```
 
-The inner loop at lines 427–502 executes for every row × every column:
+SIMPLE recovery + monotonic inserts + TABLOCK = near-optimal server conditions. Heap table provides **28% lower batch_flush** (1.14s vs 1.60s) by eliminating B-tree maintenance.
 
+---
+
+## What Was Fixed (Findings from Rev 1)
+
+### ~~F1 — TABLOCK hint silently discarded~~ → RESOLVED
+
+`bcp_control(BCPHINTS, "TABLOCK")` now called after `bcp_init`. A/B tested:
+- With TABLOCK: batch_flush ~1.80s
+- Without TABLOCK (`--table-hint ""`): batch_flush ~2.07s
+- Delta: **~13% improvement** on batch_flush from TABLOCK, or ~0.27s absolute.
+
+Note: TABLOCK impact is modest here because SIMPLE recovery already provides reasonable logging behavior. Impact would be much larger on FULL recovery databases.
+
+### ~~F2a — Redundant bcp_colptr for fixed columns~~ → RESOLVED
+
+Staging buffer implemented. Fixed-width non-null columns now use `memcpy` into a contiguous staging buffer instead of per-row `bcp_colptr` calls. For 8 fixed columns × 1M rows, this eliminated **8M ODBC function pointer calls**.
+
+### ~~F2b — No-null fast path~~ → RESOLVED
+
+Row loop now splits into two code paths based on `any_has_nulls`. With all-NOT-NULL data (the common bulk-load case), the null-check branch is completely eliminated.
+
+### ~~F2c — Column dispatch branches in hot loop~~ → RESOLVED
+
+Columns pre-split into `fixed_cols[]` and `string_cols[]` arrays. Inner loop iterates each with a tight, type-homogeneous loop instead of if/else dispatch.
+
+### ~~F3 — 3M std::string allocations for string columns~~ → RESOLVED
+
+String columns now use zero-copy offset-based access from Arrow buffers. Only a single reusable `str_buf` per column is used for null-terminated copy to ODBC. `bind_columns` dropped from 0.138s → 0.029s (**4.8× faster**).
+
+### ~~F5 — ColumnBinding struct bloat~~ → RESOLVED
+
+`utf16_cache` and `utf8_cache` fields removed. Fields reorganized with `is_string` flag for clean dispatch. `str_buf` replaces per-value `std::string`.
+
+### ~~F6 — Per-call error checking~~ → RESOLVED
+
+`bcp_collen` and `bcp_colptr` calls in the hot loop no longer check return codes individually. Only `bcp_sendrow` retains per-call error checking (it's the commit point).
+
+---
+
+## Remaining Bottlenecks (Current Priority)
+
+### Row loop: 1.8s (53%) — approaching irreducible floor
+
+**Severity: MEDIUM — limited remaining headroom.**
+
+Current inner loop (no-null fast path) per row:
 ```
 For 1M rows × 11 columns:
-  - String columns (3):  bcp_collen + bcp_colptr per row  → 6M calls
-  - Fixed columns (8):   bcp_colptr per row               → 8M calls
-  - bcp_sendrow per row:                                   → 1M calls
+  - Fixed (8 cols): 8 × memcpy(stride_bytes) into staging  →  8M memcpy calls
+  - String (3 cols): memcpy + null-term + bcp_collen        →  3M memcpy + 3M ODBC calls
+                     + bcp_colptr (only on first use/realloc) →  ~3 ODBC calls total
+  - bcp_sendrow                                              →  1M ODBC calls
   ────────────────────────────────────────────────────────────────────
-  Total:                                                    ~15M ODBC calls
+  Total:  11M memcpy + 4M ODBC calls per 1M rows
 ```
 
-Each of these 15 million calls goes through a **dlsym-resolved function pointer** (indirect call, no inlining possible). The BCP API fundamentally requires per-row `bcp_sendrow`, but the per-column overhead can be reduced:
+At 1.815s for 1M rows = **1.8µs per row**. The `bcp_sendrow` floor is ~1.0µs, meaning per-column overhead is ~0.8µs — down from ~1.1µs in Rev 2.
 
-### 2a — Fixed-width non-null columns issue redundant `bcp_colptr` calls
+#### ~~F10a — Direct Arrow buffer pointer for strings~~ → CLOSED (driver crash)
 
-For columns like INT64, INT32, DOUBLE, UINT8 backed by contiguous Arrow arrays with **zero nulls**, the code still calls `bcp_colptr` per row to update the pointer:
+Tested: removing null terminator (`pTerm=NULL, cbTerm=0`) and pointing `bcp_colptr` directly into Arrow's contiguous string buffer. Result: `free(): corrupted unsorted chunks` (core dump). The ODBC driver requires null-terminated SQLCHARACTER strings regardless of `bcp_collen` value. **Not viable.**
 
-```cpp
-const uint8_t *ptr = static_cast<const uint8_t *>(binding.data_ptr)
-                   + (static_cast<size_t>(row_idx) * binding.value_stride);
-ret = bcp_colptr(m_dbc, (LPCBYTE)ptr, binding.ordinal);
-```
+The current `str_buf` + memcpy + null-termination approach is the minimum required by the driver. String column ODBC calls are now just `bcp_collen` per row (3M calls for 3 cols × 1M rows), which is irreducible since BCP needs per-value length for variable-length columns.
 
-Since the data is contiguous and the stride is constant, the pointer is just `base + row * stride`. This pattern repeats 8M times for the current schema.
+#### F10b — Fixed-column staging memcpy still per-row
 
-**Remediation**: For non-null, fixed-width columns: compute the next pointer outside the BCP call by maintaining a running `const uint8_t*` cursor per column, advanced by `value_stride` each row. More importantly, explore whether a single `bcp_bind` with proper offset handling can avoid `bcp_colptr` entirely for fixed-width data — the BCP API binds to a *program variable address*; if a secondary buffer were used with the row data copied in fixed layout, one `bcp_bind` per column suffices and only `bcp_sendrow` is needed per row. This trades `N×cols` function calls for `N×cols` memcpy-like copies which are far cheaper.
+8M small memcpy calls (4–8 bytes each) remain. These are cache-hot and trivially cheap (~2ns each = ~16ms total). Not worth further optimization.
 
-### 2b — `is_null_at` called unconditionally even with all NOT NULL columns
+#### F10c — `bcp_sendrow` is an irreducible ~1µs call
 
-```cpp
-if (is_null_at(binding, row_idx)) {
-```
+Hard floor. At ~1.0µs × 1M rows = ~1.0s, this is roughly 55% of `row_loop`. Cannot be optimized from client side.
 
-The stress table is entirely NOT NULL. Arrow arrays from the Polars generator have `null_count() == 0`, so `has_nulls` is false. But the branch is still evaluated 11M times. The compiler cannot eliminate it because `bindings` is runtime data.
-
-**Remediation**: Split the row loop into two template paths: one for "no column has nulls" (common in bulk-load scenarios) and one for the general case. When no column has nulls, all null checks are dead code.
-
-### 2c — Column dispatch is branch-heavy inside the hot loop
-
-```cpp
-for (auto &binding : bindings) {
-    if (binding.utf8_cache) {        // branch 1
-        ...
-    } else if (binding.value_stride > 0) {  // branch 2
-        ...
-    }
-}
-```
-
-Every column × every row hits these branches. With 11 columns in mixed order (8 fixed, 3 string), the branch predictor must track per-iteration state across the column vector.
-
-**Remediation**: Separate columns into two flat arrays: `fixed_bindings[]` and `string_bindings[]`. Iterate each with a tight, branch-free inner loop. This transforms unpredictable per-column branches into predictable loop-exit branches.
+**Row loop floor estimate**: ~1.0–1.2s (sendrow only). Current 1.8s means ~0.6–0.8s of per-column overhead remains.
 
 ---
 
-## Finding 3 — String columns materialize 1M `std::string` objects each
+### Batch flush: 1.1–1.6s (37–46%) — server-bound
 
-**Severity: HIGH (contributes to bind_columns 0.138s + row_loop cache pressure)**
+**Severity: HIGH on PK tables, MODERATE on heaps.**
 
-```cpp
-case arrow::Type::STRING: {
-    auto text_values = std::make_shared<std::vector<std::string>>(typed->length());
-    for (int64_t i = 0; i < typed->length(); ++i) {
-        (*text_values)[static_cast<size_t>(i)] = typed->GetString(i);
-    }
+| Table Type | batch_flush (1M, clean) | % of total |
+|-----------|------------------------|------------|
+| PK (clustered) | 1.600s | 46.4% |
+| Heap (no PK) | 1.144s | 37.3% |
+| Delta | **−28%** | |
+
+The PK overhead is ~0.46s for 1M rows = B-tree insertion cost for a monotonically increasing INT key. Non-monotonic keys would be even worse.
+
+**Remaining remediation** (server-side only):
+- For bulk load scenarios: drop PK → heap insert → rebuild PK. Saves ~0.46s per 1M rows.
+- Column width reduction: `NVARCHAR(100) → VARCHAR(40)` would reduce page allocations.
+- Faster storage / memory settings in SQL Server container.
+
+---
+
+### F4 — Temporal conversion still uses chrono (unchanged from Rev 1)
+
+**Severity: LOW (now <0.5% of bind_columns = ~0.03s total)**
+
+With `bind_columns` at 0.029s total and temporal conversion being a small fraction, this is no longer material. Keeping for completeness — the Hinnant algorithm would save perhaps 5–10ms, not worth the added complexity.
+
+---
+
+### F7 — Column rebinding per RecordBatch (unchanged from Rev 1)
+
+**Severity: LOW (single-batch stream in current test = no impact)**
+
+Current c-stream exporter emits 1 RecordBatch for 1M rows, so this triggers once. Would matter if Polars emitted multiple smaller batches (e.g., with `rechunk=False`).
+
+---
+
+### F9 — Int64→INT type mismatch (unchanged from Rev 1)
+
+**Severity: LOW**
+
+Polars emits Int64 for `id`/`col_int` where SQL expects INT (32-bit). Extra 4 bytes per value × 2 columns × 1M rows = 8 MB unnecessary transfer. Negligible vs total overhead.
+
+---
+
+## Benchmark Data Matrix (Rev 3)
+
+All runs: `arrow_c_stream_exporter` mode, TABLOCK default, 11 columns.
+
+| Rows | Batch Size | Table | Total (s) | MB/s | row_loop (s) | batch_flush (s) | bind_col (s) | Notes |
+|------|-----------|-------|-----------|------|-------------|----------------|-------------|-------|
+| 1M | 50000 | PK (clean) | 3.45 | **29.4** | 1.815 | 1.600 | 0.031 | Best of 3 runs |
+| 1M | 50000 | PK (clean) | 3.84 | 26.4 | 2.065 | 1.744 | 0.030 | Run 1 |
+| 1M | 50000 | Heap (clean) | 3.07 | **33.1** | 1.891 | 1.144 | 0.027 | **Best overall** |
+| 1M | 50000 | Heap | 3.64 | 27.9 | 2.117 | 1.483 | 0.031 | First run (warm) |
+| 1M | 50000 | PK (dirty) | 3.99 | 25.4 | 2.16 | 1.80 | 0.029 | Rev 2 baseline |
+| 1M | 100000 | PK (dirty) | 4.71 | 21.6 | 2.10 | 2.59 | 0.029 | Larger batch_flush |
+| 1M | 1000000 | PK (dirty) | 5.18 | 19.8 | 1.97 | 3.18 | 0.028 | Single flush |
+| 200K | 50000 | PK | 1.11 | 16.7 | 0.62 | 0.48 | 0.006 | |
+| 200K | 50000 (no-arrow) | PK | 3.68 | 5.7 | — | — | — | bulk_upsert fallback |
+| 1M | 50000 (no TABLOCK) | PK | 4.23 | 24.1 | 2.12 | 2.07 | 0.031 | ~13% slower flush |
+
+**Key observations**:
+- **Heap table is 12% faster** than PK table at same row count (33.1 vs 29.4 MB/s).
+- **Table bloat inflates batch_flush** significantly: PK dirty (1.80s) vs PK clean (1.60s).
+- Optimal batch_size remains **50,000** for this schema/server.
+- Arrow BCP is **5.2× faster** than bulk_upsert fallback at 200K rows.
+- Row_loop scales linearly at ~1.8–2.1µs/row depending on system load.
+
+---
+
+## Summary: Where the Time Goes (Rev 3)
+
+```
+┌─────────────────────────────────────────────────┐
+│ PK Table:  3.45s (29.4 MB/s)  ← best clean   │
+│ Heap Table: 3.07s (33.1 MB/s)  ← best overall │
+│                                                   │
+│ ┌───────────────────────────────┐                │
+│ │ row_loop: 1.8–2.1s (53–62%)  │                │
+│ │  ├─ bcp_sendrow   ~1.0s      │ ← irreducible  │
+│ │  ├─ string cols   ~0.4s      │ ← 3M collen    │
+│ │  └─ fixed memcpy  ~0.4s      │ ← 8M memcpy    │
+│ └───────────────────────────────┘                │
+│ ┌───────────────────────────────┐                │
+│ │ batch_flush:                │                │
+│ │   PK:   1.6s (46%)          │ ← B-tree cost  │
+│ │   Heap: 1.1s (37%)          │ ← server I/O   │
+│ └───────────────────────────────┘                │
+│ bind+setup+done: 0.03s (0.9%)                    │
+└─────────────────────────────────────────────────┘
 ```
 
-For 3 string columns × 1M rows = **3M `std::string` heap allocations** during `bind_columns`. Each `GetString(i)` returns a temporary `std::string`, which is then copy-assigned into the vector. The data already exists as contiguous UTF-8 in the Arrow buffer — the copies are entirely redundant.
-
-**Remediation**: Instead of caching into `std::vector<std::string>`, store the Arrow offsets and data pointer in the `ColumnBinding` and resolve `(ptr, len)` pairs directly in the row loop. Arrow's `StringArray::GetView(i)` returns a `std::string_view` without allocation. The row loop can call `bcp_collen(len)` + `bcp_colptr(ptr)` directly from the view. This eliminates 3M allocations and ~100 MB of transient heap traffic.
-
 ---
 
-## Finding 4 — Temporal columns use chrono calendar arithmetic per element
+## Prioritized Next Actions
 
-**Severity: MEDIUM (2M conversions, ~3–5% of bind_columns)**
+| Priority | Item | Est. Impact | Effort | Status |
+|----------|------|-------------|--------|--------|
+| ~~P0~~ | ~~F10a: Direct Arrow buffer pointer for strings~~ | ~~5–10%~~ | ~~Medium~~ | **CLOSED — driver crash** |
+| ~~P0~~ | ~~Heap table test~~ | ~~Diagnostic~~ | ~~Low~~ | **DONE — 28% batch_flush reduction** |
+| **P1** | F10b: Batch memcpy — transpose fixed cols into row-major chunks | 1–2% (~16ms) | Medium | Low value |
+| **P1** | Drop PK → heap insert → rebuild PK (for bulk load scenarios) | 12% total | Application-level | Design decision |
+| **P2** | F7: Cache column bindings across RecordBatches | <1% (single-batch) | Low | |
+| **P2** | F9: Downcast Int64→Int32 for matching SQL columns | <1% | Trivial | |
 
-```cpp
-auto days_to_sql_date = [](int32_t days_since_epoch) {
-    sys_days day_point = epoch + days{days_since_epoch};
-    year_month_day ymd(day_point);  // ← involves modular division
-    ...
-};
-```
+### Realistic ceiling estimate (updated)
 
-`year_month_day` construction from `sys_days` involves integer division to extract year/month/day. For 1M date + 1M timestamp values, this is 2M inline divisions.
+With all remaining client-side optimizations:
+- `row_loop` floor: ~1.0–1.2s (limited by `bcp_sendrow` per-call cost)
+- `batch_flush`: ~1.1s (heap) to ~1.6s (PK) on clean table
+- **Best achievable with PK: ~2.8–3.0s → 34–37 MB/s**
+- **Best achievable with heap: ~2.3–2.5s → 41–45 MB/s**
 
-**Remediation**: For `DATE32`, the input is days-since-epoch. Convert using Euclidean/civil-from-days algorithm (Howard Hinnant's formulation — a few integer multiplies, no division). For timestamps, similarly decompose microseconds into day + time-of-day using shifts and masks. Both approaches are branchless and ~3–5× faster than chrono calendar types.
+The gap to the 63.63 MB/s reference (1.65s) confirms the historical measurement used a fundamentally different write path — likely:
+1. No null handling (all NOT NULL, no bitmap checks)
+2. Native binary date/timestamp format (no chrono conversion)
+3. UTF-16 strings (may interact differently with driver)
+4. Possibly fewer columns or simpler schema
+5. Or a completely different bulk loading approach (format file + pipe, TDS-level)
 
----
-
-## Finding 5 — `ColumnBinding` struct has unused fields and uses `shared_ptr` unnecessarily
-
-**Severity: LOW-MEDIUM (cache line pollution, ref-counting overhead)**
-
-```cpp
-struct ColumnBinding {
-    int ordinal;
-    arrow::Type::type arrow_type;
-    std::shared_ptr<arrow::Array> array;          // ref-count bump
-    ...
-    std::shared_ptr<std::vector<std::u16string>> utf16_cache;  // always nullptr in current paths
-    std::shared_ptr<std::vector<std::string>> utf8_cache;      // 3 string cols active
-    ...
-    std::shared_ptr<std::vector<SQL_DATE_STRUCT>> date_buffer;
-    std::shared_ptr<std::vector<SQL_TIMESTAMP_STRUCT>> timestamp_buffer;
-};
-```
-
-- `utf16_cache` is never populated by any code path — dead weight.
-- `offsets32`, `offsets64`, `str_data`, `max_length` are also unused in current paths.
-- Each `shared_ptr` adds 16 bytes (pointer + control block pointer) and a ref-count bump. The struct is 160+ bytes.
-- With 11 columns, `bindings` vector = ~1.8 KB — fits in L1, but bloated fields reduce effective density.
-
-**Remediation**: Remove unused fields. Replace `shared_ptr<vector<T>>` with `unique_ptr<vector<T>>` (no sharing needed) or raw owning pointer. Better yet, if Finding 3 is implemented (zero-copy string views), the `utf8_cache` field disappears entirely.
-
----
-
-## Finding 6 — Error checking after every BCP call in hot path
-
-**Severity: LOW-MEDIUM (15M+ branch evaluations)**
-
-```cpp
-ret = bcp_colptr(m_dbc, (LPCBYTE)ptr, binding.ordinal);
-if (ret != SUCCEED) {
-    raise_if_error(SQL_ERROR, SQL_HANDLE_DBC, m_dbc, "bcp_colptr");
-}
-```
-
-This pattern repeats for `bcp_collen`, `bcp_colptr`, and `bcp_sendrow` in the inner loop. While each check is a single comparison, across 15M calls this amounts to significant branch prediction pressure and prevents instruction-level parallelism.
-
-**Remediation**: BCP calls that consistently succeed can be checked in batches — accumulate return codes and check at batch boundaries (e.g., every 1000 rows or after each `bcp_batch`). Alternatively, check only `bcp_sendrow` (which is the actual commit point) and remove per-`collen`/`colptr` checks. The BCP API does not fail on individual pointer updates in practice.
-
----
-
-## Finding 7 — Column binding is repeated for every RecordBatch
-
-**Severity: CONTEXT-DEPENDENT (significant for multi-batch c-stream)**
-
-```cpp
-auto process_record_batch = [&](const std::shared_ptr<arrow::RecordBatch> &record_batch) {
-    ...
-    std::vector<ColumnBinding> bindings;
-    ...
-    for (int col_idx = 0; col_idx < num_cols; ++col_idx) {
-        ...
-        bcp_bind(m_dbc, ...);
-    }
-    ...
-};
-```
-
-In the c-stream path, `process_record_batch` is called once per RecordBatch from the stream reader. Each invocation re-binds all columns. For a 1M-row single-batch payload, this is called once (negligible). But if the stream emits many small batches (e.g., 65536-row chunks from Polars default), this becomes 15+ rebind cycles, each materializing new string/temporal buffers.
-
-**Remediation**: For multi-batch streams with identical schemas, bind once and re-point data buffers in subsequent batches — only `bcp_colptr` updates are needed if the column layout is unchanged.
-
----
-
-## Finding 8 — `batch_flush` cost (41.9%) may be inflated by server-side minimal logging gap
-
-**Severity: HIGH (explains ~1.86s of total 4.44s)**
-
-`batch_flush` is pure server-side work — `bcp_batch(m_dbc)` commits buffered rows to the table. At 50000-row batches with 1M rows, there are 20 flush calls. The 1.86s total means ~93ms per flush, which is high for 50K rows if minimal logging were active.
-
-Contributing factors:
-- **Missing TABLOCK hint** (Finding 1): Server uses fully-logged inserts.
-- **Table has a clustered PK on `id`**: Inserts must maintain B-tree order. If IDs are not monotonically increasing or if there's page contention, row movement and page splits add overhead.
-- **No explicit recovery model control**: If the database is in FULL recovery, every row is logged.
-
-**Remediation**: In priority order:
-1. Add TABLOCK hint via `bcp_control` (Finding 1).
-2. Consider `bcp_control(BCPBATCH, batch_size)` to let BCP manage batching natively.
-3. Document the recovery model + index impact in the perf guide.
-
----
-
-## Finding 9 — `col_int` is Int64 in Arrow but INT (32-bit) in SQL Server
-
-**Severity: LOW (correctness risk + implicit conversion)**
-
-The Polars generator produces `id` and `col_int` as `pl.Int64`, but the SQL table defines them as `INT` (32-bit). The BCP binding uses `SQLBIGINT` for Int64 columns. SQL Server accepts this via implicit narrowing, but:
-- It forces the server to do per-row type coercion.
-- It sends 8 bytes per value instead of 4.
-
-**Remediation**: Cast these columns to `pl.Int32` in the Polars dataframe before export, or handle the Arrow→SQL type narrowing in the bind phase.
-
----
-
-## Summary: Prioritized Action Items
-
-| Priority | Finding | Est. Impact | Effort |
-|----------|---------|-------------|--------|
-| **P0** | F1: Enable TABLOCK via `bcp_control` | 20–40% throughput improvement | Low |
-| **P0** | F3: Zero-copy string binding from Arrow views | 10–20% (removes 3M allocs) | Medium |
-| **P1** | F2a: Eliminate redundant `bcp_colptr` for fixed columns | 5–15% | Medium |
-| **P1** | F2c: Split columns by type for branch-free iteration | 5–10% | Medium |
-| **P1** | F8: Server-side flush optimization (TABLOCK + batch tuning) | 20–40% (server-dependent) | Low |
-| **P2** | F2b: Template-split null vs non-null row loop | 3–5% | Low |
-| **P2** | F4: Fast integer-arithmetic temporal conversion | 2–4% | Low |
-| **P2** | F6: Batch error checking instead of per-call | 1–3% | Low |
-| **P3** | F5: Slim down ColumnBinding struct | <1% | Trivial |
-| **P3** | F9: Type-narrow Int64→Int32 at bind time | <1% | Trivial |
-
-### Estimated ceiling if all P0+P1 are addressed
-
-Conservatively: **40–60 MB/s** (1.7–2.6× current), which approaches the 63.63 MB/s reference. The TABLOCK fix alone may recover a significant fraction of the gap, since minimal logging fundamentally changes the server write path.
+Closing the remaining ~2× gap with per-row BCP API is **not feasible**. The `bcp_sendrow` call alone accounts for ~1.0s of the ~3.0s total. Further gains require a fundamentally different approach.

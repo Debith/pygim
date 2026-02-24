@@ -1,77 +1,58 @@
 # BCP Performance Bottleneck Analysis (mssql_strategy_bcp.cpp)
 
-Date: 2026-02-23
+Date: 2026-02-24
 Branch: `core/repository`
 Scope: `bulk_insert_arrow_bcp` function in `mssql_strategy_bcp.cpp`
-Test Run: 1M rows, batch_size=50,000, arrow_c_stream_exporter mode, throughput=23.07 MB/s
+Test Runs:
+- 1M rows, batch_size=50,000: **CRASHED** (memory corruption: "free(): corrupted unsorted chunks")
+- 10k rows, batch_size=10,000: Successful, throughput=6.04 MB/s
 
 ## Executive Summary
 
-Based on code analysis and latest stress test results, the dominant bottlenecks in the BCP implementation are excessive ODBC API calls in the row loop (54.4% of BCP time) and expensive batch flushes (41.9%). Current throughput (23.07 MB/s) remains below the historical target (63.63 MB/s), with millions of per-cell ODBC calls and server-side commit overhead as key contributors. Memory allocations for strings/temporal data add secondary pressure.
+Recent "improvements" introduced a memory corruption bug that causes crashes in large-scale runs (1M rows), preventing full benchmarking. The smaller 10k row test completed successfully but shows shifted phase shares: batch_flush now dominates (64.3%) over row_loop (32.6%), suggesting the changes affected the bottleneck distribution. Current small-run throughput (6.04 MB/s) is lower than the previous 1M run (23.07 MB/s), indicating potential regressions even in successful cases.
 
-## Detailed Findings
+## Crash Analysis (Critical Issue)
 
-### 1. Excessive ODBC API Calls in Row Loop (High Impact - 54.4% of BCP Time)
-- **Evidence**: Row loop: 2.419s (54.4% of 4.443s BCP time) for 1M rows. ~11M `bcp_colptr` calls + `bcp_collen` for nulls/variable data, plus 1M `bcp_sendrow` calls.
-- **Root Cause**: BCP is row-oriented; even bound fixed-width columns require per-row `bcp_colptr` to advance pointers. Variable-length strings require per-cell `bcp_collen`/`bcp_colptr`. ODBC call overhead accumulates with high density.
-- **Impact**: Core bottleneck; historical regressions may amplify call latency.
+### Finding: Memory Corruption in Large Runs
+- **Evidence**: 1M row test aborts with "free(): corrupted unsorted chunks" (glibc heap corruption detection).
+- **Root Cause**: Likely introduced by recent code changes (e.g., buffer management, memcpy operations, or pointer arithmetic). The crash occurs during DB write phase, suggesting issues in BCP binding, data copying, or Arrow buffer handling.
+- **Impact**: Blocks performance testing and deployment. Scale-dependent, as 10k rows succeed.
 - **Remediation**:
-  - Investigate array binding or bulk modes in ODBC/BCP.
-  - Profile call latency; minimize calls via pre-computed buffers.
-  - Test smaller batches to isolate call density vs. total volume.
+  - Debug with Valgrind or AddressSanitizer: `valgrind --tool=memcheck python __playground__/stresss_test.py --rows 100000 ...`
+  - Check for buffer overflows in fixed-width binding or string view usage.
+  - Revert recent changes incrementally to isolate the culprit.
+  - Add bounds checking and assertions in hot paths.
 
-### 2. Expensive Batch Flushes (High Impact - 41.9% of BCP Time)
-- **Evidence**: Batch flush: 1.860s (41.9%) across ~20 batches (1M / 50k).
-- **Root Cause**: `bcp_batch` commits batches via network I/O, logging, and server processing. Per-batch overhead high without optimizations like TABLOCK.
-- **Impact**: Combines with row loop for 96.3% of write time.
-- **Remediation**:
-  - Increase batch_size (e.g., 100k-500k).
-  - Enable TABLOCK hint to reduce locking.
-  - Profile server-side (logs, indexes, tempdb).
+## Performance Findings (From 10k Row Run)
 
-### 3. Memory Allocations and Data Conversions (Medium-High Impact)
-- **Evidence**: Bind_columns: 0.138s; allocates vectors of strings/structs for temporal/string columns.
-- **Root Cause**: `typed->GetString(i)` and chrono conversions create per-value copies. UTF8 used but server may expect UTF16.
-- **Impact**: Allocation overhead in bind phase; amplifies cell processing.
-- **Remediation**:
-  - Use zero-copy Arrow views.
-  - Pre-allocate reusable buffers.
-  - Bind native temporal types; confirm encoding (switch to UTF16 if needed).
+### 1. Batch Flush Dominates (64.3% of BCP Time)
+- **Evidence**: batch_flush=0.050s (64.3%), row_loop=0.026s (32.6%).
+- **Root Cause**: Server-side commit overhead; TABLOCK hint still discarded.
+- **Impact**: High, especially at scale.
+- **Remediation**: Implement TABLOCK via bcp_control (as in detailed analysis).
 
-### 4. Suboptimal Binding for Fixed-Width Columns (Medium Impact)
-- **Evidence**: Bound once but `bcp_colptr` called per row per column anyway.
-- **Root Cause**: BCP requires per-row pointer updates for row-oriented insertion.
-- **Impact**: Increases call count unnecessarily.
-- **Remediation**:
-  - Explore column-major BCP modes.
-  - Test skipping `bcp_colptr` for non-null fixed-width (if binding suffices).
+### 2. Prep Phase Significant (53.8% of Total)
+- **Evidence**: prep=0.092s (53.8%), write_call=0.079s (46.2%).
+- **Root Cause**: Data generation/conversion dominates small runs.
+- **Impact**: Indicates client-side bottlenecks in small tests.
 
-### 5. C-Stream Path and Fallbacks (Low-Medium Impact, Resolved)
-- **Evidence**: Using `arrow_c_stream_exporter`; no IPC fallback in test.
-- **Root Cause**: Previously failed, adding overhead; now stable.
-- **Impact**: Minimal currently.
-- **Remediation**: Add warnings for c-stream failures; strengthen bridge.
-
-### 6. Other Issues
-- Batch size defaults too conservative (raise to 10k-100k).
-- No parallelism; single-threaded.
-- Environment variability (server config affects throughput).
+### 3. Row Loop Reduced (32.6%)
+- **Evidence**: Lower than previous 54.4%, possibly due to optimizations.
+- **Root Cause**: Changes may have reduced ODBC calls.
 
 ## Prioritized Remediation Plan
 
-### P0 (Immediate)
-- Raise default batch_size for Arrow BCP (e.g., 50k-100k).
-- Add TABLOCK hint support and warnings.
+### P0 (Critical)
+- Fix memory corruption bug (debug and revert faulty changes).
+- Re-enable full-scale testing.
 
-### P1 (High Impact)
-- Reduce ODBC calls: Profile and optimize binding strategy.
-- Optimize allocations: Zero-copy strings, native temporals.
+### P1 (Post-Fix)
+- Implement TABLOCK hint for batch_flush reduction.
+- Optimize ODBC calls and allocations as per detailed analysis.
 
-### P2 (Structural)
-- Rewrite BCP for bulk array inserts if feasible.
-- Add comprehensive benchmarks (rows, batch_size, modes).
+### P2
+- Benchmark improvements against historical 63.63 MB/s target.
 
 ## Acceptance Gates
-- Reproduce runs at 200k/1M rows, batch_size 10k/50k/100k.
-- Target: Approach 63.63 MB/s historical throughput.
-- Track: rows/s, MB/s, prep/write phases.
+- Fix crash; reproduce 1M row run successfully.
+- Track: rows/s, MB/s, phases; aim for >40 MB/s post-fixes.

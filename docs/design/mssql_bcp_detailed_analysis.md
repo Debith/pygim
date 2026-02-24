@@ -64,7 +64,7 @@ Based on the stress test output and the source code of `mssql_strategy_bcp.cpp`,
 
 ### 5. Parallelization Potential (Data Conversion vs. Flushing)
 - **Observation**: The current implementation is strictly single-threaded. It sequentially binds columns, loops over rows to send data (`bcp_sendrow`), and periodically flushes batches (`bcp_batch`).
-- **Analysis**: 
+- **Analysis**:
   - `bcp_sendrow` and `bcp_batch` are stateful operations on a single ODBC connection handle (`m_dbc`). ODBC connection handles are generally not thread-safe for concurrent operations on the same statement/connection.
   - However, the *preparation* of data (e.g., converting Arrow temporal integers to `SQL_DATE_STRUCT`, or extracting `std::string_view` from Arrow arrays) is entirely CPU-bound and independent of the ODBC handle.
   - The `batch_flush` phase (41.9% of time) is largely I/O bound (waiting for the network and SQL Server).
@@ -76,6 +76,6 @@ Based on the stress test output and the source code of `mssql_strategy_bcp.cpp`,
     - **Memory Overhead**: We would need to allocate memory for at least two full batches of intermediate buffers (one being filled by the producer, one being sent by the consumer) to achieve true overlap.
     - **Complexity**: Managing thread synchronization, buffer handoffs, and error propagation (e.g., if the consumer fails to send, the producer must be stopped) adds significant complexity to the C++ extension.
     - **ODBC Limitations**: The actual `bcp_sendrow` and `bcp_batch` calls must still happen sequentially on a single thread per connection. If `bcp_sendrow` itself (even with optimized binding) remains the bottleneck, parallelizing the prep phase won't yield massive gains.
-- **Recommendation**: 
-  - **Defer Parallelization**: Before introducing multi-threading complexity, implement the P1 optimizations (fixed-buffer binding to eliminate `bcp_colptr` calls, and zero-copy strings). 
+- **Recommendation**:
+  - **Defer Parallelization**: Before introducing multi-threading complexity, implement the P1 optimizations (fixed-buffer binding to eliminate `bcp_colptr` calls, and zero-copy strings).
   - If the CPU-bound prep work (which is currently only ~3.1% of the time in `bind_columns`, but might increase slightly if we move temporal conversions to the `row_loop`) becomes the new bottleneck *after* fixing the ODBC call overhead, then a producer-consumer pipeline would be the next logical step.

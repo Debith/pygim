@@ -198,6 +198,7 @@ void MssqlStrategyNative::bulk_insert_arrow_bcp(const std::string &table,
 #endif
         // Reusable buffer for null-terminated string copy (avoids per-row alloc)
         std::vector<uint8_t> str_buf;
+        bool str_buf_bound{false};  // true once bcp_colptr pointed at str_buf
         // Staging row buffer offset (fixed cols only, used in no-null fast path)
         size_t staging_offset{0};
         // Temporal column pre-converted buffers
@@ -444,31 +445,32 @@ void MssqlStrategyNative::bulk_insert_arrow_bcp(const std::string &table,
             if (b.has_nulls) { any_has_nulls = true; break; }
         }
 
-        // F2a: Staging row buffer for fixed columns (no-null fast path).
-        // Bind fixed columns to contiguous staging slots so that per-row
+        // Staging row buffer for ALL fixed columns (used in both paths).
+        // Bind each fixed column to a contiguous staging slot so per-row
         // work is a small memcpy instead of a bcp_colptr ODBC call.
-        // This eliminates ~(num_fixed_cols × num_rows) ODBC function pointer
-        // calls from the hot loop.
+        // For null rows we only toggle bcp_collen(SQL_NULL_DATA) — the
+        // staging pointer stays valid (bcp_sendrow reads the length first
+        // and skips the data when length is SQL_NULL_DATA).
         std::vector<uint8_t> staging_buf;
-        if (!any_has_nulls) {
+        {
             size_t staging_total = 0;
             for (auto *bp : fixed_cols) {
                 bp->staging_offset = staging_total;
                 staging_total += bp->value_stride;
             }
             staging_buf.resize(staging_total);
-            // Redirect each fixed column's bound address to its staging slot.
-            // bcp_colptr sets the address bcp_sendrow reads from; it persists
-            // until changed, so this single call per column replaces millions
-            // of per-row bcp_colptr calls.
+            // One-time redirect: point each fixed column at its staging slot.
             for (auto *bp : fixed_cols) {
                 bcp_colptr(m_dbc, staging_buf.data() + bp->staging_offset, bp->ordinal);
+                // Pre-set the length so non-null rows don't need bcp_collen.
+                bcp_collen(m_dbc, static_cast<DBINT>(bp->value_stride), bp->ordinal);
             }
         }
 
         timer.start_sub_timer("row_loop", false);
 
         // --- Macro for string column handling (shared by both paths) ---
+        // Only calls bcp_colptr when str_buf reallocates (pointer changes).
         #define PYGIM_BCP_HANDLE_STRING_COL(bp, row_idx)                          \
             do {                                                                   \
                 DBINT len;                                                         \
@@ -486,11 +488,15 @@ void MssqlStrategyNative::bulk_insert_arrow_bcp(const std::string &table,
                 const auto ulen = static_cast<size_t>(len);                        \
                 if (ulen + 1 > (bp)->str_buf.size()) {                             \
                     (bp)->str_buf.resize(ulen + 1);                                \
+                    (bp)->str_buf_bound = false;                                   \
                 }                                                                  \
                 std::memcpy((bp)->str_buf.data(), ptr, ulen);                      \
                 (bp)->str_buf[ulen] = '\0';                                        \
                 bcp_collen(m_dbc, len, (bp)->ordinal);                             \
-                bcp_colptr(m_dbc, (bp)->str_buf.data(), (bp)->ordinal);            \
+                if (!(bp)->str_buf_bound) {                                        \
+                    bcp_colptr(m_dbc, (bp)->str_buf.data(), (bp)->ordinal);         \
+                    (bp)->str_buf_bound = true;                                    \
+                }                                                                  \
             } while (0)
 
         #if PYGIM_HAVE_ARROW_STRING_VIEW
@@ -523,9 +529,10 @@ void MssqlStrategyNative::bulk_insert_arrow_bcp(const std::string &table,
 
         if (!any_has_nulls) {
             // ============================================================
-            // F2b FAST PATH — no column has nulls.
+            // FAST PATH — no column has nulls.
             // Fixed cols: memcpy into staging buffer (zero ODBC calls).
-            // String cols: offset-based copy + bcp_collen/bcp_colptr.
+            // String cols: offset-based copy + bcp_collen (+ bcp_colptr
+            //              only on first use / realloc).
             // ============================================================
             for (int64_t row_idx = 0; row_idx < num_rows; ++row_idx) {
                 // Fixed-width: single memcpy per column into staging slot
@@ -549,31 +556,35 @@ void MssqlStrategyNative::bulk_insert_arrow_bcp(const std::string &table,
         } else {
             // ============================================================
             // GENERAL PATH — at least one column has nulls.
-            // Uses per-row bcp_collen/bcp_colptr for null handling.
+            // Fixed cols still use staging buffer; null toggle via
+            // bcp_collen only (no bcp_colptr calls in row loop).
+            // String cols: null → bcp_collen(SQL_NULL_DATA), else macro.
             // ============================================================
             for (int64_t row_idx = 0; row_idx < num_rows; ++row_idx) {
-                // Fixed-width columns
+                // Fixed-width columns — staging + collen toggle
                 for (auto *bp : fixed_cols) {
                     if (bp->has_nulls && is_null_at(*bp, row_idx)) {
                         bcp_collen(m_dbc, SQL_NULL_DATA, bp->ordinal);
-                        bcp_colptr(m_dbc, nullptr, bp->ordinal);
-                        continue;
+                    } else {
+                        const uint8_t *src = static_cast<const uint8_t*>(bp->data_ptr)
+                                           + (static_cast<size_t>(row_idx) * bp->value_stride);
+                        std::memcpy(staging_buf.data() + bp->staging_offset, src, bp->value_stride);
+                        if (bp->has_nulls) {
+                            // Restore length after a possible prior SQL_NULL_DATA
+                            bcp_collen(m_dbc, static_cast<DBINT>(bp->value_stride), bp->ordinal);
+                        }
                     }
-                    const uint8_t *ptr = static_cast<const uint8_t *>(bp->data_ptr)
-                                       + (static_cast<size_t>(row_idx) * bp->value_stride);
-                    if (bp->has_nulls) {
-                        bcp_collen(m_dbc, static_cast<DBINT>(bp->value_stride), bp->ordinal);
-                    }
-                    bcp_colptr(m_dbc, (LPCBYTE)ptr, bp->ordinal);
                 }
                 // String columns
                 for (auto *bp : string_cols) {
                     if (bp->has_nulls && is_null_at(*bp, row_idx)) {
                         bcp_collen(m_dbc, SQL_NULL_DATA, bp->ordinal);
-                        bcp_colptr(m_dbc, nullptr, bp->ordinal);
                         continue;
                     }
                     PYGIM_BCP_HANDLE_STRING_COL(bp, row_idx);
+                    if (bp->has_nulls) {
+                        // Length already set by macro; no extra work needed
+                    }
                 }
                 ret = bcp_sendrow(m_dbc);
                 if (ret != SUCCEED) {
