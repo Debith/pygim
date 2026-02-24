@@ -23,7 +23,7 @@ PersistAttempt run_bulk_upsert(MssqlStrategyNative &self,
     }
 
     pygim::QuickTimer timer("persist_bulk_upsert", std::clog, false);
-    timer.start_sub_timer("bulk_upsert_write");
+    timer.start_sub_timer("bulk_upsert_write", false);
     self.bulk_upsert(table, columns, data_frame, key_column, batch_size, table_hint);
     out.write_seconds = timer.stop_sub_timer("bulk_upsert_write", false);
     out.success = true;

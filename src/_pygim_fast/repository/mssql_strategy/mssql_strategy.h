@@ -45,6 +45,20 @@ namespace py = pybind11;
 
 class MssqlStrategyNative {
 public:
+    struct BcpMetrics {
+        double setup_seconds{0.0};
+        double reader_open_seconds{0.0};
+        double bind_columns_seconds{0.0};
+        double row_loop_seconds{0.0};
+        double batch_flush_seconds{0.0};
+        double done_seconds{0.0};
+        double total_seconds{0.0};
+        long long processed_rows{0};
+        long long sent_rows{0};
+        long long record_batches{0};
+        std::string input_mode{"none"};
+    };
+
     explicit MssqlStrategyNative(std::string conn);
     ~MssqlStrategyNative();
     py::object fetch(const py::object& key);
@@ -64,6 +78,7 @@ public:
                                const py::object& arrow_ipc_payload,
                                int batch_size = 100000,
                                const std::string& table_hint = "TABLOCK");
+    py::dict last_bcp_metrics() const;
     std::string repr() const;
     static void raise_if_error(SQLRETURN, SQLSMALLINT, SQLHANDLE, const char*);
 #if PYGIM_HAVE_ODBC
@@ -91,6 +106,7 @@ private:
                             const std::string& key_column,
                             int batch_size,
                             const std::string& table_hint);
+    BcpMetrics m_last_bcp_metrics;
 #endif
 };
 } // namespace pygim

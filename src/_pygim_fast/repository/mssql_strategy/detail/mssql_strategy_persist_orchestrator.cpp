@@ -15,16 +15,20 @@ py::dict PersistDataFrameOrchestrator::execute(const PersistRequestView &view) c
 
             PersistAttempt c_stream_attempt = m_arrow.try_c_stream(arrow_view);
             if (c_stream_attempt.success) {
-                return to_py_dict(c_stream_attempt, std::nullopt);
+                py::dict out = to_py_dict(c_stream_attempt, std::nullopt);
+                out["bcp_metrics"] = m_strategy.last_bcp_metrics();
+                return out;
             }
 
             PersistAttempt ipc_attempt = m_arrow.try_ipc(arrow_view);
             if (ipc_attempt.success) {
-                return to_py_dict(
+                py::dict out = to_py_dict(
                     ipc_attempt,
                     c_stream_attempt.error.empty()
                         ? std::nullopt
                         : std::optional<std::string>(c_stream_attempt.error));
+                out["bcp_metrics"] = m_strategy.last_bcp_metrics();
+                return out;
             }
 
             std::string combined_error;
@@ -44,7 +48,9 @@ py::dict PersistDataFrameOrchestrator::execute(const PersistRequestView &view) c
     }
 
     PersistAttempt fallback = m_bulk.run(view);
-    return to_py_dict(fallback, arrow_error);
+    py::dict out = to_py_dict(fallback, arrow_error);
+    out["bcp_metrics"] = py::none();
+    return out;
 }
 
 } // namespace pygim::persist_detail

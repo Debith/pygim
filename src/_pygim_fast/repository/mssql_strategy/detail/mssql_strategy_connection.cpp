@@ -27,6 +27,22 @@ std::string MssqlStrategyNative::repr() const {
 #endif
 }
 
+py::dict MssqlStrategyNative::last_bcp_metrics() const {
+    py::dict out;
+    out["setup_seconds"] = py::float_(m_last_bcp_metrics.setup_seconds);
+    out["reader_open_seconds"] = py::float_(m_last_bcp_metrics.reader_open_seconds);
+    out["bind_columns_seconds"] = py::float_(m_last_bcp_metrics.bind_columns_seconds);
+    out["row_loop_seconds"] = py::float_(m_last_bcp_metrics.row_loop_seconds);
+    out["batch_flush_seconds"] = py::float_(m_last_bcp_metrics.batch_flush_seconds);
+    out["done_seconds"] = py::float_(m_last_bcp_metrics.done_seconds);
+    out["total_seconds"] = py::float_(m_last_bcp_metrics.total_seconds);
+    out["processed_rows"] = py::int_(m_last_bcp_metrics.processed_rows);
+    out["sent_rows"] = py::int_(m_last_bcp_metrics.sent_rows);
+    out["record_batches"] = py::int_(m_last_bcp_metrics.record_batches);
+    out["input_mode"] = py::str(m_last_bcp_metrics.input_mode);
+    return out;
+}
+
 #if PYGIM_HAVE_ODBC
 void MssqlStrategyNative::init_handles() {
     PYGIM_SCOPE_LOG_TAG("repo.connection");

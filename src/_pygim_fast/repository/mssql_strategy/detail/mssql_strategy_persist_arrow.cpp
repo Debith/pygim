@@ -38,16 +38,18 @@ PersistAttempt try_arrow_c_stream_bcp(MssqlStrategyNative &self,
     PersistAttempt out;
     out.mode = "arrow_c_stream_bcp";
 
-    pygim::QuickTimer timer("persist_arrow_c_stream", std::clog, false);
+    pygim::QuickTimer timer("persist_arrow_c_stream", std::clog, false, false);
 
     try {
-        timer.start_sub_timer("to_arrow_c_stream");
+        timer.start_sub_timer("to_arrow_c_stream", false);
         py::object c_stream_capsule;
         py::object compat_level = try_polars_compat_oldest();
         if (!compat_level.is_none() && py::hasattr(data_frame, "to_arrow")) {
             py::object arrow_table = data_frame.attr("to_arrow")(py::arg("compat_level") = compat_level);
             if (py::hasattr(arrow_table, "__arrow_c_stream__")) {
                 c_stream_capsule = arrow_table.attr("__arrow_c_stream__")();
+            } else if (py::hasattr(arrow_table, "to_reader")) {
+                c_stream_capsule = arrow_table.attr("to_reader")();
             } else {
                 c_stream_capsule = data_frame.attr("__arrow_c_stream__")();
             }
@@ -56,7 +58,7 @@ PersistAttempt try_arrow_c_stream_bcp(MssqlStrategyNative &self,
         }
         out.prep_to_arrow_seconds = timer.stop_sub_timer("to_arrow_c_stream", false);
 
-        timer.start_sub_timer("bcp_write");
+        timer.start_sub_timer("bcp_write", false);
         self.bulk_insert_arrow_bcp(table, c_stream_capsule, batch_size, table_hint);
         out.write_seconds = timer.stop_sub_timer("bcp_write", false);
 
@@ -81,10 +83,10 @@ PersistAttempt try_arrow_ipc_bcp(MssqlStrategyNative &self,
     PersistAttempt out;
     out.mode = "arrow_ipc_bcp";
 
-    pygim::QuickTimer timer("persist_arrow_ipc", std::clog, false);
+    pygim::QuickTimer timer("persist_arrow_ipc", std::clog, false, false);
 
     try {
-        timer.start_sub_timer("to_arrow_ipc");
+        timer.start_sub_timer("to_arrow_ipc", false);
         py::object compat_level = try_polars_compat_oldest();
         py::object payload;
         if (!compat_level.is_none()) {
@@ -104,7 +106,7 @@ PersistAttempt try_arrow_ipc_bcp(MssqlStrategyNative &self,
         }
         out.prep_ipc_seconds = timer.stop_sub_timer("to_arrow_ipc", false);
 
-        timer.start_sub_timer("bcp_write");
+        timer.start_sub_timer("bcp_write", false);
         self.bulk_insert_arrow_bcp(table, payload, batch_size, table_hint);
         out.write_seconds = timer.stop_sub_timer("bcp_write", false);
 

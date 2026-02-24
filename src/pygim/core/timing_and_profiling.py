@@ -12,7 +12,7 @@ __all__ = ("quick_timer", "quick_profile")
 
 
 @contextmanager
-def quick_timer(title="Code block", *, printer=print):
+def quick_timer(title="Code block", *, printer=print, print_on_start=True):
     """
     Measure the execution time of a code block using a context manager.
 
@@ -22,6 +22,8 @@ def quick_timer(title="Code block", *, printer=print):
         The title to display when printing the execution time. Default is "Code block".
     printer : `Callable[[str], None]`, optional
         The function to use for printing the execution time. Default is `print`.
+    print_on_start : `bool`, optional
+        Whether to print a start message when the timer begins. Default is `True`.
 
     Yields:
     -------
@@ -43,9 +45,13 @@ def quick_timer(title="Code block", *, printer=print):
             slow_code()
     """
     start = time.time()
-    yield
-    end = time.time()
-    printer(f"{title} executed in {end - start:.2f} seconds!")
+    if print_on_start:
+        printer(f"{title} started...")
+    try:
+        yield
+    finally:
+        end = time.time()
+        printer(f"{title} executed in {end - start:.2f} seconds!")
 
 
 @contextmanager

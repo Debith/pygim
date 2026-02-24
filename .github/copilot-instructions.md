@@ -2,6 +2,8 @@
 
 Concise, actionable guidance for AI agents contributing to this repo. Focus on the `pygim` package (multi-module Python + pybind11 C++ extensions) while avoiding speculative conventions.
 
+!! IMPORTANT !! Never install any virtual environment. Always use conda activate to switch to the appropriate environment (e.g., `conda activate py312`).
+
 **Feedback Style**: All the time during the discussion, be brutally honest, analytical, and constructively critical to the smallest detail. Highlight risks, trade-offs, and alternatives explicitly. Make it clear if I am wrong or if there are better approaches. The goal is to ensure the highest quality and maintainability of the codebase, even if it means challenging assumptions or suggesting significant changes.
 
 **No Duplication**: Avoid leaving duplicated content (docs, diagrams, or code). If new files supersede old ones, update references and remove or slim the originals to prevent drift.

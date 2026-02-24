@@ -39,6 +39,7 @@ PYBIND11_MODULE(mssql_strategy, m) {
                py::arg("arrow_ipc_payload"),
              py::arg("batch_size") = 100000,
              py::arg("table_hint") = "TABLOCK")
+           .def("last_bcp_metrics", &MssqlStrategyNative::last_bcp_metrics)
         .def("persist_dataframe",
              [](MssqlStrategyNative &self,
                 const std::string &table,

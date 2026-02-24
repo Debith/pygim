@@ -17,11 +17,17 @@ class QuickTimer {
 public:
     explicit QuickTimer(std::string name = "QuickTimer",
                         std::ostream &output = std::clog,
-                        bool auto_print = true)
+                        bool auto_print = true,
+                        bool print_on_start = true)
         : m_name(std::move(name)),
           m_output(&output),
           m_auto_print(auto_print),
-          m_started_at(Clock::now()) {}
+          m_print_on_start(print_on_start),
+          m_started_at(Clock::now()) {
+        if (m_print_on_start) {
+            print_started(m_name);
+        }
+    }
 
     ~QuickTimer() noexcept {
         if (!m_auto_print || m_output == nullptr) {
@@ -33,7 +39,7 @@ public:
         }
     }
 
-    void start_sub_timer(const std::string &name) {
+    void start_sub_timer(const std::string &name, bool print_on_start = true) {
         if (name.empty()) {
             throw std::invalid_argument("sub timer name must not be empty");
         }
@@ -54,6 +60,9 @@ public:
         sub_timer.running = true;
         sub_timer.started_at = Clock::now();
         m_active_sub_timer_index = it->second;
+        if (print_on_start) {
+            print_started(sub_timer.name);
+        }
     }
 
     double stop_sub_timer(std::string_view name = {}, bool print_now = true) {
@@ -157,6 +166,13 @@ private:
         (*m_output) << m_name << " [" << name << "]: " << format_seconds(seconds) << "s" << std::endl;
     }
 
+    void print_started(const std::string &name) {
+        if (m_output == nullptr) {
+            return;
+        }
+        (*m_output) << m_name << " [" << name << "]: started" << std::endl;
+    }
+
     static std::string format_seconds(double seconds) {
         std::ostringstream stream;
         stream << std::fixed << std::setprecision(6) << seconds;
@@ -166,6 +182,7 @@ private:
     std::string m_name;
     std::ostream *m_output;
     bool m_auto_print;
+    bool m_print_on_start;
     Clock::time_point m_started_at;
     std::vector<SubTimer> m_sub_timers;
     std::unordered_map<std::string, std::size_t> m_sub_timer_indices;
