@@ -42,7 +42,7 @@ else:
 detail_root = Path("src/_pygim_fast/repository/mssql_strategy/detail")
 mssql_detail_sources = []
 if detail_root.exists():
-    mssql_detail_sources = sorted(detail_root.glob("*.cpp"))
+    mssql_detail_sources = sorted(detail_root.rglob("*.cpp"))
 
 ext_modules = []
 for cpp_file in get_cpp_files("src/_pygim_fast"):
