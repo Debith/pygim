@@ -102,7 +102,6 @@ private:
     void init_handles();
     void cleanup_handles();
     void ensure_connected();
-    static bool is_valid_identifier(const std::string& s);
     py::object fetch_impl(const std::string& table, const py::object& pk);
     void upsert_impl(const std::string& table, const py::object& pk, const py::object& value_mapping);
     py::object execute_query_object(const py::object& query_obj);

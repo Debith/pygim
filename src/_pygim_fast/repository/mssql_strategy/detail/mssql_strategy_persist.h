@@ -79,25 +79,6 @@ private:
 
 bool env_true(const char *name);
 
-PersistAttempt try_arrow_c_stream_bcp(MssqlStrategyNative &self,
-                                      const std::string &table,
-                                      const py::object &data_frame,
-                                      int batch_size,
-                                      const std::string &table_hint);
-
-PersistAttempt try_arrow_ipc_bcp(MssqlStrategyNative &self,
-                                 const std::string &table,
-                                 const py::object &data_frame,
-                                 int batch_size,
-                                 const std::string &table_hint);
-
-PersistAttempt run_bulk_upsert(MssqlStrategyNative &self,
-                               const std::string &table,
-                               const py::object &data_frame,
-                               const std::string &key_column,
-                               int batch_size,
-                               const std::string &table_hint);
-
 py::dict to_py_dict(const PersistAttempt &attempt,
                     const std::optional<std::string> &arrow_error = std::nullopt);
 

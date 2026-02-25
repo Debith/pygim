@@ -1,5 +1,4 @@
 #include "../mssql_strategy.h"
-#include "helpers.h"
 #include "../../../utils/logging.h"
 
 namespace pygim {
@@ -110,11 +109,6 @@ void MssqlStrategyNative::raise_if_error(SQLRETURN ret, SQLSMALLINT type, SQLHAN
         throw std::runtime_error(error);
     }
     throw std::runtime_error(std::string(what) + " failed (no diagnostics)");
-}
-
-bool MssqlStrategyNative::is_valid_identifier(const std::string &s) {
-    PYGIM_SCOPE_LOG_TAG("repo.connection");
-    return detail::is_valid_identifier(s);
 }
 #endif
 

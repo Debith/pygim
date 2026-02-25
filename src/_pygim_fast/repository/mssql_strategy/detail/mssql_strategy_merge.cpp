@@ -20,15 +20,15 @@ void MssqlStrategyNative::bulk_upsert(const std::string &table,
                                       const std::string &table_hint) {
     PYGIM_SCOPE_LOG_TAG("repo.merge");
     ensure_connected();
-    if (!is_valid_identifier(table)) {
+    if (!detail::is_valid_identifier(table)) {
         throw std::runtime_error("Invalid table identifier");
     }
     for (const auto &col : columns) {
-        if (!is_valid_identifier(col)) {
+        if (!detail::is_valid_identifier(col)) {
             throw std::runtime_error("Invalid column identifier");
         }
     }
-    if (!is_valid_identifier(key_column)) {
+    if (!detail::is_valid_identifier(key_column)) {
         throw std::runtime_error("Invalid key column identifier");
     }
     detail::BatchSpec spec(table, columns, key_column, table_hint, batch_size);

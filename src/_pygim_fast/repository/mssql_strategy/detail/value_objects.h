@@ -32,25 +32,11 @@ struct TableSpec {
 struct BatchOptions {
     int batch_size{1000};
     int param_limit{2090};
-
-    [[nodiscard]] int effective_rows_per_statement(size_t column_count) const noexcept {
-        const int cols = static_cast<int>(column_count);
-        if (cols <= 0) {
-            return 0;
-        }
-        const int per_stmt = std::max(1, std::min(batch_size, param_limit / cols));
-        return per_stmt;
-    }
 };
 
 struct QueryEnvelope {
     Query query;
     std::string label;
-};
-
-struct MergePlan {
-    TableSpec spec;
-    int rows_per_statement{0};
 };
 
 template <typename SourceTag>

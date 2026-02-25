@@ -8,7 +8,7 @@ namespace py = pybind11;
 
 namespace pygim::persist_detail {
 
-PersistAttempt run_bulk_upsert(MssqlStrategyNative &self,
+static PersistAttempt run_bulk_upsert(MssqlStrategyNative &self,
                                const std::string &table,
                                const py::object &data_frame,
                                const std::string &key_column,

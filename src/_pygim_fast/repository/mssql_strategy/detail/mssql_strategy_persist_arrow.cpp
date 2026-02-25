@@ -31,7 +31,7 @@ py::object try_polars_compat_oldest() {
 
 } // namespace
 
-PersistAttempt try_arrow_c_stream_bcp(MssqlStrategyNative &self,
+static PersistAttempt try_arrow_c_stream_bcp(MssqlStrategyNative &self,
                                       const std::string &table,
                                       const py::object &data_frame,
                                       int batch_size,
@@ -78,7 +78,7 @@ PersistAttempt try_arrow_c_stream_bcp(MssqlStrategyNative &self,
     }
 }
 
-PersistAttempt try_arrow_ipc_bcp(MssqlStrategyNative &self,
+static PersistAttempt try_arrow_ipc_bcp(MssqlStrategyNative &self,
                                  const std::string &table,
                                  const py::object &data_frame,
                                  int batch_size,
