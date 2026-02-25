@@ -9,6 +9,7 @@
 
 #include "mssql_strategy.h"
 #include "detail/mssql_strategy_persist.h"
+#include "detail/bcp/bcp_arrow_import.h"
 #include "../../utils/logging.h"
 
 namespace py = pybind11;
@@ -34,9 +35,19 @@ PYBIND11_MODULE(mssql_strategy, m) {
              py::arg("key_column") = "id",
              py::arg("batch_size") = 1000,
              py::arg("table_hint") = "TABLOCK")
-        .def("bulk_insert_arrow_bcp", &MssqlStrategyNative::bulk_insert_arrow_bcp,
+        .def("bulk_insert_arrow_bcp",
+             [](MssqlStrategyNative& self,
+                const std::string& table,
+                const py::object& arrow_payload,
+                int batch_size,
+                const std::string& table_hint) {
+                 // Convert py::object → C++ RecordBatchReader at the boundary
+                 auto result = bcp::import_arrow_reader(arrow_payload);
+                 self.bulk_insert_arrow_bcp(table, std::move(result.reader),
+                                           result.mode, batch_size, table_hint);
+             },
              py::arg("table"),
-               py::arg("arrow_ipc_payload"),
+             py::arg("arrow_ipc_payload"),
              py::arg("batch_size") = 100000,
              py::arg("table_hint") = "TABLOCK")
            .def("last_bcp_metrics", &MssqlStrategyNative::last_bcp_metrics)

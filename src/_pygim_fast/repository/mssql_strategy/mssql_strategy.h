@@ -7,8 +7,13 @@
 #include <string>
 #include <vector>
 #include <optional>
+#include <memory>
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
+
+// Forward-declare Arrow types to avoid pulling heavy headers into every
+// translation unit that includes mssql_strategy.h.
+namespace arrow { class RecordBatchReader; }
 
 // Header presence feature detection. Both <sql.h> and <sqlext.h> are required
 // for a usable ODBC based implementation. Allow build system to override via
@@ -75,7 +80,8 @@ public:
                      int batch_size = 1000,
                      const std::string& table_hint = "TABLOCK");
     void bulk_insert_arrow_bcp(const std::string& table,
-                               const py::object& arrow_ipc_payload,
+                               std::shared_ptr<arrow::RecordBatchReader> reader,
+                               const std::string& input_mode,
                                int batch_size = 100000,
                                const std::string& table_hint = "TABLOCK");
     py::dict last_bcp_metrics() const;

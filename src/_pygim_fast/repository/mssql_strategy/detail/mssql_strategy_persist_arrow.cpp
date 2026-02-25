@@ -1,4 +1,5 @@
 #include "mssql_strategy_persist.h"
+#include "bcp/bcp_arrow_import.h"
 
 #include <cstdlib>
 
@@ -59,7 +60,9 @@ PersistAttempt try_arrow_c_stream_bcp(MssqlStrategyNative &self,
         out.prep_to_arrow_seconds = timer.stop_sub_timer("to_arrow_c_stream", false);
 
         timer.start_sub_timer("bcp_write", false);
-        self.bulk_insert_arrow_bcp(table, c_stream_capsule, batch_size, table_hint);
+        auto imported = bcp::import_arrow_reader(c_stream_capsule);
+        self.bulk_insert_arrow_bcp(table, std::move(imported.reader),
+                                   imported.mode, batch_size, table_hint);
         out.write_seconds = timer.stop_sub_timer("bcp_write", false);
 
         out.prep_seconds = out.prep_to_arrow_seconds;
@@ -107,7 +110,9 @@ PersistAttempt try_arrow_ipc_bcp(MssqlStrategyNative &self,
         out.prep_ipc_seconds = timer.stop_sub_timer("to_arrow_ipc", false);
 
         timer.start_sub_timer("bcp_write", false);
-        self.bulk_insert_arrow_bcp(table, payload, batch_size, table_hint);
+        auto imported = bcp::import_arrow_reader(payload);
+        self.bulk_insert_arrow_bcp(table, std::move(imported.reader),
+                                   imported.mode, batch_size, table_hint);
         out.write_seconds = timer.stop_sub_timer("bcp_write", false);
 
         out.prep_seconds = out.prep_ipc_seconds;

@@ -1,9 +1,10 @@
-// BCP strategy orchestrator — slim entry point that delegates to the modular
-// headers in this folder.  The method body reads like a ~20-line recipe:
-//   1. Load BCP API  →  bcp_api.h
-//   2. Bind columns  →  bcp_bind.h
-//   3. Row loop      →  bcp_row_loop.h
-//   4. Read Arrow    →  bcp_read_arrow.h
+// BCP strategy orchestrator — pure C++ entry point, ZERO pybind11 dependency.
+// Delegates to modular headers:
+//   1. BCP API loading  →  bcp_api.h
+//   2. Column binding   →  bcp_bind.h
+//   3. Row loop         →  bcp_row_loop.h
+// The py::object → RecordBatchReader conversion lives in the BINDING layer
+// (bcp_arrow_import.h), not here.
 
 #include "../../mssql_strategy.h"
 #include "../helpers.h"
@@ -14,7 +15,6 @@
 #include "bcp_types.h"
 #include "bcp_bind.h"
 #include "bcp_row_loop.h"
-#include "bcp_read_arrow.h"
 
 #define PYGIM_HAVE_ARROW 1
 #define PYGIM_HAVE_ODBC  1
@@ -109,11 +109,12 @@ void extract_metrics(const bcp::BcpContext& ctx,
 
 } // anonymous namespace
 
-// ── Public entry point ──────────────────────────────────────────────────────
+// ── Public entry point (pure C++) ───────────────────────────────────────────
 
 void MssqlStrategyNative::bulk_insert_arrow_bcp(
     const std::string& table,
-    const py::object& arrow_ipc_payload,
+    std::shared_ptr<arrow::RecordBatchReader> reader,
+    const std::string& input_mode,
     int batch_size,
     const std::string& table_hint)
 {
@@ -131,14 +132,19 @@ void MssqlStrategyNative::bulk_insert_arrow_bcp(
     init_session(api, m_dbc, qualified, table_hint);
     timer.stop_sub_timer("setup", false);
 
-    // 2. Process all Arrow batches
+    // 2. Iterate RecordBatchReader — no Python references past this point
     bcp::BcpContext ctx{api, m_dbc, timer,
                         batch_size > 0 ? static_cast<int64_t>(batch_size) : 100000LL};
 
-    auto process = [&](const std::shared_ptr<arrow::RecordBatch>& batch) {
+    while (true) {
+        std::shared_ptr<arrow::RecordBatch> batch;
+        auto st = reader->ReadNext(&batch);
+        if (!st.ok())
+            throw std::runtime_error("Failed reading Arrow batch: " + st.ToString());
+        if (!batch) break;
         bcp::process_batch(ctx, batch);
-    };
-    m_last_bcp_metrics.input_mode = bcp::read_arrow_data(arrow_ipc_payload, timer, process);
+    }
+    m_last_bcp_metrics.input_mode = input_mode;
 
     // 3. Finalize
     if (ctx.processed_rows == 0)
