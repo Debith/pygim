@@ -1,0 +1,175 @@
+@startuml RepositoryArchitecture_Abstract
+skinparam shadowing false
+skinparam classAttributeIconSize 0
+skinparam packageStyle rectangle
+skinparam nodesep 80
+skinparam ranksep 60
+skinparam linetype ortho
+
+title Repository Architecture — Abstract Interfaces
+
+' ════════════════════════════════════════════════════════════════════════════
+' PUBLIC SURFACE
+' ════════════════════════════════════════════════════════════════════════════
+
+class Repository <<facade>> #FFFDE7 {
+  +save(data, hint?) : dict
+  +fetch(Query) : ResultSet
+  __
+  +add_pre_transform(fn)
+  +add_post_transform(fn)
+}
+note top of Repository
+  Acquired from a connection string.
+  Internally resolves one StorageStrategy.
+  User only calls save() / fetch().
+end note
+
+class Query <<builder>> #FFFDE7 {
+  +select(cols) : self
+  +from_table(table) : self
+  +where(clause, param) : self
+  +limit(n) : self
+  +build() : Query
+}
+
+' ════════════════════════════════════════════════════════════════════════════
+' EXTRACTION — Python data → abstract View  (compile-time, template)
+' ════════════════════════════════════════════════════════════════════════════
+
+abstract class ExtractionPolicy <<policy>> #E8F5E9 {
+  +{static} detect(data) : ExtractionPolicy
+  +{abstract} extract(data) : View
+}
+note bottom of ExtractionPolicy
+  **How** Python data becomes C++ View.
+
+  1. Auto-detect format (one type check)
+     or skip via caller hint.
+  2. Tag-dispatch to compile-time optimized
+     extractor (Polars, Pandas, Arrow, dict…).
+  3. Returns a thin **View** that
+     StorageStrategy consumes.
+end note
+
+' ════════════════════════════════════════════════════════════════════════════
+' VIEW — the universal interchange between extraction and storage
+' ════════════════════════════════════════════════════════════════════════════
+
+abstract class View <<interface>> #E0F2F1 {
+  +{abstract} schema() : Schema
+  +{abstract} num_rows() : size_t
+}
+
+class ArrowView <<view>> #E0F2F1 {
+  RecordBatchReader handle
+}
+
+class RowView <<view>> #E0F2F1 {
+  single RowMap
+}
+
+' ════════════════════════════════════════════════════════════════════════════
+' STORAGE — where data lives  (runtime, virtual — one per repo)
+' ════════════════════════════════════════════════════════════════════════════
+
+abstract class StorageStrategy <<interface>> #E8F5E9 {
+  +{abstract} capabilities() : Capabilities
+  __
+  +fetch(query) : ResultSet
+  +persist(View)
+  +save(key, RowMap)
+}
+note bottom of StorageStrategy
+  **Where** data lives.
+  Resolved from connection string.
+  One concrete instance per Repository.
+
+  **Transpose is internal.**
+  Column→row transposition for bulk DB
+  write is owned by the strategy, not
+  exposed. Uses `if constexpr` trampoline
+  with Simd enum {Scalar, Avx2, ...} —
+  zero per-row overhead, fully inlined.
+end note
+
+class Capabilities <<value>> #E8F5E9 {
+  +can_fetch : bool
+  +can_persist : bool
+  +can_save : bool
+}
+
+' ════════════════════════════════════════════════════════════════════════════
+' VALUE TYPES
+' ════════════════════════════════════════════════════════════════════════════
+
+together {
+  class CellValue <<variant>> #F3E5F5 {
+    Null | bool | int64 | double | string
+  }
+
+  class RowMap <<alias>> #F3E5F5 {
+    map<string, CellValue>
+  }
+
+  class ResultSet <<value>> #F3E5F5 {
+    +columns : string[]
+    +rows : CellValue[][]
+  }
+}
+
+' ════════════════════════════════════════════════════════════════════════════
+' SIMD DISPATCH  (internal to StorageStrategy, compile-time)
+' ════════════════════════════════════════════════════════════════════════════
+
+enum Simd <<enum>> #FFF3E0 {
+  Scalar
+  Avx2
+  /Neon  (future)/
+  /Avx512 (future)/
+}
+note right of Simd
+  Detected once at module init
+  via `cpu_supports_avx2()`.
+  Pipeline is templated on Simd —
+  `if constexpr` compiles away
+  unused branches.
+end note
+
+' ════════════════════════════════════════════════════════════════════════════
+' RELATIONSHIPS
+' ════════════════════════════════════════════════════════════════════════════
+
+Repository *-down- "1" StorageStrategy : owns (from conn string)
+Repository ..> Query : accepts
+Repository ..> ExtractionPolicy : data → View
+
+ExtractionPolicy ..> View : produces
+ArrowView -up-|> View
+RowView -up-|> View
+
+StorageStrategy ..> View : consumes
+StorageStrategy ..> Capabilities : declares
+StorageStrategy ..> Simd : dispatches internally
+StorageStrategy ..> RowMap : reads / writes
+
+Repository ..> ResultSet : returns
+
+' ════════════════════════════════════════════════════════════════════════════
+' NOTES
+' ════════════════════════════════════════════════════════════════════════════
+
+note as N_pipeline
+  **Pipeline (internal to StorageStrategy):**
+
+  View → partition rows → transpose<Simd>
+  → BCP buffer → ODBC driver → DB
+
+  Multi-threaded: N reader/transpose threads
+  feed M writer connections via lock-free queue.
+  GIL released for entire pipeline.
+end note
+
+N_pipeline .. StorageStrategy
+
+@enduml

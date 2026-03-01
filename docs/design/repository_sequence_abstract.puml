@@ -1,0 +1,111 @@
+@startuml RepositorySequence_Abstract
+
+skinparam backgroundColor #FCFCFF
+skinparam shadowing false
+skinparam sequence {
+  ArrowColor #4C6FFF
+  LifeLineBorderColor #64748B
+  LifeLineBackgroundColor #F8FAFC
+  ParticipantBorderColor #334155
+  ParticipantBackgroundColor #E2E8F0
+  ActorBorderColor #1E293B
+  ActorBackgroundColor #DBEAFE
+  GroupBorderColor #93C5FD
+  GroupBackgroundColor #EFF6FF
+}
+
+title Repository — Abstract Sequence Flows
+
+actor "Caller\n(Python)" as Caller
+
+participant "Repository" as Repo #FFFDE7
+participant "ExtractionPolicy" as Extract #E8F5E9
+participant "StorageStrategy" as Storage #E8F5E9
+
+== acquire ==
+
+Caller -> Repo : Repository("mssql://server/db")
+note right
+  Connection string selects the
+  concrete StorageStrategy.
+  One strategy per repository.
+end note
+Repo -> Repo : parse connection string
+Repo -> Storage ** : construct from conn string
+Repo -> Repo : detect Simd level\n(cpu_supports_avx2())
+
+== save ==
+
+Caller -> Repo : save(data)
+note right
+  data can be: DataFrame (Polars, Pandas, …),
+  Arrow table, dict, or single row.
+  Optional hint= skips auto-detection.
+end note
+
+Repo -> Repo : detect data format\n(or use hint to skip)
+
+Repo -> Extract : extract(data)
+note right
+  Dispatches to compile-time optimized
+  extractor based on detected type.
+  Returns a thin **View** (ArrowView
+  or RowView).
+end note
+
+alt bulk data (DataFrame / Arrow table)
+  Extract --> Repo : ArrowView
+
+  Repo -> Storage : persist(ArrowView)
+
+  note over Storage
+    **Internal pipeline (GIL released):**
+
+    ArrowView → partition rows
+    → transpose<Simd>(tile)
+      `if constexpr` selects AVX2 or scalar
+      — zero per-row branch overhead
+    → BCP buffer
+    → bcp_sendrow loop
+    → bcp_done
+
+    Multi-threaded: N transpose threads
+    feed M writer connections via
+    lock-free bounded queue.
+  end note
+
+  Storage --> Repo : result
+
+else single row (dict / key-value)
+  Extract --> Repo : RowView
+
+  opt transforms enabled
+    Repo -> Repo : apply pre_transform(RowMap)
+  end
+
+  Repo -> Storage : save(key, RowMap)
+  Storage --> Repo : result
+end
+
+Repo --> Caller : result
+
+== fetch ==
+
+Caller -> Repo : query = Query().select(cols)\n.from_table(t).where(...).build()
+Caller -> Repo : fetch(query)
+
+Repo -> Repo : render Query → sql + params
+Repo -> Storage : fetch(sql, params)
+Storage --> Repo : ResultSet
+
+opt transforms enabled
+  Repo -> Repo : apply post_transform(ResultSet)
+end
+
+Repo --> Caller : ResultSet
+
+@enduml
+
+Repo --> Caller : ResultSet
+
+@enduml

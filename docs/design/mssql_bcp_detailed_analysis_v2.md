@@ -7,7 +7,7 @@ Test Run: 1M rows, batch_size=50,000, arrow_c_stream_exporter mode, throughput=1
 
 ## Executive Summary
 
-Recent improvements successfully eliminated the eager memory allocations in `bind_columns`, dropping its execution time from 3.1% (0.138s) to just 0.5% (0.027s). However, overall throughput slightly decreased (23.07 MB/s -> 19.65 MB/s). 
+Recent improvements successfully eliminated the eager memory allocations in `bind_columns`, dropping its execution time from 3.1% (0.138s) to just 0.5% (0.027s). However, overall throughput slightly decreased (23.07 MB/s -> 19.65 MB/s).
 
 The root cause is that the `row_loop` (now 52.2% of time) absorbed the string extraction work, but **failed to eliminate the `bcp_colptr` calls for datasets containing nulls**. The newly introduced "Fast Path" (`F2b`) is completely bypassed if *any* column contains nulls, falling back to the "General Path" which still makes millions of expensive ODBC API calls.
 
@@ -17,9 +17,9 @@ The root cause is that the `row_loop` (now 52.2% of time) absorbed the string ex
 - **Evidence**: The `any_has_nulls` check forces the entire batch into the `GENERAL PATH` if even a single null exists in any column.
 - **Root Cause**: The code assumes that null handling requires changing the pointer via `bcp_colptr(m_dbc, nullptr, bp->ordinal)`.
 - **Impact**: In real-world data (like the stress test), nulls are common. The `GENERAL PATH` still calls `bcp_colptr` for every single row of every fixed-width column.
-- **Remediation**: 
-  - **Use the staging buffer for the General Path too.** You do not need to pass `nullptr` to `bcp_colptr` to indicate a null value. You only need to call `bcp_collen(m_dbc, SQL_NULL_DATA, ordinal)`. 
-  - The driver will ignore the memory address if the length is `SQL_NULL_DATA`. 
+- **Remediation**:
+  - **Use the staging buffer for the General Path too.** You do not need to pass `nullptr` to `bcp_colptr` to indicate a null value. You only need to call `bcp_collen(m_dbc, SQL_NULL_DATA, ordinal)`.
+  - The driver will ignore the memory address if the length is `SQL_NULL_DATA`.
   - Therefore, bind the `staging_buf` pointers *once* upfront for all fixed columns, and in the `GENERAL PATH`, simply `memcpy` the data and toggle `bcp_collen` between `SQL_NULL_DATA` and `stride`. **Never call `bcp_colptr` for fixed columns in the row loop.**
 
 ### 2. Redundant `bcp_colptr` Calls for Strings (High Impact)
