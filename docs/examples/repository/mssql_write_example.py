@@ -1,17 +1,13 @@
 """Example demonstrating saving (upsert) with Repository + native MSSQL strategy.
 
 NOTE:
-    * The native MSSQL strategy is a minimal skeleton. Real production usage MUST use
-        proper parameter binding for DML statements (INSERT/UPDATE) to avoid SQL injection.
     * MSSQL support now auto-detects ODBC headers at build (``PYGIM_HAVE_ODBC``). Install
         unixODBC dev headers + a Microsoft ODBC driver (e.g. msodbcsql18) before installing
         this package to enable the native implementation; otherwise a stub raises at runtime.
 """
 import os
 
-from pygim import mssql_strategy, repository
-from pygim.query import Query
-from pygim.repo_helpers import MemoryStrategy
+from pygim import repository_v2 as rv2
 
 
 # For Docker/local development with the Microsoft ODBC Driver 18 the default is Encrypt=yes and
@@ -36,9 +32,9 @@ CONNECTION = (
     "UID=sa;PWD=NewP@ssw0rd#2025;Encrypt=yes;TrustServerCertificate=yes;"
 )
 
-repo = repository.Repository(transformers=True)
-repo.add_strategy(MemoryStrategy())
-repo.add_strategy(mssql_strategy.MssqlStrategyNative(CONNECTION))
+repo = rv2.Repository(transformers=True)
+repo.add_memory_strategy()
+repo.add_mssql_strategy(CONNECTION)
 
 
 try:  # pragma: no cover - environment dependent
@@ -47,7 +43,7 @@ try:  # pragma: no cover - environment dependent
 
     # 2. Fetch the just-upserted row using fluent query builder (parameterized WHERE)
     query = (
-        Query()
+        rv2.Query()
         .select(["id", "name", "email"])  # columns
         .from_table("users")                  # table
         .where("id=?", 42)                    # simple predicate

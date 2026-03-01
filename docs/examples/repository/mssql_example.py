@@ -1,26 +1,24 @@
-"""Example usage of Repository with native MSSQL strategy (placeholder).
+"""Example usage of Repository with native MSSQL strategy.
 
 Requires building with ODBC headers (``PYGIM_HAVE_ODBC``) and enabling the native
-``mssql_strategy`` extension during installation.
+MSSL strategy during installation.
 """
-from pygim import mssql_strategy, repository
-from pygim.query import Query
-from pygim.repo_helpers import MemoryStrategy
+from pygim import repository_v2 as rv2
 
 CONNECTION = (
     "Driver={ODBC Driver 17 for SQL Server};"
     "Server=localhost;Database=test;UID=sa;PWD=Passw0rd!;"
 )
 
-repo = repository.Repository(transformers=False)
-repo.add_strategy(MemoryStrategy())  # dev cache / fallback
-repo.add_strategy(mssql_strategy.MssqlStrategyNative(CONNECTION))
+repo = rv2.Repository(transformers=False)
+repo.add_memory_strategy()  # dev cache / fallback
+repo.add_mssql_strategy(CONNECTION)
 
 
 try:
     # Fluent param query (limit 1)
     query = (
-        Query()
+        rv2.Query()
         .select(["id", "name", "email"])
         .from_table("users")
         .where("id=?", 42)

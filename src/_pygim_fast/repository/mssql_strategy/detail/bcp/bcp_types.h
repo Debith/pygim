@@ -23,6 +23,9 @@ namespace pygim { class QuickTimer; }
 
 namespace pygim::bcp {
 
+// Forward-declare so BcpContext can hold a non-owning pointer.
+struct TransposeStrategy;
+
 // ── ColumnBinding ───────────────────────────────────────────────────────────
 /// Per-column metadata populated at bind time and consumed during the row loop.
 struct ColumnBinding {
@@ -65,6 +68,10 @@ struct BcpContext {
     int64_t       sent_rows{0};
     int64_t       processed_rows{0};
     int64_t       record_batches{0};
+
+    /// Pluggable transpose strategy (non-owning).  When nullptr, falls back
+    /// to the default RowMajorTranspose defined in bcp_transpose_strategy.h.
+    TransposeStrategy* transpose{nullptr};
 };
 
 // ── ClassifiedColumns ───────────────────────────────────────────────────────
