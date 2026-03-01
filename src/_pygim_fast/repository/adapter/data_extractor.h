@@ -209,15 +209,22 @@ private:
                                                                 const std::string &dtype,
                                                                 size_t total_rows) {
         core::TypedColumnBatch::Column col;
+        // NOTE: dtype strings like "UInt8", "Int32", "Float32" all contain the
+        // substring we match on, but the underlying numpy array may have a
+        // narrower element width.  Always widen to the canonical width via
+        // numpy astype (no-copy when already correct) to avoid buffer overreads.
+        py::object np = py::module_::import("numpy");
         if (dtype.find("Int") != std::string::npos) {
             col.kind = core::TypedColumnBatch::Kind::I64;
             py::object np_arr = series.attr("to_numpy")();
+            np_arr = np_arr.attr("astype")(np.attr("int64"), py::arg("copy") = false);
             auto *ptr = reinterpret_cast<const int64_t *>(
                 np_arr.attr("ctypes").attr("data").cast<intptr_t>());
             col.i64_data.assign(ptr, ptr + total_rows);
         } else if (dtype.find("Float") != std::string::npos) {
             col.kind = core::TypedColumnBatch::Kind::F64;
             py::object np_arr = series.attr("to_numpy")();
+            np_arr = np_arr.attr("astype")(np.attr("float64"), py::arg("copy") = false);
             auto *ptr = reinterpret_cast<const double *>(
                 np_arr.attr("ctypes").attr("data").cast<intptr_t>());
             col.f64_data.assign(ptr, ptr + total_rows);

@@ -1,9 +1,9 @@
 """Example demonstrating saving (upsert) with Repository + native MSSQL strategy.
 
 NOTE:
-    * MSSQL support now auto-detects ODBC headers at build (``PYGIM_HAVE_ODBC``). Install
-        unixODBC dev headers + a Microsoft ODBC driver (e.g. msodbcsql18) before installing
-        this package to enable the native implementation; otherwise a stub raises at runtime.
+    * ODBC and Arrow are required build dependencies. Install unixODBC dev headers
+        + a Microsoft ODBC driver (e.g. msodbcsql18) and Apache Arrow C++ before
+        installing this package.
 """
 import os
 

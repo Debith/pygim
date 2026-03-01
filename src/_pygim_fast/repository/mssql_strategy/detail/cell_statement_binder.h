@@ -13,14 +13,10 @@
 
 #include "../../core/value_types.h"
 
-#if PYGIM_HAVE_ODBC
-#  include <sql.h>
-#  include <sqlext.h>
-#endif
+#include <sql.h>
+#include <sqlext.h>
 
 namespace pygim::mssql::detail {
-
-#if PYGIM_HAVE_ODBC
 
 /// Binds a vector of CellValue to an ODBC prepared statement.
 /// Manages storage lifetimes for bound parameters.
@@ -174,7 +170,5 @@ private:
         }
     }
 };
-
-#endif // PYGIM_HAVE_ODBC
 
 } // namespace pygim::mssql::detail

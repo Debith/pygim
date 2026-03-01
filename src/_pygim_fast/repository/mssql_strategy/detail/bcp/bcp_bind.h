@@ -2,7 +2,7 @@
 // BCP column binding: per-type bind helpers, column classification, staging buffer setup.
 
 #include "bcp_types.h"
-#include "../../mssql_strategy.h"
+#include "../odbc_error.h"
 
 #include <arrow/table.h>
 
@@ -28,7 +28,7 @@ inline ColumnBinding make_fixed_binding(
     auto ret = bcp.bind(dbc, reinterpret_cast<LPCBYTE>(const_cast<void*>(data)),
                         0, static_cast<DBINT>(stride), nullptr, 0, bcp_type, ordinal);
     if (ret != kSucceed)
-        MssqlStrategyNative::raise_if_error(SQL_ERROR, SQL_HANDLE_DBC, dbc, "bcp_bind");
+        odbc::raise_if_error(SQL_ERROR, SQL_HANDLE_DBC, dbc, "bcp_bind");
     return b;
 }
 
@@ -56,7 +56,7 @@ inline ColumnBinding make_string_binding(
                         reinterpret_cast<LPCBYTE>(const_cast<uint8_t*>(&term)),
                         1, sql_type::character, ordinal);
     if (ret != kSucceed)
-        MssqlStrategyNative::raise_if_error(SQL_ERROR, SQL_HANDLE_DBC, dbc, "bcp_bind");
+        odbc::raise_if_error(SQL_ERROR, SQL_HANDLE_DBC, dbc, "bcp_bind");
     return b;
 }
 

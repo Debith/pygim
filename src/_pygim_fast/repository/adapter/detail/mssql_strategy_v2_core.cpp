@@ -2,11 +2,13 @@
 // Pybind-free — all methods operate on core C++ types only.
 
 #include "../../mssql_strategy/mssql_strategy_v2.h"
+#include "../../mssql_strategy/detail/bcp/bcp_entry.h"
 
 #include <stdexcept>
 #include <string>
 #include <vector>
 
+#include "../../mssql_strategy/detail/odbc_error.h"
 #include "../../mssql_strategy/detail/cell_statement_binder.h"
 #include "../../../utils/logging.h"
 
@@ -17,16 +19,12 @@ namespace pygim::mssql {
 MssqlStrategy::MssqlStrategy(std::string connection_string)
     : m_conn_str(std::move(connection_string)) {
     PYGIM_SCOPE_LOG_TAG("repo.v2.connection");
-#if PYGIM_HAVE_ODBC
     init_handles();
-#endif
 }
 
 MssqlStrategy::~MssqlStrategy() {
     PYGIM_SCOPE_LOG_TAG("repo.v2.connection");
-#if PYGIM_HAVE_ODBC
     cleanup_handles();
-#endif
 }
 
 // ---- core::Strategy interface -----------------------------------------------
@@ -37,11 +35,7 @@ core::StrategyCapabilities MssqlStrategy::capabilities() const {
         .can_save = true,
         .can_bulk_insert = true,
         .can_bulk_upsert = true,
-#if defined(PYGIM_HAVE_ARROW) && PYGIM_HAVE_ARROW
         .can_persist_arrow = true,
-#else
-        .can_persist_arrow = false,
-#endif
     };
 }
 
@@ -50,33 +44,21 @@ const core::QueryDialect *MssqlStrategy::dialect() const {
 }
 
 std::string MssqlStrategy::repr() const {
-#if PYGIM_HAVE_ODBC
     return "MssqlStrategy(connected)";
-#else
-    return "MssqlStrategy(odbc_unavailable)";
-#endif
 }
 
 // ---- Public method implementations ------------------------------------------
 
 std::optional<core::ResultSet> MssqlStrategy::fetch(const core::RenderedQuery &query) {
     PYGIM_SCOPE_LOG_TAG("repo.v2.fetch");
-#if PYGIM_HAVE_ODBC
     ensure_connected();
     return fetch_impl(query.sql, query.params);
-#else
-    throw std::runtime_error("MssqlStrategy built without ODBC; fetch unavailable");
-#endif
 }
 
 void MssqlStrategy::save(const core::TablePkKey &key, const core::RowMap &data) {
     PYGIM_SCOPE_LOG_TAG("repo.v2.save");
-#if PYGIM_HAVE_ODBC
     ensure_connected();
     upsert_impl(key.table, key.pk, data);
-#else
-    throw std::runtime_error("MssqlStrategy built without ODBC; save unavailable");
-#endif
 }
 
 void MssqlStrategy::bulk_insert(const std::string &table,
@@ -84,12 +66,8 @@ void MssqlStrategy::bulk_insert(const std::string &table,
                                 int batch_size,
                                 const std::string &table_hint) {
     PYGIM_SCOPE_LOG_TAG("repo.v2.bulk");
-#if PYGIM_HAVE_ODBC
     ensure_connected();
     bulk_insert_typed(table, batch, batch_size, table_hint);
-#else
-    throw std::runtime_error("MssqlStrategy built without ODBC; bulk_insert unavailable");
-#endif
 }
 
 void MssqlStrategy::bulk_upsert(const std::string &table,
@@ -98,12 +76,8 @@ void MssqlStrategy::bulk_upsert(const std::string &table,
                                 int batch_size,
                                 const std::string &table_hint) {
     PYGIM_SCOPE_LOG_TAG("repo.v2.bulk");
-#if PYGIM_HAVE_ODBC
     ensure_connected();
     bulk_upsert_typed(table, batch, key_column, batch_size, table_hint);
-#else
-    throw std::runtime_error("MssqlStrategy built without ODBC; bulk_upsert unavailable");
-#endif
 }
 
 void MssqlStrategy::persist_arrow(const std::string &table,
@@ -112,26 +86,13 @@ void MssqlStrategy::persist_arrow(const std::string &table,
                                   int batch_size,
                                   const std::string &table_hint) {
     PYGIM_SCOPE_LOG_TAG("repo.v2.arrow");
-#if defined(PYGIM_HAVE_ODBC) && defined(PYGIM_HAVE_ARROW) && PYGIM_HAVE_ARROW
     ensure_connected();
-    // Delegate to the existing BCP arrow machinery.
-    // The old MssqlStrategyNative::bulk_insert_arrow_bcp is reused here
-    // because the BCP code is already pybind-free once it receives the
-    // RecordBatchReader. This is a temporary bridge — the BCP code will
-    // be folded into this class in a follow-up.
-    //
-    // For now, we include the old strategy header to access the BCP function.
-    // TODO: Extract BCP logic into standalone functions in mssql/detail/.
-    throw std::runtime_error("MssqlStrategy::persist_arrow not yet wired — "
-                             "use old MssqlStrategyNative for Arrow BCP path");
-#else
-    throw std::runtime_error("MssqlStrategy built without Arrow; persist_arrow unavailable");
-#endif
+    bcp::bulk_insert_arrow_bcp(m_dbc, table, std::move(reader),
+                               input_mode, batch_size, table_hint,
+                               m_last_bcp_metrics);
 }
 
 // ---- ODBC Handle Management -------------------------------------------------
-
-#if PYGIM_HAVE_ODBC
 
 void MssqlStrategy::init_handles() {
     PYGIM_SCOPE_LOG_TAG("repo.v2.connection");
@@ -156,9 +117,7 @@ void MssqlStrategy::cleanup_handles() {
         m_env = SQL_NULL_HENV;
     }
     m_connected = false;
-#if defined(PYGIM_HAVE_ARROW) && PYGIM_HAVE_ARROW
     m_bcp_attr_enabled = false;
-#endif
 }
 
 void MssqlStrategy::ensure_connected() {
@@ -168,7 +127,6 @@ void MssqlStrategy::ensure_connected() {
     }
     if (m_connected) return;
 
-#if defined(PYGIM_HAVE_ARROW) && PYGIM_HAVE_ARROW
     if (!m_bcp_attr_enabled) {
         SQLRETURN attr_ret = SQLSetConnectAttr(
             m_dbc, SQL_COPT_SS_BCP, (SQLPOINTER)SQL_BCP_ON, SQL_IS_UINTEGER);
@@ -177,7 +135,6 @@ void MssqlStrategy::ensure_connected() {
         }
         m_bcp_attr_enabled = true;
     }
-#endif
 
     SQLSMALLINT outstrlen = 0;
     SQLRETURN ret = SQLDriverConnect(
@@ -191,18 +148,7 @@ void MssqlStrategy::ensure_connected() {
 
 void MssqlStrategy::raise_if_error(SQLRETURN ret, SQLSMALLINT type,
                                    SQLHANDLE handle, const char *what) {
-    if (SQL_SUCCEEDED(ret)) return;
-    SQLCHAR state[6];
-    SQLINTEGER native;
-    SQLCHAR msg[256];
-    SQLSMALLINT len;
-    if (SQLGetDiagRec(type, handle, 1, state, &native, msg, sizeof(msg), &len) == SQL_SUCCESS) {
-        std::string state_str(reinterpret_cast<const char *>(state));
-        std::string msg_str(reinterpret_cast<const char *>(msg));
-        throw std::runtime_error(
-            std::string(what) + " failed: [" + state_str + "] " + msg_str);
-    }
-    throw std::runtime_error(std::string(what) + " failed (no diagnostics)");
+    odbc::raise_if_error(ret, type, handle, what);
 }
 
 // ---- Fetch implementation ---------------------------------------------------
@@ -398,7 +344,5 @@ void MssqlStrategy::upsert_impl(const std::string &table,
         SQLFreeHandle(SQL_HANDLE_STMT, stmt);
     }
 }
-
-#endif // PYGIM_HAVE_ODBC
 
 } // namespace pygim::mssql

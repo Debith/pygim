@@ -10,7 +10,7 @@ Implemented and active behind the native repository/strategy path.
 - Falls back to IPC serialization when stream ingestion is unavailable.
 - Falls back to `bulk_upsert` if Arrow path cannot be used.
 
-## Operational requirement
+## Build requirement
 
-Arrow/BCP acceleration still depends on environment support (Arrow C++ + ODBC/BCP availability).
-When unavailable, behavior degrades to supported fallback paths.
+Arrow C++ (libarrow, libparquet) and ODBC (unixODBC) are mandatory build dependencies.
+The build fails at compile time if they are missing — there is no graceful degradation.

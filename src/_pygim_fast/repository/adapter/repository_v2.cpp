@@ -143,18 +143,4 @@ PYBIND11_MODULE(repository_v2, m) {
              "Quote identifier with MSSQL [bracket] syntax.")
         .def("__repr__",
              [](const query::MssqlDialect &) { return "MssqlDialect()"; });
-
-    // ---- Feature flags ------------------------------------------------------
-
-#if PYGIM_HAVE_ODBC
-    m.attr("HAVE_ODBC") = py::bool_(true);
-#else
-    m.attr("HAVE_ODBC") = py::bool_(false);
-#endif
-
-#ifdef PYGIM_HAVE_ARROW
-    m.attr("HAVE_ARROW") = py::bool_(true);
-#else
-    m.attr("HAVE_ARROW") = py::bool_(false);
-#endif
 }

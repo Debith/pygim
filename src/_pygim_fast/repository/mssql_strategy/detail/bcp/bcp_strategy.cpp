@@ -6,8 +6,13 @@
 // The py::object → RecordBatchReader conversion lives in the BINDING layer
 // (bcp_arrow_import.h), not here.
 
-#include "../../mssql_strategy.h"
-#include "../helpers.h"
+// mssql_strategy_v2.h MUST be included first: it includes core/value_types.h
+// which uses BOOL as an enum member. ODBC headers (pulled in by bcp_*.h and
+// odbc_error.h) define BOOL as a macro, so they must come AFTER value_types.h.
+#include "../../mssql_strategy_v2.h"
+
+#include "../odbc_error.h"
+#include "../sql_helpers.h"
 #include "../../../../utils/logging.h"
 #include "../../../../utils/quick_timer.h"
 
@@ -16,10 +21,7 @@
 #include "bcp_bind.h"
 #include "bcp_row_loop.h"
 
-#define PYGIM_HAVE_ARROW 1
-#define PYGIM_HAVE_ODBC  1
-
-namespace pygim {
+namespace pygim::bcp {
 namespace {
 
 // ── Session setup helpers ───────────────────────────────────────────────────
@@ -31,23 +33,10 @@ void enable_bcp_attr(SQLHDBC dbc) {
 
     rc = SQLSetConnectAttr(dbc, SQL_COPT_SS_BCP, (SQLPOINTER)SQL_BCP_ON, SQL_IS_UINTEGER);
     if (!SQL_SUCCEEDED(rc))
-        MssqlStrategyNative::raise_if_error(rc, SQL_HANDLE_DBC, dbc, "SQLSetConnectAttr(BCP_ON)");
+        odbc::raise_if_error(rc, SQL_HANDLE_DBC, dbc, "SQLSetConnectAttr(BCP_ON)");
 }
 
-std::string qualify_table(const std::string& table) {
-    auto ok = [](const std::string& s) {
-        if (detail::is_valid_identifier(s)) return true;
-        auto dot = s.find('.');
-        if (dot == std::string::npos) return false;
-        return !s.substr(0, dot).empty() && !s.substr(dot + 1).empty()
-            && detail::is_valid_identifier(s.substr(0, dot))
-            && detail::is_valid_identifier(s.substr(dot + 1));
-    };
-    if (!ok(table)) throw std::runtime_error("Invalid table identifier");
-    return (table.find('.') == std::string::npos) ? "dbo." + table : table;
-}
-
-void init_session(const bcp::BcpApi& api, SQLHDBC dbc,
+void init_session(const BcpApi& api, SQLHDBC dbc,
                   const std::string& qualified_table,
                   const std::string& hint) {
     std::u16string w;
@@ -55,15 +44,15 @@ void init_session(const bcp::BcpApi& api, SQLHDBC dbc,
     for (char ch : qualified_table) w.push_back(static_cast<char16_t>(ch));
 
     if (api.init(dbc, reinterpret_cast<LPCWSTR>(w.c_str()),
-                 nullptr, nullptr, DB_IN) != bcp::kSucceed) {
-        MssqlStrategyNative::raise_if_error(
+                 nullptr, nullptr, DB_IN) != kSucceed) {
+        odbc::raise_if_error(
             SQL_ERROR, SQL_HANDLE_DBC, dbc,
             ("bcp_init(table=" + qualified_table + ")").c_str());
     }
     if (!hint.empty() && api.control) {
-        if (api.control(dbc, bcp::kBcpHints,
-                        const_cast<char*>(hint.c_str())) != bcp::kSucceed) {
-            MssqlStrategyNative::raise_if_error(
+        if (api.control(dbc, kBcpHints,
+                        const_cast<char*>(hint.c_str())) != kSucceed) {
+            odbc::raise_if_error(
                 SQL_ERROR, SQL_HANDLE_DBC, dbc, "bcp_control(BCPHINTS)");
         }
     }
@@ -71,26 +60,26 @@ void init_session(const bcp::BcpApi& api, SQLHDBC dbc,
 
 // ── Finalize: flush remaining rows + bcp_done ───────────────────────────────
 
-void finalize_bcp(bcp::BcpContext& ctx) {
+void finalize_bcp(BcpContext& ctx) {
     if (ctx.sent_rows > 0 && ctx.sent_rows % ctx.batch_size != 0) {
         ctx.timer.start_sub_timer("batch_flush", false);
         auto ret = ctx.bcp.batch(ctx.dbc);
         ctx.timer.stop_sub_timer("batch_flush", false);
         if (ret == -1)
-            MssqlStrategyNative::raise_if_error(SQL_ERROR, SQL_HANDLE_DBC, ctx.dbc, "bcp_batch");
+            odbc::raise_if_error(SQL_ERROR, SQL_HANDLE_DBC, ctx.dbc, "bcp_batch");
     }
     ctx.timer.start_sub_timer("done", false);
     auto done = ctx.bcp.done(ctx.dbc);
     ctx.timer.stop_sub_timer("done", false);
     if (done == -1)
-        MssqlStrategyNative::raise_if_error(SQL_ERROR, SQL_HANDLE_DBC, ctx.dbc, "bcp_done");
+        odbc::raise_if_error(SQL_ERROR, SQL_HANDLE_DBC, ctx.dbc, "bcp_done");
 }
 
 // ── Extract timing metrics ──────────────────────────────────────────────────
 
-void extract_metrics(const bcp::BcpContext& ctx,
+void extract_metrics(const BcpContext& ctx,
                      const QuickTimer& timer,
-                     MssqlStrategyNative::BcpMetrics& m) {
+                     mssql::BcpMetrics& m) {
     auto sub = [&](std::string_view name) -> double {
         try { return timer.sub_timer_seconds(name); }
         catch (...) { return 0.0; }
@@ -109,32 +98,32 @@ void extract_metrics(const bcp::BcpContext& ctx,
 
 } // anonymous namespace
 
-// ── Public entry point (pure C++) ───────────────────────────────────────────
+// ── Public free function (pure C++) ─────────────────────────────────────────
 
-void MssqlStrategyNative::bulk_insert_arrow_bcp(
+void bulk_insert_arrow_bcp(
+    SQLHDBC dbc,
     const std::string& table,
     std::shared_ptr<arrow::RecordBatchReader> reader,
     const std::string& input_mode,
     int batch_size,
-    const std::string& table_hint)
+    const std::string& table_hint,
+    mssql::BcpMetrics& metrics_out)
 {
     PYGIM_SCOPE_LOG_TAG("repo.bcp");
-#if PYGIM_HAVE_ODBC && PYGIM_HAVE_ARROW
-    m_last_bcp_metrics = BcpMetrics{};
+    metrics_out = mssql::BcpMetrics{};
     QuickTimer timer("bulk_insert_arrow_bcp", std::clog, false, false);
 
     // 1. Setup: load driver, enable BCP, init session
     timer.start_sub_timer("setup", false);
-    const auto& api = bcp::ensure_bcp_api();
-    ensure_connected();
-    enable_bcp_attr(m_dbc);
-    auto qualified = qualify_table(table);
-    init_session(api, m_dbc, qualified, table_hint);
+    const auto& api = ensure_bcp_api();
+    enable_bcp_attr(dbc);
+    auto qualified = sql::qualify_table(table);
+    init_session(api, dbc, qualified, table_hint);
     timer.stop_sub_timer("setup", false);
 
     // 2. Iterate RecordBatchReader — no Python references past this point
-    bcp::BcpContext ctx{api, m_dbc, timer,
-                        batch_size > 0 ? static_cast<int64_t>(batch_size) : 100000LL};
+    BcpContext ctx{api, dbc, timer,
+                   batch_size > 0 ? static_cast<int64_t>(batch_size) : 100000LL};
 
     while (true) {
         std::shared_ptr<arrow::RecordBatch> batch;
@@ -142,23 +131,16 @@ void MssqlStrategyNative::bulk_insert_arrow_bcp(
         if (!st.ok())
             throw std::runtime_error("Failed reading Arrow batch: " + st.ToString());
         if (!batch) break;
-        bcp::process_batch(ctx, batch);
+        process_batch(ctx, batch);
     }
-    m_last_bcp_metrics.input_mode = input_mode;
+    metrics_out.input_mode = input_mode;
 
     // 3. Finalize
     if (ctx.processed_rows == 0)
         throw std::runtime_error("Arrow BCP received zero rows from payload");
 
     finalize_bcp(ctx);
-    extract_metrics(ctx, timer, m_last_bcp_metrics);
-#elif PYGIM_HAVE_ODBC
-    throw std::runtime_error(
-        "bulk_insert_arrow_bcp requires Arrow C++ library (not detected at build time)");
-#else
-    throw std::runtime_error(
-        "MssqlStrategyNative built without ODBC headers; feature unavailable");
-#endif
+    extract_metrics(ctx, timer, metrics_out);
 }
 
-} // namespace pygim
+} // namespace pygim::bcp

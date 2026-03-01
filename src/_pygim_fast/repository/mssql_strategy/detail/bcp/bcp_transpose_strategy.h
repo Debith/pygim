@@ -68,7 +68,7 @@ struct RowMajorTranspose final : TransposeStrategy {
 private:
     static void send_and_flush(BcpContext& ctx, int64_t row) {
         if (ctx.bcp.sendrow(ctx.dbc) != kSucceed) [[unlikely]] {
-            MssqlStrategyNative::raise_if_error(
+            odbc::raise_if_error(
                 SQL_ERROR, SQL_HANDLE_DBC, ctx.dbc, "bcp_sendrow");
             throw std::runtime_error(
                 "bcp_sendrow failed at row " + std::to_string(row));
@@ -212,7 +212,7 @@ private:
                     handle_string_column(ctx.bcp, ctx.dbc, *bp, abs_row);
 
                 if (ctx.bcp.sendrow(ctx.dbc) != kSucceed) [[unlikely]] {
-                    MssqlStrategyNative::raise_if_error(
+                    odbc::raise_if_error(
                         SQL_ERROR, SQL_HANDLE_DBC, ctx.dbc, "bcp_sendrow");
                     throw std::runtime_error(
                         "bcp_sendrow failed at row " + std::to_string(abs_row));
@@ -249,7 +249,7 @@ private:
                     handle_string_column(ctx.bcp, ctx.dbc, *bp, row);
                 }
                 if (ctx.bcp.sendrow(ctx.dbc) != kSucceed) [[unlikely]] {
-                    MssqlStrategyNative::raise_if_error(
+                    odbc::raise_if_error(
                         SQL_ERROR, SQL_HANDLE_DBC, ctx.dbc, "bcp_sendrow");
                     throw std::runtime_error(
                         "bcp_sendrow failed at row " + std::to_string(row));

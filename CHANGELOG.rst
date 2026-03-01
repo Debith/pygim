@@ -28,6 +28,11 @@ Added
 
 Changed
 ~~~~~~~
+- Build: Removed ``PYGIM_HAVE_ODBC`` and ``PYGIM_HAVE_ARROW`` compile-time feature flags. ODBC and Arrow C++ are now mandatory build dependencies (fail-fast philosophy).
+- Build: Removed dependency probing from ``setup.py``; compilation fails directly if headers/libraries are missing.
+- C++: Removed all ``#if PYGIM_HAVE_ODBC`` / ``#if PYGIM_HAVE_ARROW`` conditional compilation guards from 8+ source files.
+- Python: Removed ``HAVE_ODBC`` / ``HAVE_ARROW`` module-level attributes from ``repository_v2`` and ``mssql_strategy`` pybind modules.
+- CLI: Simplified ``show_support()`` to report extension importability only, without checking feature flag attributes.
 - Registry: Override path optimized to single unordered_map probe (eliminated double lookup).
 - Registry: ``__repr__`` now includes ``policy``, ``hooks`` flag, and current ``size``.
 - Docs: Expanded ``_pygim_fast/registry.h`` with architectural overview & guidance.
@@ -54,6 +59,9 @@ Performance
 
 Docs
 ~~~~
+- Updated design documents to reflect removal of compile-time feature flags (``arrow_bcp_status.md``, ``arrow_bcp_implementation.md``, architecture diagrams, performance analysis docs).
+- Updated file path references across design docs from ``mssql_strategy_bcp.cpp`` to ``bcp/bcp_strategy.cpp``.
+- Removed ``PYGIM_ENABLE_ARROW_BCP`` env gate from sequence diagram (no longer used).
 - Added inline binding docstrings for new registry APIs.
 - Added educational examples demonstrating hooks and override semantics.
 - Expanded class- and method-level documentation in registry/factory core+adapter headers with explicit rationale, argument, return, and exception notes.

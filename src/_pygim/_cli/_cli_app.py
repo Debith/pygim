@@ -64,12 +64,12 @@ class GimmicksCliApp:
     def show_support(self):
         rows = []
         try:
-            mssql_mod = import_module("pygim.mssql_strategy")
-            rows.append(("mssql strategy extension", True))
-            rows.append(("odbc", bool(getattr(mssql_mod, "HAVE_ODBC", False))))
-            rows.append(("arrow (c++)", bool(getattr(mssql_mod, "HAVE_ARROW", False))))
+            repo_mod = import_module("pygim.repository_v2")
+            rows.append(("repository extension", True))
+            rows.append(("odbc", True))
+            rows.append(("arrow (c++)", True))
         except ImportError:
-            rows.append(("mssql strategy extension", False))
+            rows.append(("repository extension", False))
         click.echo("Feature support:")
         for name, supported in rows:
             status = "supported" if supported else "missing"

@@ -20,10 +20,9 @@ actor Caller
 
 participant "Repository.persist_dataframe\n(src/_pygim_fast/repository.h)" as RepoPersist
 participant "MssqlStrategyNative.persist_dataframe\n(pybind lambda in mssql_strategy.cpp)" as StratPersist
-participant "env_true(PYGIM_ENABLE_ARROW_BCP)" as EnvGate
 participant "try_arrow_c_stream_bcp(...)" as TryCStream
 participant "try_arrow_ipc_bcp(...)" as TryIpc
-participant "bulk_insert_arrow_bcp(...)\n(mssql_strategy_bcp.cpp)" as BulkArrow
+participant "bulk_insert_arrow_bcp(...)\n(bcp_strategy.cpp)" as BulkArrow
 participant "run_bulk_upsert(...)" as RunFallback
 participant "bulk_upsert(...)" as BulkUpsert
 participant "to_py_dict(...)" as ToDict
@@ -35,29 +34,16 @@ loop for each strategy in m_strategies
   RepoPersist -> StratPersist: strat.persist_dataframe(...)
 
   alt prefer_arrow == true
-    StratPersist -> EnvGate: env_true("PYGIM_ENABLE_ARROW_BCP")
-
-    alt env gate disabled
-      StratPersist -> StratPersist: arrow_error = "disabled by default..."
-      StratPersist -> RunFallback: run_bulk_upsert(...)
-      RunFallback -> BulkUpsert: self.bulk_upsert(...)
-      BulkUpsert --> RunFallback: success/failure
-      RunFallback --> StratPersist: PersistAttempt(mode=bulk_upsert)
-      StratPersist -> ToDict: to_py_dict(fallback, arrow_error)
-      ToDict --> RepoPersist: dict(mode=bulk_upsert, arrow_error=...)
-
-    else env gate enabled
-      StratPersist -[#red]> TryCStream: try_arrow_c_stream_bcp(...)
-      note over StratPersist, TryCStream #FFCDD2
-        BOTTLENECK A:
-        c-stream often fails in this environment,
-        adding failed-attempt overhead before fallback.
+      StratPersist -[#green]> TryCStream: try_arrow_c_stream_bcp(...)
+      note over StratPersist, TryCStream
+        Arrow and ODBC are mandatory build dependencies.
+        No env gate — Arrow path is always attempted when prefer_arrow=true.
       end note
       TryCStream -> TryCStream: data_frame.__arrow_c_stream__() or to_arrow(...)
-      TryCStream -[#red]> BulkArrow: bulk_insert_arrow_bcp(c_stream_capsule,...)
+      TryCStream -[#green]> BulkArrow: bulk_insert_arrow_bcp(c_stream_capsule,...)
       note over TryCStream, BulkArrow #FFCDD2
-        BOTTLENECK B:
-        hot BCP path is ODBC-call heavy.
+      note over TryCStream, BulkArrow
+        Hot BCP path is ODBC-call heavy.
       end note
 
       alt c-stream success
@@ -70,14 +56,13 @@ loop for each strategy in m_strategies
         BulkArrow --> TryCStream: throw/py error
         TryCStream --> StratPersist: PersistAttempt(success=false, error=...)
 
-        StratPersist -[#red]> TryIpc: try_arrow_ipc_bcp(...)
-        TryIpc -[#red]> TryIpc: data_frame.write_ipc(file=None, compat_level=oldest)
-        note over TryIpc #FFCDD2
-          BOTTLENECK C:
-          IPC serialization/materialization cost
-          before BCP write.
+        StratPersist -> TryIpc: try_arrow_ipc_bcp(...)
+        TryIpc -> TryIpc: data_frame.write_ipc(file=None, compat_level=oldest)
+        note over TryIpc
+          IPC serialization fallback:
+          materialization cost before BCP write.
         end note
-        TryIpc -[#red]> BulkArrow: bulk_insert_arrow_bcp(ipc_payload,...)
+        TryIpc -> BulkArrow: bulk_insert_arrow_bcp(ipc_payload,...)
 
         alt ipc success
           BulkArrow --> TryIpc: success
@@ -97,14 +82,13 @@ loop for each strategy in m_strategies
           ToDict --> RepoPersist: dict(mode=bulk_upsert, arrow_error=combined_error)
         end
       end
-    end
 
   else prefer_arrow == false
-    StratPersist -[#red]> RunFallback: run_bulk_upsert(...)
-    RunFallback -[#red]> BulkUpsert: self.bulk_upsert(...)
-    note over RunFallback, BulkUpsert #FFCDD2
-      BOTTLENECK D:
-      fallback path is typically slower than Arrow BCP.
+    StratPersist -> RunFallback: run_bulk_upsert(...)
+    RunFallback -> BulkUpsert: self.bulk_upsert(...)
+    note over RunFallback, BulkUpsert
+      Fallback path uses typed SQL MERGE,
+      typically slower than Arrow BCP.
     end note
     BulkUpsert --> RunFallback: success/failure
     RunFallback --> StratPersist: PersistAttempt(mode=bulk_upsert)

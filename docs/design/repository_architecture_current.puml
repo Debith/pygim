@@ -1,47 +1,252 @@
 @startuml RepositoryArchitecture_Current
 skinparam shadowing false
 skinparam classAttributeIconSize 0
-title Repository Architecture (Current)
+skinparam packageStyle rectangle
+skinparam nodesep 60
+skinparam ranksep 50
 
-package "pygim (pybind bindings)" as pybind_pkg {
-  class Repository {
-    -m_strategies : list
+title Repository Architecture — Current State (v2)
+
+' ════════════════════════════════════════════════════════════════════════════
+' LAYER 1: Python / pybind11 adapter  (repository_v2 module)
+' ════════════════════════════════════════════════════════════════════════════
+package "adapter  «pybind11 boundary»" as adapter_pkg #FFFDE7 {
+
+  class "adapter::Repository" as AdapterRepo {
+    -m_core : RepositoryCore
+    -m_factory_py : py::object
+    -m_pre_transforms_py : vector<py::function>
+    -m_post_transforms_py : vector<py::function>
+    __
+    +add_strategy(unique_ptr<Strategy>)
+    +persist_dataframe(table, df, key_column, prefer_arrow, table_hint, batch_size) : py::dict
+    +fetch_raw(QueryAdapter) : py::object
+    +save(key, value)
+    +bulk_insert(...) / bulk_upsert(...)
+    __
+    -extract_arrow_reader(df) : shared_ptr<RecordBatchReader>
+    -extract_arrow_capsule(df) : py::object
+    -extract_bulk_batch(df, cols) : TypedColumnBatch
+  }
+
+  class DataExtractor <<static>> {
+    +is_polars_dataframe(obj) : bool
+    +extract_batch_from_polars(df, cols) : TypedColumnBatch
+    +extract_batch_from_iterable(rows, cols) : TypedColumnBatch
+    -extract_polars_column(series, dtype, n) : Column
+    +extract_row_map(dict) : RowMap
+    +row_map_to_py(RowMap) : py::dict
+  }
+
+  class QueryAdapter {
+    +table : string
+    +columns : vector<string>
+    +sql() : string
+    +params() : vector<CellValue>
+  }
+}
+
+' ════════════════════════════════════════════════════════════════════════════
+' LAYER 2: Core  (pure C++, pybind-free)
+' ════════════════════════════════════════════════════════════════════════════
+package "core  «pure C++»" as core_pkg #E8F5E9 {
+
+  class RepositoryCore {
+    -m_strategies : vector<unique_ptr<Strategy>>
+    -m_pre_save : vector<PreSaveTransform>
+    -m_post_load : vector<PostLoadTransform>
+    -m_factory : RowFactory
     -m_enable_transformers : bool
-    -m_factory : callable
-    +add_strategy(strategy)
-    +fetch_raw(key)
-    +save(key, value)
-    +bulk_insert(...)
-    +bulk_upsert(...)
+    __
+    +add_strategy(unique_ptr<Strategy>)
+    +persist_arrow(table, reader, mode, batch_size, hint)
+    +bulk_upsert(table, batch, key_col, batch_size, hint)
+    +bulk_insert(table, batch, batch_size, hint)
+    +fetch_raw(RenderedQuery) : optional<ResultSet>
+    +save(TablePkKey, RowMap)
+    +render_query(QueryIntent) : RenderedQuery
   }
 
-  class Query {
-    +select(cols)
-    +from_table(table)
-    +where(clause, param)
-    +limit(n)
-    +build() : Query
-    +sql() : const std::string&
-    +params() : std::vector<PyObj>
+  abstract class Strategy <<interface>> {
+    +{abstract} capabilities() : StrategyCapabilities
+    +dialect() : const QueryDialect* = nullptr
+    +fetch(RenderedQuery) : optional<ResultSet>
+    +fetch_by_key(TablePkKey) : optional<RowMap>
+    +save(TablePkKey, RowMap)
+    +bulk_insert(table, batch, batch_size, hint)
+    +bulk_upsert(table, batch, key_col, batch_size, hint)
+    +persist_arrow(table, reader, mode, batch_size, hint)
+  }
+
+  class StrategyCapabilities <<struct>> {
+    +can_fetch : bool
+    +can_save : bool
+    +can_bulk_insert : bool
+    +can_bulk_upsert : bool
+    +can_persist_arrow : bool
+  }
+
+  class TypedColumnBatch <<struct>> {
+    +column_names : vector<string>
+    +row_count : size_t
+    +columns : vector<Column>
+  }
+
+  class MemoryStrategy {
+    -m_store : unordered_map<string, RowMap>
+    +capabilities() {can_fetch, can_save}
+    +fetch_by_key(key) : optional<RowMap>
+    +save(key, data)
+    +size() : size_t
   }
 }
 
-package "mssql_strategy (pybind)" as mssql_pkg {
-  class MssqlStrategyNative {
-    +fetch(key)
-    +save(key, value)
-    +bulk_insert(table, columns, rows, batch_size, table_hint)
-    +bulk_upsert(table, columns, rows, key_column, batch_size, table_hint)
-    +bulk_insert_arrow_bcp(table, arrow_ipc_bytes, batch_size, table_hint)
+' ════════════════════════════════════════════════════════════════════════════
+' LAYER 3: MSSQL Strategy  (ODBC + Arrow + BCP)
+' ════════════════════════════════════════════════════════════════════════════
+package "mssql  «ODBC backend»" as mssql_pkg #E3F2FD {
+
+  class MssqlStrategy {
+    -m_conn_str : string
+    -m_dialect : MssqlDialect
+    -m_last_bcp_metrics : BcpMetrics
+    -m_env : SQLHENV
+    -m_dbc : SQLHDBC
+    __
+    +capabilities() {all = true}
+    +dialect() : MssqlDialect*
+    +fetch(query) : optional<ResultSet>
+    +save(key, data)
+    +bulk_insert(table, batch, batch_size, hint)
+    +bulk_upsert(table, batch, key_col, batch_size, hint)
+    +persist_arrow(table, reader, mode, batch_size, hint)
+    __
+    -fetch_impl(sql, params) : optional<ResultSet>
+    -upsert_impl(table, pk, data)
+    -bulk_insert_typed(table, batch, batch_size, hint)
+    -bulk_upsert_typed(table, batch, key_col, batch_size, hint)
+  }
+
+  class BcpMetrics <<struct>> {
+    +setup_seconds : double
+    +row_loop_seconds : double
+    +total_seconds : double
+    +processed_rows : int64
+    +sent_rows : int64
+    +input_mode : string
+  }
+
+  class MssqlDialect {
+    +quote_identifier(id) : string
+    +render(QueryIntent) : RenderedQuery
   }
 }
 
-Repository -down-> MssqlStrategyNative : add_strategy/dispatch
-Repository -down-> Query : fetch_raw(query)
+' ════════════════════════════════════════════════════════════════════════════
+' LAYER 4: BCP detail  (Arrow row-loop machinery)
+' ════════════════════════════════════════════════════════════════════════════
+package "bcp  «detail»" as bcp_pkg #FFF3E0 {
 
-note right of Repository
-  Current implementation uses pybind11
-  and Python objects in the hot path.
+  class BcpContext <<struct>> {
+    +bcp : const BcpApi&
+    +dbc : SQLHDBC
+    +timer : QuickTimer&
+    +batch_size : int64
+    +sent_rows : int64
+    +transpose : TransposeStrategy*
+  }
+
+  class ColumnBinding <<struct>> {
+    +ordinal : int
+    +arrow_type : arrow::Type
+    +data_ptr : const void*
+    +value_stride : size_t
+    +is_string : bool
+    +has_nulls : bool
+  }
+
+  abstract class TransposeStrategy <<interface>> {
+    +{abstract} run(ctx, fixed, string, staging, rows, any_nulls)
+    +{abstract} name() : const char*
+  }
+
+  class RowMajorTranspose {
+    +run(...) : per-row memcpy
+    +name() = "row_major"
+  }
+
+  class ColumnMajorTranspose {
+    -m_mini_batch : int64
+    +run(...) : mini-batch column-major fill
+    +name() = "column_major"
+  }
+
+  class "bcp::import_arrow_reader" as ImportArrow <<function>> {
+    +import_arrow_reader(py::object) : ArrowImportResult
+    __
+    tries: C stream capsule → C stream exporter → IPC
+  }
+}
+
+' ════════════════════════════════════════════════════════════════════════════
+' RELATIONSHIPS
+' ════════════════════════════════════════════════════════════════════════════
+
+AdapterRepo *-down- RepositoryCore : m_core
+AdapterRepo .right.> DataExtractor : «uses»
+AdapterRepo ..> QueryAdapter
+
+RepositoryCore o-down- "1..*" Strategy : m_strategies
+
+Strategy <|-- MemoryStrategy
+Strategy <|-- MssqlStrategy
+Strategy ..> StrategyCapabilities : returns
+
+MssqlStrategy *-- MssqlDialect : m_dialect
+MssqlStrategy *-- BcpMetrics : m_last_bcp_metrics
+
+MssqlStrategy ..> BcpContext : creates (persist_arrow path)
+BcpContext o-- TransposeStrategy : transpose
+
+TransposeStrategy <|-- RowMajorTranspose
+TransposeStrategy <|-- ColumnMajorTranspose
+
+DataExtractor ..> TypedColumnBatch : produces
+
+' ════════════════════════════════════════════════════════════════════════════
+' CALL-FLOW NOTES
+' ════════════════════════════════════════════════════════════════════════════
+
+note as N_flow #E8F5E9
+  **persist_dataframe call flow (current):**
+
+  1. adapter::Repository.persist_dataframe(prefer_arrow=true)
+  2. → extract_arrow_reader(df)  → RecordBatchReader
+  3.   (tries C-stream capsule → IPC fallback)
+  4. → RepositoryCore.persist_arrow(reader)
+  5.   → MssqlStrategy.persist_arrow(reader)
+  6.     → BCP bulk insert via Arrow buffers  ← **fast path**
+
+  **Fallback (non-Arrow):**
+
+  1. adapter::Repository.persist_dataframe(prefer_arrow=false or Arrow fails)
+  2. → extract_bulk_batch(df)
+  3.   → DataExtractor.extract_batch_from_polars()
+  4. → RepositoryCore.bulk_upsert(TypedColumnBatch)
+  5.   → MssqlStrategy.bulk_upsert()  ← typed SQL MERGE
+end note
+
+N_flow .. AdapterRepo
+
+note bottom of MssqlStrategy #E8F5E9
+  persist_arrow() delegates to
+  bcp::bulk_insert_arrow_bcp()
+  bulk path uses typed SQL MERGE
+end note
+
+note bottom of ColumnMajorTranspose
+  Ready for future SIMD strategies
+  (e.g., AVX2Transpose)
 end note
 
 @enduml

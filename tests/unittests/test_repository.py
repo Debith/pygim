@@ -88,6 +88,6 @@ def test_mssql_dialect_quoting():
 
 
 def test_feature_flags():
-    """Feature flags reflect build-time ODBC/Arrow detection."""
-    assert isinstance(repository_ext.HAVE_ODBC, bool)
-    assert isinstance(repository_ext.HAVE_ARROW, bool)
+    """Module importability implies ODBC and Arrow support."""
+    # If import succeeds, both ODBC and Arrow were present at build time.
+    import pygim.repository_v2  # noqa: F401

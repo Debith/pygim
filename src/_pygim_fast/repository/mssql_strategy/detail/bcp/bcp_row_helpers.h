@@ -58,7 +58,7 @@ inline void flush_batch(const BcpApi& bcp, SQLHDBC dbc, QuickTimer& timer) {
     auto ret = bcp.batch(dbc);
     timer.stop_sub_timer("batch_flush", false);
     if (ret == -1) [[unlikely]]
-        MssqlStrategyNative::raise_if_error(SQL_ERROR, SQL_HANDLE_DBC, dbc, "bcp_batch");
+        odbc::raise_if_error(SQL_ERROR, SQL_HANDLE_DBC, dbc, "bcp_batch");
     timer.start_sub_timer("row_loop", false);
 }
 

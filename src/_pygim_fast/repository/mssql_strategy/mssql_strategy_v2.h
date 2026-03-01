@@ -3,8 +3,6 @@
 //
 // All Python data extraction is done in the adapter layer before reaching
 // this class. Every method accepts/returns only core C++ types.
-//
-// Coexists with the old MssqlStrategyNative during transition.
 #pragma once
 
 #include <memory>
@@ -21,31 +19,20 @@ namespace arrow {
 class RecordBatchReader;
 } // namespace arrow
 
-// ODBC feature detection (same logic as old header).
-#ifndef PYGIM_HAVE_ODBC
-#  if __has_include(<sql.h>) && __has_include(<sqlext.h>)
-#    define PYGIM_HAVE_ODBC 1
-#  else
-#    define PYGIM_HAVE_ODBC 0
-#  endif
+#include <sql.h>
+#include <sqlext.h>
+#ifdef BOOL
+#  undef BOOL
 #endif
-
-#if PYGIM_HAVE_ODBC
-#  include <sql.h>
-#  include <sqlext.h>
-#  ifdef BOOL
-#    undef BOOL
-#  endif
-#  ifdef INT
-#    undef INT
-#  endif
-#  if !defined(_WIN32) && !defined(_WIN64)
-#    ifndef SQL_COPT_SS_BCP
-#      define SQL_COPT_SS_BASE 1200
-#      define SQL_COPT_SS_BCP (SQL_COPT_SS_BASE + 19)
-#      define SQL_BCP_ON ((SQLULEN)1L)
-#      define SQL_BCP_OFF ((SQLULEN)0L)
-#    endif
+#ifdef INT
+#  undef INT
+#endif
+#if !defined(_WIN32) && !defined(_WIN64)
+#  ifndef SQL_COPT_SS_BCP
+#    define SQL_COPT_SS_BASE 1200
+#    define SQL_COPT_SS_BCP (SQL_COPT_SS_BASE + 19)
+#    define SQL_BCP_ON ((SQLULEN)1L)
+#    define SQL_BCP_OFF ((SQLULEN)0L)
 #  endif
 #endif
 
@@ -111,24 +98,19 @@ public:
 
     // ---- ODBC handle access (for detail implementations) --------------------
 
-#if PYGIM_HAVE_ODBC
     SQLHDBC connection_handle() const noexcept { return m_dbc; }
     static void raise_if_error(SQLRETURN ret, SQLSMALLINT type,
                                SQLHANDLE handle, const char *what);
-#endif
 
 private:
     std::string m_conn_str;
     query::MssqlDialect m_dialect;
     BcpMetrics m_last_bcp_metrics;
 
-#if PYGIM_HAVE_ODBC
     SQLHENV m_env{SQL_NULL_HENV};
     SQLHDBC m_dbc{SQL_NULL_HDBC};
     bool m_connected{false};
-#  if defined(PYGIM_HAVE_ARROW) && PYGIM_HAVE_ARROW
     bool m_bcp_attr_enabled{false};
-#  endif
 
     void init_handles();
     void cleanup_handles();
@@ -157,7 +139,6 @@ private:
                            const std::string &key_column,
                            int batch_size,
                            const std::string &table_hint);
-#endif
 };
 
 } // namespace pygim::mssql

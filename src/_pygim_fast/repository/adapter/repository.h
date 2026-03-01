@@ -17,6 +17,8 @@
 #include "data_extractor.h"
 #include "query_adapter.h"
 
+#include "../mssql_strategy/detail/bcp/bcp_arrow_import.h"
+
 namespace pygim::adapter {
 
 namespace py = pybind11;
@@ -263,19 +265,21 @@ private:
     }
 
     /// Extract Arrow RecordBatchReader from a Python DataFrame.
-    /// Handles Polars compat level, __arrow_c_stream__, and IPC fallback.
+    /// Uses bcp_arrow_import.h for C-stream / IPC extraction.
     std::shared_ptr<arrow::RecordBatchReader> extract_arrow_reader(const py::object &data_frame) {
-        // This absorbs the logic currently in mssql_strategy_persist_arrow.cpp.
-        // For now, delegate to the existing BCP import machinery.
-        // TODO: Inline extraction once strategy refactor is complete.
+        // Try capsule first (Polars compat level → Arrow table → __arrow_c_stream__).
         py::object capsule = extract_arrow_capsule(data_frame);
-        if (capsule.is_none()) return nullptr;
-
-        // Delegate to existing import function.
-        py::module_ bcp_mod = py::module_::import("pygim.mssql_strategy");
-        // This is a temporary bridge — the actual C++ import_arrow_reader
-        // will be called directly once the strategy is fully refactored.
-        return nullptr; // Placeholder — will be wired in strategy refactor.
+        if (!capsule.is_none()) {
+            auto result = bcp::import_arrow_reader(capsule);
+            return result.reader;
+        }
+        // Fallback: pass the dataframe directly (supports _export_to_c / IPC).
+        try {
+            auto result = bcp::import_arrow_reader(data_frame);
+            return result.reader;
+        } catch (...) {
+            return nullptr;
+        }
     }
 
     /// Extract Arrow C stream capsule from a Python DataFrame.

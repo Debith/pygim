@@ -1,7 +1,6 @@
 """Example usage of Repository with native MSSQL strategy.
 
-Requires building with ODBC headers (``PYGIM_HAVE_ODBC``) and enabling the native
-MSSL strategy during installation.
+Requires ODBC headers and Arrow C++ library installed at build time.
 """
 from pygim import repository_v2 as rv2
 

@@ -102,7 +102,7 @@ Query Security & Dialect Notes
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Passing a built ``Query`` object directly to ``Repository.fetch_raw(query)``
-will bind parameters using ODBC (when compiled with ``PYGIM_HAVE_ODBC``). The builder renders
+will bind parameters using ODBC. The builder renders
 queries via ``MssqlDialect``, emitting ``TOP n`` for SQL Server.
 
 Native Arrow Persist Path

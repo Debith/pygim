@@ -1,8 +1,8 @@
-# BCP Performance Bottleneck Analysis (mssql_strategy_bcp.cpp)
+# BCP Performance Bottleneck Analysis (bcp_strategy.cpp)
 
 Date: 2026-02-24
 Branch: `core/repository`
-Scope: `bulk_insert_arrow_bcp` function in `mssql_strategy_bcp.cpp`
+Scope: `bulk_insert_arrow_bcp` function in `bcp_strategy.cpp`
 Test Runs:
 - 1M rows, batch_size=50,000: **CRASHED** (memory corruption: "free(): corrupted unsorted chunks")
 - 10k rows, batch_size=10,000: Successful, throughput=6.04 MB/s

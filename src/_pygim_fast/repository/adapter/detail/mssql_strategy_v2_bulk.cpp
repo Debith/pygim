@@ -12,8 +12,6 @@
 
 namespace pygim::mssql {
 
-#if PYGIM_HAVE_ODBC
-
 // ---- Bulk INSERT using TypedColumnBatch -------------------------------------
 
 void MssqlStrategy::bulk_insert_typed(const std::string &table,
@@ -203,7 +201,5 @@ void MssqlStrategy::bulk_upsert_typed(const std::string &table,
     if (stmt_tail != SQL_NULL_HSTMT) SQLFreeHandle(SQL_HANDLE_STMT, stmt_tail);
     SQLSetConnectAttr(m_dbc, SQL_ATTR_AUTOCOMMIT, (SQLPOINTER)old_autocommit, 0);
 }
-
-#endif // PYGIM_HAVE_ODBC
 
 } // namespace pygim::mssql

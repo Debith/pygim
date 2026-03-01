@@ -1,8 +1,8 @@
-# BCP Performance Bottleneck Analysis v2 (mssql_strategy_bcp.cpp)
+# BCP Performance Bottleneck Analysis v2 (bcp_strategy.cpp)
 
 Date: 2026-02-24
 Branch: `core/repository`
-Scope: `bulk_insert_arrow_bcp` function in `mssql_strategy_bcp.cpp`
+Scope: `bulk_insert_arrow_bcp` function in `bcp_strategy.cpp`
 Test Run: 1M rows, batch_size=50,000, arrow_c_stream_exporter mode, throughput=19.65 MB/s
 
 ## Executive Summary

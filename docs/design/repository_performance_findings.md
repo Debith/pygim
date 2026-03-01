@@ -52,7 +52,7 @@ Impact: high. Losing c-stream means extra serialization work and additional fail
 
 - Inner loop performs per-cell `bcp_collen` + `bcp_colptr` then per-row `bcp_sendrow`.
 - At 1M rows × 11 columns, this is tens of millions of ODBC calls even before network/log flush effects.
-- Relevant code path: `src/_pygim_fast/repository/mssql_strategy/detail/mssql_strategy_bcp.cpp`.
+- Relevant code path: `src/_pygim_fast/repository/mssql_strategy/detail/bcp/bcp_strategy.cpp`.
 
 Impact: very high. This is the dominant write-path overhead after payload prep.
 

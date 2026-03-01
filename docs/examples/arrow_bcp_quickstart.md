@@ -42,5 +42,5 @@ python __playground__/stresss_test.py --rows 1000000 --no-arrow
 
 - The native path first attempts Arrow C Data Interface (`__arrow_c_stream__`).
 - If stream import is unavailable, native code falls back to IPC serialization.
-- Use `--arrow` in the stress harness to set `PYGIM_ENABLE_ARROW_BCP=1` explicitly.
+- Use `--arrow` in the stress harness to explicitly test the Arrow BCP path.
 - If Arrow persist fails, repository falls back to `bulk_upsert`.

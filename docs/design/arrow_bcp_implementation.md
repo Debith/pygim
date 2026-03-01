@@ -18,9 +18,11 @@ The native strategy handles conversion and write orchestration internally.
 
 ## Files of Interest
 
-- `src/_pygim_fast/repository/mssql_strategy/mssql_strategy.cpp`
-- `src/_pygim_fast/repository/mssql_strategy/detail/mssql_strategy_bcp.cpp`
-- `src/_pygim_fast/repository.cpp`
+- `src/_pygim_fast/repository/mssql_strategy/mssql_strategy_v2.h`
+- `src/_pygim_fast/repository/adapter/detail/mssql_strategy_v2_core.cpp`
+- `src/_pygim_fast/repository/mssql_strategy/detail/bcp/bcp_strategy.cpp`
+- `src/_pygim_fast/repository/adapter/repository.h`
+- `src/_pygim_fast/repository/adapter/repository_v2.cpp`
 - `__playground__/stresss_test.py`
 
 ## Notes

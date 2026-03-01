@@ -1,6 +1,6 @@
 # BCP Hot-Path Bottleneck Analysis
 
-File: `src/_pygim_fast/repository/mssql_strategy/detail/mssql_strategy_bcp.cpp`
+File: `src/_pygim_fast/repository/mssql_strategy/detail/bcp/bcp_strategy.cpp`
 Benchmark: 1M rows × 11 columns, `--arrow --batch-size 50000`, mode `arrow_c_stream_bcp`
 Known-good historical reference: **63.63 MB/s, 607,200 rows/s** (1M rows in 1.65s)
 

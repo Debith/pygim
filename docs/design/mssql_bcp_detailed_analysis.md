@@ -1,13 +1,13 @@
-# BCP Performance Bottleneck Analysis (mssql_strategy_bcp.cpp)
+# BCP Performance Bottleneck Analysis (bcp_strategy.cpp)
 
 Date: 2026-02-23
 Branch: `core/repository`
-Scope: `bulk_insert_arrow_bcp` function in `mssql_strategy_bcp.cpp`
+Scope: `bulk_insert_arrow_bcp` function in `bcp_strategy.cpp`
 Test Run: 1M rows, batch_size=50,000, arrow_c_stream_exporter mode, throughput=23.07 MB/s
 
 ## Executive Summary
 
-Based on the stress test output and the source code of `mssql_strategy_bcp.cpp`, the dominant bottlenecks in the BCP implementation are excessive ODBC API calls in the inner row loop (54.4% of DB write time) and expensive batch flushes (41.9%). Current throughput (23.07 MB/s) remains below the historical target (63.63 MB/s). The sheer volume of per-cell ODBC calls (`bcp_colptr`, `bcp_collen`) and eager memory allocations for strings and temporal data add significant CPU and memory pressure.
+Based on the stress test output and the source code of `bcp_strategy.cpp`, the dominant bottlenecks in the BCP implementation are excessive ODBC API calls in the inner row loop (54.4% of DB write time) and expensive batch flushes (41.9%). Current throughput (23.07 MB/s) remains below the historical target (63.63 MB/s). The sheer volume of per-cell ODBC calls (`bcp_colptr`, `bcp_collen`) and eager memory allocations for strings and temporal data add significant CPU and memory pressure.
 
 ## Detailed Findings
 
