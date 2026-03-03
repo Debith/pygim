@@ -10,6 +10,7 @@
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 
+#include "../core/connection_uri.h"
 #include "../core/memory_strategy.h"
 #include "../core/repository_core.h"
 #include "../core/strategy.h"
@@ -18,6 +19,7 @@
 #include "query_adapter.h"
 
 #include "../mssql_strategy/detail/bcp/bcp_arrow_import.h"
+#include "../mssql_strategy/mssql_strategy_v2.h"
 
 namespace pygim::adapter {
 
@@ -25,14 +27,20 @@ namespace py = pybind11;
 
 class Repository {
 public:
-    explicit Repository(bool enable_transformers = false)
-        : m_core(enable_transformers) {}
-
-    // ---- Strategy management ------------------------------------------------
-
-    /// Add a C++ strategy (constructed directly — e.g., MemoryStrategy).
-    void add_strategy(std::unique_ptr<core::Strategy> strategy) {
-        m_core.add_strategy(std::move(strategy));
+    /// Construct a Repository from a connection URI.
+    ///
+    /// Supported schemes:
+    ///   "memory://"              — in-memory strategy (dev / test)
+    ///   "mssql://server/db"     — MSSQL via ODBC
+    ///   "Driver={...};Server=…" — raw ODBC connection string (MSSQL)
+    ///
+    /// Optional:
+    ///   transformers — enable pre-save / post-load transformer pipeline.
+    explicit Repository(const std::string &connection_uri,
+                        bool enable_transformers = false)
+        : m_core(enable_transformers), m_uri(core::parse_uri(connection_uri))
+    {
+        create_strategy_from_uri();
     }
 
     // ---- Factory management -------------------------------------------------
@@ -237,19 +245,35 @@ public:
 
     size_t strategy_count() const { return m_core.strategy_count(); }
     bool transformers_enabled() const { return m_core.transformers_enabled(); }
+    const core::ConnectionUri &uri() const noexcept { return m_uri; }
 
     std::string repr() const {
-        return "Repository(strategies=" + std::to_string(m_core.strategy_count()) +
+        return "Repository(scheme=\"" + m_uri.scheme + "\""
                ", transformers=" + (m_core.transformers_enabled() ? "True" : "False") +
                ", factory=" + (has_factory() ? "True" : "False") + ")";
     }
 
 private:
     core::RepositoryCore m_core;
+    core::ConnectionUri m_uri;
     py::object m_factory_py = py::none();
     bool m_has_factory_py{false};
     std::vector<py::function> m_pre_transforms_py;
     std::vector<py::function> m_post_transforms_py;
+
+    /// Create the single strategy from the parsed URI.
+    void create_strategy_from_uri() {
+        if (m_uri.scheme == "memory") {
+            m_core.add_strategy(std::make_unique<core::MemoryStrategy>());
+        } else if (m_uri.scheme == "mssql") {
+            auto conn_str = core::build_odbc_connection_string(m_uri);
+            m_core.add_strategy(std::make_unique<mssql::MssqlStrategy>(conn_str));
+        } else {
+            throw std::invalid_argument(
+                "Repository: unsupported scheme '" + m_uri.scheme + "'. "
+                "Supported: memory://, mssql://server/db");
+        }
+    }
 
     // ---- Internal helpers ---------------------------------------------------
 

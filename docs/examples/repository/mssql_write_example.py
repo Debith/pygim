@@ -7,7 +7,7 @@ NOTE:
 """
 import os
 
-from pygim import repository_v2 as rv2
+from pygim import repository as rv2
 
 
 # For Docker/local development with the Microsoft ODBC Driver 18 the default is Encrypt=yes and
@@ -32,9 +32,7 @@ CONNECTION = (
     "UID=sa;PWD=NewP@ssw0rd#2025;Encrypt=yes;TrustServerCertificate=yes;"
 )
 
-repo = rv2.Repository(transformers=True)
-repo.add_memory_strategy()
-repo.add_mssql_strategy(CONNECTION)
+repo = rv2.Repository(CONNECTION, transformers=True)
 
 
 try:  # pragma: no cover - environment dependent

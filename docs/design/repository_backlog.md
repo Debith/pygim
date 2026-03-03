@@ -16,7 +16,7 @@ Settle the abstract design before writing new code.
 
 | # | Task | Status | Notes |
 |---|------|--------|-------|
-| 0.1 | StorageStrategy acquired from connection string | open | One strategy per repository instance. Connection string selects concrete impl (MSSQL, Postgres, …). Hint as last resort fallback. |
+| 0.1 | StorageStrategy acquired from connection string | done | `Repository("memory://")` or `Repository("mssql://server/db")`. URI parsed in `connection_uri.h`. One strategy per repo. Raw ODBC strings also accepted. |
 | 0.2 | ExtractionPolicy returns abstract View | open | View is what StorageStrategy consumes. Likely Arrow RecordBatchReader as the universal format, or a lightweight two-case variant (ArrowReader \| RowMap). |
 | 0.3 | Transpose is internal to StorageStrategy | open | Not a peer strategy. StorageStrategy owns its column→row transform. Hintable (caller can suggest AVX/scalar) but not user-exposed. |
 | 0.4 | Unified `save(data, hint?)` API | open | Auto-detect data format (one type check) or skip via hint. Single entry point, internal dispatch. |

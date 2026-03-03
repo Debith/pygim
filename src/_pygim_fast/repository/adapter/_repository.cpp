@@ -1,30 +1,25 @@
-// Pybind11 bindings for the new core/adapter Repository architecture.
+// Pybind11 bindings for the core/adapter Repository architecture.
 //
 // Exposes:
-// - QueryAdapter as "Query" (fluent builder, backward-compatible API)
+// - QueryAdapter as "Query" (fluent builder)
 // - Repository (adapter wrapping RepositoryCore)
-// - MemoryStrategy (C++ in-memory backend)
-// - MssqlStrategy (pybind-free ODBC backend, when ODBC available)
-// - MssqlDialect (for explicit dialect access from Python)
 //
-// NOTE: This file coexists with the old repository.cpp bindings during
-// transition. Once the old monolith is removed, this replaces it.
+// MemoryStrategy, MssqlStrategy, and MssqlDialect are internal C++ types —
+// they are constructed/used automatically by Repository and do not need
+// Python-level bindings.
 
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 
-#include "../core/memory_strategy.h"
 #include "../core/value_types.h"
-#include "../query/mssql_dialect.h"
-#include "../mssql_strategy/mssql_strategy_v2.h"
 #include "data_extractor.h"
 #include "query_adapter.h"
 #include "repository.h"
 
 namespace py = pybind11;
 
-PYBIND11_MODULE(repository_v2, m) {
-    m.doc() = "Repository with core/adapter split — pybind-free strategies, "
+PYBIND11_MODULE(_repository, m) {
+    m.doc() = "Repository core/adapter — pybind-free strategies, "
               "centralized data extraction, dialect-based query rendering.";
 
     using namespace pygim;
@@ -55,44 +50,20 @@ PYBIND11_MODULE(repository_v2, m) {
         .def("params", &adapter::QueryAdapter::params_py,
              "Return bound parameters as a Python list.");
 
-    // ---- MemoryStrategy -----------------------------------------------------
-
-    py::class_<core::MemoryStrategy>(m, "MemoryStrategy")
-        .def(py::init<>(),
-             "Create an in-memory strategy for development and testing.")
-        .def("size", &core::MemoryStrategy::size,
-             "Number of stored entries.")
-        .def("clear", &core::MemoryStrategy::clear,
-             "Remove all stored entries.")
-        .def("__repr__",
-             [](const core::MemoryStrategy &self) {
-                 return "MemoryStrategy(size=" + std::to_string(self.size()) + ")";
-             });
-
-    // ---- MssqlStrategy (pybind-free ODBC backend) ---------------------------
-
-    py::class_<mssql::MssqlStrategy>(m, "MssqlStrategy")
-        .def(py::init<std::string>(), py::arg("connection_string"),
-             "Create an MSSQL strategy with the given ODBC connection string.")
-        .def("__repr__", &mssql::MssqlStrategy::repr);
-
     // ---- Repository ---------------------------------------------------------
 
     py::class_<adapter::Repository>(m, "Repository", py::dynamic_attr())
-        .def(py::init<bool>(), py::arg("transformers") = false,
-             "Create a Repository.\n\nParameters:\n"
-             "  transformers: enable transformer pipeline (pre-save & post-load).")
-        .def("add_memory_strategy",
-             [](adapter::Repository &self) {
-                 self.add_strategy(std::make_unique<core::MemoryStrategy>());
-             },
-             "Add a built-in in-memory strategy.")
-        .def("add_mssql_strategy",
-             [](adapter::Repository &self, const std::string &connection_string) {
-                 self.add_strategy(std::make_unique<mssql::MssqlStrategy>(connection_string));
-             },
-             py::arg("connection_string"),
-             "Add an MSSQL strategy with the given ODBC connection string.")
+        .def(py::init<std::string, bool>(),
+             py::arg("connection_uri"),
+             py::arg("transformers") = false,
+             "Create a Repository from a connection URI.\n\n"
+             "Supported schemes:\n"
+             "  memory://              — in-memory (dev/test)\n"
+             "  mssql://server/db     — MSSQL via ODBC\n"
+             "  Driver={...};Server=… — raw ODBC (MSSQL)\n\n"
+             "Parameters:\n"
+             "  connection_uri: URI or ODBC connection string.\n"
+             "  transformers: enable pre-save / post-load pipeline.")
         .def("set_factory", &adapter::Repository::set_factory, py::arg("factory"),
              "Set factory callable: factory(key, data) -> entity.")
         .def("clear_factory", &adapter::Repository::clear_factory)
@@ -133,14 +104,4 @@ PYBIND11_MODULE(repository_v2, m) {
              py::arg("key"), py::arg("value"))
         .def("__repr__", &adapter::Repository::repr);
 
-    // ---- MssqlDialect (for explicit access from Python) ---------------------
-
-    py::class_<query::MssqlDialect>(m, "MssqlDialect")
-        .def(py::init<>(),
-             "Create MSSQL dialect for T-SQL rendering.")
-        .def("quote_identifier", &query::MssqlDialect::quote_identifier,
-             py::arg("identifier"),
-             "Quote identifier with MSSQL [bracket] syntax.")
-        .def("__repr__",
-             [](const query::MssqlDialect &) { return "MssqlDialect()"; });
 }

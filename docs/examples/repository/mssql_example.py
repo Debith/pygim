@@ -2,16 +2,14 @@
 
 Requires ODBC headers and Arrow C++ library installed at build time.
 """
-from pygim import repository_v2 as rv2
+from pygim import repository as rv2
 
 CONNECTION = (
     "Driver={ODBC Driver 17 for SQL Server};"
     "Server=localhost;Database=test;UID=sa;PWD=Passw0rd!;"
 )
 
-repo = rv2.Repository(transformers=False)
-repo.add_memory_strategy()  # dev cache / fallback
-repo.add_mssql_strategy(CONNECTION)
+repo = rv2.Repository(CONNECTION)
 
 
 try:

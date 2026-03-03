@@ -64,7 +64,7 @@ class GimmicksCliApp:
     def show_support(self):
         rows = []
         try:
-            repo_mod = import_module("pygim.repository_v2")
+            repo_mod = import_module("pygim._repository")
             rows.append(("repository extension", True))
             rows.append(("odbc", True))
             rows.append(("arrow (c++)", True))

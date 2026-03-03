@@ -91,12 +91,12 @@ for cpp_file in get_cpp_files("src/_pygim_fast"):
     stem = cpp_file.stem
     kwargs = {}
     macros = list(base_macros)
-    if stem == "repository_v2":
-        # repository_v2 bundles adapter/detail + BCP sources.
+    if stem == "_repository":
+        # _repository bundles adapter/detail + BCP sources.
         sources = [str(cpp_file)] + [str(p) for p in repo_v2_detail_sources] + bcp_sources
         kwargs.update(odbc_kwargs())
     elif stem == "mssql_strategy":
-        # Old monolith — superseded by repository_v2; skip.
+        # Old monolith — superseded by _repository; skip.
         continue
     else:
         # Standard extensions: just default compile args, single source.

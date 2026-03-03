@@ -80,11 +80,9 @@ Example (read):
 
 .. code-block:: python
 
-        from pygim import repository_v2 as rv2
+        from pygim import repository as rv2
 
-        repo = rv2.Repository(transformers=False)
-        repo.add_memory_strategy()
-        repo.add_mssql_strategy("Driver={ODBC Driver 18 for SQL Server};Server=localhost;Database=test;UID=sa;PWD=Passw0rd!;")
+        repo = rv2.Repository("mssql://localhost/test")
 
         q = rv2.Query().select(["id","name"]).from_table("users").where("id=?", 1).build()
         row = repo[("users", 1)]  # Strategy interprets key
