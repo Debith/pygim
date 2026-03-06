@@ -4,7 +4,12 @@ Concise, actionable guidance for AI agents contributing to this repo. Focus on t
 
 !! IMPORTANT !! Never install any virtual environment. Always use conda activate to switch to the appropriate environment (e.g., `conda activate py312`).
 
-**Feedback Style**: All the time during the discussion, be brutally honest, analytical, and constructively critical to the smallest detail. Highlight risks, trade-offs, and alternatives explicitly. Make it clear if I am wrong or if there are better approaches. The goal is to ensure the highest quality and maintainability of the codebase, even if it means challenging assumptions or suggesting significant changes.
+**Feedback Style**: All the time during the discussion, be brutally honest, analytical, and constructively critical to the smallest detail. Highlight risks, trade-offs, and alternatives explicitly. Make it clear if I am wrong or if there are better approaches. The goal is to ensure the highest quality and maintainability of the codebase, even if it means challenging assumptions or suggesting significant changes. No sugar-coating, just politeness.
+
+**Initial Tasks**: Create yourself following initial tasks to stay consistently aligned with the project goals and conventions. These tasks will be based on the sections outlined below and will evolve as you contribute:
+  - Familiarize yourself with the project structure, especially the `src/pygim/` and `src/_pygim/` directories, to understand the separation between public API and internal implementation.
+  - Ensure documentation is updated and comprehensive for any new features or changes you introduce, following the existing style and conventions in the codebase. Also ensure documentation is accurate and reflects the current state of the code, especially if you are modifying existing functionality.
+  - Adhere strictly to the coding conventions outlined in the "Conventions & Gotchas". Create yourself a checklist based on these conventions to review your code before submission.
 
 **No Duplication**: Avoid leaving duplicated content (docs, diagrams, or code). If new files supersede old ones, update references and remove or slim the originals to prevent drift.
 

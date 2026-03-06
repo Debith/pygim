@@ -22,11 +22,6 @@
 #include "strategy.h"
 #include "value_types.h"
 
-// Forward-declare Arrow types.
-namespace arrow {
-class RecordBatchReader;
-} // namespace arrow
-
 namespace pygim::core {
 
 // ---- Transformer types (pybind-free) ----------------------------------------
@@ -161,52 +156,19 @@ public:
         }
     }
 
-    // ---- Bulk operations ----------------------------------------------------
+    // ---- Bulk persistence (DataView) ----------------------------------------
 
-    void bulk_insert(const std::string &table,
-                     const TypedColumnBatch &batch,
-                     int batch_size = 1000,
-                     const std::string &table_hint = "TABLOCK") {
-        bool any = false;
+    /// Persist bulk data via the first capable strategy.
+    ///
+    /// DataView carries either an ArrowView or TypedBatchView.
+    /// PersistOptions specifies mode (Insert/Upsert), batch_size, key_column.
+    void persist(const TableSpec &table_spec, DataView view, const PersistOptions &opts) {
         for (auto &s : m_strategies) {
-            if (!s->capabilities().can_bulk_insert) continue;
-            s->bulk_insert(table, batch, batch_size, table_hint);
-            any = true;
-        }
-        if (!any) {
-            throw std::runtime_error("RepositoryCore: no strategy supports bulk_insert()");
-        }
-    }
-
-    void bulk_upsert(const std::string &table,
-                     const TypedColumnBatch &batch,
-                     const std::string &key_column = "id",
-                     int batch_size = 500,
-                     const std::string &table_hint = "TABLOCK") {
-        bool any = false;
-        for (auto &s : m_strategies) {
-            if (!s->capabilities().can_bulk_upsert) continue;
-            s->bulk_upsert(table, batch, key_column, batch_size, table_hint);
-            any = true;
-        }
-        if (!any) {
-            throw std::runtime_error("RepositoryCore: no strategy supports bulk_upsert()");
-        }
-    }
-
-    // ---- Arrow persistence --------------------------------------------------
-
-    void persist_arrow(const std::string &table,
-                       std::shared_ptr<arrow::RecordBatchReader> reader,
-                       const std::string &input_mode,
-                       int batch_size = 100000,
-                       const std::string &table_hint = "TABLOCK") {
-        for (auto &s : m_strategies) {
-            if (!s->capabilities().can_persist_arrow) continue;
-            s->persist_arrow(table, std::move(reader), input_mode, batch_size, table_hint);
+            if (!s->capabilities().can_persist) continue;
+            s->persist(table_spec, std::move(view), opts);
             return;
         }
-        throw std::runtime_error("RepositoryCore: no strategy supports persist_arrow()");
+        throw std::runtime_error("RepositoryCore: no strategy supports persist()");
     }
 
     // ---- Introspection ------------------------------------------------------

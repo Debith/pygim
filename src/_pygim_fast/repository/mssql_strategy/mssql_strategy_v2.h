@@ -14,11 +14,6 @@
 #include "../core/value_types.h"
 #include "../query/mssql_dialect.h"
 
-// Forward-declare Arrow types.
-namespace arrow {
-class RecordBatchReader;
-} // namespace arrow
-
 #include <sql.h>
 #include <sqlext.h>
 #ifdef BOOL
@@ -74,22 +69,14 @@ public:
     std::optional<core::ResultSet> fetch(const core::RenderedQuery &query) override;
     void save(const core::TablePkKey &key, const core::RowMap &data) override;
 
-    void bulk_insert(const std::string &table,
-                     const core::TypedColumnBatch &batch,
-                     int batch_size,
-                     const std::string &table_hint) override;
-
-    void bulk_upsert(const std::string &table,
-                     const core::TypedColumnBatch &batch,
-                     const std::string &key_column,
-                     int batch_size,
-                     const std::string &table_hint) override;
-
-    void persist_arrow(const std::string &table,
-                       std::shared_ptr<arrow::RecordBatchReader> reader,
-                       const std::string &input_mode,
-                       int batch_size,
-                       const std::string &table_hint) override;
+    /// Persist bulk data from a DataView.
+    ///
+    /// Dispatches internally:
+    ///   ArrowView     → BCP via bulk_insert_arrow_bcp (zero-copy, fastest path)
+    ///   TypedBatchView → INSERT or MERGE based on opts.mode
+    void persist(const core::TableSpec &table_spec,
+                 core::DataView view,
+                 const core::PersistOptions &opts) override;
 
     // ---- Metrics & introspection --------------------------------------------
 

@@ -5,11 +5,18 @@
 #pragma once
 
 #include <cstdint>
+#include <memory>
 #include <optional>
 #include <string>
 #include <unordered_map>
 #include <variant>
 #include <vector>
+
+// Forward-declare Arrow reader. Definition in Arrow headers — only translation
+// units that construct or destroy ArrowView must include Arrow headers.
+namespace arrow {
+class RecordBatchReader;
+} // namespace arrow
 
 namespace pygim::core {
 
@@ -84,6 +91,36 @@ struct TableSpec {
 
     [[nodiscard]] size_t column_count() const noexcept { return columns.size(); }
     [[nodiscard]] bool has_key() const noexcept { return key_column.has_value(); }
+};
+
+// ---- DataView — abstract bulk data representation  (Phase 0.2) -------------
+
+/// Arrow C Data Interface path: zero-copy from Arrow / Polars.
+/// Translation units that construct/destroy this must include Arrow headers.
+struct ArrowView {
+    std::shared_ptr<arrow::RecordBatchReader> reader;
+    std::string input_mode{"arrow"}; ///< Descriptive label for metrics.
+};
+
+/// Column-major typed batch: Python iterable / Polars fallback path.
+struct TypedBatchView {
+    TypedColumnBatch batch;
+};
+
+/// The two-case View passed from ExtractionPolicy to StorageStrategy::persist().
+using DataView = std::variant<ArrowView, TypedBatchView>;
+
+// ---- PersistOptions — per-call bulk persistence parameters -----------------
+
+enum class PersistMode : uint8_t {
+    Insert, ///< INSERT — fail on duplicate key.
+    Upsert, ///< MERGE — insert or update.
+};
+
+struct PersistOptions {
+    PersistMode mode{PersistMode::Insert};
+    int batch_size{1000};
+    std::optional<std::string> key_column; ///< Required when mode == Upsert.
 };
 
 } // namespace pygim::core

@@ -44,9 +44,17 @@ Changed
 - Playground stress harness: Add explicit ``--arrow`` CLI flag (mutually exclusive with ``--no-arrow``) to set ``PYGIM_ENABLE_ARROW_BCP`` for reproducible Arrow-path runs.
 - Repository/MSSQL: Split ``persist_dataframe`` orchestration helpers into dedicated detail translation units (Arrow strategies vs bulk-upsert/result shaping) to keep ``mssql_strategy.cpp`` focused on pybind bindings.
 - Repository/MSSQL: Introduced OOP-style ``persist_dataframe`` orchestration with lightweight request/view objects and path-specific classes (Arrow path vs bulk-upsert path), delegating pybind lambda control flow to a dedicated orchestrator.
+- Repository: Introduced ``ExtractionPolicy`` as the single, explicit point of ``py::object`` inspection for bulk data — Arrow C stream, Polars, and Python iterables all convert here to a ``DataView`` before reaching any strategy.
+- Repository: Introduced ``DataView = std::variant<ArrowView, TypedBatchView>`` to replace per-method data passing; ``ArrowView`` carries a zero-copy ``RecordBatchReader``, ``TypedBatchView`` carries a column-major ``TypedColumnBatch``.
+- Repository: Collapsed ``bulk_insert``, ``bulk_upsert``, and ``persist_arrow`` virtual methods on ``Strategy`` into a single ``persist(TableSpec, DataView, PersistOptions)``; ``PersistMode`` enum (Insert/Upsert) and ``PersistOptions`` carry all per-call parameters.
+- Repository: Updated ``StrategyCapabilities`` from five flags to three (``can_fetch``, ``can_save``, ``can_persist``); bulk-level granularity was premature given the single-strategy-per-repo invariant.
+- Docs: Updated abstract PlantUML diagrams (architecture + sequence) to represent ideal end-state for all backlog phases (Phase 1–5 + M), including pipeline internals, SchemaCache, BufferPool, and MeasurementHarness.
+- Repository: ``persist_dataframe`` gains ``bcp_batch_size=0`` parameter; when 0 (default), BCP uses its 100 000-row commit default; pass an explicit value to bound memory per batch on very wide or high-cardinality datasets.
 
 Fixed
 ~~~~~
+- Repository: Fix BCP commit-frequency regression — ``persist_dataframe`` was passing ``batch_size=1000`` directly to BCP, causing 1 000 ``bcp_batch()`` server-side commits for a 1 M-row load; MERGE used the same parameter but runs all batches inside a single transaction (one commit), so BCP was paradoxically slower (2.88 MB/s) than MERGE (5.98 MB/s). Root cause was a units mismatch: ``batch_size`` on the MERGE path caps SQL parameter count per statement, while on the BCP path it sets the commit frequency. Fix: add separate ``bcp_batch_size=0`` parameter to ``persist_dataframe``; when 0, BCP uses its internal 100 000-row default (10 commits for 1 M rows instead of 1 000), restoring expected throughput ordering.
+- Repository: Fix Arrow BCP performance regression introduced in 0.2 — ``ExtractionPolicy`` now tries ``data.__arrow_c_stream__()`` first (zero-copy), then falls back to ``to_arrow(compat_level=oldest)`` when the direct import fails; the compat path is required on Arrow < 14 because Polars 1.x emits ``StringView`` (``"vu"`` format) natively, which Arrow < 14 rejects at the C bridge layer.
 - Tests: Ensured override semantics correctly raise when ``override=True`` and key is missing.
 - Added edge-case tests for factory missing getitem/override behavior and registry key tuple validation + ``find_id`` variant fallback.
 - Repository/MSSQL Arrow persist: Export Polars IPC payloads with legacy-compatible ``compat_level=oldest`` to avoid unsupported Arrow view encodings in mixed Arrow-runtime environments.

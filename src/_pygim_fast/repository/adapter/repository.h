@@ -16,9 +16,9 @@
 #include "../core/strategy.h"
 #include "../core/value_types.h"
 #include "data_extractor.h"
+#include "extraction_policy.h"
 #include "query_adapter.h"
 
-#include "../mssql_strategy/detail/bcp/bcp_arrow_import.h"
 #include "../mssql_strategy/mssql_strategy_v2.h"
 
 namespace pygim::adapter {
@@ -105,8 +105,6 @@ public:
     /// Fetch via QueryAdapter (renders using strategy's dialect).
     py::object fetch_raw(const QueryAdapter &query) {
         if (query.is_manual()) {
-            auto rendered = core::RenderedQuery{query.sql(), {}};
-            // Manual SQL — params are in the rendered query.
             auto rq = query.render(*m_core.find_dialect());
             auto result = m_core.fetch_raw(rq);
             if (!result.has_value()) return py::none();
@@ -188,8 +186,11 @@ public:
                      const py::object &rows,
                      int batch_size = 1000,
                      const std::string &table_hint = "TABLOCK") {
-        auto batch = extract_bulk_batch(rows, columns);
-        m_core.bulk_insert(table, batch, batch_size, table_hint);
+        // Skip Arrow path — caller explicitly provides column schema.
+        auto view = ExtractionPolicy::extract(rows, columns, /*prefer_arrow=*/false);
+        core::TableSpec ts{table, columns, std::nullopt, table_hint};
+        core::PersistOptions opts{core::PersistMode::Insert, batch_size, std::nullopt};
+        m_core.persist(ts, std::move(view), opts);
     }
 
     void bulk_upsert(const std::string &table,
@@ -198,8 +199,11 @@ public:
                      const std::string &key_column = "id",
                      int batch_size = 500,
                      const std::string &table_hint = "TABLOCK") {
-        auto batch = extract_bulk_batch(rows, columns);
-        m_core.bulk_upsert(table, batch, key_column, batch_size, table_hint);
+        // Skip Arrow path — caller explicitly provides column schema.
+        auto view = ExtractionPolicy::extract(rows, columns, /*prefer_arrow=*/false);
+        core::TableSpec ts{table, columns, key_column, table_hint};
+        core::PersistOptions opts{core::PersistMode::Upsert, batch_size, key_column};
+        m_core.persist(ts, std::move(view), opts);
     }
 
     // ---- DataFrame persistence (Arrow path) ---------------------------------
@@ -209,34 +213,29 @@ public:
                                const std::string &key_column = "id",
                                bool prefer_arrow = true,
                                const std::string &table_hint = "TABLOCK",
-                               int batch_size = 1000) {
-        // Arrow extraction is adapter-only logic.
-        // Attempt Arrow C stream first, then IPC, then fallback to bulk_upsert.
-        if (prefer_arrow) {
-            try {
-                auto reader = extract_arrow_reader(data_frame);
-                if (reader) {
-                    m_core.persist_arrow(table, std::move(reader), "arrow_c_stream",
-                                         batch_size, table_hint);
-                    py::dict result;
-                    result["mode"] = py::str("arrow_c_stream");
-                    result["success"] = py::bool_(true);
-                    return result;
-                }
-            } catch (...) {
-                // Fall through to bulk path.
-            }
-        }
+                               int batch_size = 1000,
+                               int bcp_batch_size = 0) {
+        // Columns inferred from data_frame inside ExtractionPolicy.
+        auto view = ExtractionPolicy::extract(data_frame, {}, prefer_arrow);
 
-        // Fallback: extract columns and use bulk_upsert.
-        std::vector<std::string> columns;
-        for (auto item : data_frame.attr("columns")) {
-            columns.push_back(py::cast<std::string>(item));
-        }
-        auto batch = extract_bulk_batch(data_frame, columns);
-        m_core.bulk_upsert(table, batch, key_column, batch_size, table_hint);
+        // Capture mode label and persist options before moving the view.
+        const bool is_arrow = std::holds_alternative<core::ArrowView>(view);
+        const std::string mode_str = is_arrow ? "arrow_c_stream" : "bulk_upsert";
+        const core::PersistMode mode =
+            is_arrow ? core::PersistMode::Insert : core::PersistMode::Upsert;
+
+        // For BCP (ArrowView), use bcp_batch_size; 0 lets bcp_strategy use its
+        // 100 000-row default, which amortizes bcp_batch() commit overhead across
+        // far fewer server round-trips than the SQL-oriented batch_size=1000.
+        // For MERGE (TypedBatchView), use batch_size as before.
+        const int effective_batch = is_arrow ? bcp_batch_size : batch_size;
+
+        core::TableSpec ts{table, {}, key_column, table_hint};
+        core::PersistOptions opts{mode, effective_batch, key_column};
+        m_core.persist(ts, std::move(view), opts);
+
         py::dict result;
-        result["mode"] = py::str("bulk_upsert");
+        result["mode"] = py::str(mode_str);
         result["success"] = py::bool_(true);
         return result;
     }
@@ -272,71 +271,6 @@ private:
             throw std::invalid_argument(
                 "Repository: unsupported scheme '" + m_uri.scheme + "'. "
                 "Supported: memory://, mssql://server/db");
-        }
-    }
-
-    // ---- Internal helpers ---------------------------------------------------
-
-    core::TypedColumnBatch extract_bulk_batch(const py::object &rows,
-                                              const std::vector<std::string> &columns) {
-        if (DataExtractor::is_polars_dataframe(rows)) {
-            return DataExtractor::extract_batch_from_polars(rows, columns);
-        }
-        if (!py::hasattr(rows, "__iter__")) {
-            throw std::runtime_error("Repository: rows must be an iterable or a Polars DataFrame");
-        }
-        return DataExtractor::extract_batch_from_iterable(rows, columns);
-    }
-
-    /// Extract Arrow RecordBatchReader from a Python DataFrame.
-    /// Uses bcp_arrow_import.h for C-stream / IPC extraction.
-    std::shared_ptr<arrow::RecordBatchReader> extract_arrow_reader(const py::object &data_frame) {
-        // Try capsule first (Polars compat level → Arrow table → __arrow_c_stream__).
-        py::object capsule = extract_arrow_capsule(data_frame);
-        if (!capsule.is_none()) {
-            auto result = bcp::import_arrow_reader(capsule);
-            return result.reader;
-        }
-        // Fallback: pass the dataframe directly (supports _export_to_c / IPC).
-        try {
-            auto result = bcp::import_arrow_reader(data_frame);
-            return result.reader;
-        } catch (...) {
-            return nullptr;
-        }
-    }
-
-    /// Extract Arrow C stream capsule from a Python DataFrame.
-    py::object extract_arrow_capsule(const py::object &data_frame) {
-        try {
-            // Try Polars compat level.
-            py::object compat_level = try_polars_compat_oldest();
-            if (!compat_level.is_none() && py::hasattr(data_frame, "to_arrow")) {
-                py::object arrow_table = data_frame.attr("to_arrow")(
-                    py::arg("compat_level") = compat_level);
-                if (py::hasattr(arrow_table, "__arrow_c_stream__")) {
-                    return arrow_table.attr("__arrow_c_stream__")();
-                }
-                if (py::hasattr(arrow_table, "to_reader")) {
-                    return arrow_table.attr("to_reader")();
-                }
-                return data_frame.attr("__arrow_c_stream__")();
-            }
-            if (py::hasattr(data_frame, "__arrow_c_stream__")) {
-                return data_frame.attr("__arrow_c_stream__")();
-            }
-        } catch (...) {
-            // Fall through.
-        }
-        return py::none();
-    }
-
-    static py::object try_polars_compat_oldest() {
-        try {
-            py::module_ pl = py::module_::import("polars");
-            return pl.attr("CompatLevel").attr("oldest")();
-        } catch (...) {
-            return py::none();
         }
     }
 };

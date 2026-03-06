@@ -14,97 +14,151 @@ skinparam sequence {
   GroupBackgroundColor #EFF6FF
 }
 
-title Repository — Abstract Sequence Flows
+title Repository — Abstract Sequence Flows (Ideal Target)
 
 actor "Caller\n(Python)" as Caller
 
 participant "Repository" as Repo #FFFDE7
 participant "ExtractionPolicy" as Extract #E8F5E9
 participant "StorageStrategy" as Storage #E8F5E9
+participant "SchemaCache" as Cache #E3F2FD
+participant "TransposeWorkers[N]" as Workers #FFF3E0
+participant "LockFreeQueue" as Queue #FFF3E0
+participant "OdbcPool[M]" as Pool #FFF3E0
 
 == acquire ==
 
 Caller -> Repo : Repository("mssql://server/db")
 note right
-  Connection string selects the
-  concrete StorageStrategy.
+  URI parsed → selects concrete StorageStrategy.
+  Raw ODBC strings also accepted.
   One strategy per repository.
 end note
-Repo -> Repo : parse connection string
-Repo -> Storage ** : construct from conn string
-Repo -> Repo : detect Simd level\n(cpu_supports_avx2())
 
-== save ==
+Repo -> Repo : parse URI → select strategy
+Repo -> Repo : detect Simd level once\n(cpu_supports_avx2())\ncompile-time trampoline fixed at startup
+Repo -> Storage ** : construct(conn_str)
+Storage -> Cache ** : init (empty)
+Storage -> Pool ** : pre-open M connections
+note right of Pool
+  TABLOCK hint registered.
+  M connections opened eagerly —
+  no handshake latency on first save().
+end note
 
-Caller -> Repo : save(data)
+== save (bulk) ==
+
+Caller -> Repo : save(data, hint?)
 note right
-  data can be: DataFrame (Polars, Pandas, …),
-  Arrow table, dict, or single row.
+  data: DataFrame (Polars/Pandas/Arrow),
+  Arrow table, or Python iterable.
   Optional hint= skips auto-detection.
 end note
 
-Repo -> Repo : detect data format\n(or use hint to skip)
-
-Repo -> Extract : extract(data)
-note right
-  Dispatches to compile-time optimized
-  extractor based on detected type.
-  Returns a thin **View** (ArrowView
-  or RowView).
-end note
-
-alt bulk data (DataFrame / Arrow table)
-  Extract --> Repo : ArrowView
-
-  Repo -> Storage : persist(ArrowView)
-
-  note over Storage
-    **Internal pipeline (GIL released):**
-
-    ArrowView → partition rows
-    → transpose<Simd>(tile)
-      `if constexpr` selects AVX2 or scalar
-      — zero per-row branch overhead
-    → BCP buffer
-    → bcp_sendrow loop
-    → bcp_done
-
-    Multi-threaded: N transpose threads
-    feed M writer connections via
-    lock-free bounded queue.
-  end note
-
-  Storage --> Repo : result
-
-else single row (dict / key-value)
-  Extract --> Repo : RowView
-
-  opt transforms enabled
-    Repo -> Repo : apply pre_transform(RowMap)
-  end
-
-  Repo -> Storage : save(key, RowMap)
-  Storage --> Repo : result
+alt hint= provided (Phase 0.4)
+  Repo -> Extract : extract(data, hint)
+else auto-detect — exactly one type check (Phase 0.4)
+  Repo -> Repo : detect data format
+  Repo -> Extract : extract(data)
 end
 
+note right of Extract
+  Only code that touches py::object.
+  GIL held only here; released after.
+end note
+
+alt Arrow / Polars via C Data Interface
+  Extract --> Repo : ArrowView\n(zero-copy RecordBatchReader)
+else Python iterable / Polars fallback
+  Extract --> Repo : TypedBatchView\n(TypedColumnBatch, column-major)
+end
+
+Repo -> Storage : persist(View, TableSpec)
+
+note over Storage
+  GIL released for entire pipeline.
+end note
+
+Storage -> Cache : lookup(table)
+
+alt schema not yet cached (first call) — Phase 5
+  Cache --> Storage : miss
+  Storage -> Storage : probe SQL Server schema\nbind BCP column descriptors
+  Storage -> Cache : store(table, metadata)
+else schema cached — Phase 5
+  Cache --> Storage : hit — skip re-probe, reuse bindings
+end
+
+Storage -> Storage : acquire alignas(64) buffers\nfrom BufferPool (Phase 5)\nno malloc/free in hot path
+
+Storage -> Workers : partition(View, N rows)\nnon-overlapping ranges → zero sync on data
+
+note over Workers
+  **Phase 1** — cache-tiled scalar transpose
+  (B×C tile fits L1 ~32 KB).
+
+  **Phase 2** — if constexpr Simd dispatch:
+    AVX2: 8×8 int32 kernel (_mm256_unpack…)
+           4×4 for int64/double
+    Scalar: strings + fallback path
+  One runtime `if` at entry; fully inlined inside.
+  static_assert catches new unhandled Simd levels.
+
+  **Phase 3** — N parallel threads.
+  alignas(64) write buffers → no false sharing.
+  Thread count auto-tuned: min(hw_concurrency,
+  data_size / MIN_TILE), respects L3 capacity.
+end note
+
+loop per partition — N threads parallel
+  Workers -> Workers : cache-tiled transpose<Simd>(tile)
+  Workers -> Queue : enqueue(transposed batch)
+end
+
+note right of Queue
+  Bounded depth — controls peak memory.
+  Hides network round-trip latency
+  behind CPU transpose work.
+  (Phase 4 — pipeline overlap)
+end note
+
+loop M writer threads — parallel (Phase 4)
+  Queue -> Pool : dequeue batch → acquire connection
+  Pool -> Pool : bcp_sendrow loop\n+ bcp_done
+  Pool --> Queue : release connection
+end
+
+Storage --> Repo : done\n(+ per-stage timings: extraction, transpose,\nqueue-wait, bcp_send, bcp_done)
+Repo --> Caller : result
+
+== save (single row) ==
+
+Caller -> Repo : save((table, pk), {col: val, …})
+Repo -> Repo : detect single-row dict\n→ extract RowMap directly (no View)
+
+opt pre_transform enabled
+  Repo -> Repo : apply pre_transform(RowMap)
+end
+
+Repo -> Storage : save(TablePkKey, RowMap)
+Storage --> Repo : result
 Repo --> Caller : result
 
 == fetch ==
 
-Caller -> Repo : query = Query().select(cols)\n.from_table(t).where(...).build()
+Caller -> Repo : query = Query()\n  .select(cols)\n  .from_table(t)\n  .where(...)\n  .build()
 Caller -> Repo : fetch(query)
 
-Repo -> Repo : render Query → sql + params
-Repo -> Storage : fetch(sql, params)
+Repo -> Repo : render Query → RenderedQuery\n(SQL + params via dialect)
+Repo -> Storage : fetch(RenderedQuery)
+Storage -> Cache : lookup(table) — reuse schema if cached
+Storage -> Storage : execute SQL via ODBC\ncollect ResultSet
+
 Storage --> Repo : ResultSet
 
-opt transforms enabled
+opt post_transform enabled
   Repo -> Repo : apply post_transform(ResultSet)
 end
-
-Repo --> Caller : ResultSet
-
-@enduml
 
 Repo --> Caller : ResultSet
 

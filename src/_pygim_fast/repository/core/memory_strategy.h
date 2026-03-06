@@ -2,7 +2,7 @@
 // This header is pybind-free.
 //
 // Stores rows as RowMap keyed by (table, pk_string). Supports fetch and save.
-// Does not support bulk operations or Arrow persistence.
+// Does not support bulk persistence (can_persist = false).
 #pragma once
 
 #include <optional>
@@ -41,9 +41,7 @@ public:
         return {
             .can_fetch = true,
             .can_save = true,
-            .can_bulk_insert = false,
-            .can_bulk_upsert = false,
-            .can_persist_arrow = false,
+            .can_persist = false,
         };
     }
 

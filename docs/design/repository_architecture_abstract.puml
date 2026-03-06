@@ -6,14 +6,14 @@ skinparam nodesep 80
 skinparam ranksep 60
 skinparam linetype ortho
 
-title Repository Architecture — Abstract Interfaces
+title Repository Architecture — Ideal Target State (All Phases)
 
 ' ════════════════════════════════════════════════════════════════════════════
 ' PUBLIC SURFACE
 ' ════════════════════════════════════════════════════════════════════════════
 
 class Repository <<facade>> #FFFDE7 {
-  +save(data, hint?) : dict
+  +save(data, hint?) : void
   +fetch(Query) : ResultSet
   __
   +add_pre_transform(fn)
@@ -23,6 +23,7 @@ note top of Repository
   Acquired from a connection string.
   Internally resolves one StorageStrategy.
   User only calls save() / fetch().
+  All pipeline complexity is invisible.
 end note
 
 class Query <<builder>> #FFFDE7 {
@@ -34,26 +35,27 @@ class Query <<builder>> #FFFDE7 {
 }
 
 ' ════════════════════════════════════════════════════════════════════════════
-' EXTRACTION — Python data → abstract View  (compile-time, template)
+' EXTRACTION — Python data → abstract View  (Phase 0.2 + 0.4)
+' hint= path skips auto-detection; no-hint path does exactly one type check.
 ' ════════════════════════════════════════════════════════════════════════════
 
-abstract class ExtractionPolicy <<policy>> #E8F5E9 {
-  +{static} detect(data) : ExtractionPolicy
-  +{abstract} extract(data) : View
+class ExtractionPolicy <<stateless>> #E8F5E9 {
+  +{static} extract(data, hint?) : View
 }
-note bottom of ExtractionPolicy
-  **How** Python data becomes C++ View.
+note right of ExtractionPolicy
+  **One** type check — or hint= bypasses it entirely.
 
-  1. Auto-detect format (one type check)
-     or skip via caller hint.
-  2. Tag-dispatch to compile-time optimized
-     extractor (Polars, Pandas, Arrow, dict…).
-  3. Returns a thin **View** that
-     StorageStrategy consumes.
+  Auto-detect dispatch:
+    Arrow / Polars (C Interface) → ArrowView
+    Python iterable / Polars fallback → TypedBatchView
+    dict / single-row             → RowMap (direct, no View)
+
+  Only code that ever touches py::object.
+  Strategies never see Python objects.
 end note
 
 ' ════════════════════════════════════════════════════════════════════════════
-' VIEW — the universal interchange between extraction and storage
+' VIEW — the interchange between extraction and storage  (Phase 0.2)
 ' ════════════════════════════════════════════════════════════════════════════
 
 abstract class View <<interface>> #E0F2F1 {
@@ -63,10 +65,17 @@ abstract class View <<interface>> #E0F2F1 {
 
 class ArrowView <<view>> #E0F2F1 {
   RecordBatchReader handle
+  --
+  Zero-copy via Arrow C Data Interface.
+  Native path for Arrow and Polars.
 }
 
-class RowView <<view>> #E0F2F1 {
-  single RowMap
+class TypedBatchView <<view>> #E0F2F1 {
+  TypedColumnBatch batch
+  --
+  Column-major typed storage.
+  Fixed-width columns are SIMD-eligible.
+  Variable-width (strings) use scalar path.
 }
 
 ' ════════════════════════════════════════════════════════════════════════════
@@ -77,20 +86,18 @@ abstract class StorageStrategy <<interface>> #E8F5E9 {
   +{abstract} capabilities() : Capabilities
   __
   +fetch(query) : ResultSet
-  +persist(View)
+  +persist(View, TableSpec)
   +save(key, RowMap)
 }
-note bottom of StorageStrategy
-  **Where** data lives.
-  Resolved from connection string.
+note right of StorageStrategy
+  Resolved from connection string (Phase 0.1).
   One concrete instance per Repository.
+  Owns all internal pipeline complexity — invisible to caller.
 
-  **Transpose is internal.**
-  Column→row transposition for bulk DB
-  write is owned by the strategy, not
-  exposed. Uses `if constexpr` trampoline
-  with Simd enum {Scalar, Avx2, ...} —
-  zero per-row overhead, fully inlined.
+  **Transpose is internal (Phase 0.3):**
+  Column→row transposition is not a peer strategy.
+  StorageStrategy owns it. Hintable (Simd level)
+  but never user-exposed.
 end note
 
 class Capabilities <<value>> #E8F5E9 {
@@ -98,6 +105,87 @@ class Capabilities <<value>> #E8F5E9 {
   +can_persist : bool
   +can_save : bool
 }
+
+' ════════════════════════════════════════════════════════════════════════════
+' PIPELINE INTERNALS — owned by MssqlStrategy
+' (Phases 1–4; invisible to all layers above StorageStrategy)
+' ════════════════════════════════════════════════════════════════════════════
+
+package "Pipeline Internals (MssqlStrategy)" #FFF8E1 {
+
+  class TransposeWorkers <<thread-pool>> #FFF3E0 {
+    N threads — non-overlapping row ranges.
+    --
+    Cache-tiled (B×C tile fits L1 ~32 KB).
+    Phase 1: scalar tiled baseline.
+    Phase 2: fixed-width cols use AVX2 8×8 kernel;
+             strings stay scalar.
+    Phase 3: N threads, alignas(64) write buffers,
+             GIL released, thread count auto-tuned.
+    if constexpr trampoline on Simd level —
+    zero per-row overhead, fully inlined.
+  }
+
+  class LockFreeQueue <<queue>> #FFF3E0 {
+    Bounded depth (controls memory).
+    --
+    N transpose threads → M writer threads.
+    Hides network latency behind CPU work.
+    (Phase 4 — pipeline overlap)
+  }
+
+  class OdbcConnectionPool <<pool>> #FFF3E0 {
+    M pre-opened connections.
+    --
+    Each writer: acquire → bcp_sendrow loop
+    → bcp_done → release.
+    TABLOCK hint enables parallel bulk insert
+    server-side.
+    (Phase 4)
+  }
+
+}
+
+' ════════════════════════════════════════════════════════════════════════════
+' CACHES & BUFFERS — Phase 5 (owned by MssqlStrategy)
+' ════════════════════════════════════════════════════════════════════════════
+
+class SchemaCache <<cache>> #E3F2FD {
+  Persistent across save() calls to same table.
+  --
+  Caches: column metadata, types, BCP bindings.
+  Avoids re-probing SQL Server schema each call.
+}
+
+class BufferPool <<pool>> #E3F2FD {
+  Thread-local or shared pool of
+  alignas(64) transpose buffers.
+  --
+  Reused across calls — no malloc/free in hot path.
+  madvise(MADV_HUGEPAGE) for large (multi-MB) buffers.
+}
+
+' ════════════════════════════════════════════════════════════════════════════
+' SIMD DISPATCH  (internal to TransposeWorkers, compile-time — Phase 2)
+' ════════════════════════════════════════════════════════════════════════════
+
+enum Simd <<enum>> #FFF3E0 {
+  Scalar
+  Avx2
+  /Neon  (future)/
+  /Avx512 (future)/
+}
+note right of Simd
+  Detected **once** at module init
+  via `cpu_supports_avx2()`.
+
+  ONE runtime `if` at pipeline entry point.
+  Entire pipeline templated on Simd level.
+  `if constexpr` compiles away unused branches.
+  `static_assert` enforces exhaustive handling —
+  adding a new enum value is a compile error
+  at every unhandled site.
+end note
 
 ' ════════════════════════════════════════════════════════════════════════════
 ' VALUE TYPES
@@ -116,25 +204,31 @@ together {
     +columns : string[]
     +rows : CellValue[][]
   }
+
+  class TypedColumnBatch <<value>> #F3E5F5 {
+    +column_names : string[]
+    +columns : Column[]{I64|F64|BOOL|STR + null_mask}
+    +row_count : size_t
+  }
 }
 
 ' ════════════════════════════════════════════════════════════════════════════
-' SIMD DISPATCH  (internal to StorageStrategy, compile-time)
+' MEASUREMENT INFRASTRUCTURE (cross-cutting — Phase M)
 ' ════════════════════════════════════════════════════════════════════════════
 
-enum Simd <<enum>> #FFF3E0 {
-  Scalar
-  Avx2
-  /Neon  (future)/
-  /Avx512 (future)/
+class MeasurementHarness <<cross-cutting>> #ECEFF1 {
+  Per-stage timing: extraction, transpose,
+  queue-wait, bcp_send, bcp_done — reported separately.
+  --
+  Hardware counters (perf stat): cache misses,
+  IPC, branch mispredictions, memory bandwidth.
+  --
+  Repeatable benchmark script:
+  warm/cold cache, configurable rows × cols × type mix,
+  local vs remote DB, N thread sweep.
+  --
+  Regression gate in CI — alert on >5% regression.
 }
-note right of Simd
-  Detected once at module init
-  via `cpu_supports_avx2()`.
-  Pipeline is templated on Simd —
-  `if constexpr` compiles away
-  unused branches.
-end note
 
 ' ════════════════════════════════════════════════════════════════════════════
 ' RELATIONSHIPS
@@ -142,34 +236,25 @@ end note
 
 Repository *-down- "1" StorageStrategy : owns (from conn string)
 Repository ..> Query : accepts
-Repository ..> ExtractionPolicy : data → View
+Repository ..> ExtractionPolicy : delegates extraction
 
 ExtractionPolicy ..> View : produces
 ArrowView -up-|> View
-RowView -up-|> View
+TypedBatchView -up-|> View
+TypedBatchView ..> TypedColumnBatch : wraps
 
-StorageStrategy ..> View : consumes
+StorageStrategy ..> View : consumes via persist()
 StorageStrategy ..> Capabilities : declares
-StorageStrategy ..> Simd : dispatches internally
-StorageStrategy ..> RowMap : reads / writes
+StorageStrategy ..> RowMap : single-row save / fetch
+StorageStrategy ..> SchemaCache : looks up schema
+StorageStrategy ..> BufferPool : acquires transpose buffers
+StorageStrategy ..> TransposeWorkers : partitions rows to
+TransposeWorkers ..> Simd : dispatches via if constexpr
+TransposeWorkers ..> LockFreeQueue : feeds transposed batches
+LockFreeQueue ..> OdbcConnectionPool : drained by M writers
 
 Repository ..> ResultSet : returns
 
-' ════════════════════════════════════════════════════════════════════════════
-' NOTES
-' ════════════════════════════════════════════════════════════════════════════
-
-note as N_pipeline
-  **Pipeline (internal to StorageStrategy):**
-
-  View → partition rows → transpose<Simd>
-  → BCP buffer → ODBC driver → DB
-
-  Multi-threaded: N reader/transpose threads
-  feed M writer connections via lock-free queue.
-  GIL released for entire pipeline.
-end note
-
-N_pipeline .. StorageStrategy
+MeasurementHarness .. StorageStrategy
 
 @enduml

@@ -1,7 +1,7 @@
 // Strategy: abstract interface for storage backends.
 // This header is pybind-free — strategies must NOT include pybind11 headers.
 //
-// All Python data extraction happens in the adapter/DataExtractor layer.
+// All Python data extraction happens in the adapter/ExtractionPolicy layer.
 // Strategies receive and return pure C++ types only.
 //
 // Each strategy implementation:
@@ -22,11 +22,6 @@
 #include "query_intent.h"
 #include "value_types.h"
 
-// Forward-declare Arrow types to avoid pulling heavy headers.
-namespace arrow {
-class RecordBatchReader;
-} // namespace arrow
-
 namespace pygim::core {
 
 /// Static capability flags — determined once at strategy construction,
@@ -34,9 +29,7 @@ namespace pygim::core {
 struct StrategyCapabilities {
     bool can_fetch{false};
     bool can_save{false};
-    bool can_bulk_insert{false};
-    bool can_bulk_upsert{false};
-    bool can_persist_arrow{false};
+    bool can_persist{false}; ///< Bulk persistence via DataView (was 3 separate flags).
 };
 
 /// Abstract base for all storage strategies.
@@ -79,31 +72,19 @@ public:
         throw std::runtime_error("Strategy::save not supported");
     }
 
-    // ---- Bulk operations (column-major typed batch) -------------------------
+    // ---- Bulk persistence (DataView) ----------------------------------------
 
-    virtual void bulk_insert(const std::string &table,
-                             const TypedColumnBatch &batch,
-                             int batch_size,
-                             const std::string &table_hint) {
-        throw std::runtime_error("Strategy::bulk_insert not supported");
-    }
-
-    virtual void bulk_upsert(const std::string &table,
-                             const TypedColumnBatch &batch,
-                             const std::string &key_column,
-                             int batch_size,
-                             const std::string &table_hint) {
-        throw std::runtime_error("Strategy::bulk_upsert not supported");
-    }
-
-    // ---- Arrow path (receives already-extracted reader) ---------------------
-
-    virtual void persist_arrow(const std::string &table,
-                               std::shared_ptr<arrow::RecordBatchReader> reader,
-                               const std::string &input_mode,
-                               int batch_size,
-                               const std::string &table_hint) {
-        throw std::runtime_error("Strategy::persist_arrow not supported");
+    /// Persist bulk data supplied as an abstract DataView.
+    ///
+    /// DataView is a two-case variant:
+    ///   ArrowView     — zero-copy Arrow RecordBatchReader (Arrow / Polars path)
+    ///   TypedBatchView — column-major TypedColumnBatch (iterable / Polars fallback)
+    ///
+    /// PersistOptions carries mode (Insert / Upsert), batch_size, key_column.
+    virtual void persist(const TableSpec &table_spec,
+                         DataView view,
+                         const PersistOptions &opts) {
+        throw std::runtime_error("Strategy::persist not supported");
     }
 };
 

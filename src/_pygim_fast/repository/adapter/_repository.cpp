@@ -98,7 +98,10 @@ PYBIND11_MODULE(_repository, m) {
              py::arg("prefer_arrow") = true,
              py::arg("table_hint") = "TABLOCK",
              py::arg("batch_size") = 1000,
-             "Persist a DataFrame via Arrow BCP when available, with fallback to bulk_upsert.")
+             py::arg("bcp_batch_size") = 0,
+             "Persist a DataFrame via Arrow BCP when available, with fallback to bulk_upsert.\n\n"
+             "batch_size     controls MERGE commit frequency (fallback path).\n"
+             "bcp_batch_size controls BCP bcp_batch() commit frequency; 0 = auto (100 000).")
         .def("__getitem__", &adapter::Repository::get, py::arg("key"))
         .def("__setitem__", &adapter::Repository::save,
              py::arg("key"), py::arg("value"))

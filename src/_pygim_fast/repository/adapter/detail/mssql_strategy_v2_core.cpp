@@ -1,4 +1,4 @@
-// MssqlStrategy v2 implementation: connection management, fetch, save.
+// MssqlStrategy v2 implementation: connection management, fetch, save, persist.
 // Pybind-free — all methods operate on core C++ types only.
 
 #include "../../mssql_strategy/mssql_strategy_v2.h"
@@ -6,6 +6,7 @@
 
 #include <stdexcept>
 #include <string>
+#include <variant>
 #include <vector>
 
 #include "../../mssql_strategy/detail/odbc_error.h"
@@ -33,9 +34,7 @@ core::StrategyCapabilities MssqlStrategy::capabilities() const {
     return {
         .can_fetch = true,
         .can_save = true,
-        .can_bulk_insert = true,
-        .can_bulk_upsert = true,
-        .can_persist_arrow = true,
+        .can_persist = true,
     };
 }
 
@@ -61,35 +60,32 @@ void MssqlStrategy::save(const core::TablePkKey &key, const core::RowMap &data) 
     upsert_impl(key.table, key.pk, data);
 }
 
-void MssqlStrategy::bulk_insert(const std::string &table,
-                                const core::TypedColumnBatch &batch,
-                                int batch_size,
-                                const std::string &table_hint) {
-    PYGIM_SCOPE_LOG_TAG("repo.v2.bulk");
+void MssqlStrategy::persist(const core::TableSpec &table_spec,
+                             core::DataView view,
+                             const core::PersistOptions &opts) {
+    PYGIM_SCOPE_LOG_TAG("repo.v2.persist");
     ensure_connected();
-    bulk_insert_typed(table, batch, batch_size, table_hint);
-}
 
-void MssqlStrategy::bulk_upsert(const std::string &table,
-                                const core::TypedColumnBatch &batch,
-                                const std::string &key_column,
-                                int batch_size,
-                                const std::string &table_hint) {
-    PYGIM_SCOPE_LOG_TAG("repo.v2.bulk");
-    ensure_connected();
-    bulk_upsert_typed(table, batch, key_column, batch_size, table_hint);
-}
-
-void MssqlStrategy::persist_arrow(const std::string &table,
-                                  std::shared_ptr<arrow::RecordBatchReader> reader,
-                                  const std::string &input_mode,
-                                  int batch_size,
-                                  const std::string &table_hint) {
-    PYGIM_SCOPE_LOG_TAG("repo.v2.arrow");
-    ensure_connected();
-    bcp::bulk_insert_arrow_bcp(m_dbc, table, std::move(reader),
-                               input_mode, batch_size, table_hint,
-                               m_last_bcp_metrics);
+    std::visit([&](auto &&data) {
+        using T = std::decay_t<decltype(data)>;
+        if constexpr (std::is_same_v<T, core::ArrowView>) {
+            bcp::bulk_insert_arrow_bcp(m_dbc, table_spec.name,
+                                       std::move(data.reader),
+                                       data.input_mode,
+                                       opts.batch_size,
+                                       table_spec.table_hint,
+                                       m_last_bcp_metrics);
+        } else if constexpr (std::is_same_v<T, core::TypedBatchView>) {
+            if (opts.mode == core::PersistMode::Upsert) {
+                const std::string key_col = opts.key_column.value_or("id");
+                bulk_upsert_typed(table_spec.name, data.batch, key_col,
+                                  opts.batch_size, table_spec.table_hint);
+            } else {
+                bulk_insert_typed(table_spec.name, data.batch,
+                                  opts.batch_size, table_spec.table_hint);
+            }
+        }
+    }, std::move(view));
 }
 
 // ---- ODBC Handle Management -------------------------------------------------

@@ -175,4 +175,3 @@ def test_acquire_repository_module_re_exports():
     assert hasattr(repository, "Repository")
     assert hasattr(repository, "Query")
     assert not hasattr(repository, "MssqlDialect")
-
