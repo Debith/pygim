@@ -107,7 +107,8 @@ void bulk_insert_arrow_bcp(
     const std::string& input_mode,
     int batch_size,
     const std::string& table_hint,
-    mssql::BcpMetrics& metrics_out)
+    mssql::BcpMetrics& metrics_out,
+    TransposeStrategy* transpose)
 {
     PYGIM_SCOPE_LOG_TAG("repo.bcp");
     metrics_out = mssql::BcpMetrics{};
@@ -124,6 +125,7 @@ void bulk_insert_arrow_bcp(
     // 2. Iterate RecordBatchReader — no Python references past this point
     BcpContext ctx{api, dbc, timer,
                    batch_size > 0 ? static_cast<int64_t>(batch_size) : 100000LL};
+    ctx.transpose = transpose;  // nullptr → run_row_loop falls back to RowMajorTranspose
 
     while (true) {
         std::shared_ptr<arrow::RecordBatch> batch;

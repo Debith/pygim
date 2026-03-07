@@ -11,6 +11,9 @@ namespace arrow { class RecordBatchReader; }
 // Forward-declare BcpMetrics.
 namespace pygim::mssql { struct BcpMetrics; }
 
+// Forward-declare TransposeStrategy.
+namespace pygim::bcp { struct TransposeStrategy; }
+
 #include <sql.h>
 #include <sqlext.h>
 
@@ -25,6 +28,7 @@ namespace pygim::bcp {
 /// @param batch_size    BCP batch size (0 = default 100k).
 /// @param table_hint    Optional BCP hint string.
 /// @param metrics_out   Populated with timing/row-count metrics on success.
+/// @param transpose     Transpose strategy to use; nullptr → RowMajorTranspose default.
 void bulk_insert_arrow_bcp(
     SQLHDBC dbc,
     const std::string& table,
@@ -32,6 +36,7 @@ void bulk_insert_arrow_bcp(
     const std::string& input_mode,
     int batch_size,
     const std::string& table_hint,
-    mssql::BcpMetrics& metrics_out);
+    mssql::BcpMetrics& metrics_out,
+    TransposeStrategy* transpose = nullptr);
 
 } // namespace pygim::bcp

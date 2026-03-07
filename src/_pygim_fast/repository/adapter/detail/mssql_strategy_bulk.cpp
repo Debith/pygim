@@ -14,10 +14,11 @@ namespace pygim::mssql {
 
 // ---- Bulk INSERT using TypedColumnBatch -------------------------------------
 
-void MssqlStrategy::bulk_insert_typed(const std::string &table,
-                                      const core::TypedColumnBatch &batch,
-                                      int batch_size,
-                                      const std::string &table_hint) {
+template <typename Transpose>
+void MssqlStrategy<Transpose>::bulk_insert_typed(const std::string &table,
+                                                 const core::TypedColumnBatch &batch,
+                                                 int batch_size,
+                                                 const std::string &table_hint) {
     PYGIM_SCOPE_LOG_TAG("repo.bulk");
     const size_t ncols = batch.columns.size();
     const size_t total_rows = batch.row_count;
@@ -111,11 +112,12 @@ void MssqlStrategy::bulk_insert_typed(const std::string &table,
 
 // ---- Bulk UPSERT (MERGE) using TypedColumnBatch -----------------------------
 
-void MssqlStrategy::bulk_upsert_typed(const std::string &table,
-                                      const core::TypedColumnBatch &batch,
-                                      const std::string &key_column,
-                                      int batch_size,
-                                      const std::string &table_hint) {
+template <typename Transpose>
+void MssqlStrategy<Transpose>::bulk_upsert_typed(const std::string &table,
+                                                 const core::TypedColumnBatch &batch,
+                                                 const std::string &key_column,
+                                                 int batch_size,
+                                                 const std::string &table_hint) {
     PYGIM_SCOPE_LOG_TAG("repo.bulk");
     const size_t ncols = batch.columns.size();
     const size_t total_rows = batch.row_count;
@@ -201,5 +203,10 @@ void MssqlStrategy::bulk_upsert_typed(const std::string &table,
     if (stmt_tail != SQL_NULL_HSTMT) SQLFreeHandle(SQL_HANDLE_STMT, stmt_tail);
     SQLSetConnectAttr(m_dbc, SQL_ATTR_AUTOCOMMIT, (SQLPOINTER)old_autocommit, 0);
 }
+
+// ---- Explicit instantiations ------------------------------------------------
+
+template class MssqlStrategy<bcp::RowMajorTranspose>;
+template class MssqlStrategy<bcp::ColumnMajorTranspose>;
 
 } // namespace pygim::mssql

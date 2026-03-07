@@ -121,9 +121,10 @@ PYBIND11_MODULE(_repository, m) {
     // ---- Repository ---------------------------------------------------------
 
     py::class_<adapter::Repository>(m, "Repository", py::dynamic_attr())
-        .def(py::init<std::string, bool>(),
+        .def(py::init<std::string, bool, std::string>(),
              py::arg("connection_uri"),
              py::arg("transformers") = false,
+             py::arg("transpose") = "",
              "Create a Repository directly from a connection URI (no status output).\n\n"
              "Prefer acquire_repository() for interactive use — it prints a status\n"
              "line before connecting and accepts a StatusPrinter for control.\n\n"
@@ -133,7 +134,9 @@ PYBIND11_MODULE(_repository, m) {
              "  Driver={...};Server=… — raw ODBC (MSSQL)\n\n"
              "Parameters:\n"
              "  connection_uri: URI or ODBC connection string.\n"
-             "  transformers: enable pre-save / post-load pipeline.")
+             "  transformers:   enable pre-save / post-load pipeline.\n"
+             "  transpose:      BCP row-loop algorithm — \"\" / \"row_major\" (default)\n"
+             "                  or \"column_major\".  Fixed for the repository's lifetime.")
         .def("set_factory", &adapter::Repository::set_factory, py::arg("factory"),
              "Set factory callable: factory(key, data) -> entity.")
         .def("clear_factory", &adapter::Repository::clear_factory)
@@ -182,13 +185,15 @@ PYBIND11_MODULE(_repository, m) {
     m.def("acquire_repository",
         [](const std::string &conn_str,
            bool transformers,
+           const std::string &transpose,
            std::optional<StatusPrinter> printer) -> adapter::Repository {
             const StatusPrinter p = printer.value_or(StatusPrinter{});
             p.print_connection("connecting  " + mask_conn_str(conn_str));
-            return adapter::Repository(conn_str, transformers);
+            return adapter::Repository(conn_str, transformers, transpose);
         },
         py::arg("conn_str"),
         py::arg("transformers") = false,
+        py::arg("transpose") = "",
         py::arg("printer") = py::none(),
         "Create a Repository from a connection string with optional status output.\n\n"
         "A status line is printed to stdout before the connection is established\n"
@@ -201,12 +206,15 @@ PYBIND11_MODULE(_repository, m) {
         "Parameters:\n"
         "  conn_str:     URI or ODBC connection string.\n"
         "  transformers: enable pre-save / post-load pipeline.\n"
+        "  transpose:    BCP row-loop algorithm — \"\" / \"row_major\" (default)\n"
+        "                or \"column_major\".  Fixed for the repository's lifetime.\n"
         "  printer:      StatusPrinter controlling output; None uses the default\n"
         "                (connection=True).  Pass StatusPrinter(connection=False)\n"
         "                to suppress all status output.\n\n"
         "Examples::\n\n"
         "    from pygim import acquire_repository, StatusPrinter\n\n"
-        "    repo = acquire_repository('mssql://host/db')          # prints\n"
+        "    repo = acquire_repository('mssql://host/db')                     # prints, row_major\n"
+        "    repo = acquire_repository('mssql://host/db', transpose='column_major')  # column_major\n"
         "    repo = acquire_repository('mssql://host/db',\n"
         "                             printer=StatusPrinter(connection=False))  # quiet"
     );

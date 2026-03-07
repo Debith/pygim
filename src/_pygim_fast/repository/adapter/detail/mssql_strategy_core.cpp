@@ -17,20 +17,23 @@ namespace pygim::mssql {
 
 // ---- Construction / Destruction ---------------------------------------------
 
-MssqlStrategy::MssqlStrategy(std::string connection_string)
+template <typename Transpose>
+MssqlStrategy<Transpose>::MssqlStrategy(std::string connection_string)
     : m_conn_str(std::move(connection_string)) {
     PYGIM_SCOPE_LOG_TAG("repo.connection");
     init_handles();
 }
 
-MssqlStrategy::~MssqlStrategy() {
+template <typename Transpose>
+MssqlStrategy<Transpose>::~MssqlStrategy() {
     PYGIM_SCOPE_LOG_TAG("repo.connection");
     cleanup_handles();
 }
 
 // ---- core::Strategy interface -----------------------------------------------
 
-core::StrategyCapabilities MssqlStrategy::capabilities() const {
+template <typename Transpose>
+core::StrategyCapabilities MssqlStrategy<Transpose>::capabilities() const {
     return {
         .can_fetch = true,
         .can_save = true,
@@ -38,43 +41,55 @@ core::StrategyCapabilities MssqlStrategy::capabilities() const {
     };
 }
 
-const core::QueryDialect *MssqlStrategy::dialect() const {
+template <typename Transpose>
+const core::QueryDialect *MssqlStrategy<Transpose>::dialect() const {
     return &m_dialect;
 }
 
-std::string MssqlStrategy::repr() const {
+template <typename Transpose>
+std::string MssqlStrategy<Transpose>::repr() const {
     return "MssqlStrategy(connected)";
 }
 
 // ---- Public method implementations ------------------------------------------
 
-std::optional<core::ResultSet> MssqlStrategy::fetch(const core::RenderedQuery &query) {
+template <typename Transpose>
+std::optional<core::ResultSet> MssqlStrategy<Transpose>::fetch(
+    const core::RenderedQuery &query) {
     PYGIM_SCOPE_LOG_TAG("repo.fetch");
     ensure_connected();
     return fetch_impl(query.sql, query.params);
 }
 
-void MssqlStrategy::save(const core::TablePkKey &key, const core::RowMap &data) {
+template <typename Transpose>
+void MssqlStrategy<Transpose>::save(const core::TablePkKey &key,
+                                    const core::RowMap &data) {
     PYGIM_SCOPE_LOG_TAG("repo.save");
     ensure_connected();
     upsert_impl(key.table, key.pk, data);
 }
 
-void MssqlStrategy::persist(const core::TableSpec &table_spec,
-                             core::DataView view,
-                             const core::PersistOptions &opts) {
+template <typename Transpose>
+void MssqlStrategy<Transpose>::persist(const core::TableSpec &table_spec,
+                                       core::DataView view,
+                                       const core::PersistOptions &opts) {
     PYGIM_SCOPE_LOG_TAG("repo.persist");
     ensure_connected();
 
     std::visit([&](auto &&data) {
         using T = std::decay_t<decltype(data)>;
         if constexpr (std::is_same_v<T, core::ArrowView>) {
+            // Pass m_transpose by address so run_row_loop() routes through the
+            // strategy fixed at construction time.  Since RowMajorTranspose and
+            // ColumnMajorTranspose are both final, the compiler can devirtualize
+            // the run() call when the concrete type is visible at the call site.
             bcp::bulk_insert_arrow_bcp(m_dbc, table_spec.name,
                                        std::move(data.reader),
                                        data.input_mode,
                                        opts.batch_size,
                                        table_spec.table_hint,
-                                       m_last_bcp_metrics);
+                                       m_last_bcp_metrics,
+                                       &m_transpose);
         } else if constexpr (std::is_same_v<T, core::TypedBatchView>) {
             if (opts.mode == core::PersistMode::Upsert) {
                 const std::string key_col = opts.key_column.value_or("id");
@@ -90,7 +105,8 @@ void MssqlStrategy::persist(const core::TableSpec &table_spec,
 
 // ---- ODBC Handle Management -------------------------------------------------
 
-void MssqlStrategy::init_handles() {
+template <typename Transpose>
+void MssqlStrategy<Transpose>::init_handles() {
     PYGIM_SCOPE_LOG_TAG("repo.connection");
     if (SQLAllocHandle(SQL_HANDLE_ENV, SQL_NULL_HANDLE, &m_env) != SQL_SUCCESS) {
         throw std::runtime_error("ODBC: Failed to allocate env handle");
@@ -101,7 +117,8 @@ void MssqlStrategy::init_handles() {
     }
 }
 
-void MssqlStrategy::cleanup_handles() {
+template <typename Transpose>
+void MssqlStrategy<Transpose>::cleanup_handles() {
     PYGIM_SCOPE_LOG_TAG("repo.connection");
     if (m_dbc != SQL_NULL_HDBC) {
         SQLDisconnect(m_dbc);
@@ -116,19 +133,18 @@ void MssqlStrategy::cleanup_handles() {
     m_bcp_attr_enabled = false;
 }
 
-void MssqlStrategy::ensure_connected() {
+template <typename Transpose>
+void MssqlStrategy<Transpose>::ensure_connected() {
     PYGIM_SCOPE_LOG_TAG("repo.connection");
-    if (m_dbc == SQL_NULL_HDBC) {
+    if (m_dbc == SQL_NULL_HDBC)
         throw std::runtime_error("ODBC: dbc handle null");
-    }
     if (m_connected) return;
 
     if (!m_bcp_attr_enabled) {
         SQLRETURN attr_ret = SQLSetConnectAttr(
             m_dbc, SQL_COPT_SS_BCP, (SQLPOINTER)SQL_BCP_ON, SQL_IS_UINTEGER);
-        if (!SQL_SUCCEEDED(attr_ret)) {
+        if (!SQL_SUCCEEDED(attr_ret))
             raise_if_error(attr_ret, SQL_HANDLE_DBC, m_dbc, "SQLSetConnectAttr(BCP_ON)");
-        }
         m_bcp_attr_enabled = true;
     }
 
@@ -136,27 +152,27 @@ void MssqlStrategy::ensure_connected() {
     SQLRETURN ret = SQLDriverConnect(
         m_dbc, NULL, (SQLCHAR *)m_conn_str.c_str(), SQL_NTS,
         NULL, 0, &outstrlen, SQL_DRIVER_NOPROMPT);
-    if (!SQL_SUCCEEDED(ret)) {
+    if (!SQL_SUCCEEDED(ret))
         raise_if_error(ret, SQL_HANDLE_DBC, m_dbc, "SQLDriverConnect");
-    }
     m_connected = true;
 }
 
-void MssqlStrategy::raise_if_error(SQLRETURN ret, SQLSMALLINT type,
-                                   SQLHANDLE handle, const char *what) {
+template <typename Transpose>
+void MssqlStrategy<Transpose>::raise_if_error(SQLRETURN ret, SQLSMALLINT type,
+                                              SQLHANDLE handle, const char *what) {
     odbc::raise_if_error(ret, type, handle, what);
 }
 
 // ---- Fetch implementation ---------------------------------------------------
 
-std::optional<core::ResultSet> MssqlStrategy::fetch_impl(
+template <typename Transpose>
+std::optional<core::ResultSet> MssqlStrategy<Transpose>::fetch_impl(
     const std::string &sql,
     const std::vector<core::CellValue> &params) {
     PYGIM_SCOPE_LOG_TAG("repo.fetch");
     SQLHSTMT stmt = SQL_NULL_HSTMT;
-    if (SQLAllocHandle(SQL_HANDLE_STMT, m_dbc, &stmt) != SQL_SUCCESS) {
+    if (SQLAllocHandle(SQL_HANDLE_STMT, m_dbc, &stmt) != SQL_SUCCESS)
         throw std::runtime_error("ODBC: alloc stmt failed");
-    }
 
     SQLRETURN ret = SQLPrepare(stmt, (SQLCHAR *)sql.c_str(), SQL_NTS);
     if (!SQL_SUCCEEDED(ret)) {
@@ -164,7 +180,6 @@ std::optional<core::ResultSet> MssqlStrategy::fetch_impl(
         raise_if_error(ret, SQL_HANDLE_STMT, stmt, "SQLPrepare");
     }
 
-    // Bind parameters using CellStatementBinder.
     detail::CellStatementBinder binder;
     binder.bind_all(stmt, params);
 
@@ -174,14 +189,12 @@ std::optional<core::ResultSet> MssqlStrategy::fetch_impl(
         return std::nullopt;
     }
 
-    // Discover columns.
     SQLSMALLINT col_count = 0;
     SQLNumResultCols(stmt, &col_count);
 
     core::ResultSet result;
     result.columns.reserve(static_cast<size_t>(col_count));
 
-    // Collect column metadata.
     std::vector<SQLSMALLINT> col_types(static_cast<size_t>(col_count));
     for (SQLSMALLINT i = 1; i <= col_count; ++i) {
         char col_name[128];
@@ -193,7 +206,6 @@ std::optional<core::ResultSet> MssqlStrategy::fetch_impl(
         col_types[static_cast<size_t>(i - 1)] = data_type;
     }
 
-    // Fetch rows.
     while (true) {
         ret = SQLFetch(stmt);
         if (ret == SQL_NO_DATA) break;
@@ -206,41 +218,29 @@ std::optional<core::ResultSet> MssqlStrategy::fetch_impl(
             SQLLEN out_len = 0;
             SQLSMALLINT dtype = col_types[static_cast<size_t>(c - 1)];
 
-            // Try typed retrieval for numeric types.
             if (dtype == SQL_BIGINT || dtype == SQL_INTEGER ||
                 dtype == SQL_SMALLINT || dtype == SQL_TINYINT) {
                 int64_t val = 0;
                 SQLRETURN dret = SQLGetData(stmt, c, SQL_C_SBIGINT, &val, 0, &out_len);
-                if (SQL_SUCCEEDED(dret) && out_len != SQL_NULL_DATA) {
-                    row.push_back(val);
-                    continue;
-                }
+                if (SQL_SUCCEEDED(dret) && out_len != SQL_NULL_DATA) { row.push_back(val); continue; }
             } else if (dtype == SQL_FLOAT || dtype == SQL_DOUBLE || dtype == SQL_REAL) {
                 double val = 0.0;
                 SQLRETURN dret = SQLGetData(stmt, c, SQL_C_DOUBLE, &val, 0, &out_len);
-                if (SQL_SUCCEEDED(dret) && out_len != SQL_NULL_DATA) {
-                    row.push_back(val);
-                    continue;
-                }
+                if (SQL_SUCCEEDED(dret) && out_len != SQL_NULL_DATA) { row.push_back(val); continue; }
             } else if (dtype == SQL_BIT) {
                 unsigned char val = 0;
                 SQLRETURN dret = SQLGetData(stmt, c, SQL_C_BIT, &val, 0, &out_len);
-                if (SQL_SUCCEEDED(dret) && out_len != SQL_NULL_DATA) {
-                    row.push_back(val != 0);
-                    continue;
-                }
+                if (SQL_SUCCEEDED(dret) && out_len != SQL_NULL_DATA) { row.push_back(val != 0); continue; }
             }
 
-            // Fallback: retrieve as string.
             std::vector<char> buf(1024);
             SQLRETURN dret = SQLGetData(stmt, c, SQL_C_CHAR, buf.data(),
                                         static_cast<SQLLEN>(buf.size()), &out_len);
             if (SQL_SUCCEEDED(dret)) {
-                if (out_len == SQL_NULL_DATA) {
+                if (out_len == SQL_NULL_DATA)
                     row.push_back(core::Null{});
-                } else {
+                else
                     row.emplace_back(std::string(buf.data()));
-                }
             } else {
                 row.push_back(core::Null{});
             }
@@ -254,13 +254,13 @@ std::optional<core::ResultSet> MssqlStrategy::fetch_impl(
 
 // ---- Save (upsert) implementation ------------------------------------------
 
-void MssqlStrategy::upsert_impl(const std::string &table,
-                                const core::CellValue &pk,
-                                const core::RowMap &data) {
+template <typename Transpose>
+void MssqlStrategy<Transpose>::upsert_impl(const std::string &table,
+                                           const core::CellValue &pk,
+                                           const core::RowMap &data) {
     PYGIM_SCOPE_LOG_TAG("repo.save");
     if (data.empty()) return;
 
-    // Build column/value lists from RowMap.
     std::vector<std::string> columns;
     std::vector<core::CellValue> values;
     columns.reserve(data.size());
@@ -284,9 +284,8 @@ void MssqlStrategy::upsert_impl(const std::string &table,
         params.push_back(pk);
 
         SQLHSTMT stmt = SQL_NULL_HSTMT;
-        if (SQLAllocHandle(SQL_HANDLE_STMT, m_dbc, &stmt) != SQL_SUCCESS) {
+        if (SQLAllocHandle(SQL_HANDLE_STMT, m_dbc, &stmt) != SQL_SUCCESS)
             throw std::runtime_error("ODBC: alloc stmt failed");
-        }
         SQLRETURN ret = SQLPrepare(stmt, (SQLCHAR *)sql.c_str(), SQL_NTS);
         if (!SQL_SUCCEEDED(ret)) {
             SQLFreeHandle(SQL_HANDLE_STMT, stmt);
@@ -299,7 +298,7 @@ void MssqlStrategy::upsert_impl(const std::string &table,
             SQLLEN row_count = 0;
             SQLRowCount(stmt, &row_count);
             SQLFreeHandle(SQL_HANDLE_STMT, stmt);
-            if (row_count > 0) return; // Update succeeded.
+            if (row_count > 0) return;
         } else {
             SQLFreeHandle(SQL_HANDLE_STMT, stmt);
         }
@@ -311,9 +310,8 @@ void MssqlStrategy::upsert_impl(const std::string &table,
         std::vector<core::CellValue> params;
         params.reserve(values.size() + 1);
         params.push_back(pk);
-        for (const auto &col : columns) {
+        for (const auto &col : columns)
             sql.append(",").append(col);
-        }
         sql.append(") VALUES (?");
         for (size_t i = 0; i < columns.size(); ++i) {
             sql.append(",?");
@@ -322,9 +320,8 @@ void MssqlStrategy::upsert_impl(const std::string &table,
         sql.append(")");
 
         SQLHSTMT stmt = SQL_NULL_HSTMT;
-        if (SQLAllocHandle(SQL_HANDLE_STMT, m_dbc, &stmt) != SQL_SUCCESS) {
+        if (SQLAllocHandle(SQL_HANDLE_STMT, m_dbc, &stmt) != SQL_SUCCESS)
             throw std::runtime_error("ODBC: alloc stmt failed");
-        }
         SQLRETURN ret = SQLPrepare(stmt, (SQLCHAR *)sql.c_str(), SQL_NTS);
         if (!SQL_SUCCEEDED(ret)) {
             SQLFreeHandle(SQL_HANDLE_STMT, stmt);
@@ -339,6 +336,24 @@ void MssqlStrategy::upsert_impl(const std::string &table,
         }
         SQLFreeHandle(SQL_HANDLE_STMT, stmt);
     }
+}
+
+// ---- Explicit instantiations ------------------------------------------------
+// Suppress implicit instantiation in all other TUs; linker gets one copy each.
+
+template class MssqlStrategy<bcp::RowMajorTranspose>;
+template class MssqlStrategy<bcp::ColumnMajorTranspose>;
+
+// ---- Factory ----------------------------------------------------------------
+
+std::unique_ptr<core::Strategy> make_mssql_strategy(
+    const std::string &conn_str,
+    const std::string &transpose_hint)
+{
+    if (transpose_hint == "column_major")
+        return std::make_unique<MssqlStrategy<bcp::ColumnMajorTranspose>>(conn_str);
+    // "" / "row_major" / anything unknown → RowMajorTranspose (default)
+    return std::make_unique<MssqlStrategy<bcp::RowMajorTranspose>>(conn_str);
 }
 
 } // namespace pygim::mssql

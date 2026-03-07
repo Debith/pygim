@@ -35,10 +35,14 @@ public:
     ///   "Driver={...};Server=…" — raw ODBC connection string (MSSQL)
     ///
     /// Optional:
-    ///   transformers — enable pre-save / post-load transformer pipeline.
+    ///   transformers    — enable pre-save / post-load transformer pipeline.
+    ///   transpose_hint  — BCP row-loop algorithm: "" / "row_major" (default)
+    ///                     or "column_major".  Ignored for non-MSSQL schemes.
     explicit Repository(const std::string &connection_uri,
-                        bool enable_transformers = false)
-        : m_core(enable_transformers), m_uri(core::parse_uri(connection_uri))
+                        bool enable_transformers = false,
+                        const std::string &transpose_hint = "")
+        : m_core(enable_transformers), m_uri(core::parse_uri(connection_uri)),
+          m_transpose_hint(transpose_hint)
     {
         create_strategy_from_uri();
     }
@@ -261,6 +265,7 @@ public:
 private:
     core::RepositoryCore m_core;
     core::ConnectionUri m_uri;
+    std::string m_transpose_hint;
     py::object m_factory_py = py::none();
     bool m_has_factory_py{false};
     std::vector<py::function> m_pre_transforms_py;
@@ -272,7 +277,7 @@ private:
             m_core.add_strategy(std::make_unique<core::MemoryStrategy>());
         } else if (m_uri.scheme == "mssql") {
             auto conn_str = core::build_odbc_connection_string(m_uri);
-            m_core.add_strategy(std::make_unique<mssql::MssqlStrategy>(conn_str));
+            m_core.add_strategy(mssql::make_mssql_strategy(conn_str, m_transpose_hint));
         } else {
             throw std::invalid_argument(
                 "Repository: unsupported scheme '" + m_uri.scheme + "'. "

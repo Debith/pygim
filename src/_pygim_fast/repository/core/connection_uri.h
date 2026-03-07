@@ -19,12 +19,6 @@
 #include "memory_strategy.h"
 #include "strategy.h"
 
-// Forward-declare MssqlStrategy to avoid pulling heavy ODBC headers
-// into every TU that includes this header.
-namespace pygim::mssql {
-class MssqlStrategy;
-} // namespace pygim::mssql
-
 namespace pygim::core {
 
 /// Parsed components of a connection URI.

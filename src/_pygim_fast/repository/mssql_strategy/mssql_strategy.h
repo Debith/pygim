@@ -31,6 +31,10 @@
 #  endif
 #endif
 
+// Include transpose strategies after ODBC headers + BOOL/INT cleanup so that
+// value_types.h (already parsed above) is safe and BOOL is not re-defined.
+#include "detail/bcp/bcp_transpose_strategy.h"
+
 namespace pygim::mssql {
 
 /// BCP performance metrics — all pure C++, no pybind.
@@ -50,9 +54,16 @@ struct BcpMetrics {
 
 /// Pybind-free MSSQL strategy implementing core::Strategy.
 ///
-/// Owns ODBC connection handles and an MssqlDialect instance.
-/// All public methods accept/return only core types.
-class MssqlStrategy final : public core::Strategy {
+/// Templated on Transpose — the row-loop transpose algorithm used in the BCP
+/// hot path.  The default (RowMajorTranspose) preserves the pre-0.4 behaviour.
+/// Pass ColumnMajorTranspose (or a future SIMD strategy) at acquire_repository()
+/// time to select a different algorithm for the lifetime of the connection.
+///
+/// The template parameter is resolved once at construction; process_batch<T>()
+/// is called with a concrete Transpose& reference, enabling the compiler to
+/// devirtualize and inline T::run() (T is final in all provided strategies).
+template <typename Transpose = bcp::RowMajorTranspose>
+class MssqlStrategy : public core::Strategy {
 public:
     explicit MssqlStrategy(std::string connection_string);
     ~MssqlStrategy() override;
@@ -72,7 +83,7 @@ public:
     /// Persist bulk data from a DataView.
     ///
     /// Dispatches internally:
-    ///   ArrowView     → BCP via bulk_insert_arrow_bcp (zero-copy, fastest path)
+    ///   ArrowView     → BCP via process_batch<Transpose> (zero-copy, devirtualized)
     ///   TypedBatchView → INSERT or MERGE based on opts.mode
     void persist(const core::TableSpec &table_spec,
                  core::DataView view,
@@ -93,6 +104,7 @@ private:
     std::string m_conn_str;
     query::MssqlDialect m_dialect;
     BcpMetrics m_last_bcp_metrics;
+    Transpose m_transpose{};    ///< Transpose algorithm — fixed for this connection's lifetime.
 
     SQLHENV m_env{SQL_NULL_HENV};
     SQLHDBC m_dbc{SQL_NULL_HDBC};
@@ -127,5 +139,23 @@ private:
                            int batch_size,
                            const std::string &table_hint);
 };
+
+// Explicit instantiation declarations — bodies are in mssql_strategy_core.cpp.
+// Including this header suppresses implicit instantiation in every TU.
+extern template class MssqlStrategy<bcp::RowMajorTranspose>;
+extern template class MssqlStrategy<bcp::ColumnMajorTranspose>;
+
+// ---- Factory ----------------------------------------------------------------
+
+/// Create the appropriate MssqlStrategy specialisation from a hint string.
+///
+/// @param conn_str       ODBC connection string.
+/// @param transpose_hint Selects the BCP transpose algorithm:
+///                         ""             / "row_major"    → RowMajorTranspose (default)
+///                         "column_major"                  → ColumnMajorTranspose
+/// @return               Owning pointer to the constructed strategy.
+std::unique_ptr<core::Strategy> make_mssql_strategy(
+    const std::string &conn_str,
+    const std::string &transpose_hint = "");
 
 } // namespace pygim::mssql
