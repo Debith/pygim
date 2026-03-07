@@ -11,11 +11,16 @@
 
 #include <arrow/array.h>
 #include <arrow/util/bit_util.h>
+#include <arrow/util/config.h>   // defines ARROW_VERSION_MAJOR
 
-#if defined(ARROW_VERSION_MAJOR) && (ARROW_VERSION_MAJOR >= 15)
+#if ARROW_VERSION_MAJOR >= 15
 #define PYGIM_HAVE_ARROW_STRING_VIEW 1
 #else
-#define PYGIM_HAVE_ARROW_STRING_VIEW 0
+static_assert(false,
+    "pygim requires arrow-cpp >= 15. "
+    "Polars 1.x exports strings as StringView (\"vu\" format); "
+    "arrow-cpp < 15 rejects this at ImportRecordBatchReader and lacks bind_string_view. "
+    "Upgrade: conda install -c conda-forge 'arrow-cpp>=15' 'pyarrow>=15'");
 #endif
 
 // Forward-declare to avoid pulling in the full header in every translation unit.

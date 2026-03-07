@@ -6,10 +6,10 @@
 // The py::object → RecordBatchReader conversion lives in the BINDING layer
 // (bcp_arrow_import.h), not here.
 
-// mssql_strategy_v2.h MUST be included first: it includes core/value_types.h
+// mssql_strategy.h MUST be included first: it includes core/value_types.h
 // which uses BOOL as an enum member. ODBC headers (pulled in by bcp_*.h and
 // odbc_error.h) define BOOL as a macro, so they must come AFTER value_types.h.
-#include "../../mssql_strategy_v2.h"
+#include "../../mssql_strategy.h"
 
 #include "../odbc_error.h"
 #include "../sql_helpers.h"

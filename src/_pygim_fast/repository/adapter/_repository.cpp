@@ -3,14 +3,21 @@
 // Exposes:
 // - QueryAdapter as "Query" (fluent builder)
 // - Repository (adapter wrapping RepositoryCore)
+// - StatusPrinter (flag-controlled status output, distinct from logging)
+// - acquire_repository() free function (recommended entry point)
 //
 // MemoryStrategy, MssqlStrategy, and MssqlDialect are internal C++ types —
 // they are constructed/used automatically by Repository and do not need
 // Python-level bindings.
 
+#include <algorithm>
+#include <optional>
+#include <string>
+
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 
+#include "../core/status_printer.h"
 #include "../core/value_types.h"
 #include "data_extractor.h"
 #include "query_adapter.h"
@@ -18,11 +25,72 @@
 
 namespace py = pybind11;
 
+// ---------------------------------------------------------------------------
+// Internal helpers
+// ---------------------------------------------------------------------------
+
+/// Return a credential-free summary of *s* safe to print in status lines.
+///  - URL form:   mssql://user:PASSWORD@host/db → mssql://user:***@host/db
+///  - Raw ODBC:   ...;PWD=secret;...            → ...;PWD=***;...
+///  - memory://   (and any credential-free URI)  → returned unchanged
+static std::string mask_conn_str(const std::string &s) {
+    std::string result = s;
+
+    // URL form: mask password between the first ':' after "://" and '@'.
+    auto scheme_end = result.find("://");
+    if (scheme_end != std::string::npos) {
+        auto after = scheme_end + 3;
+        auto colon = result.find(':', after);
+        auto at    = result.find('@', after);
+        if (colon != std::string::npos && at != std::string::npos && colon < at) {
+            result.replace(colon + 1, at - colon - 1, "***");
+        }
+    }
+
+    // Raw ODBC: find PWD= (case-insensitive) and mask the value up to ';'.
+    std::string lower = result;
+    std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
+    auto pwd = lower.find("pwd=");
+    if (pwd != std::string::npos) {
+        auto val_start = pwd + 4;
+        auto val_end = result.find(';', val_start);
+        if (val_end == std::string::npos) val_end = result.size();
+        result.replace(val_start, val_end - val_start, "***");
+    }
+
+    return result;
+}
+
+// ---------------------------------------------------------------------------
+
 PYBIND11_MODULE(_repository, m) {
     m.doc() = "Repository core/adapter — pybind-free strategies, "
               "centralized data extraction, dialect-based query rendering.";
 
     using namespace pygim;
+
+    // ---- StatusPrinter ------------------------------------------------------
+
+    py::class_<StatusPrinter>(m, "StatusPrinter",
+        "Flag-controlled status output for repository operations.\n\n"
+        "StatusPrinter prints directly to stdout and is intentionally\n"
+        "separate from the structured logging subsystem.\n\n"
+        "Each boolean flag gates one category of output:\n"
+        "  connection  — one line per connection attempt (default True).\n\n"
+        "Pass a StatusPrinter to acquire_repository() to control output:\n"
+        "  repo = acquire_repository('mssql://host/db')                   # prints\n"
+        "  repo = acquire_repository('mssql://host/db',\n"
+        "                            printer=StatusPrinter(connection=False))  # quiet")
+        .def(py::init([](bool connection) {
+                 return StatusPrinter{connection};
+             }),
+             py::arg("connection") = true)
+        .def_readwrite("connection", &StatusPrinter::connection,
+                       "Print one status line per connection attempt.")
+        .def("__repr__", [](const StatusPrinter &p) {
+            return "StatusPrinter(connection=" +
+                   std::string(p.connection ? "True" : "False") + ")";
+        });
 
     // ---- QueryAdapter as "Query" --------------------------------------------
 
@@ -56,7 +124,9 @@ PYBIND11_MODULE(_repository, m) {
         .def(py::init<std::string, bool>(),
              py::arg("connection_uri"),
              py::arg("transformers") = false,
-             "Create a Repository from a connection URI.\n\n"
+             "Create a Repository directly from a connection URI (no status output).\n\n"
+             "Prefer acquire_repository() for interactive use — it prints a status\n"
+             "line before connecting and accepts a StatusPrinter for control.\n\n"
              "Supported schemes:\n"
              "  memory://              — in-memory (dev/test)\n"
              "  mssql://server/db     — MSSQL via ODBC\n"
@@ -107,4 +177,37 @@ PYBIND11_MODULE(_repository, m) {
              py::arg("key"), py::arg("value"))
         .def("__repr__", &adapter::Repository::repr);
 
+    // ---- acquire_repository free function -----------------------------------
+
+    m.def("acquire_repository",
+        [](const std::string &conn_str,
+           bool transformers,
+           std::optional<StatusPrinter> printer) -> adapter::Repository {
+            const StatusPrinter p = printer.value_or(StatusPrinter{});
+            p.print_connection("connecting  " + mask_conn_str(conn_str));
+            return adapter::Repository(conn_str, transformers);
+        },
+        py::arg("conn_str"),
+        py::arg("transformers") = false,
+        py::arg("printer") = py::none(),
+        "Create a Repository from a connection string with optional status output.\n\n"
+        "A status line is printed to stdout before the connection is established\n"
+        "unless suppressed via the printer argument.  Credentials in the connection\n"
+        "string are masked automatically.\n\n"
+        "Supported schemes:\n"
+        "  memory://              — in-memory (dev/test)\n"
+        "  mssql://server/db     — MSSQL via ODBC\n"
+        "  Driver={...};Server=… — raw ODBC (MSSQL)\n\n"
+        "Parameters:\n"
+        "  conn_str:     URI or ODBC connection string.\n"
+        "  transformers: enable pre-save / post-load pipeline.\n"
+        "  printer:      StatusPrinter controlling output; None uses the default\n"
+        "                (connection=True).  Pass StatusPrinter(connection=False)\n"
+        "                to suppress all status output.\n\n"
+        "Examples::\n\n"
+        "    from pygim import acquire_repository, StatusPrinter\n\n"
+        "    repo = acquire_repository('mssql://host/db')          # prints\n"
+        "    repo = acquire_repository('mssql://host/db',\n"
+        "                             printer=StatusPrinter(connection=False))  # quiet"
+    );
 }

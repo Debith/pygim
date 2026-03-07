@@ -25,11 +25,11 @@ namespace py = pybind11;
 /// Extracts a DataView from any Python bulk data object.
 ///
 /// Dispatch order (prefer_arrow = true):
-///   1a. data.__arrow_c_stream__() directly — zero-copy, no materialisation.
-///       Fails on Arrow < 14 when Polars exports StringView ("vu" format).
-///   1b. data.to_arrow(compat_level=oldest).__arrow_c_stream__() — converts
-///       StringView → LargeUtf8 before export; required on Arrow < 14.
-///   1c. data._export_to_c / IPC bytes — other Arrow-capable objects.
+///   1a. data.__arrow_c_stream__() → zero-copy capsule.
+///       Arrow C++ >= 15 (build minimum) accepts StringView ("vu") from Polars 1.x
+///       end-to-end: ImportRecordBatchReader + bind_string_view both handle it.
+///   1b. data._export_to_c / IPC bytes — other Arrow-capable objects
+///       (e.g. PyArrow RecordBatchReader passed directly).
 ///   2.  Polars DataFrame               → TypedBatchView (column extraction)
 ///   3.  Python iterable of sequences   → TypedBatchView (row-major → column-major)
 ///
@@ -78,8 +78,8 @@ private:
     static std::shared_ptr<arrow::RecordBatchReader>
     try_extract_arrow_reader(const py::object &data) {
         // 1a. Zero-copy: data exports itself via the Arrow C Data Interface.
-        //     On Arrow < 14, Polars emits StringView ("vu") which ImportRecordBatchReader
-        //     rejects — the exception is caught and we fall through to 1b.
+        //     Polars 1.x emits StringView ("vu"); Arrow C++ >= 15 accepts it
+        //     at both ImportRecordBatchReader and bind_string_view.
         if (py::hasattr(data, "__arrow_c_stream__")) {
             try {
                 py::object capsule = data.attr("__arrow_c_stream__")();
@@ -88,44 +88,14 @@ private:
             } catch (...) {}
         }
 
-        // 1b. Compat path: materialise via to_arrow(compat_level=oldest).
-        //     Polars converts StringView → LargeUtf8, which all Arrow versions handle.
-        //     Required when the runtime Arrow C++ library predates StringView support.
-        py::object capsule = extract_arrow_capsule_compat(data);
-        if (!capsule.is_none()) {
-            try {
-                auto result = bcp::import_arrow_reader(capsule);
-                if (result.reader) return result.reader;
-            } catch (...) {}
-        }
-
-        // 1c. Object with _export_to_c or IPC bytes.
+        // 1b. Object with _export_to_c or IPC bytes
+        //     (e.g. PyArrow RecordBatchReader passed directly).
         try {
             auto result = bcp::import_arrow_reader(data);
             if (result.reader) return result.reader;
         } catch (...) {}
 
         return nullptr;
-    }
-
-    /// Extract a C stream capsule via to_arrow(compat_level=oldest).
-    /// Converts Polars-native StringView → LargeUtf8 for Arrow < 14 compatibility.
-    static py::object extract_arrow_capsule_compat(const py::object &data) {
-        try {
-            py::module_ pl = py::module_::import("polars");
-            py::object compat_level = pl.attr("CompatLevel").attr("oldest")();
-            if (py::hasattr(data, "to_arrow")) {
-                py::object arrow_table = data.attr("to_arrow")(
-                    py::arg("compat_level") = compat_level);
-                if (py::hasattr(arrow_table, "__arrow_c_stream__")) {
-                    return arrow_table.attr("__arrow_c_stream__")();
-                }
-                if (py::hasattr(arrow_table, "to_reader")) {
-                    return arrow_table.attr("to_reader")();
-                }
-            }
-        } catch (...) {}
-        return py::none();
     }
 
     /// Infer column names from the data object when not explicitly provided.

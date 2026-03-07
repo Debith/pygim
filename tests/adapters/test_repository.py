@@ -1,10 +1,9 @@
 import pytest
 
 from pygim import _repository as repository_ext
-from pygim import repository as repository_mod
 
 Repository = repository_ext.Repository
-acquire_repository = repository_mod.acquire_repository
+acquire_repository = repository_ext.acquire_repository
 
 
 def test_memory_strategy_basic_get_set():
@@ -170,8 +169,10 @@ def test_acquire_repository_accessible_from_pygim_namespace():
 
 
 def test_acquire_repository_module_re_exports():
-    """pygim.repository re-exports the C++ extension symbols."""
-    from pygim import repository
-    assert hasattr(repository, "Repository")
-    assert hasattr(repository, "Query")
-    assert not hasattr(repository, "MssqlDialect")
+    """_repository C++ extension exports the expected public symbols."""
+    from pygim import _repository
+    assert hasattr(_repository, "Repository")
+    assert hasattr(_repository, "Query")
+    assert hasattr(_repository, "StatusPrinter")
+    assert hasattr(_repository, "acquire_repository")
+    assert not hasattr(_repository, "MssqlDialect")

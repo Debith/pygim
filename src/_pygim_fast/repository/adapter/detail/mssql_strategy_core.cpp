@@ -1,7 +1,7 @@
-// MssqlStrategy v2 implementation: connection management, fetch, save, persist.
+// MssqlStrategy implementation: connection management, fetch, save, persist.
 // Pybind-free — all methods operate on core C++ types only.
 
-#include "../../mssql_strategy/mssql_strategy_v2.h"
+#include "../../mssql_strategy/mssql_strategy.h"
 #include "../../mssql_strategy/detail/bcp/bcp_entry.h"
 
 #include <stdexcept>
@@ -19,12 +19,12 @@ namespace pygim::mssql {
 
 MssqlStrategy::MssqlStrategy(std::string connection_string)
     : m_conn_str(std::move(connection_string)) {
-    PYGIM_SCOPE_LOG_TAG("repo.v2.connection");
+    PYGIM_SCOPE_LOG_TAG("repo.connection");
     init_handles();
 }
 
 MssqlStrategy::~MssqlStrategy() {
-    PYGIM_SCOPE_LOG_TAG("repo.v2.connection");
+    PYGIM_SCOPE_LOG_TAG("repo.connection");
     cleanup_handles();
 }
 
@@ -49,13 +49,13 @@ std::string MssqlStrategy::repr() const {
 // ---- Public method implementations ------------------------------------------
 
 std::optional<core::ResultSet> MssqlStrategy::fetch(const core::RenderedQuery &query) {
-    PYGIM_SCOPE_LOG_TAG("repo.v2.fetch");
+    PYGIM_SCOPE_LOG_TAG("repo.fetch");
     ensure_connected();
     return fetch_impl(query.sql, query.params);
 }
 
 void MssqlStrategy::save(const core::TablePkKey &key, const core::RowMap &data) {
-    PYGIM_SCOPE_LOG_TAG("repo.v2.save");
+    PYGIM_SCOPE_LOG_TAG("repo.save");
     ensure_connected();
     upsert_impl(key.table, key.pk, data);
 }
@@ -63,7 +63,7 @@ void MssqlStrategy::save(const core::TablePkKey &key, const core::RowMap &data) 
 void MssqlStrategy::persist(const core::TableSpec &table_spec,
                              core::DataView view,
                              const core::PersistOptions &opts) {
-    PYGIM_SCOPE_LOG_TAG("repo.v2.persist");
+    PYGIM_SCOPE_LOG_TAG("repo.persist");
     ensure_connected();
 
     std::visit([&](auto &&data) {
@@ -91,7 +91,7 @@ void MssqlStrategy::persist(const core::TableSpec &table_spec,
 // ---- ODBC Handle Management -------------------------------------------------
 
 void MssqlStrategy::init_handles() {
-    PYGIM_SCOPE_LOG_TAG("repo.v2.connection");
+    PYGIM_SCOPE_LOG_TAG("repo.connection");
     if (SQLAllocHandle(SQL_HANDLE_ENV, SQL_NULL_HANDLE, &m_env) != SQL_SUCCESS) {
         throw std::runtime_error("ODBC: Failed to allocate env handle");
     }
@@ -102,7 +102,7 @@ void MssqlStrategy::init_handles() {
 }
 
 void MssqlStrategy::cleanup_handles() {
-    PYGIM_SCOPE_LOG_TAG("repo.v2.connection");
+    PYGIM_SCOPE_LOG_TAG("repo.connection");
     if (m_dbc != SQL_NULL_HDBC) {
         SQLDisconnect(m_dbc);
         SQLFreeHandle(SQL_HANDLE_DBC, m_dbc);
@@ -117,7 +117,7 @@ void MssqlStrategy::cleanup_handles() {
 }
 
 void MssqlStrategy::ensure_connected() {
-    PYGIM_SCOPE_LOG_TAG("repo.v2.connection");
+    PYGIM_SCOPE_LOG_TAG("repo.connection");
     if (m_dbc == SQL_NULL_HDBC) {
         throw std::runtime_error("ODBC: dbc handle null");
     }
@@ -152,7 +152,7 @@ void MssqlStrategy::raise_if_error(SQLRETURN ret, SQLSMALLINT type,
 std::optional<core::ResultSet> MssqlStrategy::fetch_impl(
     const std::string &sql,
     const std::vector<core::CellValue> &params) {
-    PYGIM_SCOPE_LOG_TAG("repo.v2.fetch");
+    PYGIM_SCOPE_LOG_TAG("repo.fetch");
     SQLHSTMT stmt = SQL_NULL_HSTMT;
     if (SQLAllocHandle(SQL_HANDLE_STMT, m_dbc, &stmt) != SQL_SUCCESS) {
         throw std::runtime_error("ODBC: alloc stmt failed");
@@ -257,7 +257,7 @@ std::optional<core::ResultSet> MssqlStrategy::fetch_impl(
 void MssqlStrategy::upsert_impl(const std::string &table,
                                 const core::CellValue &pk,
                                 const core::RowMap &data) {
-    PYGIM_SCOPE_LOG_TAG("repo.v2.save");
+    PYGIM_SCOPE_LOG_TAG("repo.save");
     if (data.empty()) return;
 
     // Build column/value lists from RowMap.

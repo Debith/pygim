@@ -1,4 +1,4 @@
-// MssqlStrategy v2: pybind-free MSSQL storage strategy.
+// MssqlStrategy: pybind-free MSSQL storage strategy.
 // Implements core::Strategy with ODBC backend.
 //
 // All Python data extraction is done in the adapter layer before reaching

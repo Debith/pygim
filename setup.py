@@ -73,8 +73,8 @@ def odbc_kwargs():
 
 # ── Detail source bundles ──────────────────────────────────────────────────
 
-repo_v2_detail_root = Path("src/_pygim_fast/repository/adapter/detail")
-repo_v2_detail_sources = sorted(repo_v2_detail_root.rglob("*.cpp")) if repo_v2_detail_root.exists() else []
+repo_detail_root = Path("src/_pygim_fast/repository/adapter/detail")
+repo_detail_sources = sorted(repo_detail_root.rglob("*.cpp")) if repo_detail_root.exists() else []
 
 bcp_strategy_cpp = Path("src/_pygim_fast/repository/mssql_strategy/detail/bcp/bcp_strategy.cpp")
 bcp_sources = [str(bcp_strategy_cpp)] if bcp_strategy_cpp.exists() else []
@@ -93,7 +93,7 @@ for cpp_file in get_cpp_files("src/_pygim_fast"):
     macros = list(base_macros)
     if stem == "_repository":
         # _repository bundles adapter/detail + BCP sources.
-        sources = [str(cpp_file)] + [str(p) for p in repo_v2_detail_sources] + bcp_sources
+        sources = [str(cpp_file)] + [str(p) for p in repo_detail_sources] + bcp_sources
         kwargs.update(odbc_kwargs())
     elif stem == "mssql_strategy":
         # Old monolith — superseded by _repository; skip.

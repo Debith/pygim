@@ -1,7 +1,7 @@
-// MssqlStrategy v2 bulk operations: INSERT and MERGE using TypedColumnBatch.
+// MssqlStrategy bulk operations: INSERT and MERGE using TypedColumnBatch.
 // Pybind-free — operates entirely on core C++ typed batch data.
 
-#include "../../mssql_strategy/mssql_strategy_v2.h"
+#include "../../mssql_strategy/mssql_strategy.h"
 
 #include <algorithm>
 #include <stdexcept>
@@ -18,7 +18,7 @@ void MssqlStrategy::bulk_insert_typed(const std::string &table,
                                       const core::TypedColumnBatch &batch,
                                       int batch_size,
                                       const std::string &table_hint) {
-    PYGIM_SCOPE_LOG_TAG("repo.v2.bulk");
+    PYGIM_SCOPE_LOG_TAG("repo.bulk");
     const size_t ncols = batch.columns.size();
     const size_t total_rows = batch.row_count;
     if (ncols == 0 || total_rows == 0) return;
@@ -116,7 +116,7 @@ void MssqlStrategy::bulk_upsert_typed(const std::string &table,
                                       const std::string &key_column,
                                       int batch_size,
                                       const std::string &table_hint) {
-    PYGIM_SCOPE_LOG_TAG("repo.v2.bulk");
+    PYGIM_SCOPE_LOG_TAG("repo.bulk");
     const size_t ncols = batch.columns.size();
     const size_t total_rows = batch.row_count;
     if (ncols == 0 || total_rows == 0) return;

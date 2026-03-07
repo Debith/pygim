@@ -19,7 +19,7 @@
 #include "extraction_policy.h"
 #include "query_adapter.h"
 
-#include "../mssql_strategy/mssql_strategy_v2.h"
+#include "../mssql_strategy/mssql_strategy.h"
 
 namespace pygim::adapter {
 
@@ -42,6 +42,12 @@ public:
     {
         create_strategy_from_uri();
     }
+
+    // Non-copyable (RepositoryCore owns unique_ptr<Strategy>); movable.
+    Repository(const Repository &) = delete;
+    Repository &operator=(const Repository &) = delete;
+    Repository(Repository &&) = default;
+    Repository &operator=(Repository &&) = default;
 
     // ---- Factory management -------------------------------------------------
 

@@ -28,6 +28,7 @@ Added
 
 Changed
 ~~~~~~~
+- Build: Raised minimum arrow-cpp build dependency to >= 15 (tested at 23.0.1). Enforced at compile time via ``static_assert`` in ``bcp_types.h`` — builds against arrow-cpp < 15 fail with an explicit message directing the user to ``conda install -c conda-forge 'arrow-cpp>=15' 'pyarrow>=15'``. Removed the ``PYGIM_HAVE_ARROW_STRING_VIEW`` compile-time gate; ``bind_string_view`` is now unconditionally compiled.
 - Build: Removed ``PYGIM_HAVE_ODBC`` and ``PYGIM_HAVE_ARROW`` compile-time feature flags. ODBC and Arrow C++ are now mandatory build dependencies (fail-fast philosophy).
 - Build: Removed dependency probing from ``setup.py``; compilation fails directly if headers/libraries are missing.
 - C++: Removed all ``#if PYGIM_HAVE_ODBC`` / ``#if PYGIM_HAVE_ARROW`` conditional compilation guards from 8+ source files.
@@ -54,10 +55,9 @@ Changed
 Fixed
 ~~~~~
 - Repository: Fix BCP commit-frequency regression — ``persist_dataframe`` was passing ``batch_size=1000`` directly to BCP, causing 1 000 ``bcp_batch()`` server-side commits for a 1 M-row load; MERGE used the same parameter but runs all batches inside a single transaction (one commit), so BCP was paradoxically slower (2.88 MB/s) than MERGE (5.98 MB/s). Root cause was a units mismatch: ``batch_size`` on the MERGE path caps SQL parameter count per statement, while on the BCP path it sets the commit frequency. Fix: add separate ``bcp_batch_size=0`` parameter to ``persist_dataframe``; when 0, BCP uses its internal 100 000-row default (10 commits for 1 M rows instead of 1 000), restoring expected throughput ordering.
-- Repository: Fix Arrow BCP performance regression introduced in 0.2 — ``ExtractionPolicy`` now tries ``data.__arrow_c_stream__()`` first (zero-copy), then falls back to ``to_arrow(compat_level=oldest)`` when the direct import fails; the compat path is required on Arrow < 14 because Polars 1.x emits ``StringView`` (``"vu"`` format) natively, which Arrow < 14 rejects at the C bridge layer.
+- Repository: Remove ``to_arrow(compat_level=oldest)`` compat materialization path from ``ExtractionPolicy`` — superseded by the Arrow C++ >= 15 build requirement. ``ImportRecordBatchReader`` and ``bind_string_view`` now accept Polars 1.x ``StringView`` (``"vu"`` format) natively; no Python-side IPC round-trip needed.
 - Tests: Ensured override semantics correctly raise when ``override=True`` and key is missing.
 - Added edge-case tests for factory missing getitem/override behavior and registry key tuple validation + ``find_id`` variant fallback.
-- Repository/MSSQL Arrow persist: Export Polars IPC payloads with legacy-compatible ``compat_level=oldest`` to avoid unsupported Arrow view encodings in mixed Arrow-runtime environments.
 - Repository/MSSQL Arrow BCP: Fix variable-length text/date/timestamp binding requirements (terminator metadata) and per-row fixed-width column pointer binding to prevent fallback/duplicate-row insertion behavior.
 - Repository/MSSQL Arrow persist: Added c-stream compatibility bridge using Arrow reader ``_export_to_c`` when table-level ``__arrow_c_stream__`` is unavailable, enabling ``arrow_c_stream_bcp`` on environments that previously fell back to IPC.
 
