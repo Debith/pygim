@@ -90,3 +90,14 @@ exclude = [
 [tool.setuptools_scm]
 version_scheme = "no-guess-dev"
 local_scheme   = "dirty-tag"
+
+[tool.cibuildwheel]
+build = "cp38-* cp39-* cp310-* cp311-* cp312-* cp313-*"
+skip = ["pp*", "*-musllinux_*"]
+
+[tool.cibuildwheel.macos]
+archs = ["universal2"]
+environment = {MACOSX_DEPLOYMENT_TARGET = "10.15"}
+
+[tool.cibuildwheel.windows]
+archs = ["AMD64"]

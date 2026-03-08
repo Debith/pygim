@@ -31,7 +31,16 @@ To install this project, simply write the following command:
 
 .. code-block:: bash
 
-    $ pip install pygim
+    $ pip install python-gimmicks
+
+Pre-built wheels are available for Linux, macOS, and Windows (Python 3.8–3.13).
+If no wheel is available for your platform, pip will attempt to build the package
+from source, which requires a C++20-capable compiler:
+
+* **Linux / macOS**: GCC 10+ or Clang 12+ (usually already installed)
+* **Windows**: `Microsoft C++ Build Tools`_ (Visual Studio 2019 or later)
+
+.. _Microsoft C++ Build Tools: https://visualstudio.microsoft.com/visual-cpp-build-tools/
 
 Command Line Interface
 ======================
