@@ -91,14 +91,15 @@ void MssqlStrategy<Transpose>::persist(const core::TableSpec &table_spec,
                                        m_last_bcp_metrics,
                                        &m_transpose);
         } else if constexpr (std::is_same_v<T, core::TypedBatchView>) {
-            if (opts.mode == core::PersistMode::Upsert) {
-                const std::string key_col = opts.key_column.value_or("id");
-                bulk_upsert_typed(table_spec.name, data.batch, key_col,
-                                  opts.batch_size, table_spec.table_hint);
-            } else {
-                bulk_insert_typed(table_spec.name, data.batch,
-                                  opts.batch_size, table_spec.table_hint);
-            }
+            const std::string key_col = opts.key_column.value_or("id");
+            if (opts.mode == core::PersistMode::Upsert)
+                bulk_persist_typed<core::PersistMode::Upsert>(
+                    table_spec.name, data.batch, key_col,
+                    opts.batch_size, table_spec.table_hint);
+            else
+                bulk_persist_typed<core::PersistMode::Insert>(
+                    table_spec.name, data.batch, key_col,
+                    opts.batch_size, table_spec.table_hint);
         }
     }, std::move(view));
 }

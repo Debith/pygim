@@ -126,18 +126,17 @@ private:
                      const core::CellValue &pk,
                      const core::RowMap &data);
 
-    /// Run a typed batch through multi-row INSERT statements.
-    void bulk_insert_typed(const std::string &table,
-                           const core::TypedColumnBatch &batch,
-                           int batch_size,
-                           const std::string &table_hint);
-
-    /// Run a typed batch through MERGE statements.
-    void bulk_upsert_typed(const std::string &table,
-                           const core::TypedColumnBatch &batch,
-                           const std::string &key_column,
-                           int batch_size,
-                           const std::string &table_hint);
+    /// Run a typed batch through multi-row INSERT or MERGE statements.
+    ///
+    /// Mode is resolved at compile time; builder type, default batch size,
+    /// and error-context labels are selected via if constexpr — the loop body
+    /// is shared verbatim between both operations.
+    template <core::PersistMode Mode>
+    void bulk_persist_typed(const std::string &table,
+                            const core::TypedColumnBatch &batch,
+                            const std::string &key_column,
+                            int batch_size,
+                            const std::string &table_hint);
 };
 
 // Explicit instantiation declarations — bodies are in mssql_strategy_core.cpp.
