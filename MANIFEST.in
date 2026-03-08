@@ -1,0 +1,10 @@
+include pyproject.toml
+include setup.py
+include README.rst
+include CHANGELOG.rst
+include LICENSE
+include __version__.py
+
+recursive-include src/_pygim_fast *.h *.cpp
+recursive-include src/_pygim *.py *.pyi
+recursive-include src/pygim *.py *.pyi

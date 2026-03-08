@@ -32,9 +32,10 @@ def extension_name_from_cpp(cpp_file: Path) -> str:
 
 # Pick sensible flags per‐compiler
 if sys.platform == "win32":
-    # MSVC: enable C++17 (or C++20 if your toolchain supports it) and optimize
+    # MSVC: enable C++20 and optimize.
+    # Requires Visual Studio 2019 v16.11 or later (MSVC 14.29+) for full C++20 support.
+    # Install from: https://visualstudio.microsoft.com/visual-cpp-build-tools/
     extra_compile_args = ["/std:c++20", "/O2"]
-    # or for VC++2022 with C++20: ["/std:c++20", "/O2"]
 else:
     extra_compile_args = ["-std=c++20", "-O3"]
 

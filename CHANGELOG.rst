@@ -24,6 +24,8 @@ Added
 - Added PlantUML architecture reference ``docs/design/core_adapter_bindings_convention.puml`` for core/adapter/bindings layering.
 - CI: Add release workflow that builds wheels via ``cibuildwheel`` and publishes tagged releases to PyPI.
 - CI: Auto-tag main whenever the ``dev`` branch is merged, driven by PR labels ``release:major``/``release:minor``/default patch.
+- Added ``MANIFEST.in`` to ensure C++ source files are included in the sdist so users can build from source when no pre-built wheel is available.
+- Docs: Added Windows installation requirements to ``README.rst``, including a link to Microsoft C++ Build Tools for users who must build from source.
 
 Changed
 ~~~~~~~
@@ -33,6 +35,8 @@ Changed
 - Project instructions updated to reflect new registry surface area (PR #4).
 - Refactored factory and registry internals into explicit ``core`` (pybind-free) and ``adapter`` (pybind boundary) headers.
 - Renamed pybind module translation units to ``bindings.cpp`` and updated build naming logic so modules remain ``pygim.factory`` and ``pygim.registry``.
+- CI: Moved ``cibuildwheel`` configuration from the workflow file into ``[tool.cibuildwheel]`` in ``pyproject.toml`` for a single source of truth; Windows builds target ``AMD64``.
+- CI: Updated ``python-packages.yml`` to use ``actions/checkout@v4`` and ``actions/setup-python@v5`` (was v3).
 
 Fixed
 ~~~~~
