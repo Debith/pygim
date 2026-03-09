@@ -25,9 +25,12 @@ Added
 - CI: Add release workflow that builds wheels via ``cibuildwheel`` and publishes tagged releases to PyPI.
 - CI: Auto-tag main whenever the ``dev`` branch is merged, driven by PR labels ``release:major``/``release:minor``/default patch.
 - Added native C++ ``QuickTimer`` utility (`src/_pygim_fast/utils/quick_timer.h`) with ordered subtimers, immediate stop reporting, and destructor summary output.
+- Benchmark: Consolidated ``benchmarks/bcp_throughput.py`` into a multi-profile benchmark with simple (7 cols), mixed (9 cols), and complex (11 cols) dataset profiles. Supports ``--dataset all`` for side-by-side comparison and ``--compare-strategies`` for row_major vs column_major matrix runs.
 
 Changed
 ~~~~~~~
+- Packaging: Made ``tabulate>=0.9`` a required runtime dependency (no fallback formatter in ``benchmarks/bcp_throughput.py``).
+- Repository/MSSQL BCP: Added row-loop micro-metrics (fixed-copy, colptr redirect, string packing, sendrow) and exposed them via ``persist_dataframe(...)["bcp_metrics"]`` for benchmark analysis.
 - Build: Raised minimum arrow-cpp build dependency to >= 15 (tested at 23.0.1). Enforced at compile time via ``static_assert`` in ``bcp_types.h`` — builds against arrow-cpp < 15 fail with an explicit message directing the user to ``conda install -c conda-forge 'arrow-cpp>=15' 'pyarrow>=15'``. Removed the ``PYGIM_HAVE_ARROW_STRING_VIEW`` compile-time gate; ``bind_string_view`` is now unconditionally compiled.
 - Build: Removed ``PYGIM_HAVE_ODBC`` and ``PYGIM_HAVE_ARROW`` compile-time feature flags. ODBC and Arrow C++ are now mandatory build dependencies (fail-fast philosophy).
 - Build: Removed dependency probing from ``setup.py``; compilation fails directly if headers/libraries are missing.

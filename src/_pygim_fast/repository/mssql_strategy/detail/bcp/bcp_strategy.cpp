@@ -88,6 +88,10 @@ void extract_metrics(const BcpContext& ctx,
     m.reader_open_seconds  = sub("reader_open");
     m.bind_columns_seconds = sub("bind_columns");
     m.row_loop_seconds     = sub("row_loop");
+    m.fixed_copy_seconds   = ctx.fixed_copy_seconds;
+    m.colptr_redirect_seconds = ctx.colptr_redirect_seconds;
+    m.string_pack_seconds  = ctx.string_pack_seconds;
+    m.sendrow_seconds      = ctx.sendrow_seconds;
     m.batch_flush_seconds  = sub("batch_flush");
     m.done_seconds         = sub("done");
     m.processed_rows       = ctx.processed_rows;

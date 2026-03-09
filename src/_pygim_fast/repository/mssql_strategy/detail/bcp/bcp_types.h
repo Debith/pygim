@@ -40,6 +40,7 @@ struct ColumnBinding {
 
     bool            has_nulls{false};
     bool            is_string{false};
+    bool            is_binary{false};   // binary columns use a length-prefix, not terminator
     const uint8_t*  null_bitmap{nullptr};
     int64_t         array_offset{0};
 
@@ -54,13 +55,17 @@ struct ColumnBinding {
     const uint8_t* str_data{nullptr};
 #if PYGIM_HAVE_ARROW_STRING_VIEW
     const arrow::StringViewArray* string_view_array{nullptr};
+    const arrow::BinaryViewArray* binary_view_array{nullptr};
 #endif
     std::vector<uint8_t> str_buf;        // reusable buffer for null-terminated copy
     bool                 str_buf_bound{false};
 
-    // Pre-converted temporal buffers (kept alive by shared_ptr)
-    std::shared_ptr<std::vector<SQL_DATE_STRUCT>>      date_buffer;
-    std::shared_ptr<std::vector<SQL_TIMESTAMP_STRUCT>>  timestamp_buffer;
+    // Pre-converted buffers (kept alive by shared_ptr)
+    std::shared_ptr<std::vector<uint8_t>>                bool_buffer;
+    std::shared_ptr<std::vector<int64_t>>                duration_buffer;
+    std::shared_ptr<std::vector<SQL_SS_TIME2_STRUCT>>    time_buffer;
+    std::shared_ptr<std::vector<SQL_DATE_STRUCT>>        date_buffer;
+    std::shared_ptr<std::vector<SQL_TIMESTAMP_STRUCT>>   timestamp_buffer;
 };
 
 // ── BcpContext ──────────────────────────────────────────────────────────────
@@ -73,6 +78,12 @@ struct BcpContext {
     int64_t       sent_rows{0};
     int64_t       processed_rows{0};
     int64_t       record_batches{0};
+
+    // Micro-metrics for row-loop internals (seconds)
+    double fixed_copy_seconds{0.0};
+    double colptr_redirect_seconds{0.0};
+    double string_pack_seconds{0.0};
+    double sendrow_seconds{0.0};
 
     /// Pluggable transpose strategy (non-owning).  When nullptr, falls back
     /// to the default RowMajorTranspose defined in bcp_transpose_strategy.h.
@@ -105,6 +116,27 @@ constexpr SQL_DATE_STRUCT days_to_sql_date(int32_t days_since_epoch) noexcept {
         .month = static_cast<SQLUSMALLINT>(static_cast<unsigned>(ymd.month())),
         .day   = static_cast<SQLUSMALLINT>(static_cast<unsigned>(ymd.day())),
     };
+}
+
+/// Convert Arrow TIME64 (nanoseconds since midnight) → SQL_SS_TIME2_STRUCT.
+constexpr SQL_SS_TIME2_STRUCT nanos_to_sql_time(int64_t ns) noexcept {
+    constexpr int64_t ns_per_hour   = 3'600'000'000'000LL;
+    constexpr int64_t ns_per_minute =    60'000'000'000LL;
+    constexpr int64_t ns_per_second =     1'000'000'000LL;
+    auto h = static_cast<SQLUSMALLINT>(ns / ns_per_hour);
+    ns %= ns_per_hour;
+    auto m = static_cast<SQLUSMALLINT>(ns / ns_per_minute);
+    ns %= ns_per_minute;
+    auto s = static_cast<SQLUSMALLINT>(ns / ns_per_second);
+    ns %= ns_per_second;
+    // fraction is in 100-nanosecond units for SQL Server TIME(7)
+    auto frac = static_cast<SQLUINTEGER>(ns / 100);
+    SQL_SS_TIME2_STRUCT t{};
+    t.hour     = h;
+    t.minute   = m;
+    t.second   = s;
+    t.fraction = frac;
+    return t;
 }
 
 /// Convert Arrow TIMESTAMP (µs since epoch) → SQL_TIMESTAMP_STRUCT.

@@ -50,6 +50,17 @@ public:
 
     size_t strategy_count() const noexcept { return m_strategies.size(); }
 
+    /// Return the first registered strategy, or nullptr when none exist.
+    /// Repository currently registers exactly one strategy per instance.
+    Strategy *primary_strategy() noexcept {
+        return m_strategies.empty() ? nullptr : m_strategies.front().get();
+    }
+
+    /// Const access to the first registered strategy.
+    const Strategy *primary_strategy() const noexcept {
+        return m_strategies.empty() ? nullptr : m_strategies.front().get();
+    }
+
     // ---- Transformer registration -------------------------------------------
 
     void add_pre_transform(PreSaveTransform fn) {

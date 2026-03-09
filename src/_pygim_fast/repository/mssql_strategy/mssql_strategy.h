@@ -43,6 +43,10 @@ struct BcpMetrics {
     double reader_open_seconds{0.0};
     double bind_columns_seconds{0.0};
     double row_loop_seconds{0.0};
+    double fixed_copy_seconds{0.0};
+    double colptr_redirect_seconds{0.0};
+    double string_pack_seconds{0.0};
+    double sendrow_seconds{0.0};
     double batch_flush_seconds{0.0};
     double done_seconds{0.0};
     double total_seconds{0.0};

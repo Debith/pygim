@@ -16,6 +16,8 @@
 
 #include "bcp_row_helpers.h"
 
+#include <chrono>
+
 namespace pygim::bcp {
 
 // ── Abstract base ───────────────────────────────────────────────────────────
@@ -67,12 +69,15 @@ struct RowMajorTranspose final : TransposeStrategy {
 
 private:
     static void send_and_flush(BcpContext& ctx, int64_t row) {
+        const auto send_t0 = std::chrono::steady_clock::now();
         if (ctx.bcp.sendrow(ctx.dbc) != kSucceed) [[unlikely]] {
             odbc::raise_if_error(
                 SQL_ERROR, SQL_HANDLE_DBC, ctx.dbc, "bcp_sendrow");
             throw std::runtime_error(
                 "bcp_sendrow failed at row " + std::to_string(row));
         }
+        ctx.sendrow_seconds += std::chrono::duration<double>(
+            std::chrono::steady_clock::now() - send_t0).count();
         ++ctx.sent_rows;
         if (ctx.sent_rows % ctx.batch_size == 0) [[unlikely]]
             flush_batch(ctx.bcp, ctx.dbc, ctx.timer);
@@ -85,14 +90,22 @@ private:
                          int64_t num_rows)
     {
         for (int64_t row = 0; row < num_rows; ++row) {
+            const auto copy_t0 = std::chrono::steady_clock::now();
             for (auto* bp : fixed) {
                 const auto* src = static_cast<const uint8_t*>(bp->data_ptr)
                                 + static_cast<size_t>(row) * bp->value_stride;
                 std::memcpy(staging.data() + bp->staging_offset,
                             src, bp->value_stride);
             }
+            ctx.fixed_copy_seconds += std::chrono::duration<double>(
+                std::chrono::steady_clock::now() - copy_t0).count();
+
+            const auto str_t0 = std::chrono::steady_clock::now();
             for (auto* bp : string)
                 handle_string_column(ctx.bcp, ctx.dbc, *bp, row);
+            ctx.string_pack_seconds += std::chrono::duration<double>(
+                std::chrono::steady_clock::now() - str_t0).count();
+
             send_and_flush(ctx, row);
         }
     }
@@ -104,8 +117,13 @@ private:
                             int64_t num_rows)
     {
         for (int64_t row = 0; row < num_rows; ++row) {
+            const auto copy_t0 = std::chrono::steady_clock::now();
             for (auto* bp : fixed)
                 copy_fixed_or_null(ctx.bcp, ctx.dbc, *bp, staging, row);
+            ctx.fixed_copy_seconds += std::chrono::duration<double>(
+                std::chrono::steady_clock::now() - copy_t0).count();
+
+            const auto str_t0 = std::chrono::steady_clock::now();
             for (auto* bp : string) {
                 if (bp->has_nulls && is_null_at(*bp, row)) [[unlikely]] {
                     ctx.bcp.collen(ctx.dbc, SQL_NULL_DATA, bp->ordinal);
@@ -113,6 +131,9 @@ private:
                 }
                 handle_string_column(ctx.bcp, ctx.dbc, *bp, row);
             }
+            ctx.string_pack_seconds += std::chrono::duration<double>(
+                std::chrono::steady_clock::now() - str_t0).count();
+
             send_and_flush(ctx, row);
         }
     }
@@ -178,6 +199,7 @@ private:
 
             // ── Column-major fill: sequential reads from Arrow buffers ──
             if (!multi_staging.empty()) {
+                const auto copy_t0 = std::chrono::steady_clock::now();
                 for (auto* bp : fixed) {
                     const auto* col_src =
                         static_cast<const uint8_t*>(bp->data_ptr)
@@ -191,32 +213,44 @@ private:
                             bp->value_stride);
                     }
                 }
+                ctx.fixed_copy_seconds += std::chrono::duration<double>(
+                    std::chrono::steady_clock::now() - copy_t0).count();
             }
 
-            // ── Row-major sendrow from pre-filled buffer ──
+            // ── Sendrow: redirect colptr into multi_staging per row — no second copy ──
+            //
+            // Each fixed column's BCP pointer is redirected to its pre-filled slot
+            // in the mini-batch buffer.  One pointer update per column per row;
+            // no data is written.  The original `staging` buffer is bypassed for
+            // fixed-width columns in this path.
             for (int64_t r = 0; r < chunk; ++r) {
                 const int64_t abs_row = base + r;
 
-                // Point BCP at this row's data in the multi-row buffer.
                 if (!multi_staging.empty()) {
-                    const auto* row_ptr =
+                    const auto redirect_t0 = std::chrono::steady_clock::now();
+                    uint8_t* row_ptr =
                         multi_staging.data() + static_cast<size_t>(r) * rw;
-                    for (auto* bp : fixed) {
-                        std::memcpy(staging.data() + bp->staging_offset,
-                                    row_ptr + bp->staging_offset,
-                                    bp->value_stride);
-                    }
+                    for (auto* bp : fixed)
+                        ctx.bcp.colptr(ctx.dbc, row_ptr + bp->staging_offset, bp->ordinal);
+                    ctx.colptr_redirect_seconds += std::chrono::duration<double>(
+                        std::chrono::steady_clock::now() - redirect_t0).count();
                 }
 
+                const auto str_t0 = std::chrono::steady_clock::now();
                 for (auto* bp : string)
                     handle_string_column(ctx.bcp, ctx.dbc, *bp, abs_row);
+                ctx.string_pack_seconds += std::chrono::duration<double>(
+                    std::chrono::steady_clock::now() - str_t0).count();
 
+                const auto send_t0 = std::chrono::steady_clock::now();
                 if (ctx.bcp.sendrow(ctx.dbc) != kSucceed) [[unlikely]] {
                     odbc::raise_if_error(
                         SQL_ERROR, SQL_HANDLE_DBC, ctx.dbc, "bcp_sendrow");
                     throw std::runtime_error(
                         "bcp_sendrow failed at row " + std::to_string(abs_row));
                 }
+                ctx.sendrow_seconds += std::chrono::duration<double>(
+                    std::chrono::steady_clock::now() - send_t0).count();
                 ++ctx.sent_rows;
                 if (ctx.sent_rows % ctx.batch_size == 0) [[unlikely]]
                     flush_batch(ctx.bcp, ctx.dbc, ctx.timer);
@@ -239,8 +273,13 @@ private:
             const int64_t end = std::min(base + mb, num_rows);
 
             for (int64_t row = base; row < end; ++row) {
+                const auto copy_t0 = std::chrono::steady_clock::now();
                 for (auto* bp : fixed)
                     copy_fixed_or_null(ctx.bcp, ctx.dbc, *bp, staging, row);
+                ctx.fixed_copy_seconds += std::chrono::duration<double>(
+                    std::chrono::steady_clock::now() - copy_t0).count();
+
+                const auto str_t0 = std::chrono::steady_clock::now();
                 for (auto* bp : string) {
                     if (bp->has_nulls && is_null_at(*bp, row)) [[unlikely]] {
                         ctx.bcp.collen(ctx.dbc, SQL_NULL_DATA, bp->ordinal);
@@ -248,12 +287,18 @@ private:
                     }
                     handle_string_column(ctx.bcp, ctx.dbc, *bp, row);
                 }
+                ctx.string_pack_seconds += std::chrono::duration<double>(
+                    std::chrono::steady_clock::now() - str_t0).count();
+
+                const auto send_t0 = std::chrono::steady_clock::now();
                 if (ctx.bcp.sendrow(ctx.dbc) != kSucceed) [[unlikely]] {
                     odbc::raise_if_error(
                         SQL_ERROR, SQL_HANDLE_DBC, ctx.dbc, "bcp_sendrow");
                     throw std::runtime_error(
                         "bcp_sendrow failed at row " + std::to_string(row));
                 }
+                ctx.sendrow_seconds += std::chrono::duration<double>(
+                    std::chrono::steady_clock::now() - send_t0).count();
                 ++ctx.sent_rows;
                 if (ctx.sent_rows % ctx.batch_size == 0) [[unlikely]]
                     flush_batch(ctx.bcp, ctx.dbc, ctx.timer);

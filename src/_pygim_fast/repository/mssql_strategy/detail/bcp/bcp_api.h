@@ -36,6 +36,19 @@ using LPCWSTR = const SQLWCHAR*;
 #endif
 #endif
 
+// SQL_SS_TIME2_STRUCT is defined in msodbcsql.h (Windows / Microsoft driver
+// package headers), but those headers are not available in unixODBC on Linux.
+// Define an equivalent struct when the driver header is absent.
+#ifndef SQL_SS_TIME2_STRUCT_DEFINED
+#define SQL_SS_TIME2_STRUCT_DEFINED
+typedef struct tagSS_TIME2_STRUCT {
+    SQLUSMALLINT hour;
+    SQLUSMALLINT minute;
+    SQLUSMALLINT second;
+    SQLUINTEGER  fraction;  // in 100-nanosecond units
+} SQL_SS_TIME2_STRUCT;
+#endif
+
 #endif // !Windows
 
 namespace pygim::bcp {
@@ -44,16 +57,21 @@ namespace pygim::bcp {
 // These are integer tokens passed to bcp_bind(), NOT C type aliases.
 // Namespaced to avoid collision with ODBC typedefs of the same name.
 namespace sql_type {
-    inline constexpr int bigint     = 0x7f;
-    inline constexpr int int4       = 0x38;
-    inline constexpr int bit        = 0x32;
-    inline constexpr int flt8       = 0x3e;
-    inline constexpr int character  = 0x2f;
-    inline constexpr int varchar    = 0x27;
-    inline constexpr int nchar      = 0xef;
-    inline constexpr int daten      = 0x28;
-    inline constexpr int datetime2n = 0x2a;
-    inline constexpr int varlen_data = -10;
+    inline constexpr int int1       = 0x30;  // TINYINT
+    inline constexpr int int2       = 0x34;  // SMALLINT
+    inline constexpr int int4       = 0x38;  // INT
+    inline constexpr int bigint     = 0x7f;  // BIGINT
+    inline constexpr int bit        = 0x32;  // BIT
+    inline constexpr int flt4       = 0x3b;  // REAL / FLOAT(24)
+    inline constexpr int flt8       = 0x3e;  // FLOAT / FLOAT(53)
+    inline constexpr int character  = 0x2f;  // NVARCHAR / NCHAR (string)
+    inline constexpr int varchar    = 0x27;  // VARCHAR
+    inline constexpr int nchar      = 0xef;  // NCHAR
+    inline constexpr int daten      = 0x28;  // DATE
+    inline constexpr int timen      = 0x29;  // TIME
+    inline constexpr int datetime2n = 0x2a;  // DATETIME2
+    inline constexpr int binary     = 0x2d;  // BINARY / VARBINARY
+    inline constexpr int varlen_data = -10;  // variable-length marker
 } // namespace sql_type
 
 inline constexpr int kSucceed  = 1;

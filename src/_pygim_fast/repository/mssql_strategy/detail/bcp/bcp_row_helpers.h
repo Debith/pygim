@@ -32,17 +32,38 @@ inline void handle_string_column(const BcpApi& bcp, SQLHDBC dbc,
         len = static_cast<DBINT>(view.size());
         ptr = reinterpret_cast<const uint8_t*>(view.data());
     }
+    else if (b.binary_view_array) {
+        auto view = b.binary_view_array->GetView(row);
+        len = static_cast<DBINT>(view.size());
+        ptr = reinterpret_cast<const uint8_t*>(view.data());
+    }
 #endif
     else { return; /* unreachable for valid bindings */ }
 
     const auto ulen = static_cast<size_t>(len);
-    if (ulen + 1 > b.str_buf.size()) {
-        b.str_buf.resize(ulen + 1);
-        b.str_buf_bound = false;
+
+    if (b.is_binary) {
+        // Binary columns use a 4-byte DBINT length prefix (no terminator).
+        // Layout: [DBINT length][data bytes]
+        constexpr size_t prefix = sizeof(DBINT);
+        const auto need = prefix + ulen;
+        if (need > b.str_buf.size()) {
+            b.str_buf.resize(need);
+            b.str_buf_bound = false;
+        }
+        std::memcpy(b.str_buf.data(), &len, prefix);
+        std::memcpy(b.str_buf.data() + prefix, ptr, ulen);
+        // No bcp_collen needed — the prefix carries the length.
+    } else {
+        // String columns: copy + null-terminate, set bcp_collen.
+        if (ulen + 1 > b.str_buf.size()) {
+            b.str_buf.resize(ulen + 1);
+            b.str_buf_bound = false;
+        }
+        std::memcpy(b.str_buf.data(), ptr, ulen);
+        b.str_buf[ulen] = '\0';
+        bcp.collen(dbc, len, b.ordinal);
     }
-    std::memcpy(b.str_buf.data(), ptr, ulen);
-    b.str_buf[ulen] = '\0';
-    bcp.collen(dbc, len, b.ordinal);
 
     if (!b.str_buf_bound) [[unlikely]] {
         bcp.colptr(dbc, b.str_buf.data(), b.ordinal);
