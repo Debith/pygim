@@ -54,6 +54,8 @@ struct BcpMetrics {
     long long sent_rows{0};
     long long record_batches{0};
     std::string input_mode{"none"};
+    std::string simd_level{"scalar"};
+    std::string timing_level{"stage"};
 };
 
 /// Pybind-free MSSQL strategy implementing core::Strategy.

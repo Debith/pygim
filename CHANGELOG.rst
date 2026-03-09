@@ -29,8 +29,15 @@ Added
 
 Changed
 ~~~~~~~
+- Repository/MSSQL BCP: Column-major AVX2 path is now strictly opt-in: only enabled if ``PYGIM_FORCE_SIMD=avx2``. All hardware auto-detection is removed; scalar is the default.
+- Repository/MSSQL BCP: Profile-aware activation: AVX2 is only enabled if ``plan_avx2_blocks`` finds at least 2 eligible blocks. Otherwise, scalar path is used to avoid unnecessary vector overhead.
+- Repository/MSSQL BCP: Eliminated per-row ``bcp_colptr`` redirect loop in column-major path — replaced N per-column ODBC calls per row with a single ``memcpy`` from the pre-filled mini-batch buffer into the original staging buffer. Reduces redirect overhead from ~500 ms to ~24 ms for 1 M rows (exhaustive profile).
+- Repository/MSSQL BCP: Promoted micro-metrics (fixed-copy, colptr-redirect, string-pack, sendrow) from hot-only to stage-level timing — always collected when any timing is enabled (~1 % overhead on 1 M rows). Makes per-component breakdown visible in default benchmark runs.
+- Repository/MSSQL BCP: Column-major AVX2 transpose now precomputes eligible contiguous 8x4-byte blocks once per run and reuses the per-column copied marker buffer across mini-batches, removing repeated block eligibility scans and hot-loop allocations.
+- Repository/MSSQL BCP: Added AVX2 4x4 transpose support for contiguous 8-byte fixed-width columns (int64/uint64/double/duration) behind ``PYGIM_ENABLE_AVX2_8B=1`` for controlled validation; default AVX2 path remains 4-byte-block optimized.
 - Packaging: Made ``tabulate>=0.9`` a required runtime dependency (no fallback formatter in ``benchmarks/bcp_throughput.py``).
-- Repository/MSSQL BCP: Added row-loop micro-metrics (fixed-copy, colptr redirect, string packing, sendrow) and exposed them via ``persist_dataframe(...)["bcp_metrics"]`` for benchmark analysis.
+- Repository/MSSQL BCP: Added row-loop micro-metrics (fixed-copy, colptr redirect, string packing, sendrow) and exposed them via ``persist_dataframe(...)['bcp_metrics']`` for benchmark analysis.
+- Utils/Timing: Added structured ``QuickTimer`` reporting API (snapshot with total + subtimers) and switched BCP metric extraction to consume ``timer.report()`` instead of repeated ad-hoc lookups.
 - Build: Raised minimum arrow-cpp build dependency to >= 15 (tested at 23.0.1). Enforced at compile time via ``static_assert`` in ``bcp_types.h`` — builds against arrow-cpp < 15 fail with an explicit message directing the user to ``conda install -c conda-forge 'arrow-cpp>=15' 'pyarrow>=15'``. Removed the ``PYGIM_HAVE_ARROW_STRING_VIEW`` compile-time gate; ``bind_string_view`` is now unconditionally compiled.
 - Build: Removed ``PYGIM_HAVE_ODBC`` and ``PYGIM_HAVE_ARROW`` compile-time feature flags. ODBC and Arrow C++ are now mandatory build dependencies (fail-fast philosophy).
 - Build: Removed dependency probing from ``setup.py``; compilation fails directly if headers/libraries are missing.

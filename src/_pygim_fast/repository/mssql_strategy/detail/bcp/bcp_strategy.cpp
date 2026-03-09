@@ -21,8 +21,25 @@
 #include "bcp_bind.h"
 #include "bcp_row_loop.h"
 
+#include <algorithm>
+#include <cctype>
+#include <cstdlib>
+
 namespace pygim::bcp {
 namespace {
+
+TimingLevel resolve_timing_level_from_env() {
+    const char* raw = std::getenv("PYGIM_TIMING_LEVEL");
+    if (!raw || *raw == '\0') return TimingLevel::Stage;
+
+    std::string value(raw);
+    std::transform(value.begin(), value.end(), value.begin(),
+                   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+
+    if (value == "off" || value == "none" || value == "0") return TimingLevel::Off;
+    if (value == "hot" || value == "deep" || value == "2") return TimingLevel::Hot;
+    return TimingLevel::Stage;
+}
 
 // ── Session setup helpers ───────────────────────────────────────────────────
 
@@ -62,15 +79,15 @@ void init_session(const BcpApi& api, SQLHDBC dbc,
 
 void finalize_bcp(BcpContext& ctx) {
     if (ctx.sent_rows > 0 && ctx.sent_rows % ctx.batch_size != 0) {
-        ctx.timer.start_sub_timer("batch_flush", false);
+        stage_timer_start(ctx, ctx.timer_batch_flush_id, "batch_flush");
         auto ret = ctx.bcp.batch(ctx.dbc);
-        ctx.timer.stop_sub_timer("batch_flush", false);
+        stage_timer_stop(ctx, ctx.timer_batch_flush_id, "batch_flush");
         if (ret == -1)
             odbc::raise_if_error(SQL_ERROR, SQL_HANDLE_DBC, ctx.dbc, "bcp_batch");
     }
-    ctx.timer.start_sub_timer("done", false);
+    stage_timer_start(ctx, ctx.timer_done_id, "done");
     auto done = ctx.bcp.done(ctx.dbc);
-    ctx.timer.stop_sub_timer("done", false);
+    stage_timer_stop(ctx, ctx.timer_done_id, "done");
     if (done == -1)
         odbc::raise_if_error(SQL_ERROR, SQL_HANDLE_DBC, ctx.dbc, "bcp_done");
 }
@@ -80,24 +97,24 @@ void finalize_bcp(BcpContext& ctx) {
 void extract_metrics(const BcpContext& ctx,
                      const QuickTimer& timer,
                      mssql::BcpMetrics& m) {
-    auto sub = [&](std::string_view name) -> double {
-        try { return timer.sub_timer_seconds(name); }
-        catch (...) { return 0.0; }
-    };
-    m.setup_seconds        = sub("setup");
-    m.reader_open_seconds  = sub("reader_open");
-    m.bind_columns_seconds = sub("bind_columns");
-    m.row_loop_seconds     = sub("row_loop");
+    const auto snapshot = timer.report();
+
+    m.setup_seconds        = snapshot.sub_timer_seconds("setup");
+    m.reader_open_seconds  = snapshot.sub_timer_seconds("reader_open");
+    m.bind_columns_seconds = snapshot.sub_timer_seconds("bind_columns");
+    m.row_loop_seconds     = snapshot.sub_timer_seconds("row_loop");
     m.fixed_copy_seconds   = ctx.fixed_copy_seconds;
     m.colptr_redirect_seconds = ctx.colptr_redirect_seconds;
     m.string_pack_seconds  = ctx.string_pack_seconds;
     m.sendrow_seconds      = ctx.sendrow_seconds;
-    m.batch_flush_seconds  = sub("batch_flush");
-    m.done_seconds         = sub("done");
+    m.batch_flush_seconds  = snapshot.sub_timer_seconds("batch_flush");
+    m.done_seconds         = snapshot.sub_timer_seconds("done");
     m.processed_rows       = ctx.processed_rows;
     m.sent_rows            = ctx.sent_rows;
     m.record_batches       = ctx.record_batches;
-    m.total_seconds        = timer.total_seconds();
+    m.simd_level           = ctx.simd_level;
+    m.timing_level         = timing_level_name(ctx.timing_level);
+    m.total_seconds        = snapshot.total_seconds;
 }
 
 } // anonymous namespace
@@ -119,16 +136,31 @@ void bulk_insert_arrow_bcp(
     QuickTimer timer("bulk_insert_arrow_bcp", std::clog, false, false);
 
     // 1. Setup: load driver, enable BCP, init session
-    timer.start_sub_timer("setup", false);
+    const auto timer_setup_id = timer.get_or_create_sub_timer_id("setup");
+    timer.start_sub_timer(timer_setup_id, false);
     const auto& api = ensure_bcp_api();
     enable_bcp_attr(dbc);
     auto qualified = sql::qualify_table(table);
     init_session(api, dbc, qualified, table_hint);
-    timer.stop_sub_timer("setup", false);
+    timer.stop_sub_timer(timer_setup_id, false);
 
     // 2. Iterate RecordBatchReader — no Python references past this point
     BcpContext ctx{api, dbc, timer,
                    batch_size > 0 ? static_cast<int64_t>(batch_size) : 100000LL};
+    ctx.timing_level = resolve_timing_level_from_env();
+    ctx.timer_setup_id = timer_setup_id;
+    ctx.timer_bind_columns_id = timer.get_or_create_sub_timer_id("bind_columns");
+    ctx.timer_row_loop_id = timer.get_or_create_sub_timer_id("row_loop");
+    ctx.timer_batch_flush_id = timer.get_or_create_sub_timer_id("batch_flush");
+    ctx.timer_done_id = timer.get_or_create_sub_timer_id("done");
+
+    if (!stage_timing_enabled(ctx)) {
+        ctx.timer_setup_id = BcpContext::kInvalidTimerId;
+        ctx.timer_bind_columns_id = BcpContext::kInvalidTimerId;
+        ctx.timer_row_loop_id = BcpContext::kInvalidTimerId;
+        ctx.timer_batch_flush_id = BcpContext::kInvalidTimerId;
+        ctx.timer_done_id = BcpContext::kInvalidTimerId;
+    }
     ctx.transpose = transpose;  // nullptr → run_row_loop falls back to RowMajorTranspose
 
     while (true) {

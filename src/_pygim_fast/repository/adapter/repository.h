@@ -268,6 +268,8 @@ public:
                 bcpm["sent_rows"] = m.sent_rows;
                 bcpm["record_batches"] = m.record_batches;
                 bcpm["input_mode"] = py::str(m.input_mode);
+                bcpm["simd_level"] = py::str(m.simd_level);
+                bcpm["timing_level"] = py::str(m.timing_level);
             } else if (auto* s = dynamic_cast<const mssql::MssqlStrategy<bcp::ColumnMajorTranspose>*>(strategy)) {
                 const auto& m = s->last_bcp_metrics();
                 bcpm["setup_seconds"] = m.setup_seconds;
@@ -285,6 +287,8 @@ public:
                 bcpm["sent_rows"] = m.sent_rows;
                 bcpm["record_batches"] = m.record_batches;
                 bcpm["input_mode"] = py::str(m.input_mode);
+                bcpm["simd_level"] = py::str(m.simd_level);
+                bcpm["timing_level"] = py::str(m.timing_level);
             }
             if (!bcpm.empty())
                 result["bcp_metrics"] = std::move(bcpm);

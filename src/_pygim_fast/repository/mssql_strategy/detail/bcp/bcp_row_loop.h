@@ -43,16 +43,16 @@ inline void process_batch(BcpContext& ctx,
     ++ctx.record_batches;
     ctx.processed_rows += batch->num_rows();
 
-    ctx.timer.start_sub_timer("bind_columns", false);
+    stage_timer_start(ctx, ctx.timer_bind_columns_id, "bind_columns");
     auto bindings = bind_columns(ctx.bcp, ctx.dbc, batch);
-    ctx.timer.stop_sub_timer("bind_columns", false);
+    stage_timer_stop(ctx, ctx.timer_bind_columns_id, "bind_columns");
 
     auto [fixed, string, any_nulls] = classify_columns(bindings);
     auto staging = setup_staging(ctx.bcp, ctx.dbc, fixed);
 
-    ctx.timer.start_sub_timer("row_loop", false);
+    stage_timer_start(ctx, ctx.timer_row_loop_id, "row_loop");
     run_row_loop(ctx, fixed, string, staging, batch->num_rows(), any_nulls);
-    ctx.timer.stop_sub_timer("row_loop", false);
+    stage_timer_stop(ctx, ctx.timer_row_loop_id, "row_loop");
 }
 
 // ── Templated overload: concrete Transpose type known at compile time ───────
@@ -70,16 +70,16 @@ inline void process_batch(BcpContext& ctx,
     ++ctx.record_batches;
     ctx.processed_rows += batch->num_rows();
 
-    ctx.timer.start_sub_timer("bind_columns", false);
+    stage_timer_start(ctx, ctx.timer_bind_columns_id, "bind_columns");
     auto bindings = bind_columns(ctx.bcp, ctx.dbc, batch);
-    ctx.timer.stop_sub_timer("bind_columns", false);
+    stage_timer_stop(ctx, ctx.timer_bind_columns_id, "bind_columns");
 
     auto [fixed, string, any_nulls] = classify_columns(bindings);
     auto staging = setup_staging(ctx.bcp, ctx.dbc, fixed);
 
-    ctx.timer.start_sub_timer("row_loop", false);
+    stage_timer_start(ctx, ctx.timer_row_loop_id, "row_loop");
     strategy.run(ctx, fixed, string, staging, batch->num_rows(), any_nulls);
-    ctx.timer.stop_sub_timer("row_loop", false);
+    stage_timer_stop(ctx, ctx.timer_row_loop_id, "row_loop");
 }
 
 } // namespace pygim::bcp

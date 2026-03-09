@@ -73,14 +73,17 @@ inline void handle_string_column(const BcpApi& bcp, SQLHDBC dbc,
 
 // ── Batch flush ─────────────────────────────────────────────────────────────
 
-inline void flush_batch(const BcpApi& bcp, SQLHDBC dbc, QuickTimer& timer) {
-    timer.stop_sub_timer("row_loop", false);
-    timer.start_sub_timer("batch_flush", false);
+inline void flush_batch(const BcpApi& bcp, SQLHDBC dbc, BcpContext& ctx) {
+    stage_timer_stop(ctx, ctx.timer_row_loop_id, "row_loop");
+    stage_timer_start(ctx, ctx.timer_batch_flush_id, "batch_flush");
+
     auto ret = bcp.batch(dbc);
-    timer.stop_sub_timer("batch_flush", false);
+    stage_timer_stop(ctx, ctx.timer_batch_flush_id, "batch_flush");
+
     if (ret == -1) [[unlikely]]
         odbc::raise_if_error(SQL_ERROR, SQL_HANDLE_DBC, dbc, "bcp_batch");
-    timer.start_sub_timer("row_loop", false);
+
+    stage_timer_start(ctx, ctx.timer_row_loop_id, "row_loop");
 }
 
 // ── Fixed column with null toggle ───────────────────────────────────────────

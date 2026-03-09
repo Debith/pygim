@@ -2,11 +2,14 @@
 // BCP types: ColumnBinding, BcpContext, null-checking, constexpr temporal converters.
 
 #include "bcp_api.h"
+#include "../../../../utils/quick_timer.h"
 
 #include <chrono>
+#include <cstddef>
 #include <cstring>
 #include <memory>
 #include <span>
+#include <string>
 #include <vector>
 
 #include <arrow/array.h>
@@ -23,10 +26,22 @@ static_assert(false,
     "Upgrade: conda install -c conda-forge 'arrow-cpp>=15' 'pyarrow>=15'");
 #endif
 
-// Forward-declare to avoid pulling in the full header in every translation unit.
-namespace pygim { class QuickTimer; }
-
 namespace pygim::bcp {
+
+enum class TimingLevel {
+    Off,
+    Stage,
+    Hot,
+};
+
+[[nodiscard]] inline const char* timing_level_name(TimingLevel level) noexcept {
+    switch (level) {
+        case TimingLevel::Off:   return "off";
+        case TimingLevel::Stage: return "stage";
+        case TimingLevel::Hot:   return "hot";
+    }
+    return "stage";
+}
 
 // Forward-declare so BcpContext can hold a non-owning pointer.
 struct TransposeStrategy;
@@ -71,6 +86,8 @@ struct ColumnBinding {
 // ── BcpContext ──────────────────────────────────────────────────────────────
 /// Session state threaded through all BCP helper functions.
 struct BcpContext {
+    static constexpr std::size_t kInvalidTimerId = static_cast<std::size_t>(-1);
+
     const BcpApi& bcp;
     SQLHDBC       dbc;
     QuickTimer&   timer;
@@ -84,11 +101,64 @@ struct BcpContext {
     double colptr_redirect_seconds{0.0};
     double string_pack_seconds{0.0};
     double sendrow_seconds{0.0};
+    std::string simd_level{"scalar"};
+    TimingLevel timing_level{TimingLevel::Stage};
+
+    // Pre-resolved QuickTimer indices (avoid repeated name-based lookups)
+    std::size_t timer_row_loop_id{kInvalidTimerId};
+    std::size_t timer_bind_columns_id{kInvalidTimerId};
+    std::size_t timer_batch_flush_id{kInvalidTimerId};
+    std::size_t timer_setup_id{kInvalidTimerId};
+    std::size_t timer_done_id{kInvalidTimerId};
 
     /// Pluggable transpose strategy (non-owning).  When nullptr, falls back
     /// to the default RowMajorTranspose defined in bcp_transpose_strategy.h.
     TransposeStrategy* transpose{nullptr};
 };
+
+[[nodiscard]] inline bool stage_timing_enabled(const BcpContext& ctx) noexcept {
+    return ctx.timing_level != TimingLevel::Off;
+}
+
+[[nodiscard]] inline bool hot_timing_enabled(const BcpContext& ctx) noexcept {
+    return ctx.timing_level == TimingLevel::Hot;
+}
+
+[[nodiscard]] inline std::chrono::steady_clock::time_point hot_timer_start(
+    const BcpContext& ctx) noexcept {
+    // Promoted from hot-only to stage-level: always collect micro-metrics
+    // when any timing is enabled.  Overhead is <1% on 1 M rows.
+    if (stage_timing_enabled(ctx)) return std::chrono::steady_clock::now();
+    return {};
+}
+
+inline void hot_timer_add(const BcpContext& ctx,
+                          std::chrono::steady_clock::time_point t0,
+                          double& accumulator) noexcept {
+    if (!stage_timing_enabled(ctx)) return;
+    accumulator += std::chrono::duration<double>(
+        std::chrono::steady_clock::now() - t0).count();
+}
+
+inline void stage_timer_start(BcpContext& ctx,
+                              std::size_t timer_id,
+                              const char* fallback_name) {
+    if (!stage_timing_enabled(ctx)) return;
+    if (timer_id != BcpContext::kInvalidTimerId)
+        ctx.timer.start_sub_timer(timer_id, false);
+    else
+        ctx.timer.start_sub_timer(fallback_name, false);
+}
+
+inline void stage_timer_stop(BcpContext& ctx,
+                             std::size_t timer_id,
+                             const char* fallback_name) {
+    if (!stage_timing_enabled(ctx)) return;
+    if (timer_id != BcpContext::kInvalidTimerId)
+        ctx.timer.stop_sub_timer(timer_id, false);
+    else
+        ctx.timer.stop_sub_timer(fallback_name, false);
+}
 
 // ── ClassifiedColumns ───────────────────────────────────────────────────────
 struct ClassifiedColumns {

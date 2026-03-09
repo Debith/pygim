@@ -344,6 +344,8 @@ def print_result(r: dict, profile: str) -> None:
         mode = bcp.get("mode", "?")
         bcp_m = bcp.get("bcp_metrics")
         if isinstance(bcp_m, dict):
+            simd_level = str(bcp_m.get("simd_level", "scalar"))
+            timing_level = str(bcp_m.get("timing_level", "stage"))
             row_loop = float(bcp_m.get("row_loop_seconds", 0))
             fixed_copy = float(bcp_m.get("fixed_copy_seconds", 0))
             redirect = float(bcp_m.get("colptr_redirect_seconds", 0))
@@ -353,7 +355,7 @@ def print_result(r: dict, profile: str) -> None:
             total = float(bcp_m.get("total_seconds", 0))
             sent = int(bcp_m.get("sent_rows", 0))
             print(
-                f"           mode={mode}  "
+                f"           mode={mode}  simd={simd_level}  timing={timing_level}  "
                 f"row_loop={row_loop:.3f}s  copy={fixed_copy:.3f}s  "
                 f"redirect={redirect:.3f}s  string={string_pack:.3f}s  "
                 f"sendrow={sendrow:.3f}s  batch_flush={batch_flush:.3f}s  "
@@ -370,9 +372,20 @@ def print_comparison_table(results: list[dict]) -> None:
     rows = []
     for r in results:
         payload_mb = r["payload_bytes"] / 1_048_576
+        simd_level = "-"
+        timing_level = "-"
+        bcp = r.get("bcp_metrics")
+        if isinstance(bcp, dict):
+            bcp_m = bcp.get("bcp_metrics")
+            if isinstance(bcp_m, dict):
+                simd_level = str(bcp_m.get("simd_level", "-"))
+                timing_level = str(bcp_m.get("timing_level", "-"))
+
         rows.append([
             r["profile"],
             r["strategy"],
+            simd_level,
+            timing_level,
             f"{r['rows']:,}",
             f"{r['elapsed_s']:.2f}s",
             f"{r['rows_s']:,.0f}",
@@ -380,7 +393,10 @@ def print_comparison_table(results: list[dict]) -> None:
             f"{payload_mb:.1f}",
         ])
 
-    headers = ["Profile", "Strategy", "Rows", "Elapsed", "rows/s", "MB/s", "Payload MB"]
+    headers = [
+        "Profile", "Strategy", "SIMD", "Timing",
+        "Rows", "Elapsed", "rows/s", "MB/s", "Payload MB"
+    ]
 
     print()
     print(tabulate(rows, headers=headers, tablefmt="github"))

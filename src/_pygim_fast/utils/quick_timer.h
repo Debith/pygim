@@ -13,8 +13,29 @@
 
 namespace pygim {
 
+struct QuickTimerEntry {
+    std::string name;
+    double seconds{0.0};
+};
+
+struct QuickTimerReport {
+    std::string name;
+    double total_seconds{0.0};
+    std::vector<QuickTimerEntry> sub_timers;
+
+    [[nodiscard]] double sub_timer_seconds(std::string_view timer_name) const noexcept {
+        for (const auto& entry : sub_timers) {
+            if (entry.name == timer_name) return entry.seconds;
+        }
+        return 0.0;
+    }
+};
+
 class QuickTimer {
 public:
+    using TimerId = std::size_t;
+    static constexpr TimerId kInvalidTimerId = static_cast<TimerId>(-1);
+
     explicit QuickTimer(std::string name = "QuickTimer",
                         std::ostream &output = std::clog,
                         bool auto_print = true,
@@ -44,22 +65,37 @@ public:
             throw std::invalid_argument("sub timer name must not be empty");
         }
 
-        if (has_active_sub_timer()) {
-            stop_sub_timer(std::string_view{}, false);
+        start_sub_timer(get_or_create_sub_timer_id(name), print_on_start);
+    }
+
+    [[nodiscard]] TimerId get_or_create_sub_timer_id(const std::string& name) {
+        if (name.empty()) {
+            throw std::invalid_argument("sub timer name must not be empty");
         }
 
         auto it = m_sub_timer_indices.find(name);
         if (it == m_sub_timer_indices.end()) {
-            const std::size_t index = m_sub_timers.size();
+            const TimerId index = m_sub_timers.size();
             m_sub_timers.push_back(SubTimer{name});
             m_sub_timer_indices.emplace(name, index);
-            it = m_sub_timer_indices.find(name);
+            return index;
+        }
+        return it->second;
+    }
+
+    void start_sub_timer(TimerId id, bool print_on_start = true) {
+        if (id >= m_sub_timers.size()) {
+            throw std::out_of_range("sub timer id out of range");
         }
 
-        SubTimer &sub_timer = m_sub_timers[it->second];
+        if (has_active_sub_timer()) {
+            stop_sub_timer(std::string_view{}, false);
+        }
+
+        SubTimer &sub_timer = m_sub_timers[id];
         sub_timer.running = true;
         sub_timer.started_at = Clock::now();
-        m_active_sub_timer_index = it->second;
+        m_active_sub_timer_index = id;
         if (print_on_start) {
             print_started(sub_timer.name);
         }
@@ -91,9 +127,55 @@ public:
         return sub_timer.seconds;
     }
 
+    double stop_sub_timer(TimerId id, bool print_now = true) {
+        if (id >= m_sub_timers.size()) {
+            throw std::out_of_range("sub timer id out of range");
+        }
+
+        SubTimer &sub_timer = m_sub_timers[id];
+
+        if (!sub_timer.running) {
+            if (print_now) {
+                print_single(sub_timer.name, sub_timer.seconds);
+            }
+            return sub_timer.seconds;
+        }
+
+        const auto now = Clock::now();
+        const double elapsed = std::chrono::duration<double>(now - sub_timer.started_at).count();
+        sub_timer.seconds += elapsed;
+        sub_timer.running = false;
+
+        if (m_active_sub_timer_index.has_value() && m_active_sub_timer_index.value() == id) {
+            m_active_sub_timer_index.reset();
+        }
+
+        if (print_now) {
+            print_single(sub_timer.name, sub_timer.seconds);
+        }
+        return sub_timer.seconds;
+    }
+
     double total_seconds() const {
         const auto now = Clock::now();
         return std::chrono::duration<double>(now - m_started_at).count();
+    }
+
+    [[nodiscard]] QuickTimerReport report() const {
+        QuickTimerReport out;
+        out.name = m_name;
+        out.total_seconds = total_seconds();
+        out.sub_timers.reserve(m_sub_timers.size());
+
+        const auto now = Clock::now();
+        for (const auto& sub_timer : m_sub_timers) {
+            double seconds = sub_timer.seconds;
+            if (sub_timer.running) {
+                seconds += std::chrono::duration<double>(now - sub_timer.started_at).count();
+            }
+            out.sub_timers.push_back(QuickTimerEntry{sub_timer.name, seconds});
+        }
+        return out;
     }
 
     double sub_timer_seconds(std::string_view name) const {
@@ -101,14 +183,8 @@ public:
         if (it == m_sub_timer_indices.end()) {
             throw std::out_of_range("sub timer not found: " + std::string(name));
         }
-
-        const SubTimer &sub_timer = m_sub_timers[it->second];
-        double seconds = sub_timer.seconds;
-        if (sub_timer.running) {
-            const auto now = Clock::now();
-            seconds += std::chrono::duration<double>(now - sub_timer.started_at).count();
-        }
-        return seconds;
+        const auto snapshot = report();
+        return snapshot.sub_timer_seconds(name);
     }
 
     void print_summary() {
@@ -120,9 +196,10 @@ public:
             return;
         }
 
-        (*m_output) << m_name << " total: " << format_seconds(total_seconds()) << "s" << std::endl;
-        for (const auto &sub_timer : m_sub_timers) {
-            (*m_output) << "  - " << sub_timer.name << ": " << format_seconds(sub_timer.seconds) << "s" << std::endl;
+        const auto snapshot = report();
+        (*m_output) << snapshot.name << " total: " << format_seconds(snapshot.total_seconds) << "s" << std::endl;
+        for (const auto &entry : snapshot.sub_timers) {
+            (*m_output) << "  - " << entry.name << ": " << format_seconds(entry.seconds) << "s" << std::endl;
         }
     }
 
