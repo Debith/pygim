@@ -39,4 +39,19 @@ void bulk_insert_arrow_bcp(
     mssql::BcpMetrics& metrics_out,
     TransposeStrategy* transpose = nullptr);
 
+/// Parallel variant: opens M additional ODBC connections and distributes
+/// Arrow RecordBatches across worker threads for concurrent bcp_sendrow.
+/// @param conn_str     ODBC connection string (used to open pool connections).
+/// @param num_workers  Number of parallel BCP sessions (0 = auto).
+void bulk_insert_arrow_bcp_parallel(
+    const std::string& conn_str,
+    const std::string& table,
+    std::shared_ptr<arrow::RecordBatchReader> reader,
+    const std::string& input_mode,
+    int batch_size,
+    const std::string& table_hint,
+    int num_workers,
+    mssql::BcpMetrics& metrics_out,
+    TransposeStrategy* transpose = nullptr);
+
 } // namespace pygim::bcp

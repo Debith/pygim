@@ -79,10 +79,20 @@ void MssqlStrategy<Transpose>::persist(const core::TableSpec &table_spec,
     std::visit([&](auto &&data) {
         using T = std::decay_t<decltype(data)>;
         if constexpr (std::is_same_v<T, core::ArrowView>) {
-            // Pass m_transpose by address so run_row_loop() routes through the
-            // strategy fixed at construction time.  Since RowMajorTranspose and
-            // ColumnMajorTranspose are both final, the compiler can devirtualize
-            // the run() call when the concrete type is visible at the call site.
+            if (opts.bcp_workers >= 2) {
+                // Parallel path: multiple BCP connections.
+                bcp::bulk_insert_arrow_bcp_parallel(
+                    m_conn_str, table_spec.name,
+                    std::move(data.reader),
+                    data.input_mode,
+                    opts.batch_size,
+                    table_spec.table_hint,
+                    opts.bcp_workers,
+                    m_last_bcp_metrics,
+                    &m_transpose);
+                return;
+            }
+            // Single-connection path (default, bcp_workers 0 or 1).
             bcp::bulk_insert_arrow_bcp(m_dbc, table_spec.name,
                                        std::move(data.reader),
                                        data.input_mode,

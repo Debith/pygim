@@ -121,6 +121,7 @@ struct PersistOptions {
     PersistMode mode{PersistMode::Insert};
     int batch_size{1000};
     std::optional<std::string> key_column; ///< Required when mode == Upsert.
+    int bcp_workers{0}; ///< Number of parallel BCP worker connections (0 = single-connection).
 };
 
 } // namespace pygim::core

@@ -285,6 +285,7 @@ def run_one(
     strategy: str,
     bcp_batch_size: int,
     table_hint: str,
+    bcp_workers: int = 0,
 ) -> dict:
     """Insert *df* via BCP and return timing metrics."""
     from pygim import acquire_repository
@@ -301,6 +302,7 @@ def run_one(
         prefer_arrow=True,
         bcp_batch_size=bcp_batch_size,
         table_hint=table_hint,
+        bcp_workers=bcp_workers,
     )
     elapsed = time.perf_counter() - t0
 
@@ -448,6 +450,8 @@ Examples:
                    help="BCP commit batch size (default: 100,000)")
     p.add_argument("--table-hint", default="TABLOCK",
                    help="SQL table hint (default: TABLOCK)")
+    p.add_argument("--workers", type=int, default=0,
+                   help="Number of parallel BCP connections (default: 0 = single-connection)")
     p.add_argument("--no-truncate", action="store_true",
                    help="Skip TRUNCATE before each run")
     p.add_argument("--warmup", action="store_true",
@@ -493,7 +497,8 @@ def main() -> None:
         if not args.no_truncate:
             truncate_table(conn_str, warmup_table, pyodbc)
         run_one(conn_str, warmup_table, data[warmup_profile],
-                strategies[0], args.batch_size, args.table_hint)
+                strategies[0], args.batch_size, args.table_hint,
+                args.workers)
 
     # ── Benchmark runs ───────────────────────────────────────────────────────
     all_results: list[dict] = []
@@ -506,7 +511,8 @@ def main() -> None:
             if not args.no_truncate:
                 truncate_table(conn_str, table, pyodbc)
             print(f"Running [{pname}] with {strat} …")
-            r = run_one(conn_str, table, df, strat, args.batch_size, args.table_hint)
+            r = run_one(conn_str, table, df, strat, args.batch_size, args.table_hint,
+                        args.workers)
             r["profile"] = pname
             all_results.append(r)
             print_result(r, pname)

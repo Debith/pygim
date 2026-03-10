@@ -224,7 +224,8 @@ public:
                                bool prefer_arrow = true,
                                const std::string &table_hint = "TABLOCK",
                                int batch_size = 1000,
-                               int bcp_batch_size = 0) {
+                               int bcp_batch_size = 0,
+                               int bcp_workers = 0) {
         // Columns inferred from data_frame inside ExtractionPolicy.
         auto view = ExtractionPolicy::extract(data_frame, {}, prefer_arrow);
 
@@ -241,7 +242,7 @@ public:
         const int effective_batch = is_arrow ? bcp_batch_size : batch_size;
 
         core::TableSpec ts{table, {}, key_column, table_hint};
-        core::PersistOptions opts{mode, effective_batch, key_column};
+        core::PersistOptions opts{mode, effective_batch, key_column, bcp_workers};
         m_core.persist(ts, std::move(view), opts);
 
         py::dict result;

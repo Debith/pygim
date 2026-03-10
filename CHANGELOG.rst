@@ -26,6 +26,9 @@ Added
 - CI: Auto-tag main whenever the ``dev`` branch is merged, driven by PR labels ``release:major``/``release:minor``/default patch.
 - Added native C++ ``QuickTimer`` utility (`src/_pygim_fast/utils/quick_timer.h`) with ordered subtimers, immediate stop reporting, and destructor summary output.
 - Benchmark: Consolidated ``benchmarks/bcp_throughput.py`` into a multi-profile benchmark with simple (7 cols), mixed (9 cols), and complex (11 cols) dataset profiles. Supports ``--dataset all`` for side-by-side comparison and ``--compare-strategies`` for row_major vs column_major matrix runs.
+- Repository/MSSQL BCP: Parallel BCP with ``bcp_workers=N`` parameter on ``persist_dataframe()``. Creates N independent ODBC connections, partitions Arrow RecordBatches by row count, and runs worker threads in parallel. ``bcp_workers=0`` (default) uses single-connection. Falls back to single-connection when batch count < workers.
+- Repository/MSSQL BCP: ``BcpConnectionPool`` (``bcp_connection_pool.h``) — RAII pool of M pre-connected ODBC handles with BCP enabled. Exception-safe constructor with rollback. Used per parallel persist call.
+- Benchmark: ``--workers N`` CLI argument in ``benchmarks/bcp_throughput.py`` for parallel BCP benchmarking.
 
 Changed
 ~~~~~~~
