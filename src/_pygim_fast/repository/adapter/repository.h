@@ -250,46 +250,30 @@ public:
 
         if (is_arrow) {
             py::dict bcpm;
+            auto fill_bcpm = [&](const mssql::BcpMetrics& m) {
+                bcpm["setup_seconds"] = m.setup_seconds;
+                bcpm["reader_open_seconds"] = m.reader_open_seconds;
+                bcpm["bind_columns_seconds"] = m.bind_columns_seconds;
+                bcpm["row_loop_seconds"] = m.row_loop_seconds;
+                bcpm["fixed_copy_seconds"] = m.fixed_copy_seconds;
+                bcpm["colptr_redirect_seconds"] = m.colptr_redirect_seconds;
+                bcpm["string_pack_seconds"] = m.string_pack_seconds;
+                bcpm["sendrow_seconds"] = m.sendrow_seconds;
+                bcpm["batch_flush_seconds"] = m.batch_flush_seconds;
+                bcpm["done_seconds"] = m.done_seconds;
+                bcpm["total_seconds"] = m.total_seconds;
+                bcpm["processed_rows"] = m.processed_rows;
+                bcpm["sent_rows"] = m.sent_rows;
+                bcpm["record_batches"] = m.record_batches;
+                bcpm["input_mode"] = py::str(m.input_mode);
+                bcpm["simd_level"] = py::str(m.simd_level);
+                bcpm["timing_level"] = py::str(m.timing_level);
+            };
             const core::Strategy* strategy = m_core.primary_strategy();
-            if (auto* s = dynamic_cast<const mssql::MssqlStrategy<bcp::RowMajorTranspose>*>(strategy)) {
-                const auto& m = s->last_bcp_metrics();
-                bcpm["setup_seconds"] = m.setup_seconds;
-                bcpm["reader_open_seconds"] = m.reader_open_seconds;
-                bcpm["bind_columns_seconds"] = m.bind_columns_seconds;
-                bcpm["row_loop_seconds"] = m.row_loop_seconds;
-                bcpm["fixed_copy_seconds"] = m.fixed_copy_seconds;
-                bcpm["colptr_redirect_seconds"] = m.colptr_redirect_seconds;
-                bcpm["string_pack_seconds"] = m.string_pack_seconds;
-                bcpm["sendrow_seconds"] = m.sendrow_seconds;
-                bcpm["batch_flush_seconds"] = m.batch_flush_seconds;
-                bcpm["done_seconds"] = m.done_seconds;
-                bcpm["total_seconds"] = m.total_seconds;
-                bcpm["processed_rows"] = m.processed_rows;
-                bcpm["sent_rows"] = m.sent_rows;
-                bcpm["record_batches"] = m.record_batches;
-                bcpm["input_mode"] = py::str(m.input_mode);
-                bcpm["simd_level"] = py::str(m.simd_level);
-                bcpm["timing_level"] = py::str(m.timing_level);
-            } else if (auto* s = dynamic_cast<const mssql::MssqlStrategy<bcp::ColumnMajorTranspose>*>(strategy)) {
-                const auto& m = s->last_bcp_metrics();
-                bcpm["setup_seconds"] = m.setup_seconds;
-                bcpm["reader_open_seconds"] = m.reader_open_seconds;
-                bcpm["bind_columns_seconds"] = m.bind_columns_seconds;
-                bcpm["row_loop_seconds"] = m.row_loop_seconds;
-                bcpm["fixed_copy_seconds"] = m.fixed_copy_seconds;
-                bcpm["colptr_redirect_seconds"] = m.colptr_redirect_seconds;
-                bcpm["string_pack_seconds"] = m.string_pack_seconds;
-                bcpm["sendrow_seconds"] = m.sendrow_seconds;
-                bcpm["batch_flush_seconds"] = m.batch_flush_seconds;
-                bcpm["done_seconds"] = m.done_seconds;
-                bcpm["total_seconds"] = m.total_seconds;
-                bcpm["processed_rows"] = m.processed_rows;
-                bcpm["sent_rows"] = m.sent_rows;
-                bcpm["record_batches"] = m.record_batches;
-                bcpm["input_mode"] = py::str(m.input_mode);
-                bcpm["simd_level"] = py::str(m.simd_level);
-                bcpm["timing_level"] = py::str(m.timing_level);
-            }
+            if (auto* s = dynamic_cast<const mssql::MssqlStrategy<bcp::RowMajorTranspose>*>(strategy))
+                fill_bcpm(s->last_bcp_metrics());
+            else if (auto* s = dynamic_cast<const mssql::MssqlStrategy<bcp::ColumnMajorTranspose>*>(strategy))
+                fill_bcpm(s->last_bcp_metrics());
             if (!bcpm.empty())
                 result["bcp_metrics"] = std::move(bcpm);
         }

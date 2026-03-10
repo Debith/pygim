@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <stdexcept>
 #include <string>
+#include <glob.h>
 
 #if defined(_WIN32) || defined(_WIN64)
 #include <msodbcsql.h>
@@ -111,9 +112,30 @@ inline const BcpApi& ensure_bcp_api() {
     static const BcpApi api = [] {
         BcpApi a;
 #if !defined(_WIN32) && !defined(_WIN64)
-        void* handle = dlopen(
-            "/opt/microsoft/msodbcsql18/lib64/libmsodbcsql-18.5.so.1.1",
-            RTLD_NOW | RTLD_GLOBAL);
+        // Try the SONAME symlink first (survives driver updates),
+        // then glob for the versioned .so, then fall back to the exact path.
+        static constexpr const char* candidates[] = {
+            "libmsodbcsql-18.so",                                         // SONAME symlink
+            nullptr,                                                       // placeholder for glob
+        };
+        static constexpr const char* glob_pattern =
+            "/opt/microsoft/msodbcsql*/lib64/libmsodbcsql-*.so.*";
+
+        void* handle = nullptr;
+
+        // Pass 1: try the well-known SONAME (ld.so will resolve it if in ldconfig)
+        handle = dlopen(candidates[0], RTLD_NOW | RTLD_GLOBAL);
+
+        // Pass 2: glob for any installed versioned .so
+        if (!handle) {
+            glob_t g{};
+            if (glob(glob_pattern, 0, nullptr, &g) == 0 && g.gl_pathc > 0) {
+                // Take the last match (highest version in sorted glob output)
+                handle = dlopen(g.gl_pathv[g.gl_pathc - 1], RTLD_NOW | RTLD_GLOBAL);
+            }
+            globfree(&g);
+        }
+
         if (handle) {
             a.init    = reinterpret_cast<bcp_initW_fn>(dlsym(handle, "bcp_initW"));
             a.bind    = reinterpret_cast<bcp_bind_fn>(dlsym(handle, "bcp_bind"));

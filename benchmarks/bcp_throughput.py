@@ -33,11 +33,9 @@ Connection:
 from __future__ import annotations
 
 import argparse
-import datetime
 import os
 import sys
 import time
-import uuid as _uuid
 
 print(f"PID: {os.getpid()}")  # attach profiler here if needed
 
@@ -69,114 +67,106 @@ def default_connection_string() -> str:
 #   generate – callable(n, pl) -> polars.DataFrame
 #   columns  – int (for display)
 
-_EPOCH = datetime.date(1970, 1, 1)
-_TS_BASE = datetime.datetime(2020, 1, 1)
+import pygim
+
+
+# ── Schema definitions for pygim.create_df ───────────────────────────────────
+# Each maps column names -> type strings consumed by the C++ data generator.
+
+_SCHEMA_SIMPLE = {
+    "id":       "serial",
+    "val_i32":  "int32",
+    "val_i64":  "int64",
+    "val_f64":  "float64",
+    "val_str":  "string",
+    "val_date": "date",
+    "val_ts":   "timestamp",
+}
+
+
+_SCHEMA_MIXED = {
+    "id":        "serial",
+    "val_i32":   "int32",
+    "val_i64":   "int64",
+    "val_f64":   "float64",
+    "val_dec":   "float64",   # maps to DECIMAL(18,4) on SQL side
+    "val_str":   "string",
+    "val_text":  "string",
+    "val_date":  "date",
+    "val_ts":    "timestamp",
+}
+
+
+_SCHEMA_COMPLEX = {
+    "id":             "serial",
+    "col_int":        "int32",
+    "col_bigint":     "int64",
+    "col_bit":        "bool",
+    "col_decimal":    "float64",
+    "col_float":      "float64",
+    "col_nvarchar":   "string",
+    "col_nchar":      "string",
+    "col_date":       "date",
+    "col_datetime2":  "timestamp",
+    "col_uuid":       "uuid",
+}
+
+
+_SCHEMA_EXHAUSTIVE = {
+    "id":              "serial",
+    "col_int8":        "int8",
+    "col_int16":       "int16",
+    "col_int32":       "int32",
+    "col_int64":       "int64",
+    "col_uint8":       "uint8",
+    "col_uint16":      "uint16",
+    "col_uint32":      "uint32",
+    "col_uint64":      "uint64",
+    "col_bool":        "bool",
+    "col_float32":     "float32",
+    "col_float64":     "float64",
+    "col_date":        "date",
+    "col_time":        "time",
+    "col_datetime2":   "timestamp",
+    "col_duration_us": "duration",
+    "col_nvarchar":    "string",
+    "col_binary":      "binary",
+}
 
 
 def _generate_simple(n: int, pl) -> object:
     """7 columns: id, INT, BIGINT, FLOAT, NVARCHAR(64), DATE, DATETIME2(6)."""
-    return pl.DataFrame({
-        "id":       list(range(1, n + 1)),
-        "val_i32":  [i % 100_000 for i in range(n)],
-        "val_i64":  [i * 10_000_000_000 for i in range(n)],
-        "val_f64":  [float(i) * 1.23456789 for i in range(n)],
-        "val_str":  [f"row_{i:07d}" for i in range(n)],
-        "val_date": [_EPOCH + datetime.timedelta(days=i % 10_000) for i in range(n)],
-        "val_ts":   [_TS_BASE + datetime.timedelta(microseconds=i * 1_000_003) for i in range(n)],
-    })
+    return pygim.create_df(_SCHEMA_SIMPLE, rows=n)
 
 
 def _generate_mixed(n: int, pl) -> object:
     """9 columns: simple + DECIMAL(18,4), wider NVARCHAR(200)."""
-    return pl.DataFrame({
-        "id":        list(range(1, n + 1)),
-        "val_i32":   [i % 100_000 for i in range(n)],
-        "val_i64":   [i * 10_000_000_000 for i in range(n)],
-        "val_f64":   [float(i) * 1.23456789 for i in range(n)],
-        "val_dec":   [round(float(i) * 0.1234, 4) for i in range(n)],
-        "val_str":   [f"row_{i:07d}" for i in range(n)],
-        "val_text":  [f"description for item number {i:09d} in the benchmark dataset" for i in range(n)],
-        "val_date":  [_EPOCH + datetime.timedelta(days=i % 10_000) for i in range(n)],
-        "val_ts":    [_TS_BASE + datetime.timedelta(microseconds=i * 1_000_003) for i in range(n)],
-    })
+    return pygim.create_df(_SCHEMA_MIXED, rows=n)
 
 
 def _generate_complex(n: int, pl) -> object:
     """11 columns: INT PK + INT, BIGINT, BIT, DECIMAL, FLOAT, NVARCHAR, NCHAR, DATE, DATETIME2, UUID."""
-    return pl.DataFrame({
-        "id":             list(range(1, n + 1)),
-        "col_int":        [i % 100_000 for i in range(n)],
-        "col_bigint":     [i * 10_000_000_000 for i in range(n)],
-        "col_bit":        [i % 2 == 0 for i in range(n)],
-        "col_decimal":    [round(float(i) * 0.1234, 4) for i in range(n)],
-        "col_float":      [float(i) * 1.23456789 for i in range(n)],
-        "col_nvarchar":   [f"row_{i:07d}" for i in range(n)],
-        "col_nchar":      [f"NC{i % 10_000:06d}" for i in range(n)],
-        "col_date":       [_EPOCH + datetime.timedelta(days=i % 10_000) for i in range(n)],
-        "col_datetime2":  [_TS_BASE + datetime.timedelta(microseconds=i * 1_000_003) for i in range(n)],
-        "col_uuid":       [str(_uuid.uuid5(_uuid.NAMESPACE_DNS, f"bench-{i}")) for i in range(n)],
-    })
+    return pygim.create_df(_SCHEMA_COMPLEX, rows=n)
 
 
 def _generate_exhaustive(n: int, pl) -> object:
-    """18 columns: exercises every Arrow type dispatch path in the BCP binder.
-
-    Arrow types covered: INT8, INT16, INT32, INT64, UINT8, UINT16, UINT32,
-    UINT64, BOOL, FLOAT, DOUBLE, DATE32, TIME64, TIMESTAMP, DURATION,
-    STRING (via LARGE_STRING), LARGE_BINARY.
-
-    Note: unsigned integers are kept within signed SQL Server type ranges
-    (INT8 >= 0 for TINYINT, UINT16 < 32768, UINT32 < 2^31, UINT64 < 2^63)
-    to avoid overflow in the BCP int1/int2/int4/bigint mappings.
-    """
-    return pl.DataFrame({
-        "id":              pl.Series("id", list(range(1, n + 1)), dtype=pl.Int32),
-        # ── Signed integers ──────────────────────────────────────────────
-        "col_int8":        pl.Series("col_int8", [i % 120 for i in range(n)], dtype=pl.Int8),
-        "col_int16":       pl.Series("col_int16", [i % 30_000 - 15_000 for i in range(n)], dtype=pl.Int16),
-        "col_int32":       pl.Series("col_int32", [i % 100_000 for i in range(n)], dtype=pl.Int32),
-        "col_int64":       pl.Series("col_int64", [i * 10_000_000 for i in range(n)], dtype=pl.Int64),
-        # ── Unsigned integers (values kept within signed SQL target range) ──
-        "col_uint8":       pl.Series("col_uint8", [i % 250 for i in range(n)], dtype=pl.UInt8),
-        "col_uint16":      pl.Series("col_uint16", [i % 30_000 for i in range(n)], dtype=pl.UInt16),
-        "col_uint32":      pl.Series("col_uint32", [i % 2_000_000_000 for i in range(n)], dtype=pl.UInt32),
-        "col_uint64":      pl.Series("col_uint64", [i % 4_000_000_000 for i in range(n)], dtype=pl.UInt64),
-        # ── Boolean ──────────────────────────────────────────────────────
-        "col_bool":        pl.Series("col_bool", [i % 2 == 0 for i in range(n)], dtype=pl.Boolean),
-        # ── Floating-point ───────────────────────────────────────────────
-        "col_float32":     pl.Series("col_float32", [float(i) * 0.5 for i in range(n)], dtype=pl.Float32),
-        "col_float64":     pl.Series("col_float64", [float(i) * 1.23456789 for i in range(n)], dtype=pl.Float64),
-        # ── Temporal ─────────────────────────────────────────────────────
-        "col_date":        [_EPOCH + datetime.timedelta(days=i % 10_000) for i in range(n)],
-        "col_time":        pl.Series("col_time",
-                                     [datetime.time(hour=i % 24, minute=(i * 7) % 60, second=(i * 13) % 60)
-                                      for i in range(n)],
-                                     dtype=pl.Time),
-        "col_datetime2":   [_TS_BASE + datetime.timedelta(microseconds=i * 1_000_003) for i in range(n)],
-        "col_duration_us": pl.Series("col_duration_us",
-                                     [datetime.timedelta(microseconds=i * 1000) for i in range(n)],
-                                     dtype=pl.Duration("us")),
-        # ── String / binary ──────────────────────────────────────────────
-        "col_nvarchar":    [f"row_{i:07d}" for i in range(n)],
-        "col_binary":      pl.Series("col_binary",
-                                     [bytes([i % 256] * (1 + i % 16)) for i in range(n)],
-                                     dtype=pl.Binary),
-    })
+    """18 columns: exercises every Arrow type dispatch path in the BCP binder."""
+    return pygim.create_df(_SCHEMA_EXHAUSTIVE, rows=n)
 
 
 PROFILES: dict[str, dict] = {
     "simple": {
         "table": "dbo.bcp_bench_simple",
         "ddl": """
-IF OBJECT_ID(N'dbo.bcp_bench_simple', N'U') IS NULL
+DROP TABLE IF EXISTS dbo.bcp_bench_simple;
 CREATE TABLE dbo.bcp_bench_simple (
-    id       INT          NOT NULL PRIMARY KEY,
-    val_i32  INT          NOT NULL,
-    val_i64  BIGINT       NOT NULL,
-    val_f64  FLOAT        NOT NULL,
-    val_str  NVARCHAR(64) NOT NULL,
-    val_date DATE         NOT NULL,
-    val_ts   DATETIME2(6) NOT NULL
+    id       INT           NOT NULL PRIMARY KEY,
+    val_i32  INT           NOT NULL,
+    val_i64  BIGINT        NOT NULL,
+    val_f64  FLOAT         NOT NULL,
+    val_str  NVARCHAR(100) NOT NULL,
+    val_date DATE          NOT NULL,
+    val_ts   DATETIME2(6)  NOT NULL
 );""",
         "generate": _generate_simple,
         "columns": 7,
@@ -184,14 +174,14 @@ CREATE TABLE dbo.bcp_bench_simple (
     "mixed": {
         "table": "dbo.bcp_bench_mixed",
         "ddl": """
-IF OBJECT_ID(N'dbo.bcp_bench_mixed', N'U') IS NULL
+DROP TABLE IF EXISTS dbo.bcp_bench_mixed;
 CREATE TABLE dbo.bcp_bench_mixed (
     id        INT            NOT NULL PRIMARY KEY,
     val_i32   INT            NOT NULL,
     val_i64   BIGINT         NOT NULL,
     val_f64   FLOAT          NOT NULL,
     val_dec   DECIMAL(18,4)  NOT NULL,
-    val_str   NVARCHAR(64)   NOT NULL,
+    val_str   NVARCHAR(100)  NOT NULL,
     val_text  NVARCHAR(200)  NOT NULL,
     val_date  DATE           NOT NULL,
     val_ts    DATETIME2(6)   NOT NULL
@@ -202,7 +192,7 @@ CREATE TABLE dbo.bcp_bench_mixed (
     "complex": {
         "table": "dbo.bcp_bench_complex",
         "ddl": """
-IF OBJECT_ID(N'dbo.bcp_bench_complex', N'U') IS NULL
+DROP TABLE IF EXISTS dbo.bcp_bench_complex;
 CREATE TABLE dbo.bcp_bench_complex (
     id             INT                NOT NULL PRIMARY KEY,
     col_int        INT                NOT NULL,
@@ -211,7 +201,7 @@ CREATE TABLE dbo.bcp_bench_complex (
     col_decimal    DECIMAL(18,4)      NOT NULL,
     col_float      FLOAT              NOT NULL,
     col_nvarchar   NVARCHAR(100)      NOT NULL,
-    col_nchar      NCHAR(10)          NOT NULL,
+    col_nchar      NVARCHAR(30)       NOT NULL,
     col_date       DATE               NOT NULL,
     col_datetime2  DATETIME2(6)       NOT NULL,
     col_uuid       UNIQUEIDENTIFIER   NOT NULL
@@ -222,7 +212,7 @@ CREATE TABLE dbo.bcp_bench_complex (
     "exhaustive": {
         "table": "dbo.bcp_bench_exhaustive",
         "ddl": """
-IF OBJECT_ID(N'dbo.bcp_bench_exhaustive', N'U') IS NULL
+DROP TABLE IF EXISTS dbo.bcp_bench_exhaustive;
 CREATE TABLE dbo.bcp_bench_exhaustive (
     id              INT             NOT NULL PRIMARY KEY,
     col_int8        TINYINT         NOT NULL,

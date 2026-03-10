@@ -343,6 +343,184 @@ inline ClassifiedColumns classify_columns(std::vector<ColumnBinding>& bindings) 
     return c;
 }
 
+// ── Fast rebind: update Arrow pointers in existing bindings ─────────────────
+// Skips bcp_bind entirely — used when schema is unchanged between batches.
+// Only updates Arrow data pointers, null bitmaps, and pre-converted buffers.
+
+namespace rebind_detail {
+
+inline void update_common(ColumnBinding& b, const std::shared_ptr<arrow::Array>& a) {
+    b.array        = a;
+    b.has_nulls    = a->null_count() > 0;
+    b.null_bitmap  = a->null_bitmap_data();
+    b.array_offset = a->offset();
+}
+
+/// Update a fixed-width numeric binding (int/uint/float/double/duration).
+/// The data pointer moves to the new Arrow buffer.
+template <typename ArrowArrayT>
+inline void update_numeric(ColumnBinding& b, const std::shared_ptr<arrow::Array>& a) {
+    update_common(b, a);
+    auto typed = std::static_pointer_cast<ArrowArrayT>(a);
+    b.data_ptr = typed->raw_values();
+}
+
+/// Update a bool binding (needs re-unpacking from bit-packed Arrow buffer).
+inline void update_bool(ColumnBinding& b, const std::shared_ptr<arrow::Array>& a) {
+    update_common(b, a);
+    auto typed = std::static_pointer_cast<arrow::BooleanArray>(a);
+    const auto n = typed->length();
+    if (!b.bool_buffer) b.bool_buffer = std::make_shared<std::vector<uint8_t>>();
+    b.bool_buffer->resize(static_cast<size_t>(n));
+    const bool has_nulls = a->null_count() > 0;
+    for (int64_t i = 0; i < n; ++i) {
+        if (has_nulls && typed->IsNull(i)) continue;
+        (*b.bool_buffer)[static_cast<size_t>(i)] = typed->Value(i) ? 1 : 0;
+    }
+    b.data_ptr = b.bool_buffer->data();
+}
+
+/// Update a date32 binding (needs re-conversion to SQL_DATE_STRUCT).
+inline void update_date32(ColumnBinding& b, const std::shared_ptr<arrow::Array>& a) {
+    update_common(b, a);
+    auto typed = std::static_pointer_cast<arrow::Date32Array>(a);
+    const auto n = typed->length();
+    if (!b.date_buffer) b.date_buffer = std::make_shared<std::vector<SQL_DATE_STRUCT>>();
+    b.date_buffer->resize(static_cast<size_t>(n));
+    const auto* raw = typed->raw_values();
+    const bool has_nulls = a->null_count() > 0;
+    for (int64_t i = 0; i < n; ++i) {
+        if (has_nulls && typed->IsNull(i)) continue;
+        (*b.date_buffer)[static_cast<size_t>(i)] = days_to_sql_date(raw[i]);
+    }
+    b.data_ptr = b.date_buffer->data();
+}
+
+/// Update a timestamp binding (needs re-conversion to SQL_TIMESTAMP_STRUCT).
+inline void update_timestamp(ColumnBinding& b, const std::shared_ptr<arrow::Array>& a) {
+    update_common(b, a);
+    auto typed = std::static_pointer_cast<arrow::TimestampArray>(a);
+    const auto n = typed->length();
+    if (!b.timestamp_buffer) b.timestamp_buffer = std::make_shared<std::vector<SQL_TIMESTAMP_STRUCT>>();
+    b.timestamp_buffer->resize(static_cast<size_t>(n));
+    const auto* raw = typed->raw_values();
+    const bool has_nulls = a->null_count() > 0;
+    for (int64_t i = 0; i < n; ++i) {
+        if (has_nulls && typed->IsNull(i)) continue;
+        (*b.timestamp_buffer)[static_cast<size_t>(i)] = micros_to_sql_timestamp(raw[i]);
+    }
+    b.data_ptr = b.timestamp_buffer->data();
+}
+
+/// Update a time64 binding (needs re-conversion to SQL_SS_TIME2_STRUCT).
+inline void update_time64(ColumnBinding& b, const std::shared_ptr<arrow::Array>& a) {
+    update_common(b, a);
+    auto typed = std::static_pointer_cast<arrow::Time64Array>(a);
+    const auto n = typed->length();
+    if (!b.time_buffer) b.time_buffer = std::make_shared<std::vector<SQL_SS_TIME2_STRUCT>>();
+    b.time_buffer->resize(static_cast<size_t>(n));
+    const auto* raw = typed->raw_values();
+    const bool has_nulls = a->null_count() > 0;
+    for (int64_t i = 0; i < n; ++i) {
+        if (has_nulls && typed->IsNull(i)) continue;
+        (*b.time_buffer)[static_cast<size_t>(i)] = nanos_to_sql_time(raw[i]);
+    }
+    b.data_ptr = b.time_buffer->data();
+}
+
+/// Update a string binding (just update offsets + data pointers).
+inline void update_string(ColumnBinding& b, const std::shared_ptr<arrow::Array>& a) {
+    update_common(b, a);
+    b.str_buf_bound = false;  // force bcp_colptr re-bind on first use
+    b.offsets32 = nullptr;
+    b.offsets64 = nullptr;
+    b.str_data  = nullptr;
+#if PYGIM_HAVE_ARROW_STRING_VIEW
+    b.string_view_array = nullptr;
+    b.binary_view_array = nullptr;
+#endif
+
+    switch (a->type_id()) {
+    case arrow::Type::STRING: {
+        auto typed = std::static_pointer_cast<arrow::StringArray>(a);
+        b.offsets32 = typed->raw_value_offsets();
+        b.str_data  = typed->value_data()->data();
+        break;
+    }
+    case arrow::Type::LARGE_STRING: {
+        auto typed = std::static_pointer_cast<arrow::LargeStringArray>(a);
+        b.offsets64 = typed->raw_value_offsets();
+        b.str_data  = typed->value_data()->data();
+        break;
+    }
+#if PYGIM_HAVE_ARROW_STRING_VIEW
+    case arrow::Type::STRING_VIEW: {
+        auto typed = std::static_pointer_cast<arrow::StringViewArray>(a);
+        b.string_view_array = typed.get();
+        break;
+    }
+    case arrow::Type::BINARY_VIEW: {
+        auto typed = std::static_pointer_cast<arrow::BinaryViewArray>(a);
+        b.binary_view_array = typed.get();
+        break;
+    }
+#endif
+    case arrow::Type::LARGE_BINARY: {
+        auto typed = std::static_pointer_cast<arrow::LargeBinaryArray>(a);
+        b.offsets64 = typed->raw_value_offsets();
+        b.str_data  = typed->value_data()->data();
+        break;
+    }
+    default: break;
+    }
+}
+
+} // namespace rebind_detail
+
+/// Update all bindings in-place for a new batch with the same schema.
+/// Skips bcp_bind entirely; only updates Arrow buffer pointers and
+/// re-converts temporal/bool columns.  Re-classifies null presence.
+inline void rebind_columns(
+    std::vector<ColumnBinding>& bindings,
+    ClassifiedColumns& classified,
+    const std::shared_ptr<arrow::RecordBatch>& batch)
+{
+    const int n = batch->num_columns();
+    // Sanity: caller guarantees schema match → column count must be identical.
+    assert(static_cast<int>(bindings.size()) == n);
+
+    classified.any_has_nulls = false;
+
+    for (int i = 0; i < n; ++i) {
+        auto& b = bindings[static_cast<size_t>(i)];
+        auto array = batch->column(i);
+
+        switch (b.arrow_type) {
+        case arrow::Type::INT8:    rebind_detail::update_numeric<arrow::Int8Array>(b, array);    break;
+        case arrow::Type::INT16:   rebind_detail::update_numeric<arrow::Int16Array>(b, array);   break;
+        case arrow::Type::INT32:   rebind_detail::update_numeric<arrow::Int32Array>(b, array);   break;
+        case arrow::Type::INT64:   rebind_detail::update_numeric<arrow::Int64Array>(b, array);   break;
+        case arrow::Type::UINT8:   rebind_detail::update_numeric<arrow::UInt8Array>(b, array);   break;
+        case arrow::Type::UINT16:  rebind_detail::update_numeric<arrow::UInt16Array>(b, array);  break;
+        case arrow::Type::UINT32:  rebind_detail::update_numeric<arrow::UInt32Array>(b, array);  break;
+        case arrow::Type::UINT64:  rebind_detail::update_numeric<arrow::UInt64Array>(b, array);  break;
+        case arrow::Type::BOOL:    rebind_detail::update_bool(b, array);                          break;
+        case arrow::Type::FLOAT:   rebind_detail::update_numeric<arrow::FloatArray>(b, array);   break;
+        case arrow::Type::DOUBLE:  rebind_detail::update_numeric<arrow::DoubleArray>(b, array);  break;
+        case arrow::Type::DATE32:  rebind_detail::update_date32(b, array);                        break;
+        case arrow::Type::TIMESTAMP: rebind_detail::update_timestamp(b, array);                   break;
+        case arrow::Type::TIME64:  rebind_detail::update_time64(b, array);                        break;
+        case arrow::Type::DURATION: rebind_detail::update_numeric<arrow::DurationArray>(b, array); break;
+        default:
+            // All string/binary types
+            rebind_detail::update_string(b, array);
+            break;
+        }
+
+        if (b.has_nulls) classified.any_has_nulls = true;
+    }
+}
+
 // ── Staging buffer ──────────────────────────────────────────────────────────
 /// Create a contiguous staging buffer for all fixed-width columns.
 /// Each column gets a slot; one-time bcp_colptr + bcp_collen redirect.

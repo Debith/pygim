@@ -32,9 +32,19 @@ def extension_name_from_cpp(cpp_file: Path) -> str:
 
 # Pick sensible flags per‐compiler
 if sys.platform == "win32":
-    extra_compile_args = ["/std:c++20", "/O2"]
+    extra_compile_args = ["/std:c++20", "/O2", "/GL"]   # /GL = whole-program opt (MSVC LTO)
+    extra_link_args_global = ["/LTCG"]                    # link-time code generation
 else:
-    extra_compile_args = ["-std=c++20", "-O3"]
+    extra_compile_args = [
+        "-std=c++20",
+        "-O3",
+        "-march=native",          # AVX2 / BMI2 / etc. for host CPU
+        "-mtune=native",          # schedule for host microarchitecture
+        "-funroll-loops",         # unroll tight inner loops (row loop, memcpy)
+        "-fno-math-errno",        # skip errno on math calls (not used in hot paths)
+        "-flto",                  # LTO needs flag on compile AND link
+    ]
+    extra_link_args_global = ["-flto"]   # link-time optimization: cross-TU inlining
 
 
 # ── Build environment ──────────────────────────────────────────────────────
@@ -46,13 +56,28 @@ if not conda_prefix and hasattr(sys, 'prefix'):
     conda_prefix = sys.prefix
 
 
+def arrow_kwargs():
+    """Return kwargs for an Arrow-only extension (no ODBC)."""
+    kw = {
+        "libraries": ["arrow"],
+        "include_dirs": [],
+        "library_dirs": [],
+        "extra_link_args": list(extra_link_args_global),
+        "extra_compile_args": list(extra_compile_args),
+    }
+    if conda_prefix:
+        kw["include_dirs"].append(f"{conda_prefix}/include")
+        kw["library_dirs"].append(f"{conda_prefix}/lib")
+    return kw
+
+
 def odbc_kwargs():
     """Return kwargs for an ODBC + Arrow extension (both required)."""
     kw = {
         "libraries": ["odbc", "arrow", "parquet"],
         "include_dirs": [],
         "library_dirs": [],
-        "extra_link_args": [],
+        "extra_link_args": list(extra_link_args_global),
         "extra_compile_args": list(extra_compile_args),
     }
 
@@ -98,9 +123,14 @@ for cpp_file in get_cpp_files("src/_pygim_fast"):
     elif stem == "mssql_strategy":
         # Old monolith — superseded by _repository; skip.
         continue
+    elif stem == "datagen":
+        # datagen needs Arrow for array builders + C Data Interface.
+        sources = [str(cpp_file)]
+        kwargs.update(arrow_kwargs())
     else:
-        # Standard extensions: just default compile args, single source.
+        # Standard extensions: default compile + link args, single source.
         kwargs["extra_compile_args"] = list(extra_compile_args)
+        kwargs["extra_link_args"] = list(extra_link_args_global)
         sources = [str(cpp_file)]
 
     ext_modules.append(

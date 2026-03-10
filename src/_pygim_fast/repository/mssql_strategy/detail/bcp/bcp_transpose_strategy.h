@@ -84,7 +84,7 @@ private:
         }
         hot_timer_add(ctx, send_t0, ctx.sendrow_seconds);
         ++ctx.sent_rows;
-        if (ctx.sent_rows % ctx.batch_size == 0) [[unlikely]]
+        if (--ctx.rows_until_flush <= 0) [[unlikely]]
             flush_batch(ctx.bcp, ctx.dbc, ctx);
     }
 
@@ -372,7 +372,7 @@ private:
                 }
                 hot_timer_add(ctx, send_t0, ctx.sendrow_seconds);
                 ++ctx.sent_rows;
-                if (ctx.sent_rows % ctx.batch_size == 0) [[unlikely]]
+                if (--ctx.rows_until_flush <= 0) [[unlikely]]
                     flush_batch(ctx.bcp, ctx.dbc, ctx);
             }
         }
@@ -437,7 +437,7 @@ private:
                 }
                 hot_timer_add(ctx, send_t0, ctx.sendrow_seconds);
                 ++ctx.sent_rows;
-                if (ctx.sent_rows % ctx.batch_size == 0) [[unlikely]]
+                if (--ctx.rows_until_flush <= 0) [[unlikely]]
                     flush_batch(ctx.bcp, ctx.dbc, ctx);
             }
         }
@@ -482,7 +482,7 @@ private:
                 }
                 hot_timer_add(ctx, send_t0, ctx.sendrow_seconds);
                 ++ctx.sent_rows;
-                if (ctx.sent_rows % ctx.batch_size == 0) [[unlikely]]
+                if (--ctx.rows_until_flush <= 0) [[unlikely]]
                     flush_batch(ctx.bcp, ctx.dbc, ctx);
             }
         }

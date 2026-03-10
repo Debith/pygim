@@ -93,6 +93,7 @@ struct BcpContext {
     QuickTimer&   timer;
     int64_t       batch_size;
     int64_t       sent_rows{0};
+    int64_t       rows_until_flush{0};  // decrementing counter; reset to batch_size on flush
     int64_t       processed_rows{0};
     int64_t       record_batches{0};
 
@@ -126,16 +127,18 @@ struct BcpContext {
 
 [[nodiscard]] inline std::chrono::steady_clock::time_point hot_timer_start(
     const BcpContext& ctx) noexcept {
-    // Promoted from hot-only to stage-level: always collect micro-metrics
-    // when any timing is enabled.  Overhead is <1% on 1 M rows.
-    if (stage_timing_enabled(ctx)) return std::chrono::steady_clock::now();
+    // Only collect per-row micro-metrics at Hot level.  At Stage level, the
+    // coarse sub-timers (row_loop, batch_flush, etc.) already capture overall
+    // timing outside the loop.  Calling steady_clock::now() 6× per row in the
+    // default Stage mode was measured at ~100 ms / 1 M rows (3–5% overhead).
+    if (hot_timing_enabled(ctx)) return std::chrono::steady_clock::now();
     return {};
 }
 
 inline void hot_timer_add(const BcpContext& ctx,
                           std::chrono::steady_clock::time_point t0,
                           double& accumulator) noexcept {
-    if (!stage_timing_enabled(ctx)) return;
+    if (!hot_timing_enabled(ctx)) return;
     accumulator += std::chrono::duration<double>(
         std::chrono::steady_clock::now() - t0).count();
 }
@@ -165,6 +168,23 @@ struct ClassifiedColumns {
     std::vector<ColumnBinding*> fixed;
     std::vector<ColumnBinding*> string;
     bool any_has_nulls{false};
+};
+
+// ── BatchBindingState ───────────────────────────────────────────────────────
+/// Cached binding state that can be reused across same-schema RecordBatches.
+/// Eliminates repeated bcp_bind / bcp_colptr / bcp_collen calls when the
+/// schema is identical between batches (the common case in streaming loads).
+struct BatchBindingState {
+    std::shared_ptr<arrow::Schema> schema;       ///< Schema of the last bound batch
+    std::vector<ColumnBinding>     bindings;      ///< Column bindings (reused across batches)
+    ClassifiedColumns              classified;    ///< Fixed/string classification
+    std::vector<uint8_t>           staging;       ///< Staging buffer (stable address for bcp_colptr)
+    bool                           initialized{false};
+
+    /// Check whether this state can be reused for a new batch.
+    [[nodiscard]] bool matches(const std::shared_ptr<arrow::Schema>& new_schema) const noexcept {
+        return initialized && schema && new_schema && schema->Equals(*new_schema);
+    }
 };
 
 // ── Null check ──────────────────────────────────────────────────────────────

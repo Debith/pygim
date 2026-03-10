@@ -41,17 +41,34 @@ TimingLevel resolve_timing_level_from_env() {
     return TimingLevel::Stage;
 }
 
+// ── RAII guard: ensures bcp_done is called even on exception ────────────────
+
+/// Calls bcp_done() on destruction unless dismiss()'d.  Prevents leaving the
+/// ODBC connection in an undefined BCP state when an exception escapes after
+/// bcp_init but before finalize_bcp.
+class BcpSessionGuard {
+public:
+    BcpSessionGuard(const BcpApi& api, SQLHDBC dbc) noexcept
+        : m_api(api), m_dbc(dbc) {}
+
+    ~BcpSessionGuard() noexcept {
+        if (!m_dismissed && m_dbc != SQL_NULL_HDBC)
+            m_api.done(m_dbc);  // best-effort; ignore return in dtor
+    }
+
+    /// Call once finalize_bcp() has completed successfully.
+    void dismiss() noexcept { m_dismissed = true; }
+
+    BcpSessionGuard(const BcpSessionGuard&) = delete;
+    BcpSessionGuard& operator=(const BcpSessionGuard&) = delete;
+
+private:
+    const BcpApi& m_api;
+    SQLHDBC       m_dbc;
+    bool          m_dismissed{false};
+};
+
 // ── Session setup helpers ───────────────────────────────────────────────────
-
-void enable_bcp_attr(SQLHDBC dbc) {
-    SQLULEN status = SQL_BCP_OFF;
-    auto rc = SQLGetConnectAttr(dbc, SQL_COPT_SS_BCP, &status, 0, nullptr);
-    if (SQL_SUCCEEDED(rc) && status == SQL_BCP_ON) return;
-
-    rc = SQLSetConnectAttr(dbc, SQL_COPT_SS_BCP, (SQLPOINTER)SQL_BCP_ON, SQL_IS_UINTEGER);
-    if (!SQL_SUCCEEDED(rc))
-        odbc::raise_if_error(rc, SQL_HANDLE_DBC, dbc, "SQLSetConnectAttr(BCP_ON)");
-}
 
 void init_session(const BcpApi& api, SQLHDBC dbc,
                   const std::string& qualified_table,
@@ -78,7 +95,8 @@ void init_session(const BcpApi& api, SQLHDBC dbc,
 // ── Finalize: flush remaining rows + bcp_done ───────────────────────────────
 
 void finalize_bcp(BcpContext& ctx) {
-    if (ctx.sent_rows > 0 && ctx.sent_rows % ctx.batch_size != 0) {
+    // Flush any remaining rows that didn't trigger a batch flush.
+    if (ctx.sent_rows > 0 && ctx.rows_until_flush < ctx.batch_size) {
         stage_timer_start(ctx, ctx.timer_batch_flush_id, "batch_flush");
         auto ret = ctx.bcp.batch(ctx.dbc);
         stage_timer_stop(ctx, ctx.timer_batch_flush_id, "batch_flush");
@@ -135,18 +153,24 @@ void bulk_insert_arrow_bcp(
     metrics_out = mssql::BcpMetrics{};
     QuickTimer timer("bulk_insert_arrow_bcp", std::clog, false, false);
 
-    // 1. Setup: load driver, enable BCP, init session
+    // 1. Setup: load driver, init session
+    //    Note: SQL_COPT_SS_BCP is already enabled by MssqlStrategy::ensure_connected()
+    //    before the connection is established. No redundant check needed here.
     const auto timer_setup_id = timer.get_or_create_sub_timer_id("setup");
     timer.start_sub_timer(timer_setup_id, false);
     const auto& api = ensure_bcp_api();
-    enable_bcp_attr(dbc);
     auto qualified = sql::qualify_table(table);
     init_session(api, dbc, qualified, table_hint);
     timer.stop_sub_timer(timer_setup_id, false);
 
+    // RAII guard: if anything throws after bcp_init, bcp_done is called
+    // to leave the connection in a clean state.
+    BcpSessionGuard session_guard(api, dbc);
+
     // 2. Iterate RecordBatchReader — no Python references past this point
     BcpContext ctx{api, dbc, timer,
                    batch_size > 0 ? static_cast<int64_t>(batch_size) : 100000LL};
+    ctx.rows_until_flush = ctx.batch_size;  // init decrementing counter
     ctx.timing_level = resolve_timing_level_from_env();
     ctx.timer_setup_id = timer_setup_id;
     ctx.timer_bind_columns_id = timer.get_or_create_sub_timer_id("bind_columns");
@@ -163,13 +187,15 @@ void bulk_insert_arrow_bcp(
     }
     ctx.transpose = transpose;  // nullptr → run_row_loop falls back to RowMajorTranspose
 
+    BatchBindingState binding_state;  // reused across same-schema batches
+
     while (true) {
         std::shared_ptr<arrow::RecordBatch> batch;
         auto st = reader->ReadNext(&batch);
         if (!st.ok())
             throw std::runtime_error("Failed reading Arrow batch: " + st.ToString());
         if (!batch) break;
-        process_batch(ctx, batch);
+        process_batch(ctx, batch, binding_state);
     }
     metrics_out.input_mode = input_mode;
 
@@ -178,6 +204,7 @@ void bulk_insert_arrow_bcp(
         throw std::runtime_error("Arrow BCP received zero rows from payload");
 
     finalize_bcp(ctx);
+    session_guard.dismiss();  // finalize_bcp succeeded — suppress dtor bcp_done
     extract_metrics(ctx, timer, metrics_out);
 }
 

@@ -83,6 +83,7 @@ inline void flush_batch(const BcpApi& bcp, SQLHDBC dbc, BcpContext& ctx) {
     if (ret == -1) [[unlikely]]
         odbc::raise_if_error(SQL_ERROR, SQL_HANDLE_DBC, dbc, "bcp_batch");
 
+    ctx.rows_until_flush = ctx.batch_size;  // reset counter
     stage_timer_start(ctx, ctx.timer_row_loop_id, "row_loop");
 }
 

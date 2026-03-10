@@ -33,6 +33,7 @@ Changed
 - Repository/MSSQL BCP: Profile-aware activation: AVX2 is only enabled if ``plan_avx2_blocks`` finds at least 2 eligible blocks. Otherwise, scalar path is used to avoid unnecessary vector overhead.
 - Repository/MSSQL BCP: Eliminated per-row ``bcp_colptr`` redirect loop in column-major path — replaced N per-column ODBC calls per row with a single ``memcpy`` from the pre-filled mini-batch buffer into the original staging buffer. Reduces redirect overhead from ~500 ms to ~24 ms for 1 M rows (exhaustive profile).
 - Repository/MSSQL BCP: Promoted micro-metrics (fixed-copy, colptr-redirect, string-pack, sendrow) from hot-only to stage-level timing — always collected when any timing is enabled (~1 % overhead on 1 M rows). Makes per-component breakdown visible in default benchmark runs.
+- Repository/MSSQL BCP: DRY refactor of BcpMetrics→Python dict builder in ``repository.h`` — extracted lambda eliminates duplicated 18-field dict construction across RowMajor/ColumnMajor strategy casts.
 - Repository/MSSQL BCP: Column-major AVX2 transpose now precomputes eligible contiguous 8x4-byte blocks once per run and reuses the per-column copied marker buffer across mini-batches, removing repeated block eligibility scans and hot-loop allocations.
 - Repository/MSSQL BCP: Added AVX2 4x4 transpose support for contiguous 8-byte fixed-width columns (int64/uint64/double/duration) behind ``PYGIM_ENABLE_AVX2_8B=1`` for controlled validation; default AVX2 path remains 4-byte-block optimized.
 - Packaging: Made ``tabulate>=0.9`` a required runtime dependency (no fallback formatter in ``benchmarks/bcp_throughput.py``).
@@ -77,6 +78,7 @@ Performance
 
 Docs
 ~~~~
+- Updated ``docs/design/repository_backlog.md``: Phase 2 (SIMD) closed out with findings — AVX2 proven non-beneficial (sendrow 85%+ of row_loop), Phase 3 (multi-threaded transpose) deprioritized with rationale, M.1/M.3 marked done.
 - Updated design documents to reflect removal of compile-time feature flags (``arrow_bcp_status.md``, ``arrow_bcp_implementation.md``, architecture diagrams, performance analysis docs).
 - Updated file path references across design docs from ``mssql_strategy_bcp.cpp`` to ``bcp/bcp_strategy.cpp``.
 - Removed ``PYGIM_ENABLE_ARROW_BCP`` env gate from sequence diagram (no longer used).
