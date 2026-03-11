@@ -250,6 +250,36 @@ void bulk_insert_arrow_bcp_parallel(
     if (all_batches.empty() || total_rows == 0)
         throw std::runtime_error("Arrow BCP received zero rows from payload");
 
+    // 1b. Slice large batches so parallelism can activate.
+    //     Polars typically exports one RecordBatch for the entire DataFrame.
+    //     Without slicing, max_workers is clamped to num_batches (= 1).
+    //     RecordBatch::Slice is zero-copy (just offset + length adjustment).
+    const int desired = (num_workers <= 0)
+        ? std::min(4, static_cast<int>(std::thread::hardware_concurrency()))
+        : num_workers;
+
+    if (desired > 1
+        && all_batches.size() < static_cast<size_t>(desired)) {
+        std::vector<std::shared_ptr<arrow::RecordBatch>> sliced;
+        for (auto& batch : all_batches) {
+            const int64_t n = batch->num_rows();
+            if (n <= 1) {
+                sliced.push_back(std::move(batch));
+                continue;
+            }
+            const int parts = std::min(desired,
+                                       static_cast<int>(n));
+            const int64_t chunk = n / parts;
+            int64_t offset = 0;
+            for (int p = 0; p < parts; ++p) {
+                const int64_t len = (p < parts - 1) ? chunk : (n - offset);
+                sliced.push_back(batch->Slice(offset, len));
+                offset += len;
+            }
+        }
+        all_batches = std::move(sliced);
+    }
+
     // 2. Resolve worker count.
     //    Auto (0): min(4, hw_concurrency, num_batches).
     //    Never more workers than batches (a worker with 0 batches would fail bcp_done).
@@ -388,7 +418,7 @@ void bulk_insert_arrow_bcp_parallel(
         merged.colptr_redirect_seconds += wm.colptr_redirect_seconds;
         merged.string_pack_seconds   += wm.string_pack_seconds;
         merged.sendrow_seconds        = std::max(merged.sendrow_seconds, wm.sendrow_seconds);
-        merged.batch_flush_seconds   += wm.batch_flush_seconds;
+        merged.batch_flush_seconds    = std::max(merged.batch_flush_seconds, wm.batch_flush_seconds);
         merged.done_seconds          += wm.done_seconds;
         merged.processed_rows        += wm.processed_rows;
         merged.sent_rows             += wm.sent_rows;

@@ -106,9 +106,17 @@ Goal: overlap CPU transpose with network I/O via parallel BCP connections.
 
 **Implementation**: `bcp_connection_pool.h` manages M pre-connected ODBC connections with BCP enabled. `bulk_insert_arrow_bcp_parallel()` in `bcp_strategy.cpp` reads all RecordBatches, partitions by row count (greedy least-loaded), launches `std::thread` workers (each with own `BcpContext`, `BcpSessionGuard`, `BatchBindingState`), joins, and merges metrics. Python API: `persist_dataframe(..., bcp_workers=N)` where `bcp_workers=0` (default) uses single-connection; `bcp_workers >= 2` activates parallel path. Falls back to single-connection when batch count < requested workers.
 
-**Benchmark results (Docker SQL Server, 16-core host)**: Parallel BCP shows **no measurable throughput gain** in the Docker benchmark environment. 1M rows × 7 cols: workers=0: 475K rows/s, workers=2: 464K rows/s, workers=4: 457K rows/s. `row_loop` time is unchanged across worker counts (~0.9s), indicating SQL Server is the throughput bottleneck, not client-side CPU. This is consistent with the Phase 2 finding that `bcp_sendrow` dominates at 85%+: the ODBC driver marshals data into TDS packets and the server's disk I/O / transaction log is the limiting factor. Parallel connections don't help when the server can't consume data faster.
+**Benchmark results (Docker SQL Server, 16-core host, tmpfs + delayed durability)**: After fixing a critical batch-slicing bug (Polars exports 1 RecordBatch — workers were always clamped to 1), parallel BCP shows **dramatic throughput gains**:
 
-**Expected gains in production**: Parallel BCP should help when (1) the server is on dedicated hardware with fast NVMe and multiple cores, (2) network latency is significant (parallel connections hide RTT), or (3) the table has many wide columns increasing per-row client CPU work. The feature is correct, tested, and ready — the Docker environment is simply too constrained to demonstrate the benefit.
+| Workers | Stress test (11 cols) | Benchmark complex (11 cols) |
+|---------|-----------------------|-----------------------------|
+| 1       | 33.7 MB/s             | 32.2 MB/s                   |
+| 2       | 54.1 MB/s             | 45.9 MB/s                   |
+| 4       | 65.7 MB/s             | 48.0 MB/s                   |
+| 8       | 67.8 MB/s             | 76.3 MB/s                   |
+| 16      | 77.8 MB/s             | —                           |
+
+The fix: `RecordBatch::Slice()` (zero-copy) splits large single-batch Arrow exports into N sub-batches before partitioning. Additionally, `batch_flush_seconds` metric merge was corrected from `+=` (sum) to `std::max` (wall-clock).
 
 | #   | Task                                               | Status | Notes                                                                                                                                                                          |
 | --- | -------------------------------------------------- | ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |

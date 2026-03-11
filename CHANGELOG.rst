@@ -67,8 +67,7 @@ Changed
 - Repository: ``persist_dataframe`` gains ``bcp_batch_size=0`` parameter; when 0 (default), BCP uses its 100 000-row commit default; pass an explicit value to bound memory per batch on very wide or high-cardinality datasets.
 
 Fixed
-~~~~~
-- Repository: Fix BCP commit-frequency regression — ``persist_dataframe`` was passing ``batch_size=1000`` directly to BCP, causing 1 000 ``bcp_batch()`` server-side commits for a 1 M-row load; MERGE used the same parameter but runs all batches inside a single transaction (one commit), so BCP was paradoxically slower (2.88 MB/s) than MERGE (5.98 MB/s). Root cause was a units mismatch: ``batch_size`` on the MERGE path caps SQL parameter count per statement, while on the BCP path it sets the commit frequency. Fix: add separate ``bcp_batch_size=0`` parameter to ``persist_dataframe``; when 0, BCP uses its internal 100 000-row default (10 commits for 1 M rows instead of 1 000), restoring expected throughput ordering.
+~~~~~- Repository/MSSQL BCP: Fix parallel BCP never activating — Polars exports the entire DataFrame as a single ``RecordBatch``, so ``max_workers`` was clamped to ``min(hw_concurrency, 1) = 1`` and always fell back to single-connection. Fix: slice large ``RecordBatch``es into N sub-batches (zero-copy via ``RecordBatch::Slice``) before partitioning across workers. Additionally fix ``batch_flush_seconds`` metric aggregation from ``+=`` (sum) to ``std::max`` (wall-clock) for consistent parallel reporting.- Repository: Fix BCP commit-frequency regression — ``persist_dataframe`` was passing ``batch_size=1000`` directly to BCP, causing 1 000 ``bcp_batch()`` server-side commits for a 1 M-row load; MERGE used the same parameter but runs all batches inside a single transaction (one commit), so BCP was paradoxically slower (2.88 MB/s) than MERGE (5.98 MB/s). Root cause was a units mismatch: ``batch_size`` on the MERGE path caps SQL parameter count per statement, while on the BCP path it sets the commit frequency. Fix: add separate ``bcp_batch_size=0`` parameter to ``persist_dataframe``; when 0, BCP uses its internal 100 000-row default (10 commits for 1 M rows instead of 1 000), restoring expected throughput ordering.
 - Repository: Remove ``to_arrow(compat_level=oldest)`` compat materialization path from ``ExtractionPolicy`` — superseded by the Arrow C++ >= 15 build requirement. ``ImportRecordBatchReader`` and ``bind_string_view`` now accept Polars 1.x ``StringView`` (``"vu"`` format) natively; no Python-side IPC round-trip needed.
 - Tests: Ensured override semantics correctly raise when ``override=True`` and key is missing.
 - Added edge-case tests for factory missing getitem/override behavior and registry key tuple validation + ``find_id`` variant fallback.
@@ -77,6 +76,7 @@ Fixed
 
 Performance
 ~~~~~~~~~~~
+- Repository/MSSQL BCP: Parallel BCP now achieves **65–78 MB/s** (4–16 workers) on 1 M rows × 11 columns vs 33 MB/s single-connection — a 2–2.4× throughput improvement. Docker SQL Server w/ tmpfs + delayed durability.
 - Reduced overhead on override operations through consolidated probe.
 
 Docs
