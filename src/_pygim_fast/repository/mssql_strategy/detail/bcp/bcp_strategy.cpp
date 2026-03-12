@@ -24,6 +24,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <chrono>
 #include <cstdlib>
 #include <exception>
 #include <thread>
@@ -105,6 +106,11 @@ void finalize_bcp(BcpContext& ctx) {
     if (ctx.sent_rows > 0 && ctx.rows_until_flush < ctx.batch_size) {
         stage_timer_start(ctx, ctx.timer_batch_flush_id, "batch_flush");
         auto ret = ctx.bcp.batch(ctx.dbc);
+        if (ret == -1) {
+            // One retry — same rationale as flush_batch().
+            std::this_thread::sleep_for(std::chrono::milliseconds(50));
+            ret = ctx.bcp.batch(ctx.dbc);
+        }
         stage_timer_stop(ctx, ctx.timer_batch_flush_id, "batch_flush");
         if (ret == -1)
             odbc::raise_if_error(SQL_ERROR, SQL_HANDLE_DBC, ctx.dbc, "bcp_batch");
@@ -394,10 +400,21 @@ void bulk_insert_arrow_bcp_parallel(
     for (auto& t : threads)
         t.join();
 
-    // 7. Check for errors (rethrow first encountered).
+    // 7. Check for errors (rethrow first encountered, with worker context).
     for (int w = 0; w < actual_workers; ++w) {
-        if (results[static_cast<size_t>(w)].error)
-            std::rethrow_exception(results[static_cast<size_t>(w)].error);
+        if (results[static_cast<size_t>(w)].error) {
+            try {
+                std::rethrow_exception(results[static_cast<size_t>(w)].error);
+            } catch (const std::exception& e) {
+                const auto& wm = results[static_cast<size_t>(w)].metrics;
+                throw std::runtime_error(
+                    std::string("Parallel BCP worker ") + std::to_string(w)
+                    + "/" + std::to_string(actual_workers)
+                    + " failed (sent " + std::to_string(wm.sent_rows)
+                    + "/" + std::to_string(worker_rows[static_cast<size_t>(w)])
+                    + " rows): " + e.what());
+            }
+        }
     }
 
     // 8. Merge metrics from all workers.

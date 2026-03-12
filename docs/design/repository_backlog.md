@@ -133,13 +133,15 @@ The fix: `RecordBatch::Slice()` (zero-copy) splits large single-batch Arrow expo
 
 Goal: reduce redundant work across repeated operations.
 
+**Status: deprioritized.** Post-parallel-BCP profiling (4 workers, 1M rows × 11 cols) shows `bind_columns` at 31 ms (1.7%) and staging allocation at <1 ms/batch. `BatchBindingState` already caches schema+bindings+staging across same-schema batches via `fast_rebind()`. The two dominant phases are `row_loop` (0.8s, ODBC `bcp_sendrow` per-row calls) and `batch_flush` (1.0s, server I/O) — neither addressable by client-side caching or buffer reuse. Phase 5 items are academically correct but offer <50 ms aggregate improvement on a 1.8s pipeline.
+
 | #   | Task                                       | Status | Notes                                                                                                                                       |
 | --- | ------------------------------------------ | ------ | ------------------------------------------------------------------------------------------------------------------------------------------- |
-| 5.1 | Schema cache                               | open   | Cache column metadata (types, offsets, BCP bindings) across `save()` calls to same table. Avoid re-probing SQL Server schema on every call. |
-| 5.2 | Buffer pool                                | open   | Reuse pre-allocated transpose buffers (`alignas(64)`) across calls instead of malloc/free each time. Thread-local or pooled.                |
-| 5.3 | String interning for repeated values       | open   | If many rows share identical strings, replace with integer keys before transpose. Keys are fixed-width → SIMD-eligible.                     |
-| 5.4 | `madvise(MADV_HUGEPAGE)` for large buffers | open   | 2 MB pages reduce TLB pressure for multi-MB transpose buffers.                                                                              |
-| 5.5 | Prefetch hints                             | open   | `_mm_prefetch` on next tile's source while processing current tile. Profile to confirm benefit (prefetch can hurt if wrong).                |
+| 5.1 | Schema cache                               | deprioritized | Already implemented as `BatchBindingState` in `bcp_types.h`. Caches bindings + classified columns + staging buffer across same-schema RecordBatches. `bind_columns` is 31 ms (1.7%) — further caching across `save()` calls adds complexity for <30 ms gain. |
+| 5.2 | Buffer pool                                | deprioritized | Staging buffers allocated once per batch (not per-row). `setup_staging` + `multi_staging` vector cost is negligible in profiling. Thread-local pools add API complexity for <1 ms/batch savings. |
+| 5.3 | String interning for repeated values       | deprioritized | Only helps with highly repetitive string data. General-case overhead of building the intern table likely exceeds savings. Would need domain-specific profiling to justify. |
+| 5.4 | `madvise(MADV_HUGEPAGE)` for large buffers | deprioritized | Staging buffers are ~100 KB for 128-row mini-batches — well within L1/L2. TLB pressure is not the bottleneck; ODBC call overhead is. |
+| 5.5 | Prefetch hints                             | deprioritized | Copy/transpose is <5% of row_loop. Prefetch helps sequential memory access, but the dominant cost is the `bcp_sendrow` function call, not memory latency. |
 
 ---
 
@@ -152,7 +154,7 @@ Required throughout all phases. Not optional.
 | M.1 | Per-stage timing instrumentation   | done | `QuickTimer` wraps `bind_columns`, `row_loop`, `bcp_batch` stages. Micro-metrics (fixed_copy, colptr_redirect, string_pack, sendrow) promoted from hot-only to stage-level — always collected when any timing is enabled (<1% overhead). All metrics surfaced in Python return dict via `persist_dataframe(...)['bcp_metrics']`. Benchmark script (`benchmarks/bcp_throughput.py`) displays the full breakdown inline. |
 | M.2 | Hardware counter profiling harness | open       | `perf stat -e cache-misses,cache-references,instructions,cycles,mem-bandwidth` around the BCP row loop. Need the Phase 1.1 cache-miss rate to quantify how much `ColumnMajorTranspose` actually helps. Run as: `perf stat -p <PID> python benchmark.py` or via `perf record` + `perf report`. |
 | M.3 | Repeatable benchmark script        | done       | `benchmarks/bcp_throughput.py` — parameterised by `--rows`, `--strategy`, `--dataset` (simple/mixed/complex/exhaustive/all), `--compare-strategies`. Reports MB/s, rows/s, per-stage timing breakdown, SIMD level. Supports `--dataset all` for side-by-side profile comparison. Requires live DB via `--conn`. |
-| M.4 | Regression gate                    | open       | CI step: run `benchmark.py --rows 100000 --fast` against an in-process or local DB, compare to stored baseline JSON. Alert (fail CI) on >5% regression in MB/s. Store baseline in `benchmarks/baseline.json`, updated manually on intentional improvements. |
+| M.4 | Regression gate                    | done       | Integrated into `benchmarks/bcp_throughput.py`. `--save-baseline FILE` persists run results as JSON (MB/s, rows/s, system info, config). `--check-regression FILE` compares current run against baseline and exits 1 if any profile drops more than `--regression-threshold PCT` (default: 15%). Machine-specific baselines; regenerate after intentional improvements. CI usage: `python benchmarks/bcp_throughput.py --rows 100000 --dataset all --check-regression baseline.json`. |
 
 ---
 

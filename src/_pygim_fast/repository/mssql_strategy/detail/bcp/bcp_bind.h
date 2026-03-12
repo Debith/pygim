@@ -50,6 +50,7 @@ inline ColumnBinding make_string_binding(
     b.array_offset = array->offset();
     b.is_string    = true;
     b.str_buf.resize(256);
+    b.last_collen  = -2;  // sentinel: never matches a real length
 
     auto ret = bcp.bind(dbc, reinterpret_cast<LPCBYTE>(const_cast<uint8_t*>(&dummy)),
                         0, sql_type::varlen_data,
@@ -432,6 +433,7 @@ inline void update_time64(ColumnBinding& b, const std::shared_ptr<arrow::Array>&
 inline void update_string(ColumnBinding& b, const std::shared_ptr<arrow::Array>& a) {
     update_common(b, a);
     b.str_buf_bound = false;  // force bcp_colptr re-bind on first use
+    b.last_collen   = -2;    // force bcp_collen re-set on first use
     b.offsets32 = nullptr;
     b.offsets64 = nullptr;
     b.str_data  = nullptr;

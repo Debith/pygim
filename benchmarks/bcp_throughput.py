@@ -33,9 +33,12 @@ Connection:
 from __future__ import annotations
 
 import argparse
+import json
 import os
+import platform
 import sys
 import time
+from datetime import datetime, timezone
 
 print(f"PID: {os.getpid()}")  # attach profiler here if needed
 
@@ -422,6 +425,120 @@ def print_comparison_table(results: list[dict]) -> None:
                 )
 
 
+# ── Regression gate ──────────────────────────────────────────────────────────
+
+def _system_info() -> dict:
+    """Capture machine identity for baseline provenance."""
+    return {
+        "os": platform.system(),
+        "os_version": platform.version(),
+        "machine": platform.machine(),
+        "cpu_count": os.cpu_count(),
+        "python": platform.python_version(),
+        "node": platform.node(),
+    }
+
+
+def save_baseline(results: list[dict], args: argparse.Namespace, path: str) -> None:
+    """Persist benchmark results as a JSON baseline file."""
+    by_profile: dict[str, dict] = {}
+    for r in results:
+        key = f"{r['profile']}/{r['strategy']}"
+        by_profile[key] = {
+            "profile": r["profile"],
+            "strategy": r["strategy"],
+            "mb_s": round(r["mb_s"], 2),
+            "rows_s": round(r["rows_s"], 1),
+            "elapsed_s": round(r["elapsed_s"], 3),
+            "rows": r["rows"],
+            "payload_bytes": r["payload_bytes"],
+        }
+
+    baseline = {
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "system": _system_info(),
+        "config": {
+            "rows": args.rows,
+            "workers": args.workers,
+            "batch_size": args.batch_size,
+            "table_hint": args.table_hint,
+            "strategy": args.strategy,
+        },
+        "results": by_profile,
+    }
+
+    with open(path, "w") as f:
+        json.dump(baseline, f, indent=2)
+    print(f"\nBaseline saved to {path} ({len(by_profile)} entries)")
+
+
+def check_regression(
+    results: list[dict],
+    baseline_path: str,
+    threshold_pct: float,
+) -> bool:
+    """Compare current results against a saved baseline.
+
+    Returns True if all checks pass, False if any profile regressed
+    beyond *threshold_pct* percent.
+    """
+    with open(baseline_path) as f:
+        baseline = json.load(f)
+
+    base_results = baseline["results"]
+    base_sys = baseline.get("system", {})
+    base_ts = baseline.get("timestamp", "?")
+
+    print(f"\n{'=' * 72}")
+    print(f"Regression check against baseline")
+    print(f"  Baseline: {baseline_path}")
+    print(f"  Created:  {base_ts}")
+    print(f"  Machine:  {base_sys.get('node', '?')} ({base_sys.get('os', '?')})")
+    print(f"  Threshold: {threshold_pct:.0f}%")
+    print(f"{'=' * 72}")
+
+    passed = True
+    checked = 0
+    for r in results:
+        key = f"{r['profile']}/{r['strategy']}"
+        base = base_results.get(key)
+        if base is None:
+            print(f"  [{key:>20s}]  SKIP (no baseline entry)")
+            continue
+
+        checked += 1
+        base_mb_s = float(base["mb_s"])
+        curr_mb_s = r["mb_s"]
+
+        if base_mb_s <= 0:
+            print(f"  [{key:>20s}]  SKIP (baseline MB/s = 0)")
+            continue
+
+        change_pct = ((curr_mb_s - base_mb_s) / base_mb_s) * 100
+        status = "PASS" if change_pct >= -threshold_pct else "FAIL"
+
+        if status == "FAIL":
+            passed = False
+
+        sign = "+" if change_pct >= 0 else ""
+        print(
+            f"  [{key:>20s}]  {status}  "
+            f"baseline={base_mb_s:7.2f} MB/s  "
+            f"current={curr_mb_s:7.2f} MB/s  "
+            f"({sign}{change_pct:.1f}%)"
+        )
+
+    print(f"{'=' * 72}")
+    if checked == 0:
+        print("  WARNING: No matching profiles found in baseline — nothing checked.")
+        return True
+
+    verdict = "PASSED" if passed else "FAILED"
+    print(f"  Regression gate: {verdict}  ({checked} profile(s) checked)")
+    print(f"{'=' * 72}")
+    return passed
+
+
 # ── CLI ──────────────────────────────────────────────────────────────────────
 
 def build_parser() -> argparse.ArgumentParser:
@@ -434,6 +551,16 @@ Examples:
   %(prog)s --rows 500000 --dataset all
   %(prog)s --rows 500000 --dataset all --compare-strategies
   %(prog)s --rows 500000 --dataset complex --strategy column_major
+
+Regression gate:
+  # Establish a baseline
+  %(prog)s --rows 500000 --dataset all --save-baseline baseline.json
+
+  # Check for regressions (exit 1 if >15%% drop)
+  %(prog)s --rows 500000 --dataset all --check-regression baseline.json
+
+  # Custom threshold (exit 1 if >10%% drop)
+  %(prog)s --rows 500000 --dataset all --check-regression baseline.json --regression-threshold 10
 """,
     )
     p.add_argument("--conn", default=None,
@@ -456,6 +583,16 @@ Examples:
                    help="Skip TRUNCATE before each run")
     p.add_argument("--warmup", action="store_true",
                    help="Run one warm-up pass (discarded) before timing")
+
+    # Regression gate
+    rg = p.add_argument_group("regression gate")
+    rg.add_argument("--save-baseline", metavar="FILE",
+                    help="Save results as a JSON baseline file")
+    rg.add_argument("--check-regression", metavar="FILE",
+                    help="Compare results against a saved baseline; exit 1 on regression")
+    rg.add_argument("--regression-threshold", type=float, default=15.0,
+                    metavar="PCT",
+                    help="Max allowed throughput drop %% before failing (default: 15)")
     return p
 
 
@@ -520,6 +657,16 @@ def main() -> None:
     # ── Summary ──────────────────────────────────────────────────────────────
     if len(all_results) > 1:
         print_comparison_table(all_results)
+
+    # ── Regression gate ──────────────────────────────────────────────────────
+    if args.save_baseline:
+        save_baseline(all_results, args, args.save_baseline)
+
+    if args.check_regression:
+        ok = check_regression(all_results, args.check_regression,
+                              args.regression_threshold)
+        if not ok:
+            sys.exit(1)
 
 
 if __name__ == "__main__":

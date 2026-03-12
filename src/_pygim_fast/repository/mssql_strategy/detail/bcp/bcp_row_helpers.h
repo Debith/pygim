@@ -6,6 +6,9 @@
 #include "bcp_bind.h"
 #include "../../../../utils/quick_timer.h"
 
+#include <thread>
+#include <chrono>
+
 namespace pygim::bcp {
 
 // ── String column handling ──────────────────────────────────────────────────
@@ -14,6 +17,15 @@ namespace pygim::bcp {
 /// set bcp_collen, and redirect bcp_colptr only when the buffer reallocates.
 inline void handle_string_column(const BcpApi& bcp, SQLHDBC dbc,
                                  ColumnBinding& b, int64_t row) {
+    // Handle NULLs: set bcp_collen to SQL_NULL_DATA.
+    if (b.has_nulls && is_null_at(b, row)) [[unlikely]] {
+        if (b.last_collen != SQL_NULL_DATA) {
+            bcp.collen(dbc, SQL_NULL_DATA, b.ordinal);
+            b.last_collen = SQL_NULL_DATA;
+        }
+        return;
+    }
+
     DBINT len{};
     const uint8_t* ptr{};
 
@@ -47,7 +59,7 @@ inline void handle_string_column(const BcpApi& bcp, SQLHDBC dbc,
         // Layout: [DBINT length][data bytes]
         constexpr size_t prefix = sizeof(DBINT);
         const auto need = prefix + ulen;
-        if (need > b.str_buf.size()) {
+        if (need > b.str_buf.size()) [[unlikely]] {
             b.str_buf.resize(need);
             b.str_buf_bound = false;
         }
@@ -55,14 +67,20 @@ inline void handle_string_column(const BcpApi& bcp, SQLHDBC dbc,
         std::memcpy(b.str_buf.data() + prefix, ptr, ulen);
         // No bcp_collen needed — the prefix carries the length.
     } else {
-        // String columns: copy + null-terminate, set bcp_collen.
-        if (ulen + 1 > b.str_buf.size()) {
+        // String columns: copy + null-terminate.
+        // Skip bcp_collen when length is unchanged from the previous row
+        // (common for uniform-length strings).  This eliminates the ODBC
+        // function-pointer call overhead (~200-300ns per call).
+        if (ulen + 1 > b.str_buf.size()) [[unlikely]] {
             b.str_buf.resize(ulen + 1);
             b.str_buf_bound = false;
         }
         std::memcpy(b.str_buf.data(), ptr, ulen);
         b.str_buf[ulen] = '\0';
-        bcp.collen(dbc, len, b.ordinal);
+        if (len != b.last_collen) [[unlikely]] {
+            bcp.collen(dbc, len, b.ordinal);
+            b.last_collen = len;
+        }
     }
 
     if (!b.str_buf_bound) [[unlikely]] {
@@ -73,11 +91,24 @@ inline void handle_string_column(const BcpApi& bcp, SQLHDBC dbc,
 
 // ── Batch flush ─────────────────────────────────────────────────────────────
 
+/// Flush accumulated rows to the server.  Retries once on transient failure
+/// (server resource pressure under parallel BCP can cause a single bcp_batch
+/// call to fail even when the connection is healthy).
 inline void flush_batch(const BcpApi& bcp, SQLHDBC dbc, BcpContext& ctx) {
     stage_timer_stop(ctx, ctx.timer_row_loop_id, "row_loop");
     stage_timer_start(ctx, ctx.timer_batch_flush_id, "batch_flush");
 
     auto ret = bcp.batch(dbc);
+
+    if (ret == -1) [[unlikely]] {
+        // One retry after a brief pause.  bcp_batch -1 under heavy parallel
+        // load is often a transient server back-pressure signal, not a fatal
+        // protocol error.  If the connection is truly broken, the retry will
+        // fail immediately and we throw.
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        ret = bcp.batch(dbc);
+    }
+
     stage_timer_stop(ctx, ctx.timer_batch_flush_id, "batch_flush");
 
     if (ret == -1) [[unlikely]]

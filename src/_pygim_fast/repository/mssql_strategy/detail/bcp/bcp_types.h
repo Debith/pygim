@@ -74,6 +74,7 @@ struct ColumnBinding {
 #endif
     std::vector<uint8_t> str_buf;        // reusable buffer for null-terminated copy
     bool                 str_buf_bound{false};
+    DBINT                last_collen{-2};  // cached bcp_collen value; -2 = unset sentinel
 
     // Pre-converted buffers (kept alive by shared_ptr)
     std::shared_ptr<std::vector<uint8_t>>                bool_buffer;
