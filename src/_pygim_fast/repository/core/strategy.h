@@ -24,6 +24,9 @@
 
 namespace pygim::core {
 
+// Forward-declare — include load_strategy.h in TUs that call load().
+class LoadStrategy;
+
 /// Static capability flags — determined once at strategy construction,
 /// queried by RepositoryCore to dispatch operations.
 struct StrategyCapabilities {
@@ -85,6 +88,17 @@ public:
                          DataView view,
                          const PersistOptions &opts) {
         throw std::runtime_error("Strategy::persist not supported");
+    }
+
+    // ---- Load (single-pass, strategy-driven materialisation) ----------------
+
+    /// Execute a query and stream results into a LoadStrategy.
+    ///
+    /// Unlike fetch(), which materialises a row-major ResultSet, load()
+    /// drives a LoadStrategy with typed cell-level callbacks — letting each
+    /// strategy build its output format directly (Arrow, dict, …).
+    virtual void load(const RenderedQuery & /*query*/, LoadStrategy & /*output*/) {
+        throw std::runtime_error("Strategy::load not supported");
     }
 };
 

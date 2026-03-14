@@ -9,6 +9,7 @@
 #include <variant>
 #include <vector>
 
+#include "../../core/load_strategy.h"
 #include "../../mssql_strategy/detail/odbc_error.h"
 #include "../../mssql_strategy/detail/cell_statement_binder.h"
 #include "../../../utils/logging.h"
@@ -59,6 +60,14 @@ std::optional<core::ResultSet> MssqlStrategy<Transpose>::fetch(
     PYGIM_SCOPE_LOG_TAG("repo.fetch");
     ensure_connected();
     return fetch_impl(query.sql, query.params);
+}
+
+template <typename Transpose>
+void MssqlStrategy<Transpose>::load(const core::RenderedQuery &query,
+                                    core::LoadStrategy &output) {
+    PYGIM_SCOPE_LOG_TAG("repo.load");
+    ensure_connected();
+    load_impl(query.sql, query.params, output);
 }
 
 template <typename Transpose>
@@ -261,6 +270,125 @@ std::optional<core::ResultSet> MssqlStrategy<Transpose>::fetch_impl(
 
     SQLFreeHandle(SQL_HANDLE_STMT, stmt);
     return result;
+}
+
+// ---- Load implementation (single-pass into LoadStrategy) --------------------
+
+/// Map ODBC SQL data type to neutral ColumnType.
+static core::ColumnType sql_type_to_column_type(SQLSMALLINT dtype) {
+    switch (dtype) {
+    case SQL_BIGINT: case SQL_INTEGER: case SQL_SMALLINT: case SQL_TINYINT:
+        return core::ColumnType::Int64;
+    case SQL_FLOAT: case SQL_DOUBLE: case SQL_REAL:
+    case SQL_DECIMAL: case SQL_NUMERIC:
+        return core::ColumnType::Double;
+    case SQL_BIT:
+        return core::ColumnType::Bool;
+    default:
+        return core::ColumnType::String;
+    }
+}
+
+template <typename Transpose>
+void MssqlStrategy<Transpose>::load_impl(
+    const std::string &sql,
+    const std::vector<core::CellValue> &params,
+    core::LoadStrategy &output) {
+    PYGIM_SCOPE_LOG_TAG("repo.load");
+    SQLHSTMT stmt = SQL_NULL_HSTMT;
+    if (SQLAllocHandle(SQL_HANDLE_STMT, m_dbc, &stmt) != SQL_SUCCESS)
+        throw std::runtime_error("ODBC: alloc stmt failed");
+
+    SQLRETURN ret = SQLPrepare(stmt, (SQLCHAR *)sql.c_str(), SQL_NTS);
+    if (!SQL_SUCCEEDED(ret)) {
+        SQLFreeHandle(SQL_HANDLE_STMT, stmt);
+        raise_if_error(ret, SQL_HANDLE_STMT, stmt, "SQLPrepare");
+    }
+
+    detail::CellStatementBinder binder;
+    binder.bind_all(stmt, params);
+
+    ret = SQLExecute(stmt);
+    if (!SQL_SUCCEEDED(ret)) {
+        SQLFreeHandle(SQL_HANDLE_STMT, stmt);
+        // Empty result — call begin/finish with no columns.
+        output.begin({});
+        output.finish();
+        return;
+    }
+
+    SQLSMALLINT col_count = 0;
+    SQLNumResultCols(stmt, &col_count);
+
+    // Collect column metadata and map ODBC types.
+    std::vector<core::ColumnInfo> columns(static_cast<size_t>(col_count));
+    std::vector<SQLSMALLINT> odbc_types(static_cast<size_t>(col_count));
+    for (SQLSMALLINT i = 1; i <= col_count; ++i) {
+        char col_name[128];
+        SQLSMALLINT name_len = 0, data_type = 0, scale = 0, nullable = 0;
+        SQLULEN col_size = 0;
+        SQLDescribeCol(stmt, i, (SQLCHAR *)col_name, sizeof(col_name),
+                       &name_len, &data_type, &col_size, &scale, &nullable);
+        const auto idx = static_cast<size_t>(i - 1);
+        columns[idx].name.assign(col_name, name_len);
+        columns[idx].type = sql_type_to_column_type(data_type);
+        odbc_types[idx] = data_type;
+    }
+
+    output.begin(columns);
+
+    // Fetch rows — dispatch typed SQLGetData and feed directly into strategy.
+    while (true) {
+        ret = SQLFetch(stmt);
+        if (ret == SQL_NO_DATA) break;
+        if (!SQL_SUCCEEDED(ret)) break;
+
+        for (SQLSMALLINT c = 1; c <= col_count; ++c) {
+            const auto idx = static_cast<size_t>(c - 1);
+            SQLLEN out_len = 0;
+            const auto col_type = columns[idx].type;
+
+            if (col_type == core::ColumnType::Int64) {
+                int64_t val = 0;
+                SQLRETURN dret = SQLGetData(stmt, c, SQL_C_SBIGINT, &val, 0, &out_len);
+                if (SQL_SUCCEEDED(dret) && out_len != SQL_NULL_DATA)
+                    output.append_int64(idx, val);
+                else
+                    output.append_null(idx);
+            } else if (col_type == core::ColumnType::Double) {
+                double val = 0.0;
+                SQLRETURN dret = SQLGetData(stmt, c, SQL_C_DOUBLE, &val, 0, &out_len);
+                if (SQL_SUCCEEDED(dret) && out_len != SQL_NULL_DATA)
+                    output.append_double(idx, val);
+                else
+                    output.append_null(idx);
+            } else if (col_type == core::ColumnType::Bool) {
+                unsigned char val = 0;
+                SQLRETURN dret = SQLGetData(stmt, c, SQL_C_BIT, &val, 0, &out_len);
+                if (SQL_SUCCEEDED(dret) && out_len != SQL_NULL_DATA)
+                    output.append_bool(idx, val != 0);
+                else
+                    output.append_null(idx);
+            } else {
+                // String path — handles VARCHAR, NVARCHAR, and any unrecognised type.
+                char buf[1024];
+                SQLRETURN dret = SQLGetData(stmt, c, SQL_C_CHAR, buf,
+                                            static_cast<SQLLEN>(sizeof(buf)), &out_len);
+                if (SQL_SUCCEEDED(dret) && out_len != SQL_NULL_DATA) {
+                    const auto len = static_cast<size_t>(
+                        out_len < static_cast<SQLLEN>(sizeof(buf)) ? out_len
+                                                                   : sizeof(buf) - 1);
+                    output.append_string(idx, std::string_view(buf, len));
+                } else {
+                    output.append_null(idx);
+                }
+            }
+        }
+        output.end_row();
+    }
+
+    output.finish();
+    SQLFreeHandle(SQL_HANDLE_STMT, stmt);
 }
 
 // ---- Save (upsert) implementation ------------------------------------------

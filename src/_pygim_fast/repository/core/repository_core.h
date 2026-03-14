@@ -19,6 +19,7 @@
 
 #include "query_dialect.h"
 #include "query_intent.h"
+#include "load_strategy.h"
 #include "strategy.h"
 #include "value_types.h"
 
@@ -150,6 +151,16 @@ public:
         auto result = fetch_raw(intent);
         if (!result.has_value()) return std::nullopt;
         return apply_post_load(intent.table, std::move(*result));
+    }
+
+    /// Stream query results directly into a LoadStrategy (zero-copy path).
+    void load(const RenderedQuery &query, LoadStrategy &output) {
+        for (auto &s : m_strategies) {
+            if (!s->capabilities().can_fetch) continue;
+            s->load(query, output);
+            return;
+        }
+        throw std::runtime_error("RepositoryCore: no strategy supports load");
     }
 
     // ---- Save operations ----------------------------------------------------

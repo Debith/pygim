@@ -86,6 +86,9 @@ public:
     std::optional<core::ResultSet> fetch(const core::RenderedQuery &query) override;
     void save(const core::TablePkKey &key, const core::RowMap &data) override;
 
+    /// Stream query results into a LoadStrategy (single-pass, zero-copy).
+    void load(const core::RenderedQuery &query, core::LoadStrategy &output) override;
+
     /// Persist bulk data from a DataView.
     ///
     /// Dispatches internally:
@@ -126,6 +129,11 @@ private:
     /// Execute a SELECT and return results.
     std::optional<core::ResultSet> fetch_impl(const std::string &sql,
                                               const std::vector<core::CellValue> &params);
+
+    /// Execute a SELECT and stream results into a LoadStrategy.
+    void load_impl(const std::string &sql,
+                   const std::vector<core::CellValue> &params,
+                   core::LoadStrategy &output);
 
     /// Upsert a single row (UPDATE then INSERT on miss).
     void upsert_impl(const std::string &table,

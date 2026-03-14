@@ -3,6 +3,7 @@
 // Exposes:
 // - QueryAdapter as "Query" (fluent builder)
 // - Repository (adapter wrapping RepositoryCore)
+// - _ArrowResult (Arrow PyCapsule protocol wrapper for load() results)
 // - StatusPrinter (flag-controlled status output, distinct from logging)
 // - acquire_repository() free function (recommended entry point)
 //
@@ -11,12 +12,17 @@
 // Python-level bindings.
 
 #include <algorithm>
+#include <cstring>
 #include <optional>
 #include <string>
+
+#include <arrow/api.h>
+#include <arrow/c/bridge.h>
 
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 
+#include "../core/arrow_load_strategy.h"
 #include "../core/status_printer.h"
 #include "../core/value_types.h"
 #include "data_extractor.h"
@@ -24,6 +30,41 @@
 #include "repository.h"
 
 namespace py = pybind11;
+
+// ---------------------------------------------------------------------------
+// _ArrowResult: PyCapsule protocol wrapper
+// ---------------------------------------------------------------------------
+
+/// Lightweight wrapper that implements Arrow PyCapsule protocol
+/// (__arrow_c_stream__).  Created transiently by Repository.load() to
+/// hand off data to Polars without going through Python dicts or PyArrow.
+struct ArrowResult {
+    std::shared_ptr<arrow::RecordBatch> batch;
+
+    py::capsule arrow_c_stream(py::object /*requested_schema*/ = py::none()) const {
+        auto reader_result = arrow::RecordBatchReader::Make({batch}, batch->schema());
+        if (!reader_result.ok())
+            throw std::runtime_error(reader_result.status().ToString());
+
+        auto *c_stream = new ArrowArrayStream;
+        std::memset(c_stream, 0, sizeof(*c_stream));
+
+        auto status = arrow::ExportRecordBatchReader(
+            std::move(*reader_result), c_stream);
+        if (!status.ok()) {
+            delete c_stream;
+            throw std::runtime_error(status.ToString());
+        }
+
+        return py::capsule(
+            static_cast<void *>(c_stream), "arrow_array_stream",
+            [](void *ptr) {
+                auto *s = static_cast<ArrowArrayStream *>(ptr);
+                if (s->release) s->release(s);
+                delete s;
+            });
+    }
+};
 
 // ---------------------------------------------------------------------------
 // Internal helpers
@@ -91,6 +132,16 @@ PYBIND11_MODULE(_repository, m) {
             return "StatusPrinter(connection=" +
                    std::string(p.connection ? "True" : "False") + ")";
         });
+
+    // ---- _ArrowResult (PyCapsule protocol for load results) ----------------
+
+    py::class_<ArrowResult>(m, "_ArrowResult",
+        "Internal Arrow PyCapsule protocol wrapper.\n\n"
+        "Created transiently by Repository.load() to convert data from\n"
+        "C++ Arrow RecordBatch to Polars DataFrame via zero-copy.")
+        .def("__arrow_c_stream__", &ArrowResult::arrow_c_stream,
+             py::arg("requested_schema") = py::none(),
+             "Export as Arrow C Data Interface stream (PyCapsule protocol).");
 
     // ---- QueryAdapter as "Query" --------------------------------------------
 
@@ -177,6 +228,27 @@ PYBIND11_MODULE(_repository, m) {
              "batch_size     controls MERGE commit frequency (fallback path).\n"
              "bcp_batch_size controls BCP bcp_batch() commit frequency; 0 = auto (100 000).\n"
              "bcp_workers    number of parallel BCP connections; 0 = single-connection (default).")
+        .def("load",
+             [](adapter::Repository &self, const std::string &source) -> py::object {
+                 pygim::core::ArrowLoadStrategy strat;
+                 self.load(source, strat);
+                 auto batch = strat.result();
+                 py::module_ pl = py::module_::import("polars");
+                 if (!batch || batch->num_rows() == 0) {
+                     return pl.attr("DataFrame")();
+                 }
+                 ArrowResult wrapper{std::move(batch)};
+                 return pl.attr("from_arrow")(py::cast(std::move(wrapper)));
+             },
+             py::arg("source"),
+             "Load data from a table name or SQL SELECT into a Polars DataFrame.\n\n"
+             "Data flows directly through Arrow builders during the ODBC fetch loop\n"
+             "(single-pass, zero intermediate copies)::\n\n"
+             "    df = repo.load('dbo.my_table')\n"
+             "    df = repo.load('SELECT TOP 100 * FROM t')\n\n"
+             "If *source* contains no whitespace it is treated as a table name\n"
+             "and ``SELECT * FROM <source>`` is executed automatically.\n\n"
+             "Returns an empty DataFrame if no rows are found.")
         .def("__getitem__", &adapter::Repository::get, py::arg("key"))
         .def("__setitem__", &adapter::Repository::save,
              py::arg("key"), py::arg("value"))

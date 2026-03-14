@@ -281,6 +281,24 @@ public:
         return result;
     }
 
+    // ---- Load (table / SQL → LoadStrategy) ----------------------------------
+
+    /// Execute a query and stream results into a LoadStrategy.
+    ///
+    /// @param source  Either a bare table name (e.g. "dbo.my_table") or a
+    ///                full SQL SELECT statement (detected by the presence of
+    ///                whitespace).
+    /// @param output  A LoadStrategy that receives typed cell-level callbacks
+    ///                during the ODBC fetch loop and materialises the output.
+    void load(const std::string &source, core::LoadStrategy &output) {
+        std::string sql = source;
+        if (source.find(' ') == std::string::npos) {
+            sql = "SELECT * FROM " + source;
+        }
+        core::RenderedQuery rq{sql, {}};
+        m_core.load(rq, output);
+    }
+
     // ---- Introspection ------------------------------------------------------
 
     size_t strategy_count() const { return m_core.strategy_count(); }
