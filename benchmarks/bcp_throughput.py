@@ -1,53 +1,26 @@
 #!/usr/bin/env python3
 """
-BCP throughput benchmark with multiple dataset profiles.
+BCP throughput benchmark — target architecture (placeholder).
 
-Runs identical BCP insert logic against three table schemas so you can
-compare apples-to-apples across simple, mixed, and complex column sets.
-Optionally loads (reads) data back to benchmark round-trip throughput.
+Exercises the full Repository pipeline:
+  acquire_repo → save (Polars → Arrow → BCP) → load (ODBC → Arrow → Polars)
+
+Uses the new target architecture API:
+  from pygim.repository import acquire_repo, Query
 
 Profiles:
   simple     – 7 columns  (INT, BIGINT, FLOAT, NVARCHAR, DATE, DATETIME2)
   mixed      – 9 columns  (adds DECIMAL, wider NVARCHAR)
   complex    – 11 columns (adds BIT, DECIMAL, NCHAR, UNIQUEIDENTIFIER)
-  exhaustive – 19 columns (every supported Arrow type: INT8-64, UINT8-64,
-                            BOOL, FLOAT32/64, DATE, TIME, DATETIME2,
-                            DURATION, NVARCHAR, VARBINARY)
+  exhaustive – 19 columns (every supported Arrow type)
 
 Modes:
-  both  – write, read-back, and verify round-trip integrity (default)
+  both  – write + read-back + verify (default)
   write – BCP insert only
   load  – SELECT read only (table must already contain data)
-
-Usage:
-  # Single profile — writes, reads back, verifies (default)
-  python benchmarks/bcp_throughput.py --rows 500000 --dataset simple
-
-  # Write-only (skip read-back and verification)
-  python benchmarks/bcp_throughput.py --rows 500000 --dataset simple --mode write
-
-  # Compare row_major vs column_major for one profile
-  python benchmarks/bcp_throughput.py --rows 500000 --dataset mixed --compare-strategies
-
-  # Run ALL profiles side-by-side
-  python benchmarks/bcp_throughput.py --rows 500000 --dataset all
-
-  # Full matrix: every profile × both strategies
-  python benchmarks/bcp_throughput.py --rows 500000 --dataset all --compare-strategies
-
-  # Load (read) benchmark after data is already in the table
-  python benchmarks/bcp_throughput.py --rows 500000 --dataset simple --mode load
-
-  # Disable verification (keep load benchmark but skip cell comparison)
-  python benchmarks/bcp_throughput.py --rows 500000 --mode both --no-verify
-
-Connection:
-  Set STRESS_CONN env var, or pass --conn, or let it fall back to the
-  local dev default.
 """
 from __future__ import annotations
 
-import argparse
 import json
 import math
 import os
@@ -58,122 +31,67 @@ from datetime import date as py_date
 from datetime import datetime, timezone
 from decimal import Decimal
 
-print(f"PID: {os.getpid()}")  # attach profiler here if needed
+import click
 
+print(f"PID: {os.getpid()}")
 
 # ── Dependency helpers ───────────────────────────────────────────────────────
 
 def _require(mod: str):
+    import importlib
     try:
-        import importlib
         return importlib.import_module(mod)
     except ModuleNotFoundError:
-        print(f"ERROR: '{mod}' is required. Install with: pip install {mod}", file=sys.stderr)
+        click.echo(f"ERROR: '{mod}' is required.  pip install {mod}", err=True)
         sys.exit(1)
 
 
 def default_connection_string() -> str:
     pwd = os.getenv("MSSQL_SA_PASSWORD", "NewP@ssw0rd#2025")
     return (
-        f"Driver={{ODBC Driver 18 for SQL Server}};Server=localhost,1433;Database=master;"
-        f"UID=sa;PWD={pwd};Encrypt=yes;TrustServerCertificate=yes;"
+        f"Driver={{ODBC Driver 18 for SQL Server}};Server=localhost,1433;"
+        f"Database=master;UID=sa;PWD={pwd};"
+        f"Encrypt=yes;TrustServerCertificate=yes;"
     )
 
 
-# ── Dataset profiles ─────────────────────────────────────────────────────────
-#
-# Each profile is a dict with:
-#   table    – fully qualified table name
-#   ddl      – IF NOT EXISTS create DDL
-#   generate – callable(n, pl) -> polars.DataFrame
-#   columns  – int (for display)
+# ── Dataset schemas (for pygim.create_df C++ data generator) ─────────────────
 
 import pygim
 
-
-# ── Schema definitions for pygim.create_df ───────────────────────────────────
-# Each maps column names -> type strings consumed by the C++ data generator.
-
 _SCHEMA_SIMPLE = {
-    "id":       "serial",
-    "val_i32":  "int32",
-    "val_i64":  "int64",
-    "val_f64":  "float64",
-    "val_str":  "string",
-    "val_date": "date",
-    "val_ts":   "timestamp",
+    "id": "serial", "val_i32": "int32", "val_i64": "int64",
+    "val_f64": "float64", "val_str": "string",
+    "val_date": "date", "val_ts": "timestamp",
 }
-
 
 _SCHEMA_MIXED = {
-    "id":        "serial",
-    "val_i32":   "int32",
-    "val_i64":   "int64",
-    "val_f64":   "float64",
-    "val_dec":   "float64",   # maps to DECIMAL(18,4) on SQL side
-    "val_str":   "string",
-    "val_text":  "string",
-    "val_date":  "date",
-    "val_ts":    "timestamp",
+    "id": "serial", "val_i32": "int32", "val_i64": "int64",
+    "val_f64": "float64", "val_dec": "float64",
+    "val_str": "string", "val_text": "string",
+    "val_date": "date", "val_ts": "timestamp",
 }
-
 
 _SCHEMA_COMPLEX = {
-    "id":             "serial",
-    "col_int":        "int32",
-    "col_bigint":     "int64",
-    "col_bit":        "bool",
-    "col_decimal":    "float64",
-    "col_float":      "float64",
-    "col_nvarchar":   "string",
-    "col_nchar":      "string",
-    "col_date":       "date",
-    "col_datetime2":  "timestamp",
-    "col_uuid":       "uuid",
+    "id": "serial", "col_int": "int32", "col_bigint": "int64",
+    "col_bit": "bool", "col_decimal": "float64", "col_float": "float64",
+    "col_nvarchar": "string", "col_nchar": "string",
+    "col_date": "date", "col_datetime2": "timestamp", "col_uuid": "uuid",
 }
-
 
 _SCHEMA_EXHAUSTIVE = {
-    "id":              "serial",
-    "col_int8":        "int8",
-    "col_int16":       "int16",
-    "col_int32":       "int32",
-    "col_int64":       "int64",
-    "col_uint8":       "uint8",
-    "col_uint16":      "uint16",
-    "col_uint32":      "uint32",
-    "col_uint64":      "uint64",
-    "col_bool":        "bool",
-    "col_float32":     "float32",
-    "col_float64":     "float64",
-    "col_date":        "date",
-    "col_time":        "time",
-    "col_datetime2":   "timestamp",
-    "col_duration_us": "duration",
-    "col_nvarchar":    "string",
-    "col_binary":      "binary",
+    "id": "serial",
+    "col_int8": "int8", "col_int16": "int16", "col_int32": "int32",
+    "col_int64": "int64", "col_uint8": "uint8", "col_uint16": "uint16",
+    "col_uint32": "uint32", "col_uint64": "uint64",
+    "col_bool": "bool", "col_float32": "float32", "col_float64": "float64",
+    "col_date": "date", "col_time": "time", "col_datetime2": "timestamp",
+    "col_duration_us": "duration", "col_nvarchar": "string",
+    "col_binary": "binary",
 }
 
 
-def _generate_simple(n: int, pl) -> object:
-    """7 columns: id, INT, BIGINT, FLOAT, NVARCHAR(64), DATE, DATETIME2(6)."""
-    return pygim.create_df(_SCHEMA_SIMPLE, rows=n)
-
-
-def _generate_mixed(n: int, pl) -> object:
-    """9 columns: simple + DECIMAL(18,4), wider NVARCHAR(200)."""
-    return pygim.create_df(_SCHEMA_MIXED, rows=n)
-
-
-def _generate_complex(n: int, pl) -> object:
-    """11 columns: INT PK + INT, BIGINT, BIT, DECIMAL, FLOAT, NVARCHAR, NCHAR, DATE, DATETIME2, UUID."""
-    return pygim.create_df(_SCHEMA_COMPLEX, rows=n)
-
-
-def _generate_exhaustive(n: int, pl) -> object:
-    """18 columns: exercises every Arrow type dispatch path in the BCP binder."""
-    return pygim.create_df(_SCHEMA_EXHAUSTIVE, rows=n)
-
+# ── Dataset profiles ─────────────────────────────────────────────────────────
 
 PROFILES: dict[str, dict] = {
     "simple": {
@@ -189,7 +107,7 @@ CREATE TABLE dbo.bcp_bench_simple (
     val_date DATE          NOT NULL,
     val_ts   DATETIME2(6)  NOT NULL
 );""",
-        "generate": _generate_simple,
+        "schema": _SCHEMA_SIMPLE,
         "columns": 7,
     },
     "mixed": {
@@ -207,7 +125,7 @@ CREATE TABLE dbo.bcp_bench_mixed (
     val_date  DATE           NOT NULL,
     val_ts    DATETIME2(6)   NOT NULL
 );""",
-        "generate": _generate_mixed,
+        "schema": _SCHEMA_MIXED,
         "columns": 9,
     },
     "complex": {
@@ -227,7 +145,7 @@ CREATE TABLE dbo.bcp_bench_complex (
     col_datetime2  DATETIME2(6)       NOT NULL,
     col_uuid       UNIQUEIDENTIFIER   NOT NULL
 );""",
-        "generate": _generate_complex,
+        "schema": _SCHEMA_COMPLEX,
         "columns": 11,
     },
     "exhaustive": {
@@ -254,7 +172,7 @@ CREATE TABLE dbo.bcp_bench_exhaustive (
     col_nvarchar    NVARCHAR(100)   NOT NULL,
     col_binary      VARBINARY(256)  NOT NULL
 );""",
-        "generate": _generate_exhaustive,
+        "schema": _SCHEMA_EXHAUSTIVE,
         "columns": 18,
     },
 }
@@ -278,113 +196,94 @@ def truncate_table(conn_str: str, table: str, pyodbc) -> None:
     cn.close()
 
 
-# ── Payload size estimation ──────────────────────────────────────────────────
+# ── Payload estimation ───────────────────────────────────────────────────────
 
-def estimate_dataframe_size_bytes(frame) -> int:
-    """Best-effort estimation of Polars DataFrame size in bytes."""
+def estimate_size_bytes(frame) -> int:
     for attr in ("estimated_size", "estimated_size_bytes"):
-        estimator = getattr(frame, attr, None)
-        if callable(estimator):
+        fn = getattr(frame, attr, None)
+        if callable(fn):
             try:
-                size = estimator()
+                return max(int(fn()), 0)
             except Exception:
                 continue
-            if size is not None:
-                return max(int(size), 0)
-    try:
-        return max(int(frame.__sizeof__()), 0)
-    except Exception:
-        return 0
+    return 0
 
 
-# ── Benchmark runner ─────────────────────────────────────────────────────────
+# ── Benchmark runners ────────────────────────────────────────────────────────
 
-def run_one(
+def run_write(
     conn_str: str,
     table: str,
     df,
-    strategy: str,
-    bcp_batch_size: int,
-    table_hint: str,
-    bcp_workers: int = 0,
+    profile_name: str,
+    bcp_workers: int,
 ) -> dict:
     """Insert *df* via BCP and return timing metrics."""
-    from pygim import acquire_repository
+    from pygim.repository import acquire_repo
 
-    repo = acquire_repository(conn_str, transpose=strategy)
+    repo = acquire_repo(conn_str, format="polars")
 
-    payload_bytes = estimate_dataframe_size_bytes(df)
+    payload_bytes = estimate_size_bytes(df)
     nrows = len(df)
 
     t0 = time.perf_counter()
-    result = repo.persist_dataframe(
-        table,
-        df,
-        prefer_arrow=True,
-        bcp_batch_size=bcp_batch_size,
-        table_hint=table_hint,
-        bcp_workers=bcp_workers,
-    )
+    repo.save(table, bcp_workers=bcp_workers)
     elapsed = time.perf_counter() - t0
 
     mb_s = (payload_bytes / 1_048_576) / elapsed if elapsed > 0 else 0.0
 
     return {
-        "strategy":      strategy,
-        "rows":          nrows,
-        "elapsed_s":     elapsed,
-        "payload_bytes": payload_bytes,
-        "mb_s":          mb_s,
-        "rows_s":        nrows / elapsed if elapsed > 0 else 0.0,
-        "bcp_metrics":   result,
-    }
-
-# ── Load (read) benchmark runner ─────────────────────────────────────────
-
-def run_load(conn_str: str, table: str, profile_name: str) -> dict:
-    """Load all rows from *table* via C++ Repository.load() (Arrow → Polars)."""
-    from pygim import acquire_repository
-
-    repo = acquire_repository(conn_str)
-    t0 = time.perf_counter()
-    df = repo.load(table)
-    elapsed = time.perf_counter() - t0
-
-    nrows = len(df)
-    payload_bytes = df.estimated_size() if nrows > 0 else 0
-    mb_s = (payload_bytes / 1_048_576) / elapsed if elapsed > 0 else 0.0
-
-    return {
-        "direction":     "load",
         "profile":       profile_name,
+        "direction":     "write",
         "rows":          nrows,
         "elapsed_s":     elapsed,
         "payload_bytes": payload_bytes,
         "mb_s":          mb_s,
         "rows_s":        nrows / elapsed if elapsed > 0 else 0.0,
+        "bcp_workers":   bcp_workers,
     }
+
+
+def run_load(
+    conn_str: str,
+    table: str,
+    profile_name: str,
+    load_workers: int,
+) -> dict:
+    """Load all rows from *table* via Repository.load() (Arrow → Polars)."""
+    from pygim.repository import acquire_repo
+
+    repo = acquire_repo(conn_str, format="polars")
+
+    t0 = time.perf_counter()
+    repo.load(table, load_workers=load_workers)
+    elapsed = time.perf_counter() - t0
+
+    # Placeholder: real code would measure actual returned DataFrame
+    nrows = 0
+    payload_bytes = 0
+    mb_s = 0.0
+
+    return {
+        "profile":       profile_name,
+        "direction":     "load",
+        "rows":          nrows,
+        "elapsed_s":     elapsed,
+        "payload_bytes": payload_bytes,
+        "mb_s":          mb_s,
+        "rows_s":        nrows / elapsed if elapsed > 0 else 0.0,
+        "load_workers":  load_workers,
+    }
+
 
 # ── Round-trip verification ───────────────────────────────────────────────────
 
 def _polars_row_to_pydict(df, idx: int) -> dict:
-    """Extract row *idx* from a Polars DataFrame as {col: python_value}."""
     return {col: df[col][idx] for col in df.columns}
 
 
 def _values_match(source, actual, col_name: str, *, float_tol: float = 1e-6) -> bool:
-    """Compare a single cell value from the source DataFrame with the SQL read-back.
-
-    Handles type coercions introduced by Arrow → BCP → SQL → pyodbc:
-      - Polars int → Python int (exact; signed int8 ↔ TINYINT unsigned handled)
-      - Polars float → Python float / Decimal (relative tolerance)
-      - Polars str → Python str (case-insensitive for UUIDs, rstrip for NCHAR)
-      - Polars date → datetime.date (exact)
-      - Polars datetime → datetime.datetime (1ms tolerance for DATETIME2(6))
-      - Polars bool → Python bool / int 0|1 (BIT)
-      - Polars timedelta → BIGINT microseconds
-      - bytes / binary → bytes (exact)
-      - None / null → None (exact)
-    """
+    """Compare a single cell value — handles Arrow → BCP → SQL → pyodbc coercions."""
     import datetime as _dt
 
     if source is None and actual is None:
@@ -398,7 +297,6 @@ def _values_match(source, actual, col_name: str, *, float_tol: float = 1e-6) -> 
 
     # timedelta (duration) → BIGINT microseconds
     if isinstance(source, _dt.timedelta):
-        # Use integer arithmetic to avoid float precision loss
         src_us = (source.days * 86_400_000_000
                   + source.seconds * 1_000_000
                   + source.microseconds)
@@ -408,36 +306,31 @@ def _values_match(source, actual, col_name: str, *, float_tol: float = 1e-6) -> 
             return source == actual
         return str(source) == str(actual)
 
-    # Integer types — handle signed↔unsigned wrapping (int8 → TINYINT)
+    # Integer — handle signed↔unsigned wrapping (int8 → TINYINT)
     if isinstance(source, int) and isinstance(actual, int):
         if source == actual:
             return True
-        # Signed int8 stored in unsigned TINYINT: source & 0xFF == actual
         if -128 <= source < 0 and 0 <= actual <= 255:
             return (source & 0xFF) == actual
-        # Signed int16 stored in unsigned SMALLINT (if applicable)
         if -32768 <= source < 0 and 0 <= actual <= 65535:
             return (source & 0xFFFF) == actual
         return False
 
-    # int vs float
     if isinstance(source, int) and isinstance(actual, float):
         return float(source) == actual
     if isinstance(source, float) and isinstance(actual, int):
         return source == float(actual)
 
-    # Float types — relative tolerance; extra slack for SQL DECIMAL truncation
+    # Float — relative tolerance; extra slack for SQL DECIMAL truncation
     if isinstance(source, float) and isinstance(actual, (float, int, Decimal)):
         a, b = float(source), float(actual)
         if math.isnan(a) and math.isnan(b):
             return True
         if a == 0 and b == 0:
             return True
-        # Use generous tolerance for DECIMAL(18,4) columns — up to 5e-5 relative
         tol = max(float_tol, 5e-5) if isinstance(actual, Decimal) else float_tol
         return abs(a - b) <= tol * max(abs(a), abs(b), 1.0)
 
-    # Decimal from SQL without float source
     if isinstance(actual, Decimal):
         try:
             tol = max(float_tol, 5e-5)
@@ -450,7 +343,6 @@ def _values_match(source, actual, col_name: str, *, float_tol: float = 1e-6) -> 
         s, a = source.strip(), str(actual).rstrip()
         if s == a:
             return True
-        # UUID: SQL Server returns uppercase
         if s.lower() == a.lower():
             return True
         return False
@@ -460,16 +352,14 @@ def _values_match(source, actual, col_name: str, *, float_tol: float = 1e-6) -> 
         if isinstance(actual, py_date):
             return source == (actual.date() if isinstance(actual, datetime) else actual)
 
-    # Datetime (microsecond tolerance)
+    # Datetime (1ms tolerance for DATETIME2(6))
     if isinstance(source, datetime) and isinstance(actual, datetime):
-        diff = abs((source - actual).total_seconds())
-        return diff < 0.001  # 1ms tolerance for DATETIME2(6)
+        return abs((source - actual).total_seconds()) < 0.001
 
     # bytes / binary
     if isinstance(source, (bytes, bytearray)) and isinstance(actual, (bytes, bytearray)):
         return bytes(source) == bytes(actual)
 
-    # Generic fallback — compare string representations
     try:
         return str(source) == str(actual)
     except Exception:
@@ -485,15 +375,7 @@ def verify_round_trip(
     *,
     sample_size: int = 200,
 ) -> dict:
-    """Read back data and verify it matches *source_df*.
-
-    Checks:
-      1. Row count matches.
-      2. Column names match.
-      3. A random sample of rows matches cell-by-cell.
-
-    Returns a dict with verification results.
-    """
+    """Read back data and verify cell-by-cell against *source_df*."""
     import random
 
     cn = pyodbc.connect(conn_str, timeout=60)
@@ -512,8 +394,8 @@ def verify_round_trip(
     cols_ok = db_cols == src_cols
 
     # 3. Sample row comparison
-    sample_ids = sorted(random.sample(range(1, src_count + 1), min(sample_size, src_count)))
-    # Fetch sample rows by id (assumes PK column is 'id' and 1-based serial)
+    sample_ids = sorted(random.sample(
+        range(1, src_count + 1), min(sample_size, src_count)))
     id_list = ",".join(str(i) for i in sample_ids)
     cursor.execute(f"SELECT * FROM {table} WHERE id IN ({id_list}) ORDER BY id")
     db_rows = cursor.fetchall()
@@ -523,8 +405,7 @@ def verify_round_trip(
     mismatches = []
     rows_checked = 0
     for db_row in db_rows:
-        row_id = db_row[0]  # first column is 'id'
-        # source_df 'id' is 1-based serial, Polars index is 0-based
+        row_id = db_row[0]
         src_idx = row_id - 1
         if src_idx < 0 or src_idx >= src_count:
             mismatches.append({"id": row_id, "error": "id out of source range"})
@@ -543,126 +424,91 @@ def verify_round_trip(
 
     passed = count_ok and cols_ok and len(mismatches) == 0
     return {
-        "passed":        passed,
-        "row_count_ok":  count_ok,
-        "src_rows":      src_count,
-        "db_rows":       db_count,
-        "cols_ok":       cols_ok,
-        "src_cols":      src_cols,
-        "db_cols":       db_cols,
-        "rows_checked":  rows_checked,
-        "mismatches":    mismatches[:20],  # cap detail output
+        "passed":           passed,
+        "row_count_ok":     count_ok,
+        "src_rows":         src_count,
+        "db_rows":          db_count,
+        "cols_ok":          cols_ok,
+        "src_cols":         src_cols,
+        "db_cols":          db_cols,
+        "rows_checked":     rows_checked,
+        "mismatches":       mismatches[:20],
         "total_mismatches": len(mismatches),
     }
 
 
+# ── Reporting ────────────────────────────────────────────────────────────────
+
+def print_write_result(r: dict) -> None:
+    payload_mb = r["payload_bytes"] / 1_048_576
+    click.echo(
+        f"  [{r['profile']:>11s}]  "
+        f"rows={r['rows']:>10,}  "
+        f"elapsed={r['elapsed_s']:6.2f}s  "
+        f"rows/s={r['rows_s']:>12,.0f}  "
+        f"MB/s={r['mb_s']:7.2f}  "
+        f"payload={payload_mb:6.1f} MB  "
+        f"workers={r['bcp_workers']}"
+    )
+
+
+def print_load_result(r: dict) -> None:
+    payload_mb = r["payload_bytes"] / 1_048_576
+    click.echo(
+        f"  [{r['profile']:>11s}]  "
+        f"rows={r['rows']:>10,}  "
+        f"elapsed={r['elapsed_s']:6.2f}s  "
+        f"rows/s={r['rows_s']:>12,.0f}  "
+        f"MB/s={r['mb_s']:7.2f}  "
+        f"payload={payload_mb:6.1f} MB  "
+        f"workers={r['load_workers']}"
+    )
+
+
 def print_verify_result(v: dict, profile: str) -> None:
-    """Pretty-print verification outcome."""
     status = "PASS" if v["passed"] else "FAIL"
     parts = [
-        f"  [{profile:>7s}]  verify={status}",
+        f"  [{profile:>11s}]  verify={status}",
         f"rows={v['src_rows']:,}/{v['db_rows']:,}",
         f"cols={'OK' if v['cols_ok'] else 'MISMATCH'}",
         f"sample={v['rows_checked']:,} checked",
     ]
     if v["total_mismatches"] > 0:
         parts.append(f"mismatches={v['total_mismatches']}")
-    print("  ".join(parts))
+    click.echo("  ".join(parts))
 
     if not v["passed"]:
         if not v["row_count_ok"]:
-            print(f"           Row count: source={v['src_rows']:,}  db={v['db_rows']:,}")
+            click.echo(f"           Row count: source={v['src_rows']:,}  "
+                       f"db={v['db_rows']:,}")
         if not v["cols_ok"]:
-            print(f"           Columns: source={v['src_cols']}")
-            print(f"                    db    ={v['db_cols']}")
+            click.echo(f"           Columns: source={v['src_cols']}")
+            click.echo(f"                    db    ={v['db_cols']}")
         for m in v["mismatches"][:10]:
             if "column" in m:
-                print(
+                click.echo(
                     f"           id={m['id']}  col={m['column']}  "
                     f"source={m['source']} ({m['source_type']})  "
                     f"actual={m['actual']} ({m['actual_type']})"
                 )
             else:
-                print(f"           id={m['id']}  {m.get('error', '?')}")
+                click.echo(f"           id={m['id']}  {m.get('error', '?')}")
         if v["total_mismatches"] > 10:
-            print(f"           … and {v['total_mismatches'] - 10} more")
-
-
-# ── Reporting ────────────────────────────────────────────────────────────────
-
-def print_result(r: dict, profile: str) -> None:
-    payload_mb = r["payload_bytes"] / 1_048_576
-    print(
-        f"  [{profile:>7s}]  strategy={r['strategy']!r:16s}  "
-        f"rows={r['rows']:>10,}  "
-        f"elapsed={r['elapsed_s']:6.2f}s  "
-        f"rows/s={r['rows_s']:>12,.0f}  "
-        f"MB/s={r['mb_s']:7.2f}  "
-        f"payload={payload_mb:6.1f} MB"
-    )
-    bcp = r.get("bcp_metrics")
-    if isinstance(bcp, dict):
-        mode = bcp.get("mode", "?")
-        bcp_m = bcp.get("bcp_metrics")
-        if isinstance(bcp_m, dict):
-            simd_level = str(bcp_m.get("simd_level", "scalar"))
-            timing_level = str(bcp_m.get("timing_level", "stage"))
-            row_loop = float(bcp_m.get("row_loop_seconds", 0))
-            fixed_copy = float(bcp_m.get("fixed_copy_seconds", 0))
-            redirect = float(bcp_m.get("colptr_redirect_seconds", 0))
-            string_pack = float(bcp_m.get("string_pack_seconds", 0))
-            sendrow = float(bcp_m.get("sendrow_seconds", 0))
-            batch_flush = float(bcp_m.get("batch_flush_seconds", 0))
-            total = float(bcp_m.get("total_seconds", 0))
-            sent = int(bcp_m.get("sent_rows", 0))
-            print(
-                f"           mode={mode}  simd={simd_level}  timing={timing_level}  "
-                f"row_loop={row_loop:.3f}s  copy={fixed_copy:.3f}s  "
-                f"redirect={redirect:.3f}s  string={string_pack:.3f}s  "
-                f"sendrow={sendrow:.3f}s  batch_flush={batch_flush:.3f}s  "
-                f"bcp_total={total:.3f}s  sent_rows={sent:,}"
-            )
-        else:
-            print(f"           mode={mode}  bcp_metrics={bcp}")
-
-
-def print_load_result(r: dict) -> None:
-    """Pretty-print a single load (read) result."""
-    payload_mb = r["payload_bytes"] / 1_048_576
-    print(
-        f"  [{r['profile']:>7s}]  "
-        f"rows={r['rows']:>10,}  "
-        f"elapsed={r['elapsed_s']:6.2f}s  "
-        f"rows/s={r['rows_s']:>12,.0f}  "
-        f"MB/s={r['mb_s']:7.2f}  "
-        f"payload={payload_mb:6.1f} MB"
-    )
+            click.echo(f"           … and {v['total_mismatches'] - 10} more")
 
 
 def print_comparison_table(results: list[dict]) -> None:
-    """Print a compact comparison table across all runs (write + load)."""
     from tabulate import tabulate
 
     rows = []
     for r in results:
         payload_mb = r["payload_bytes"] / 1_048_576
         direction = r.get("direction", "write")
-        strategy_or_method = r.get("strategy", "cpp" if direction == "load" else "-")
-        simd_level = "-"
-        timing_level = "-"
-        bcp = r.get("bcp_metrics")
-        if isinstance(bcp, dict):
-            bcp_m = bcp.get("bcp_metrics")
-            if isinstance(bcp_m, dict):
-                simd_level = str(bcp_m.get("simd_level", "-"))
-                timing_level = str(bcp_m.get("timing_level", "-"))
-
+        workers = r.get("bcp_workers", r.get("load_workers", 0))
         rows.append([
             r["profile"],
             direction,
-            strategy_or_method,
-            simd_level,
-            timing_level,
+            workers,
             f"{r['rows']:,}",
             f"{r['elapsed_s']:.2f}s",
             f"{r['rows_s']:,.0f}",
@@ -671,63 +517,38 @@ def print_comparison_table(results: list[dict]) -> None:
         ])
 
     headers = [
-        "Profile", "Dir", "Strategy/Method", "SIMD", "Timing",
-        "Rows", "Elapsed", "rows/s", "MB/s", "Payload MB"
+        "Profile", "Dir", "Workers", "Rows",
+        "Elapsed", "rows/s", "MB/s", "Payload MB",
     ]
+    click.echo()
+    click.echo(tabulate(rows, headers=headers, tablefmt="github"))
 
-    print()
-    print(tabulate(rows, headers=headers, tablefmt="github"))
-
-    # Cross-profile speedup relative to "simple" baseline per direction
+    # Cross-profile speedup relative to first profile per direction
     for dir_label in ("write", "load"):
-        dir_results = [r for r in results if r.get("direction", "write") == dir_label]
+        dir_results = [r for r in results if r.get("direction") == dir_label]
         if len(dir_results) < 2:
             continue
-        baselines = {}
-        for r in dir_results:
-            key = r.get("strategy", "cpp" if dir_label == "load" else "-")
-            if key not in baselines:
-                baselines[key] = r
-        for r in dir_results:
-            key = r.get("strategy", "cpp" if dir_label == "load" else "-")
-            base = baselines.get(key)
-            if base and base["profile"] != r["profile"] and base["rows_s"] > 0:
+        base = dir_results[0]
+        for r in dir_results[1:]:
+            if base["rows_s"] > 0:
                 ratio = r["rows_s"] / base["rows_s"]
-                print(
-                    f"  {r['profile']} vs {base['profile']} ({dir_label}/{key}): "
+                click.echo(
+                    f"  {r['profile']} vs {base['profile']} ({dir_label}): "
                     f"{ratio:.2f}x rows/s"
                 )
 
-    # Cross-strategy speedup per profile (write direction only)
-    write_results = [r for r in results if r.get("direction", "write") == "write"]
-    by_profile: dict[str, list[dict]] = {}
-    for r in write_results:
-        by_profile.setdefault(r["profile"], []).append(r)
-    for pname, runs in by_profile.items():
-        if len(runs) == 2:
-            a, b = runs[0], runs[1]
-            if a["rows_s"] > 0:
-                ratio = b["rows_s"] / a["rows_s"]
-                print(
-                    f"  {pname}: {b['strategy']} vs {a['strategy']} = {ratio:.2f}x rows/s"
-                )
-
-    # Write vs load throughput per profile
-    write_by_profile = {r["profile"]: r for r in results if r.get("direction") == "write"}
-    load_by_profile = {r["profile"]: r for r in results if r.get("direction") == "load"}
-    for pname in write_by_profile:
-        if pname in load_by_profile:
-            w = write_by_profile[pname]
-            l = load_by_profile[pname]
-            if l["rows_s"] > 0:
-                ratio = w["rows_s"] / l["rows_s"]
-                print(f"  {pname}: write/load ratio = {ratio:.2f}x rows/s")
+    # Write vs load per profile
+    write_by = {r["profile"]: r for r in results if r.get("direction") == "write"}
+    load_by = {r["profile"]: r for r in results if r.get("direction") == "load"}
+    for pname in write_by:
+        if pname in load_by and load_by[pname]["rows_s"] > 0:
+            ratio = write_by[pname]["rows_s"] / load_by[pname]["rows_s"]
+            click.echo(f"  {pname}: write/load ratio = {ratio:.2f}x rows/s")
 
 
 # ── Regression gate ──────────────────────────────────────────────────────────
 
 def _system_info() -> dict:
-    """Capture machine identity for baseline provenance."""
     return {
         "os": platform.system(),
         "os_version": platform.version(),
@@ -738,17 +559,17 @@ def _system_info() -> dict:
     }
 
 
-def save_baseline(results: list[dict], args: argparse.Namespace, path: str) -> None:
-    """Persist benchmark results as a JSON baseline file."""
-    by_profile: dict[str, dict] = {}
+def save_baseline(results: list[dict], rows: int, workers: int,
+                   path: str) -> None:
+    by_key: dict[str, dict] = {}
     for r in results:
         direction = r.get("direction", "write")
-        strategy_or_method = r.get("strategy", "cpp" if direction == "load" else "-")
-        key = f"{r['profile']}/{direction}/{strategy_or_method}"
-        by_profile[key] = {
+        w = r.get("bcp_workers", r.get("load_workers", 0))
+        key = f"{r['profile']}/{direction}/w{w}"
+        by_key[key] = {
             "profile": r["profile"],
             "direction": direction,
-            "strategy": strategy_or_method,
+            "workers": w,
             "mb_s": round(r["mb_s"], 2),
             "rows_s": round(r["rows_s"], 1),
             "elapsed_s": round(r["elapsed_s"], 3),
@@ -759,19 +580,12 @@ def save_baseline(results: list[dict], args: argparse.Namespace, path: str) -> N
     baseline = {
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "system": _system_info(),
-        "config": {
-            "rows": args.rows,
-            "workers": args.workers,
-            "batch_size": args.batch_size,
-            "table_hint": args.table_hint,
-            "strategy": args.strategy,
-        },
-        "results": by_profile,
+        "config": {"rows": rows, "workers": workers},
+        "results": by_key,
     }
-
     with open(path, "w") as f:
         json.dump(baseline, f, indent=2)
-    print(f"\nBaseline saved to {path} ({len(by_profile)} entries)")
+    click.echo(f"\nBaseline saved to {path} ({len(by_key)} entries)")
 
 
 def check_regression(
@@ -779,11 +593,6 @@ def check_regression(
     baseline_path: str,
     threshold_pct: float,
 ) -> bool:
-    """Compare current results against a saved baseline.
-
-    Returns True if all checks pass, False if any profile regressed
-    beyond *threshold_pct* percent.
-    """
     with open(baseline_path) as f:
         baseline = json.load(f)
 
@@ -791,25 +600,24 @@ def check_regression(
     base_sys = baseline.get("system", {})
     base_ts = baseline.get("timestamp", "?")
 
-    print(f"\n{'=' * 72}")
-    print(f"Regression check against baseline")
-    print(f"  Baseline: {baseline_path}")
-    print(f"  Created:  {base_ts}")
-    print(f"  Machine:  {base_sys.get('node', '?')} ({base_sys.get('os', '?')})")
-    print(f"  Threshold: {threshold_pct:.0f}%")
-    print(f"{'=' * 72}")
+    click.echo(f"\n{'=' * 72}")
+    click.echo(f"Regression check against baseline")
+    click.echo(f"  Baseline: {baseline_path}")
+    click.echo(f"  Created:  {base_ts}")
+    click.echo(f"  Machine:  {base_sys.get('node', '?')} "
+               f"({base_sys.get('os', '?')})")
+    click.echo(f"  Threshold: {threshold_pct:.0f}%")
+    click.echo(f"{'=' * 72}")
 
     passed = True
     checked = 0
     for r in results:
         direction = r.get("direction", "write")
-        strategy_or_method = r.get("strategy", "cpp" if direction == "load" else "-")
-        key = f"{r['profile']}/{direction}/{strategy_or_method}"
-        # Fallback to legacy key format for older baselines
-        base = base_results.get(key) or base_results.get(
-            f"{r['profile']}/{r.get('strategy', strategy_or_method)}")
+        w = r.get("bcp_workers", r.get("load_workers", 0))
+        key = f"{r['profile']}/{direction}/w{w}"
+        base = base_results.get(key)
         if base is None:
-            print(f"  [{key:>20s}]  SKIP (no baseline entry)")
+            click.echo(f"  [{key:>30s}]  SKIP (no baseline)")
             continue
 
         checked += 1
@@ -817,223 +625,174 @@ def check_regression(
         curr_mb_s = r["mb_s"]
 
         if base_mb_s <= 0:
-            print(f"  [{key:>20s}]  SKIP (baseline MB/s = 0)")
+            click.echo(f"  [{key:>30s}]  SKIP (baseline MB/s = 0)")
             continue
 
         change_pct = ((curr_mb_s - base_mb_s) / base_mb_s) * 100
         status = "PASS" if change_pct >= -threshold_pct else "FAIL"
-
         if status == "FAIL":
             passed = False
 
         sign = "+" if change_pct >= 0 else ""
-        print(
-            f"  [{key:>20s}]  {status}  "
-            f"baseline={base_mb_s:7.2f} MB/s  "
+        click.echo(
+            f"  [{key:>30s}]  {status}  "
+            f"baseline={base_mb_s:7.2f}  "
             f"current={curr_mb_s:7.2f} MB/s  "
             f"({sign}{change_pct:.1f}%)"
         )
 
-    print(f"{'=' * 72}")
+    click.echo(f"{'=' * 72}")
     if checked == 0:
-        print("  WARNING: No matching profiles found in baseline — nothing checked.")
+        click.echo("  WARNING: No matching profiles — nothing checked.")
         return True
 
     verdict = "PASSED" if passed else "FAILED"
-    print(f"  Regression gate: {verdict}  ({checked} profile(s) checked)")
-    print(f"{'=' * 72}")
+    click.echo(f"  Regression gate: {verdict}  ({checked} profile(s) checked)")
+    click.echo(f"{'=' * 72}")
     return passed
 
 
 # ── CLI ──────────────────────────────────────────────────────────────────────
 
-def build_parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(
-        description="BCP throughput benchmark with simple / mixed / complex / exhaustive dataset profiles",
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="""\
-Examples:
-  %(prog)s --rows 500000 --dataset simple
-  %(prog)s --rows 500000 --dataset all
-  %(prog)s --rows 500000 --dataset all --compare-strategies
-  %(prog)s --rows 500000 --dataset complex --strategy column_major
-
-  # Write-only (no read-back)
-  %(prog)s --rows 500000 --dataset simple --mode write
-
-  # Skip verification but still read-back
-  %(prog)s --rows 500000 --dataset simple --no-verify
-
-Load (read) benchmark:
-  # Load from table (must contain data)
-  %(prog)s --dataset simple --mode load
-
-  # Write then load in one pass
-  %(prog)s --rows 500000 --dataset all --mode both
-
-Regression gate:
-  # Establish a baseline
-  %(prog)s --rows 500000 --dataset all --save-baseline baseline.json
-
-  # Check for regressions (exit 1 if >15%% drop)
-  %(prog)s --rows 500000 --dataset all --check-regression baseline.json
-
-  # Custom threshold (exit 1 if >10%% drop)
-  %(prog)s --rows 500000 --dataset all --check-regression baseline.json --regression-threshold 10
-""",
-    )
-    p.add_argument("--conn", default=None,
-                   help="ODBC connection string (default: STRESS_CONN env var or local dev)")
-    p.add_argument("--rows", type=int, default=1_000_000,
-                   help="Number of rows to insert per run (default: 1,000,000)")
-    p.add_argument("--dataset", choices=PROFILE_ORDER + ["all"], default="simple",
-                   help="Dataset profile to test (default: simple)")
-    p.add_argument("--mode", choices=["write", "load", "both"], default="both",
-                   help="Benchmark mode: both (write + read-back + verify, default), "
-                        "write (BCP insert only), or load (SELECT read only)")
-    p.add_argument("--no-verify", action="store_true",
-                   help="Skip round-trip data verification in 'both' mode")
-    p.add_argument("--verify-sample", type=int, default=200,
-                   help="Number of random rows to spot-check during verification (default: 200)")
-    p.add_argument("--strategy", choices=["row_major", "column_major"], default="row_major",
-                   help="Transpose strategy (default: row_major)")
-    p.add_argument("--compare-strategies", action="store_true",
-                   help="Run both row_major and column_major for each selected profile")
-    p.add_argument("--batch-size", type=int, default=100_000,
-                   help="BCP commit batch size (default: 100,000)")
-    p.add_argument("--table-hint", default="TABLOCK",
-                   help="SQL table hint (default: TABLOCK)")
-    p.add_argument("--workers", type=int, default=0,
-                   help="Number of parallel BCP connections (default: 0 = single-connection)")
-    p.add_argument("--no-truncate", action="store_true",
-                   help="Skip TRUNCATE before each run")
-    p.add_argument("--warmup", action="store_true",
-                   help="Run one warm-up pass (discarded) before timing")
-
-    # Regression gate
-    rg = p.add_argument_group("regression gate")
-    rg.add_argument("--save-baseline", metavar="FILE",
-                    help="Save results as a JSON baseline file")
-    rg.add_argument("--check-regression", metavar="FILE",
-                    help="Compare results against a saved baseline; exit 1 on regression")
-    rg.add_argument("--regression-threshold", type=float, default=15.0,
-                    metavar="PCT",
-                    help="Max allowed throughput drop %% before failing (default: 15)")
-    return p
-
-
-def main() -> None:
-    args = build_parser().parse_args()
-
-    conn_str = args.conn or os.getenv("STRESS_CONN", "").strip() or default_connection_string()
+@click.command()
+@click.option("--conn", default=None,
+              help="ODBC connection string (default: STRESS_CONN env or local dev)")
+@click.option("--rows", default=1_000_000, type=int, show_default=True,
+              help="Rows to insert per run")
+@click.option("--dataset",
+              type=click.Choice(PROFILE_ORDER + ["all"], case_sensitive=False),
+              default="simple", show_default=True,
+              help="Dataset profile to test")
+@click.option("--mode",
+              type=click.Choice(["write", "load", "both"], case_sensitive=False),
+              default="both", show_default=True,
+              help="Benchmark mode")
+@click.option("--format", "fmt",
+              type=click.Choice(["polars", "pandas"], case_sensitive=False),
+              default="polars", show_default=True,
+              help="Output data format")
+@click.option("--workers", default=0, type=int, show_default=True,
+              help="Parallel BCP / load connections (0 = single)")
+@click.option("--no-verify", is_flag=True,
+              help="Skip round-trip verification in 'both' mode")
+@click.option("--verify-sample", default=200, type=int, show_default=True,
+              help="Rows to spot-check during verification")
+@click.option("--no-truncate", is_flag=True,
+              help="Skip TRUNCATE before each write run")
+@click.option("--warmup", is_flag=True,
+              help="Run one discarded warm-up pass before timing")
+@click.option("--save-baseline", "baseline_out", type=click.Path(), default=None,
+              help="Save results as JSON baseline file")
+@click.option("--check-regression", "baseline_in", type=click.Path(exists=True),
+              default=None,
+              help="Compare against saved baseline; exit 1 on regression")
+@click.option("--regression-threshold", default=15.0, type=float,
+              show_default=True, help="Max throughput drop % before failing")
+def bench(
+    conn, rows, dataset, mode, fmt, workers,
+    no_verify, verify_sample, no_truncate, warmup,
+    baseline_out, baseline_in, regression_threshold,
+):
+    """BCP throughput benchmark — target architecture (placeholder)."""
+    conn_str = conn or os.getenv("STRESS_CONN", "").strip() or default_connection_string()
 
     pl = _require("polars")
     pyodbc = _require("pyodbc")
 
-    profiles = PROFILE_ORDER if args.dataset == "all" else [args.dataset]
-    strategies = (
-        ["row_major", "column_major"] if args.compare_strategies else [args.strategy]
-    )
+    profiles = PROFILE_ORDER if dataset == "all" else [dataset]
 
-    # ── Ensure tables exist ──────────────────────────────────────────────────
+    # ── Ensure tables ────────────────────────────────────────────────────
     for pname in profiles:
-        profile = PROFILES[pname]
-        ensure_table(conn_str, profile["ddl"], pyodbc)
+        ensure_table(conn_str, PROFILES[pname]["ddl"], pyodbc)
 
-    # ── Generate data (only needed for write / both modes) ───────────────
+    # ── Generate data ────────────────────────────────────────────────────
     data: dict[str, object] = {}
-    if args.mode in ("write", "both"):
+    if mode in ("write", "both"):
         for pname in profiles:
             profile = PROFILES[pname]
-            print(f"Generating {args.rows:,} rows for [{pname}] ({profile['columns']} cols) …")
+            click.echo(f"Generating {rows:,} rows for [{pname}] "
+                       f"({profile['columns']} cols) …")
             t0 = time.perf_counter()
-            df = profile["generate"](args.rows, pl)
+            df = pygim.create_df(profile["schema"], rows=rows)
             gen_s = time.perf_counter() - t0
-            size_mb = estimate_dataframe_size_bytes(df) / 1_048_576
-            print(f"  -> {size_mb:.1f} MB in {gen_s:.2f}s")
+            size_mb = estimate_size_bytes(df) / 1_048_576
+            click.echo(f"  → {size_mb:.1f} MB in {gen_s:.2f}s")
             data[pname] = df
 
-    # ── Warm-up ──────────────────────────────────────────────────────────────
-    if args.warmup and args.mode in ("write", "both"):
-        warmup_profile = profiles[0]
-        warmup_table = PROFILES[warmup_profile]["table"]
-        print(f"\nWarm-up pass ({warmup_profile}, {strategies[0]}) …")
-        if not args.no_truncate:
-            truncate_table(conn_str, warmup_table, pyodbc)
-        run_one(conn_str, warmup_table, data[warmup_profile],
-                strategies[0], args.batch_size, args.table_hint,
-                args.workers)
+    # ── Warm-up ──────────────────────────────────────────────────────────
+    if warmup and mode in ("write", "both"):
+        pname0 = profiles[0]
+        click.echo(f"\nWarm-up pass ({pname0}) …")
+        if not no_truncate:
+            truncate_table(conn_str, PROFILES[pname0]["table"], pyodbc)
+        run_write(conn_str, PROFILES[pname0]["table"], data[pname0],
+                  pname0, workers)
 
-    do_write = args.mode in ("write", "both")
-    do_load  = args.mode in ("load", "both")
+    do_write = mode in ("write", "both")
+    do_load = mode in ("load", "both")
+    do_verify = do_write and do_load and not no_verify
 
-    do_verify = do_write and do_load and not args.no_verify
-
-    # ── Write (BCP) benchmark runs ───────────────────────────────────────
+    # ── Write runs ───────────────────────────────────────────────────────
     all_results: list[dict] = []
     verify_results: list[dict] = []
+
     if do_write:
-        print()
+        click.echo()
         for pname in profiles:
-            profile = PROFILES[pname]
-            table = profile["table"]
+            table = PROFILES[pname]["table"]
             df = data[pname]
-            for strat in strategies:
-                if not args.no_truncate:
-                    truncate_table(conn_str, table, pyodbc)
-                print(f"Writing [{pname}] with {strat} …")
-                r = run_one(conn_str, table, df, strat, args.batch_size, args.table_hint,
-                            args.workers)
-                r["profile"] = pname
-                r["direction"] = "write"
-                all_results.append(r)
-                print_result(r, pname)
 
-                # Verify immediately after write (before next strategy truncates)
-                if do_verify:
-                    v = verify_round_trip(
-                        conn_str, table, df, pname, pyodbc,
-                        sample_size=args.verify_sample,
-                    )
-                    v["strategy"] = strat
-                    verify_results.append(v)
-                    print_verify_result(v, pname)
+            if not no_truncate:
+                truncate_table(conn_str, table, pyodbc)
 
-    # ── Load (read) benchmark runs ───────────────────────────────────────
+            click.echo(f"Writing [{pname}] …")
+            r = run_write(conn_str, table, df, pname, workers)
+            all_results.append(r)
+            print_write_result(r)
+
+            if do_verify:
+                v = verify_round_trip(
+                    conn_str, table, df, pname, pyodbc,
+                    sample_size=verify_sample,
+                )
+                verify_results.append(v)
+                print_verify_result(v, pname)
+
+    # ── Load runs ────────────────────────────────────────────────────────
     if do_load:
-        print()
+        click.echo()
         for pname in profiles:
-            profile = PROFILES[pname]
-            table = profile["table"]
-            print(f"Loading [{pname}] …")
-            r = run_load(conn_str, table, pname)
+            table = PROFILES[pname]["table"]
+            click.echo(f"Loading [{pname}] …")
+            r = run_load(conn_str, table, pname, workers)
             all_results.append(r)
             print_load_result(r)
 
-    # ── Verification summary ─────────────────────────────────────────────────
+    # ── Verification summary ─────────────────────────────────────────────
     if verify_results:
         all_passed = all(v["passed"] for v in verify_results)
-        total_mismatches = sum(v["total_mismatches"] for v in verify_results)
-        print()
+        total_mm = sum(v["total_mismatches"] for v in verify_results)
+        click.echo()
         if all_passed:
-            print(f"Round-trip verification: ALL PASSED  "
-                  f"({len(verify_results)} run(s), 0 mismatches)")
+            click.echo(f"Round-trip verification: ALL PASSED  "
+                       f"({len(verify_results)} run(s), 0 mismatches)")
         else:
-            failed = [v for v in verify_results if not v["passed"]]
-            print(f"Round-trip verification: {len(failed)} FAILED out of "
-                  f"{len(verify_results)} run(s), {total_mismatches} total mismatches")
+            failed = sum(1 for v in verify_results if not v["passed"])
+            click.echo(f"Round-trip verification: {failed} FAILED / "
+                       f"{len(verify_results)} run(s), "
+                       f"{total_mm} total mismatches")
 
-    # ── Summary ──────────────────────────────────────────────────────────────
+    # ── Summary table ────────────────────────────────────────────────────
     if len(all_results) > 1:
         print_comparison_table(all_results)
 
-    # ── Regression gate ──────────────────────────────────────────────────────
-    if args.save_baseline:
-        save_baseline(all_results, args, args.save_baseline)
+    # ── Regression gate ──────────────────────────────────────────────────
+    if baseline_out:
+        save_baseline(all_results, rows, workers, baseline_out)
 
-    if args.check_regression:
-        ok = check_regression(all_results, args.check_regression,
-                              args.regression_threshold)
+    if baseline_in:
+        ok = check_regression(
+            all_results, baseline_in, regression_threshold)
         if not ok:
             sys.exit(1)
 
@@ -1043,4 +802,4 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    bench()

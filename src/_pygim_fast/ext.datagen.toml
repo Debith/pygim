@@ -1,0 +1,3 @@
+[extension]
+module = "datagen"
+deps = ["arrow"]

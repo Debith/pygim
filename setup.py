@@ -19,125 +19,102 @@ ext_modules = []
 base_macros = [("VERSION_INFO", repr(scm_version))]
 
 
-def get_cpp_files(path):
-    cpp_files = list(p for p in Path(path).rglob("*.cpp"))
-    return cpp_files
-
-
-def extension_name_from_cpp(cpp_file: Path) -> str:
-    if cpp_file.stem == "bindings":
-        return f"pygim.{cpp_file.parent.name}"
-    return f"pygim.{cpp_file.stem}"
-
-
-# Pick sensible flags per‐compiler
+# Pick sensible flags per-compiler
 if sys.platform == "win32":
-    extra_compile_args = ["/std:c++20", "/O2", "/GL"]   # /GL = whole-program opt (MSVC LTO)
-    extra_link_args_global = ["/LTCG"]                    # link-time code generation
+    extra_compile_args = ["/std:c++23", "/O2", "/GL"]
+    extra_link_args_global = ["/LTCG"]
 else:
     extra_compile_args = [
-        "-std=c++20",
+        "-std=c++23",
         "-O3",
-        "-march=native",          # AVX2 / BMI2 / etc. for host CPU
-        "-mtune=native",          # schedule for host microarchitecture
-        "-funroll-loops",         # unroll tight inner loops (row loop, memcpy)
-        "-fno-math-errno",        # skip errno on math calls (not used in hot paths)
-        "-flto",                  # LTO needs flag on compile AND link
+        "-march=native",
+        "-mtune=native",
+        "-funroll-loops",
+        "-fno-math-errno",
+        "-flto",
     ]
-    extra_link_args_global = ["-flto"]   # link-time optimization: cross-TU inlining
+    extra_link_args_global = ["-flto"]
 
 
 # ── Build environment ──────────────────────────────────────────────────────
-# ODBC and Arrow are required dependencies. If headers or libraries are
-# missing the C++ compilation will fail — this is intentional (fail-fast).
 
 conda_prefix = os.environ.get('CONDA_PREFIX') or os.environ.get('PREFIX')
 if not conda_prefix and hasattr(sys, 'prefix'):
     conda_prefix = sys.prefix
 
 
-def arrow_kwargs():
-    """Return kwargs for an Arrow-only extension (no ODBC)."""
-    kw = {
-        "libraries": ["arrow"],
-        "include_dirs": [],
-        "library_dirs": [],
-        "extra_link_args": list(extra_link_args_global),
+# ── Dependency presets ─────────────────────────────────────────────────────
+# Each ext.*.toml can list deps from this table.  Any dep not listed here
+# is silently ignored (forward-compatible with future presets like "pg").
+
+def _base_kwargs():
+    return {
         "extra_compile_args": list(extra_compile_args),
+        "extra_link_args": list(extra_link_args_global),
     }
+
+
+_DEP_CONFIGURATORS = {
+    "arrow": lambda kw: _apply_arrow(kw),
+    "odbc":  lambda kw: _apply_odbc(kw),
+}
+
+
+def _apply_arrow(kw):
+    kw.setdefault("libraries", []).append("arrow")
     if conda_prefix:
-        kw["include_dirs"].append(f"{conda_prefix}/include")
-        kw["library_dirs"].append(f"{conda_prefix}/lib")
-    return kw
+        kw.setdefault("include_dirs", []).append(f"{conda_prefix}/include")
+        kw.setdefault("library_dirs", []).append(f"{conda_prefix}/lib")
 
 
-def odbc_kwargs():
-    """Return kwargs for an ODBC + Arrow extension (both required)."""
-    kw = {
-        "libraries": ["odbc", "arrow", "parquet"],
-        "include_dirs": [],
-        "library_dirs": [],
-        "extra_link_args": list(extra_link_args_global),
-        "extra_compile_args": list(extra_compile_args),
-    }
-
+def _apply_odbc(kw):
+    kw.setdefault("libraries", []).extend(["odbc", "arrow", "parquet"])
     mssql_odbc_lib = Path("/opt/microsoft/msodbcsql18/lib64")
     if mssql_odbc_lib.exists():
-        kw["library_dirs"].append(str(mssql_odbc_lib))
+        kw.setdefault("library_dirs", []).append(str(mssql_odbc_lib))
         lib_files = list(mssql_odbc_lib.glob("libmsodbcsql-*.so*"))
         if lib_files:
-            kw["libraries"].append(f":{lib_files[0].name}")
-            kw["extra_link_args"].append(f"-Wl,-rpath,{mssql_odbc_lib}")
-
+            kw.setdefault("libraries", []).append(f":{lib_files[0].name}")
+            kw.setdefault("extra_link_args", []).append(
+                f"-Wl,-rpath,{mssql_odbc_lib}")
     if conda_prefix:
-        kw["include_dirs"].append(f"{conda_prefix}/include")
-        kw["library_dirs"].append(f"{conda_prefix}/lib")
-
-    return kw
+        kw.setdefault("include_dirs", []).append(f"{conda_prefix}/include")
+        kw.setdefault("library_dirs", []).append(f"{conda_prefix}/lib")
 
 
-# ── Detail source bundles ──────────────────────────────────────────────────
+# ── Extension discovery via ext.*.toml ─────────────────────────────────────
+# Each ext.<name>.toml declares:
+#   [extension]
+#   module   = "pygim_module_name"      # required
+#   sources  = ["path/to/file.cpp"]     # optional; default: "<name>.cpp"
+#   deps     = ["arrow", "odbc"]        # optional; default: []
 
-repo_detail_root = Path("src/_pygim_fast/repository/adapter/detail")
-repo_detail_sources = sorted(repo_detail_root.rglob("*.cpp")) if repo_detail_root.exists() else []
-
-bcp_strategy_cpp = Path("src/_pygim_fast/repository/mssql_strategy/detail/bcp/bcp_strategy.cpp")
-bcp_sources = [str(bcp_strategy_cpp)] if bcp_strategy_cpp.exists() else []
-
-
-# ── Extension module loop ──────────────────────────────────────────────────
-
+FAST_ROOT = Path("src/_pygim_fast")
 ext_modules = []
-for cpp_file in get_cpp_files("src/_pygim_fast"):
-    if "mssql_strategy/detail" in str(cpp_file).replace("\\", "/"):
-        continue
-    if "adapter/detail" in str(cpp_file).replace("\\", "/"):
-        continue
-    stem = cpp_file.stem
-    kwargs = {}
-    macros = list(base_macros)
-    if stem == "_repository":
-        # _repository bundles adapter/detail + BCP sources.
-        sources = [str(cpp_file)] + [str(p) for p in repo_detail_sources] + bcp_sources
-        kwargs.update(odbc_kwargs())
-    elif stem == "mssql_strategy":
-        # Old monolith — superseded by _repository; skip.
-        continue
-    elif stem == "datagen":
-        # datagen needs Arrow for array builders + C Data Interface.
-        sources = [str(cpp_file)]
-        kwargs.update(arrow_kwargs())
+
+for ext_toml in sorted(FAST_ROOT.glob("ext.*.toml")):
+    ext_cfg = toml.loads(ext_toml.read_text())["extension"]
+    module_name = f"pygim.{ext_cfg['module']}"
+
+    # Resolve sources relative to FAST_ROOT
+    ext_stem = ext_toml.stem.split(".", 1)[1]  # "ext.factory" → "factory"
+    if "sources" in ext_cfg:
+        sources = [str(FAST_ROOT / s) for s in ext_cfg["sources"]]
     else:
-        # Standard extensions: default compile + link args, single source.
-        kwargs["extra_compile_args"] = list(extra_compile_args)
-        kwargs["extra_link_args"] = list(extra_link_args_global)
-        sources = [str(cpp_file)]
+        sources = [str(FAST_ROOT / f"{ext_stem}.cpp")]
+
+    # Build kwargs from dep presets
+    kwargs = _base_kwargs()
+    for dep in ext_cfg.get("deps", []):
+        configurator = _DEP_CONFIGURATORS.get(dep)
+        if configurator:
+            configurator(kwargs)
 
     ext_modules.append(
         Pybind11Extension(
-            extension_name_from_cpp(cpp_file),
+            module_name,
             sources,
-            define_macros=macros,
+            define_macros=list(base_macros),
             **kwargs,
         )
     )

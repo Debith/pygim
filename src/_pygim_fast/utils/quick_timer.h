@@ -1,269 +1,246 @@
 #pragma once
 
+#include <array>
+#include <charconv>
 #include <chrono>
-#include <iomanip>
-#include <iostream>
+#include <cstdio>
 #include <stdexcept>
-#include <optional>
-#include <sstream>
-#include <string>
 #include <string_view>
-#include <unordered_map>
-#include <vector>
 
 namespace pygim {
 
-struct QuickTimerEntry {
-    std::string name;
-    double seconds{0.0};
-};
+// ── QuickTimerT ──────────────────────────────────────────────────
+// Zero-heap-allocation RAII timer with fixed-capacity sub-timers.
+// All output via FILE* (no <iostream>, no virtual dispatch).
+//
+// Memory layout (MaxSubTimers=8, typical):
+//   m_name            16   string_view
+//   m_output           8   FILE*
+//   m_started_at       8   time_point
+//   m_active_sub       8   size_t sentinel
+//   m_sub_timer_count  8   size_t
+//   m_auto_print       1   bool
+//   m_print_on_start   1   bool
+//   (padding)          6
+//   m_sub_timers     256   array<SubTimer,8>  (32 bytes each)
+//   ─────────────────────
+//   Total           ~312 bytes on stack, zero heap.
 
-struct QuickTimerReport {
-    std::string name;
-    double total_seconds{0.0};
-    std::vector<QuickTimerEntry> sub_timers;
-
-    [[nodiscard]] double sub_timer_seconds(std::string_view timer_name) const noexcept {
-        for (const auto& entry : sub_timers) {
-            if (entry.name == timer_name) return entry.seconds;
-        }
-        return 0.0;
-    }
-};
-
-class QuickTimer {
+template <std::size_t MaxSubTimers = 8>
+class QuickTimerT {
 public:
     using TimerId = std::size_t;
     static constexpr TimerId kInvalidTimerId = static_cast<TimerId>(-1);
+    static constexpr std::size_t kMaxSubTimers = MaxSubTimers;
 
-    explicit QuickTimer(std::string name = "QuickTimer",
-                        std::ostream &output = std::clog,
-                        bool auto_print = true,
-                        bool print_on_start = true)
-        : m_name(std::move(name)),
-          m_output(&output),
+private:
+    using Clock = std::chrono::steady_clock;
+    static constexpr std::size_t kNoActive = static_cast<std::size_t>(-1);
+
+    // 32 bytes per sub-timer (no bool — sentinel time_point for "not running").
+    struct SubTimer {
+        std::string_view name;            // 16
+        Clock::time_point started_at{};   //  8  — default-init = not running
+        double seconds{0.0};              //  8
+        // "running" iff started_at != time_point{}
+    };
+
+    static constexpr Clock::time_point kNotRunning{};
+
+public:
+    explicit QuickTimerT(std::string_view name = "QuickTimer",
+                         std::FILE* output = stderr,
+                         bool auto_print = true,
+                         bool print_on_start = true)
+        : m_name(name),
+          m_output(output),
+          m_started_at(Clock::now()),
+          m_active_sub(kNoActive),
+          m_sub_timer_count(0),
           m_auto_print(auto_print),
-          m_print_on_start(print_on_start),
-          m_started_at(Clock::now()) {
+          m_print_on_start(print_on_start) {
         if (m_print_on_start) {
             print_started(m_name);
         }
     }
 
-    ~QuickTimer() noexcept {
-        if (!m_auto_print || m_output == nullptr) {
-            return;
-        }
-        try {
-            print_summary();
-        } catch (...) {
-        }
+    ~QuickTimerT() noexcept {
+        if (!m_auto_print || m_output == nullptr) return;
+        try { print_summary(); } catch (...) {}
     }
 
-    void start_sub_timer(const std::string &name, bool print_on_start = true) {
-        if (name.empty()) {
-            throw std::invalid_argument("sub timer name must not be empty");
-        }
+    // Non-copyable, movable.
+    QuickTimerT(const QuickTimerT&) = delete;
+    QuickTimerT& operator=(const QuickTimerT&) = delete;
+    QuickTimerT(QuickTimerT&&) = default;
+    QuickTimerT& operator=(QuickTimerT&&) = default;
 
+    // ── Sub-timer API ────────────────────────────────────────────
+
+    // Name must point to storage that outlives this timer (string literals are ideal).
+    void start_sub_timer(std::string_view name, bool print_on_start = true) {
         start_sub_timer(get_or_create_sub_timer_id(name), print_on_start);
     }
 
-    [[nodiscard]] TimerId get_or_create_sub_timer_id(const std::string& name) {
-        if (name.empty()) {
-            throw std::invalid_argument("sub timer name must not be empty");
+    [[nodiscard]] TimerId get_or_create_sub_timer_id(std::string_view name) {
+        for (std::size_t i = 0; i < m_sub_timer_count; ++i) {
+            if (m_sub_timers[i].name == name) return i;
         }
-
-        auto it = m_sub_timer_indices.find(name);
-        if (it == m_sub_timer_indices.end()) {
-            const TimerId index = m_sub_timers.size();
-            m_sub_timers.push_back(SubTimer{name});
-            m_sub_timer_indices.emplace(name, index);
-            return index;
+        if (m_sub_timer_count >= MaxSubTimers) [[unlikely]] {
+            throw std::out_of_range("sub timer capacity exceeded");
         }
-        return it->second;
+        const TimerId id = m_sub_timer_count++;
+        m_sub_timers[id].name = name;
+        return id;
     }
 
     void start_sub_timer(TimerId id, bool print_on_start = true) {
-        if (id >= m_sub_timers.size()) {
+        if (id >= m_sub_timer_count) [[unlikely]] {
             throw std::out_of_range("sub timer id out of range");
         }
-
-        if (has_active_sub_timer()) {
-            stop_sub_timer(std::string_view{}, false);
+        if (m_active_sub != kNoActive) {
+            stop_sub_timer_impl(m_active_sub, false);
         }
-
-        SubTimer &sub_timer = m_sub_timers[id];
-        sub_timer.running = true;
-        sub_timer.started_at = Clock::now();
-        m_active_sub_timer_index = id;
+        SubTimer& sub = m_sub_timers[id];
+        sub.started_at = Clock::now();
+        m_active_sub = id;
         if (print_on_start) {
-            print_started(sub_timer.name);
+            print_started(sub.name);
         }
     }
 
     double stop_sub_timer(std::string_view name = {}, bool print_now = true) {
-        std::size_t index = resolve_sub_timer_index(name);
-        SubTimer &sub_timer = m_sub_timers[index];
-
-        if (!sub_timer.running) {
-            if (print_now) {
-                print_single(sub_timer.name, sub_timer.seconds);
-            }
-            return sub_timer.seconds;
-        }
-
-        const auto now = Clock::now();
-        const double elapsed = std::chrono::duration<double>(now - sub_timer.started_at).count();
-        sub_timer.seconds += elapsed;
-        sub_timer.running = false;
-
-        if (m_active_sub_timer_index.has_value() && m_active_sub_timer_index.value() == index) {
-            m_active_sub_timer_index.reset();
-        }
-
-        if (print_now) {
-            print_single(sub_timer.name, sub_timer.seconds);
-        }
-        return sub_timer.seconds;
+        return stop_sub_timer_impl(resolve_sub_timer_index(name), print_now);
     }
 
     double stop_sub_timer(TimerId id, bool print_now = true) {
-        if (id >= m_sub_timers.size()) {
+        if (id >= m_sub_timer_count) [[unlikely]] {
             throw std::out_of_range("sub timer id out of range");
         }
-
-        SubTimer &sub_timer = m_sub_timers[id];
-
-        if (!sub_timer.running) {
-            if (print_now) {
-                print_single(sub_timer.name, sub_timer.seconds);
-            }
-            return sub_timer.seconds;
-        }
-
-        const auto now = Clock::now();
-        const double elapsed = std::chrono::duration<double>(now - sub_timer.started_at).count();
-        sub_timer.seconds += elapsed;
-        sub_timer.running = false;
-
-        if (m_active_sub_timer_index.has_value() && m_active_sub_timer_index.value() == id) {
-            m_active_sub_timer_index.reset();
-        }
-
-        if (print_now) {
-            print_single(sub_timer.name, sub_timer.seconds);
-        }
-        return sub_timer.seconds;
+        return stop_sub_timer_impl(id, print_now);
     }
+
+    // ── Queries ──────────────────────────────────────────────────
 
     double total_seconds() const {
-        const auto now = Clock::now();
-        return std::chrono::duration<double>(now - m_started_at).count();
-    }
-
-    [[nodiscard]] QuickTimerReport report() const {
-        QuickTimerReport out;
-        out.name = m_name;
-        out.total_seconds = total_seconds();
-        out.sub_timers.reserve(m_sub_timers.size());
-
-        const auto now = Clock::now();
-        for (const auto& sub_timer : m_sub_timers) {
-            double seconds = sub_timer.seconds;
-            if (sub_timer.running) {
-                seconds += std::chrono::duration<double>(now - sub_timer.started_at).count();
-            }
-            out.sub_timers.push_back(QuickTimerEntry{sub_timer.name, seconds});
-        }
-        return out;
+        return std::chrono::duration<double>(Clock::now() - m_started_at).count();
     }
 
     double sub_timer_seconds(std::string_view name) const {
-        auto it = m_sub_timer_indices.find(std::string(name));
-        if (it == m_sub_timer_indices.end()) {
-            throw std::out_of_range("sub timer not found: " + std::string(name));
+        for (std::size_t i = 0; i < m_sub_timer_count; ++i) {
+            if (m_sub_timers[i].name == name) {
+                return snapshot_sub_seconds(m_sub_timers[i]);
+            }
         }
-        const auto snapshot = report();
-        return snapshot.sub_timer_seconds(name);
+        throw std::out_of_range("sub timer not found");
     }
 
+    std::string_view name() const { return m_name; }
+    std::size_t sub_timer_count() const { return m_sub_timer_count; }
+
+    // ── Output ───────────────────────────────────────────────────
+
     void print_summary() {
-        if (has_active_sub_timer()) {
-            stop_sub_timer(std::string_view{}, false);
+        if (m_active_sub != kNoActive) {
+            stop_sub_timer_impl(m_active_sub, false);
         }
+        if (m_output == nullptr) return;
 
-        if (m_output == nullptr) {
-            return;
-        }
-
-        const auto snapshot = report();
-        (*m_output) << snapshot.name << " total: " << format_seconds(snapshot.total_seconds) << "s" << std::endl;
-        for (const auto &entry : snapshot.sub_timers) {
-            (*m_output) << "  - " << entry.name << ": " << format_seconds(entry.seconds) << "s" << std::endl;
+        const double total = total_seconds();
+        std::fprintf(m_output, "%.*s total: %ss\n",
+                     static_cast<int>(m_name.size()), m_name.data(),
+                     fmt_seconds(total));
+        for (std::size_t i = 0; i < m_sub_timer_count; ++i) {
+            const double secs = snapshot_sub_seconds(m_sub_timers[i]);
+            std::fprintf(m_output, "  - %.*s: %ss\n",
+                         static_cast<int>(m_sub_timers[i].name.size()),
+                         m_sub_timers[i].name.data(),
+                         fmt_seconds(secs));
         }
     }
 
 private:
-    using Clock = std::chrono::steady_clock;
+    // ── Helpers ──────────────────────────────────────────────────
 
-    struct SubTimer {
-        explicit SubTimer(std::string timer_name)
-            : name(std::move(timer_name)) {}
+    static bool is_running(const SubTimer& sub) {
+        return sub.started_at != kNotRunning;
+    }
 
-        std::string name;
-        double seconds{0.0};
-        bool running{false};
-        Clock::time_point started_at{};
-    };
+    static double snapshot_sub_seconds(const SubTimer& sub) {
+        double secs = sub.seconds;
+        if (is_running(sub)) {
+            secs += std::chrono::duration<double>(Clock::now() - sub.started_at).count();
+        }
+        return secs;
+    }
+
+    double stop_sub_timer_impl(std::size_t index, bool print_now) {
+        SubTimer& sub = m_sub_timers[index];
+        if (!is_running(sub)) {
+            if (print_now) print_single(sub.name, sub.seconds);
+            return sub.seconds;
+        }
+        const double elapsed =
+            std::chrono::duration<double>(Clock::now() - sub.started_at).count();
+        sub.seconds += elapsed;
+        sub.started_at = kNotRunning;     // mark stopped (no bool needed)
+        if (m_active_sub == index) {
+            m_active_sub = kNoActive;
+        }
+        if (print_now) print_single(sub.name, sub.seconds);
+        return sub.seconds;
+    }
 
     std::size_t resolve_sub_timer_index(std::string_view name) const {
         if (!name.empty()) {
-            auto it = m_sub_timer_indices.find(std::string(name));
-            if (it == m_sub_timer_indices.end()) {
-                throw std::out_of_range("sub timer not found: " + std::string(name));
+            for (std::size_t i = 0; i < m_sub_timer_count; ++i) {
+                if (m_sub_timers[i].name == name) return i;
             }
-            return it->second;
+            throw std::out_of_range("sub timer not found");
         }
-
-        if (!m_active_sub_timer_index.has_value()) {
+        if (m_active_sub == kNoActive) [[unlikely]] {
             throw std::runtime_error("no active sub timer");
         }
-
-        return m_active_sub_timer_index.value();
+        return m_active_sub;
     }
 
-    bool has_active_sub_timer() const {
-        return m_active_sub_timer_index.has_value();
+    void print_single(std::string_view sv_name, double seconds) {
+        if (m_output == nullptr) return;
+        std::fprintf(m_output, "%.*s [%.*s]: %ss\n",
+                     static_cast<int>(m_name.size()), m_name.data(),
+                     static_cast<int>(sv_name.size()), sv_name.data(),
+                     fmt_seconds(seconds));
     }
 
-    void print_single(const std::string &name, double seconds) {
-        if (m_output == nullptr) {
-            return;
-        }
-        (*m_output) << m_name << " [" << name << "]: " << format_seconds(seconds) << "s" << std::endl;
+    void print_started(std::string_view sv_name) {
+        if (m_output == nullptr) return;
+        std::fprintf(m_output, "%.*s [%.*s]: started\n",
+                     static_cast<int>(m_name.size()), m_name.data(),
+                     static_cast<int>(sv_name.size()), sv_name.data());
     }
 
-    void print_started(const std::string &name) {
-        if (m_output == nullptr) {
-            return;
-        }
-        (*m_output) << m_name << " [" << name << "]: started" << std::endl;
+    // Format seconds into a thread-local buffer via std::to_chars (fast, no locale).
+    static const char* fmt_seconds(double seconds) {
+        thread_local char buf[32];
+        auto [ptr, ec] = std::to_chars(buf, buf + sizeof(buf) - 1, seconds,
+                                       std::chars_format::fixed, 6);
+        *ptr = '\0';
+        return buf;
     }
 
-    static std::string format_seconds(double seconds) {
-        std::ostringstream stream;
-        stream << std::fixed << std::setprecision(6) << seconds;
-        return stream.str();
-    }
-
-    std::string m_name;
-    std::ostream *m_output;
-    bool m_auto_print;
-    bool m_print_on_start;
-    Clock::time_point m_started_at;
-    std::vector<SubTimer> m_sub_timers;
-    std::unordered_map<std::string, std::size_t> m_sub_timer_indices;
-    std::optional<std::size_t> m_active_sub_timer_index;
+    // ── Data members (ordered for packing) ───────────────────────
+    std::string_view m_name;                                // 16
+    std::FILE* m_output;                                    //  8
+    Clock::time_point m_started_at;                         //  8
+    std::size_t m_active_sub;                               //  8  (sentinel, not optional)
+    std::size_t m_sub_timer_count;                          //  8
+    bool m_auto_print;                                      //  1
+    bool m_print_on_start;                                  //  1
+    // 6 bytes padding
+    std::array<SubTimer, MaxSubTimers> m_sub_timers{};      // 32 * MaxSubTimers
 };
+
+// Default alias — 8 sub-timers, ~312 bytes, zero heap allocations.
+using QuickTimer = QuickTimerT<8>;
 
 } // namespace pygim
