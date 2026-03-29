@@ -77,8 +77,8 @@ public:
                       "%zu columns\n", m_row_count, m_columns.size());
     }
 
-    std::size_t row_count() const { return m_row_count; }
-    auto const& columns() const { return m_columns; }
+    [[nodiscard]] std::size_t row_count() const { return m_row_count; }
+    [[nodiscard]] auto const& columns() const { return m_columns; }
 };
 
 } // namespace pygim::core

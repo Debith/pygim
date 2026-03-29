@@ -1,6 +1,7 @@
 #pragma once
 
 #include <functional>
+#include <ranges>
 #include <stdexcept>
 #include <unordered_map>
 #include <utility>
@@ -183,7 +184,7 @@ public:
      * \return `true` when key exists, else `false`.
      * \note Exists to support fast existence checks without lookup side effects.
      */
-    bool contains(const key_type& key) const {
+    [[nodiscard]] bool contains(const key_type& key) const {
         return m_map.find(key) != m_map.end();
     }
 
@@ -193,7 +194,7 @@ public:
      * \return Pointer to mutable value, or `nullptr` if absent.
      * \note Exists for hook-enabled read paths where mutable pre-processing is required.
      */
-    value_type* try_get(const key_type& key) {
+    [[nodiscard]] value_type* try_get(const key_type& key) {
         auto it = m_map.find(key);
         if (it == m_map.end()) {
             return nullptr;
@@ -208,7 +209,7 @@ public:
      * \return Pointer to const value, or `nullptr` if absent.
      * \note Exists for read-only access paths.
      */
-    const value_type* try_get_const(const key_type& key) const {
+    [[nodiscard]] const value_type* try_get_const(const key_type& key) const {
         auto it = m_map.find(key);
         if (it == m_map.end()) {
             return nullptr;
@@ -231,7 +232,7 @@ public:
      * \brief Return number of entries.
      * \return Count of stored key/value pairs.
      */
-    std::size_t size() const noexcept {
+    [[nodiscard]] std::size_t size() const noexcept {
         return m_map.size();
     }
 
@@ -240,13 +241,9 @@ public:
      * \return Vector containing all current keys.
      * \note Exists for introspection and debug/test tooling.
      */
-    std::vector<key_type> keys() const {
-        std::vector<key_type> out;
-        out.reserve(m_map.size());
-        for (const auto& kv : m_map) {
-            out.push_back(kv.first);
-        }
-        return out;
+    [[nodiscard]] std::vector<key_type> keys() const {
+        auto key_view = m_map | std::views::keys;
+        return {key_view.begin(), key_view.end()};
     }
 
     /**

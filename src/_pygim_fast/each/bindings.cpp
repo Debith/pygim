@@ -1,4 +1,4 @@
-// each_bindings.cpp – pybind11 module definition
+// each/bindings.cpp – pybind11 module definition
 // ------------------------------------------------------
 // This file *only* contains the binding glue.  All runtime logic lives in
 // each.h so that this translation unit stays tiny and fast to

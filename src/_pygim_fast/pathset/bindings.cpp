@@ -3,8 +3,10 @@
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 #include <pybind11/operators.h>
+#define PYBIND11_HAS_FILESYSTEM_IS_OPTIONAL
+#include <pybind11/stl/filesystem.h>
 
-#include "pathset.h"
+#include "core.h"
 #include <iostream>         // std::string
 
 #define STRINGIFY(x) #x

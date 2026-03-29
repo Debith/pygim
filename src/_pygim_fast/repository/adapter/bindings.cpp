@@ -1,15 +1,18 @@
 // repository/adapter/bindings.cpp
-// Adapter package — pybind11 bindings placeholder.
+// Adapter package — pybind11 bindings.
 //
 // Exposes acquire_repo(), FlexibleRepository, and Query to Python.
 // Uses if constexpr trampoline (D2) for format selection.
+// Refactored: creates ConnectionPool and passes it through.
 
-#include "flexible_repository.h"
+#include "../core/connection_pool.h"
+#include "../core/flexible_repository.h"
 #include "../core/query.h"
 #include "../../utils/logging.h"
 
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
+#include <memory>
 
 namespace py = pybind11;
 using namespace pygim;
@@ -26,21 +29,22 @@ using MssqlPandasRepo = adapter::FlexibleRepository<core::MssqlBackend, adapter:
 // ────────────────────────────────────────────────────────────────
 
 static py::object acquire_repo(const std::string& conn_str,
-                               const std::string& format) {
+                               const std::string& format,
+                               std::size_t pool_size) {
     PYGIM_TIMED_SCOPE("acquire_repo");
-    PYGIM_LOG_FMT("[acquire_repo] conn_str=\"%s\", format=\"%s\"\n",
-                  conn_str.c_str(), format.c_str());
+    PYGIM_LOG_FMT("[acquire_repo] conn_str=\"%s\", format=\"%s\", pool_size=%zu\n",
+                  conn_str.c_str(), format.c_str(), pool_size);
 
-    // D2: if constexpr trampoline — at Python boundary we branch once
-    // on the format string, then everything inside is fully inlined.
+    // D2: branch once on format string at the Python boundary,
+    // then everything inside is fully inlined via templates.
     if (format == "polars") {
         PYGIM_LOG_FMT("[acquire_repo]   FormatEnum::Polars → "
                       "FlexibleRepository<Mssql, Polars>\n");
-        return py::cast(MssqlPolarsRepo(conn_str));
+        return py::cast(MssqlPolarsRepo::create(conn_str, pool_size));
     } else if (format == "pandas") {
         PYGIM_LOG_FMT("[acquire_repo]   FormatEnum::Pandas → "
                       "FlexibleRepository<Mssql, Pandas>\n");
-        return py::cast(MssqlPandasRepo(conn_str));
+        return py::cast(MssqlPandasRepo::create(conn_str, pool_size));
     } else {
         throw py::value_error("Unknown format: " + format +
                               ". Use 'polars' or 'pandas'.");
@@ -94,6 +98,7 @@ PYBIND11_MODULE(_repository, m) {
     m.def("acquire_repo", &acquire_repo,
           py::arg("conn_str"),
           py::arg("format") = "polars",
+          py::arg("pool_size") = 4,
           R"doc(
           Create a repository from a connection string.
 
@@ -103,6 +108,8 @@ PYBIND11_MODULE(_repository, m) {
               Connection string (e.g., "Driver={...};Server=...").
           format : str
               Output format: "polars" (default) or "pandas".
+          pool_size : int
+              Maximum number of pooled connections (default: 4).
 
           Returns
           -------

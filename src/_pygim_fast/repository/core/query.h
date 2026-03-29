@@ -59,7 +59,7 @@ public:
         return *this;
     }
 
-    std::string build() const {
+    [[nodiscard]] std::string build() const {
         if (!m_raw_sql.empty()) {
             PYGIM_LOG_FMT("[Query] build() → raw SQL\n");
             return m_raw_sql;
@@ -84,8 +84,8 @@ public:
         return sql;
     }
 
-    bool is_raw() const { return !m_raw_sql.empty(); }
-    std::string_view table() const { return m_table; }
+    [[nodiscard]] bool is_raw() const { return !m_raw_sql.empty(); }
+    [[nodiscard]] std::string_view table() const { return m_table; }
 };
 
 } // namespace pygim::core

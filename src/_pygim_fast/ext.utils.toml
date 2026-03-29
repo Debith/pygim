@@ -1,2 +1,3 @@
 [extension]
 module = "utils"
+sources = ["utils/bindings.cpp"]

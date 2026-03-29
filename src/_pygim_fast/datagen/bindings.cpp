@@ -1,4 +1,4 @@
-// datagen.cpp – pybind11 module definition for fast test-data generation.
+// datagen/bindings.cpp – pybind11 module definition for fast test-data generation.
 //
 // Exposes pygim.datagen.generate() which returns an ArrowStreamExporter
 // implementing __arrow_c_stream__ (Arrow PyCapsule protocol).  Consumed by
@@ -6,7 +6,7 @@
 
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
-#include "datagen.h"
+#include "adapter.h"
 
 namespace py = pybind11;
 

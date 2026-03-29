@@ -1,18 +1,21 @@
-// repository/adapter/flexible_repository.h
-// Adapter package — FlexibleRepository<Backend, Fmt> placeholder.
+// repository/core/flexible_repository.h
+// Adapter package — FlexibleRepository<Backend, Fmt>.
 //
 // Default pybind11-exposed surface.  Wraps FormatAdapter with optional
 // pre/post transforms (D10: type-erased via py::function).
 //
 // Transform pipeline at call boundary only — not in the hot inner loop.
 // If no transforms registered → delegates directly.
+// Refactored: takes shared_ptr<ConnectionPool> and passes it to FormatAdapter.
 
 #pragma once
 
+#include "connection_pool.h"
 #include "format_adapter.h"
 
 #include "../../utils/logging.h"
 #include <functional>
+#include <memory>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -36,11 +39,19 @@ class FlexibleRepository {
     std::vector<TransformFn>     m_post_transforms;
 
 public:
-    explicit FlexibleRepository(std::string_view conn_str)
-        : m_inner(conn_str)
+    explicit FlexibleRepository(std::shared_ptr<core::ConnectionPool<Backend>> pool)
+        : m_inner(std::move(pool))
     {
         PYGIM_LOG_FMT("[FlexibleRepository<%s, %s>] created\n",
                       backend_label(), format_name(Fmt));
+    }
+
+    // Static factory: creates pool + repo in one call
+    [[nodiscard]]
+    static FlexibleRepository create(std::string_view conn_str,
+                                     std::size_t pool_size = 4) {
+        auto pool = std::make_shared<core::ConnectionPool<Backend>>(conn_str, pool_size);
+        return FlexibleRepository(std::move(pool));
     }
 
     void add_pre_transform(TransformFn fn) {

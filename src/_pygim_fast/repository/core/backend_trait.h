@@ -19,10 +19,10 @@ namespace pygim::core {
 // ────────────────────────────────────────────────────────────────
 
 struct OdbcConnection {
-    std::string connection_string;
+    std::string m_connection_string;
 
     void open(std::string_view conn_str) {
-        connection_string = std::string(conn_str);
+        m_connection_string = std::string(conn_str);
         PYGIM_LOG_FMT("[OdbcConnection] open(\"%.*s\")\n",
                       static_cast<int>(conn_str.size()), conn_str.data());
     }
@@ -55,6 +55,12 @@ struct MssqlBackend {
         conn.open(conn_str);
         return conn;
     }
+
+    static void reset(Connection& conn) {
+        PYGIM_LOG_FMT("[MssqlBackend] reset(conn_str=\"%s\")\n",
+                      conn.m_connection_string.c_str());
+        // Placeholder: real impl would reset ODBC statement handles, etc.
+    }
 };
 
 // ────────────────────────────────────────────────────────────────
@@ -62,11 +68,14 @@ struct MssqlBackend {
 // ────────────────────────────────────────────────────────────────
 
 template <typename B>
-concept BackendPolicy = requires(B b, std::string_view s) {
+concept BackendPolicy = requires(std::string_view s,
+                                  typename B::Connection conn) {
     typename B::Connection;
     typename B::SaveImpl;
     typename B::LoadImpl;
-    { B::connect(s) } -> std::same_as<typename B::Connection>;
+    { B::connect(s) }    -> std::same_as<typename B::Connection>;
+    { B::reset(conn) }   -> std::same_as<void>;
+    { conn.close() }     -> std::same_as<void>;
 };
 
 static_assert(BackendPolicy<MssqlBackend>,

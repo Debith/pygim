@@ -1,4 +1,4 @@
-// each_proxy.hpp – C++ implementation of Python‑side helpers `Proxy` and `each`
+// each_proxy.hpp – C++ implementation of Python‑side helpers `Proxy` and `each`
 // ---------------------------------------------------------------------------
 // This header **contains the full implementation** so that a standalone
 // translation unit (bindings.cpp) only has to expose the classes to Python
@@ -27,7 +27,6 @@
 // ---------------------------------------------------------------------------
 #pragma once
 
-#include <iostream>
 #include <optional>
 #include <string>
 #include <memory>
@@ -35,7 +34,7 @@
 
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
-#include "utils/utils.h"
+#include "../utils/adapter_utils.h"
 
 namespace py = pybind11;
 
@@ -86,7 +85,7 @@ public:
                 py::isinstance<py::cpp_function>(attr) ||
                 PyCallable_Check(attr.ptr())) {
 
-                m_funcName = name;                         // enter “method” mode
+                m_funcName = name;                         // enter "method" mode
                 return py::cast(shared_from_this());
             }
             collected.emplace_back(std::move(attr));      // data attribute
@@ -177,7 +176,7 @@ public:
             // NOTE: We deliberately reject **generator objects** here.
             //
             // Generators are *single-pass* iterators: once you consume a value,
-            // it is gone forever and the generator’s internal state has advanced.
+            // it is gone forever and the generator's internal state has advanced.
             // The proxy logic needs to traverse the collection multiple times:
             //
             //   • first pass – probe each element to see whether `name` exists and

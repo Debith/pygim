@@ -1,17 +1,20 @@
-// repository/adapter/format_adapter.h
-// Adapter package — FormatAdapter<Backend, Format> placeholder.
+// repository/core/format_adapter.h
+// Adapter package — FormatAdapter<Backend, Format>.
 //
 // This is where format selection lives (D7).
 // save: Python data → to_arrow() at the edge → core save(ArrowTable)
 // load: core load() → RecordBatch → from_arrow() at the edge → Python data
 //
 // Format axis exists ONLY here — core C++ is unaware of Polars or Pandas.
+// Refactored: takes shared_ptr<ConnectionPool> and passes it to Repository.
 
 #pragma once
 
-#include "../core/repository.h"
+#include "connection_pool.h"
+#include "repository.h"
 
 #include "../../utils/logging.h"
+#include <memory>
 #include <string>
 #include <string_view>
 
@@ -40,8 +43,8 @@ class FormatAdapter {
     core::Repository<Backend> m_repo;
 
 public:
-    explicit FormatAdapter(std::string_view conn_str)
-        : m_repo(conn_str)
+    explicit FormatAdapter(std::shared_ptr<core::ConnectionPool<Backend>> pool)
+        : m_repo(std::move(pool))
     {
         PYGIM_LOG_FMT("[FormatAdapter<%s, %s>] created\n",
                       backend_label(), format_name(Fmt));
@@ -87,7 +90,6 @@ public:
     }
 
     void load(core::Query const& query, int load_workers = 1) {
-        auto sql = query.build();
         PYGIM_LOG_FMT("[FormatAdapter<%s, %s>] load(query)\n",
                       backend_label(), format_name(Fmt));
         m_repo.load(query, load_workers);

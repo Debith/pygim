@@ -1,40 +1,29 @@
-#include <pybind11/pybind11.h>
-#include <pybind11/stl.h>
-#define PYBIND11_HAS_FILESYSTEM_IS_OPTIONAL
-#include <pybind11/stl/filesystem.h>
+#pragma once
+
 #include <filesystem>
 #include <set>
 #include <string>
+#include <string_view>
 #include <vector>
 #include <fstream>
 #include <sstream>
 #include <mutex>
 #include <execution>
 
-namespace py = pybind11;
 namespace fs = std::filesystem;
 
-bool match_pattern(const std::string& pattern, const std::string& str) {
-    const char *p = pattern.c_str();
-    const char *s = str.c_str();
+[[nodiscard]] inline bool match_pattern(std::string_view pattern, std::string_view str) {
+    // Fast-path checks (no allocation needed)
+    if (pattern.empty()) return false;
+    if (pattern == "*") return true;
+    if (pattern == "*.*") return str.find('.') != std::string_view::npos;
+
+    // Pointer-chase algorithm requires null-terminated strings
+    std::string p_str(pattern), s_str(str);
+    const char *p = p_str.c_str();
+    const char *s = s_str.c_str();
     const char *star = nullptr;
     const char *ss = nullptr;
-
-    // If the pattern is empty, it matches nothing
-    if (*p == '\0') {
-        return false;
-    }
-
-    // Optimization for "*" pattern
-    if (pattern == "*") {
-        return true;
-    }
-
-    // Optimization for "*.*" pattern
-    if (pattern == "*.*") {
-        // Check if 'str' contains a dot
-        return str.find('.') != std::string::npos;
-    }
 
     while (*s) {
         if (*p == '?' || *p == *s) {
@@ -65,10 +54,9 @@ bool match_pattern(const std::string& pattern, const std::string& str) {
 }
 
 
-namespace fs = std::filesystem;
 using entry   = fs::directory_entry;
 
-/*-------------  A “callable” filter  ----------------*/
+/*-------------  A "callable" filter  ----------------*/
 struct Filter
 {
     std::function<bool(const entry&)> pred;
@@ -86,7 +74,7 @@ struct Filter
     { return { [=](auto& e){ return !a(e); } }; }
 };
 
-/* small helpers (“ext", “size_gt”, …) */
+/* small helpers ("ext", "size_gt", …) */
 inline Filter ext(std::string_view x)
 {
     return { [x](const entry& e){ return e.path().extension() == x; } };
@@ -128,9 +116,7 @@ public:
         m_paths.insert(initial_paths.begin(), initial_paths.end());
     }
 
-    PathSet(const PathSet& other) {
-        m_paths = other.m_paths;
-    }
+    PathSet(const PathSet& other) = default;
 
     // Static factory method for current working directory
     static PathSet cwd() {
@@ -141,19 +127,19 @@ public:
     PathSet& operator=(PathSet&& other) noexcept = default;
 
     // Methods
-    std::size_t size() const {
+    [[nodiscard]] std::size_t size() const {
         return m_paths.size();
     }
 
-    bool empty() const {
+    [[nodiscard]] bool empty() const {
         return m_paths.empty();
     }
 
-    std::string repr() const {
+    [[nodiscard]] std::string repr() const {
         return "PathSet(" + std::to_string(m_paths.size()) + " entries)";
     }
 
-    std::string str() const {
+    [[nodiscard]] std::string str() const {
         std::ostringstream oss;
         for (const auto& p : m_paths) {
             oss << p.string() << "\n";
@@ -161,31 +147,15 @@ public:
         return oss.str();
     }
 
-    bool contains(const fs::path& path) const {
+    [[nodiscard]] bool contains(const fs::path& path) const {
         return m_paths.find(path) != m_paths.end();
     }
 
-    PathSet clone() const {
+    [[nodiscard]] PathSet clone() const {
         return PathSet(*this);
     }
 
-    bool operator==(const PathSet& other) const {
-        if (this == &other) {
-            return true;
-        }
-
-        if (m_paths.size() != other.m_paths.size()) {
-            return false;
-        }
-
-        // Check if all elements in this set are in the other set
-        for (const auto& p : m_paths) {
-            if (other.m_paths.find(p) == other.m_paths.end()) {
-                return false;
-            }
-        }
-        return true;
-    }
+    bool operator==(const PathSet& other) const = default;
 
     PathSet operator+(const PathSet& other) const {
         PathSet result;
@@ -206,7 +176,7 @@ public:
     }
 
     // Read all files
-    std::vector<std::string> read_all_files() const {
+    [[nodiscard]] std::vector<std::string> read_all_files() const {
         std::vector<std::string> contents;
         contents.reserve(m_paths.size());
 
