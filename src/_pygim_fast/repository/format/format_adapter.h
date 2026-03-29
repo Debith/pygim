@@ -1,17 +1,18 @@
-// repository/core/format_adapter.h
+// repository/format/format_adapter.h
 // Adapter package — FormatAdapter<Backend, Format>.
 //
-// This is where format selection lives (D7).
+// Format selection lives here (D7).
 // save: Python data → to_arrow() at the edge → core save(ArrowTable)
 // load: core load() → RecordBatch → from_arrow() at the edge → Python data
 //
 // Format axis exists ONLY here — core C++ is unaware of Polars or Pandas.
-// Refactored: takes shared_ptr<ConnectionPool> and passes it to Repository.
+// Takes shared_ptr<ConnectionPool> and passes it to Repository.
 
 #pragma once
 
-#include "connection_pool.h"
-#include "repository.h"
+#include "../core/connection_pool.h"
+#include "../core/repository.h"
+#include "format.h"
 
 #include "../../utils/logging.h"
 #include <memory>
@@ -19,20 +20,6 @@
 #include <string_view>
 
 namespace pygim::adapter {
-
-// ────────────────────────────────────────────────────────────────
-// Format enum
-// ────────────────────────────────────────────────────────────────
-
-enum class Format { Polars, Pandas };
-
-constexpr const char* format_name(Format f) {
-    switch (f) {
-        case Format::Polars: return "Polars";
-        case Format::Pandas: return "Pandas";
-    }
-    return "Unknown";
-}
 
 // ────────────────────────────────────────────────────────────────
 // FormatAdapter<Backend, Fmt>
@@ -50,8 +37,6 @@ public:
                       backend_label(), format_name(Fmt));
     }
 
-    // save: Python object → to_arrow → core save
-    // Placeholder: just prints the conversion pipeline
     void save(std::string_view table_name, int bcp_workers = 1) {
         PYGIM_LOG_FMT("[FormatAdapter<%s, %s>] save()\n",
                       backend_label(), format_name(Fmt));
@@ -69,8 +54,6 @@ public:
         m_repo.save(table_name, bcp_workers);
     }
 
-    // load: core load → RecordBatch → from_arrow → Python object
-    // Placeholder: just prints the conversion pipeline
     void load(std::string_view source, int load_workers = 1) {
         PYGIM_LOG_FMT("[FormatAdapter<%s, %s>] load(\"%.*s\")\n",
                       backend_label(), format_name(Fmt),
@@ -106,10 +89,7 @@ public:
 
 private:
     static constexpr const char* backend_label() {
-        if constexpr (std::is_same_v<Backend, core::MssqlBackend>)
-            return "Mssql";
-        else
-            return "Unknown";
+        return Backend::name();
     }
 };
 

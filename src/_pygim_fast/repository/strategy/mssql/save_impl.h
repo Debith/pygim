@@ -1,17 +1,17 @@
-// repository/core/save_impl.h
-// Core C++ package — MssqlSaveImpl placeholder.
+// repository/strategy/mssql/save_impl.h
+// MssqlSaveImpl placeholder (strategy layer).
 //
 // Compile-time dispatch: ArrowTable → BCP bulk insert.
 // Supports single-connection and parallel multi-connection BCP.
 
 #pragma once
 
-#include "backend_trait.h"
+#include "backend.h"
 
-#include "../../utils/logging.h"
+#include "../../../utils/logging.h"
 #include <string_view>
 
-namespace pygim::core {
+namespace pygim::strategy::mssql {
 
 struct MssqlSaveImpl {
     // Placeholder: in real code this receives arrow::Table
@@ -50,4 +50,4 @@ struct MssqlSaveImpl {
     }
 };
 
-} // namespace pygim::core
+} // namespace pygim::strategy::mssql

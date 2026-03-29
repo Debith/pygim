@@ -59,33 +59,12 @@ public:
         return *this;
     }
 
-    [[nodiscard]] std::string build() const {
-        if (!m_raw_sql.empty()) {
-            PYGIM_LOG_FMT("[Query] build() → raw SQL\n");
-            return m_raw_sql;
-        }
-
-        std::string sql = "SELECT ";
-        if (m_columns.empty()) {
-            sql += "*";
-        } else {
-            for (std::size_t i = 0; i < m_columns.size(); ++i) {
-                if (i > 0) sql += ", ";
-                sql += m_columns[i];
-            }
-        }
-        sql += " FROM " + m_table;
-        if (!m_where.empty())
-            sql += " WHERE " + m_where;
-        if (m_limit)
-            sql += " TOP " + std::to_string(*m_limit);
-
-        PYGIM_LOG_FMT("[Query] build() → \"%s\"\n", sql.c_str());
-        return sql;
-    }
-
     [[nodiscard]] bool is_raw() const { return !m_raw_sql.empty(); }
     [[nodiscard]] std::string_view table() const { return m_table; }
+    [[nodiscard]] std::vector<std::string> const& columns() const { return m_columns; }
+    [[nodiscard]] std::string_view where_clause() const { return m_where; }
+    [[nodiscard]] std::optional<int> limit_value() const { return m_limit; }
+    [[nodiscard]] std::string_view raw_sql() const { return m_raw_sql; }
 };
 
 } // namespace pygim::core

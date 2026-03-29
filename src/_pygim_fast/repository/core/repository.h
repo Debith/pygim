@@ -11,11 +11,10 @@
 
 #pragma once
 
-#include "backend_trait.h"
+#include "backend_policy.h"
 #include "connection_pool.h"
-#include "load_impl.h"
+#include "dialect.h"
 #include "query.h"
-#include "save_impl.h"
 
 #include "../../utils/logging.h"
 #include <memory>
@@ -51,7 +50,8 @@ public:
 
         auto result = m_pool->checkout();
         if (!result) {
-            throw std::runtime_error("Repository: failed to checkout connection from pool");
+            throw std::runtime_error(
+                std::string("Repository: checkout failed: ") + pool_error_name(result.error()));
         }
         auto handle = std::move(*result);
         Backend::SaveImpl::execute(handle.get(), table_name, bcp_workers);
@@ -59,13 +59,15 @@ public:
 
     // load: accepts Query → checks out connection
     void load(Query const& query, int load_workers = 1) {
-        auto sql = query.build();
+        typename Backend::Dialect const dialect{};
+        auto sql = build_sql(query, dialect);
         PYGIM_LOG_FMT("[Repository<%s>] load(sql=\"%s\")\n",
                       backend_name(), sql.c_str());
 
         auto result = m_pool->checkout();
         if (!result) {
-            throw std::runtime_error("Repository: failed to checkout connection from pool");
+            throw std::runtime_error(
+                std::string("Repository: checkout failed: ") + pool_error_name(result.error()));
         }
         auto handle = std::move(*result);
         Backend::LoadImpl::execute(handle.get(), sql, load_workers);
@@ -74,10 +76,13 @@ public:
     // load from table name or raw SQL shortcut
     void load(std::string_view source, int load_workers = 1) {
         std::string sql;
-        if (source.find(' ') != std::string_view::npos) {
+        if (source.contains(' ')) {
             sql = std::string(source);
         } else {
-            sql = "SELECT * FROM " + std::string(source);
+            Query q;
+            q.from_table(source);
+            typename Backend::Dialect const dialect{};
+            sql = build_sql(q, dialect);
         }
         PYGIM_LOG_FMT("[Repository<%s>] load(source=\"%.*s\") → sql=\"%s\"\n",
                       backend_name(),
@@ -86,24 +91,22 @@ public:
 
         auto result = m_pool->checkout();
         if (!result) {
-            throw std::runtime_error("Repository: failed to checkout connection from pool");
+            throw std::runtime_error(
+                std::string("Repository: checkout failed: ") + pool_error_name(result.error()));
         }
         auto handle = std::move(*result);
         Backend::LoadImpl::execute(handle.get(), sql, load_workers);
     }
 
-    std::string_view connection_string() const {
+    [[nodiscard]] std::string_view connection_string() const {
         return m_pool->connection_string();
     }
 
-    std::shared_ptr<ConnectionPool<Backend>> const& pool() const { return m_pool; }
+    [[nodiscard]] std::shared_ptr<ConnectionPool<Backend>> const& pool() const { return m_pool; }
 
 private:
     static constexpr const char* backend_name() {
-        if constexpr (std::is_same_v<Backend, MssqlBackend>)
-            return "MssqlBackend";
-        else
-            return "UnknownBackend";
+        return Backend::name();
     }
 };
 

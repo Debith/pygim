@@ -1,20 +1,24 @@
-// repository/core/load_impl.h
-// Core C++ package — MssqlLoadImpl placeholder.
+// repository/strategy/mssql/load_impl.h
+// MssqlLoadImpl placeholder (strategy layer).
 //
 // Block cursor drives ArrowBuilder.  No intermediate ResultSet.
 // Returns arrow::RecordBatch.  Supports single and parallel (future) load.
 
 #pragma once
 
-#include "arrow_builder.h"
-#include "backend_trait.h"
+#include "../../core/arrow_builder.h"
+#include "backend.h"
 
-#include "../../utils/logging.h"
+#include "../../../utils/logging.h"
 #include <string>
 #include <string_view>
 #include <vector>
 
-namespace pygim::core {
+namespace pygim::strategy::mssql {
+
+using pygim::core::ArrowBuilder;
+using pygim::core::ColumnInfo;
+using pygim::core::ColumnType;
 
 struct MssqlLoadImpl {
     // Placeholder: in real code this executes SQL via ODBC block cursors
@@ -78,4 +82,7 @@ struct MssqlLoadImpl {
     }
 };
 
-} // namespace pygim::core
+// NOTE: static_assert(BackendPolicy<MssqlBackend>) deferred to bindings.cpp
+// where all types (MssqlSaveImpl, MssqlLoadImpl) are fully defined.
+
+} // namespace pygim::strategy::mssql

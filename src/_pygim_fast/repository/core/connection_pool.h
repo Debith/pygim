@@ -7,7 +7,7 @@
 
 #pragma once
 
-#include "backend_trait.h"
+#include "backend_policy.h"
 #include "../../utils/logging.h"
 
 #include <cassert>
@@ -32,6 +32,15 @@ enum class PoolError {
     PoolClosed,
     ConnectionFailed,
 };
+
+constexpr const char* pool_error_name(PoolError e) {
+    switch (e) {
+        case PoolError::Timeout:          return "timeout";
+        case PoolError::PoolClosed:       return "pool_closed";
+        case PoolError::ConnectionFailed: return "connection_failed";
+    }
+    std::unreachable();
+}
 
 // ────────────────────────────────────────────────────────────────
 // Forward declarations
@@ -160,6 +169,7 @@ public:
         if (!m_available.empty()) {
             auto conn = std::move(m_available.back());
             m_available.pop_back();
+            lock.unlock();
             Backend::reset(conn);
             PYGIM_LOG_FMT("[ConnectionPool] checkout → reused idle connection\n");
             return ConnectionHandle<Backend>(this, std::move(conn));
@@ -167,9 +177,10 @@ public:
 
         // Can we create a new one?
         if (m_total_created < m_max_size) {
-            auto conn = create_connection_locked();
-            PYGIM_LOG_FMT("[ConnectionPool] checkout → created new connection (%zu/%zu)\n",
-                          m_total_created, m_max_size);
+            ++m_total_created;
+            lock.unlock();
+            auto conn = Backend::connect(m_conn_str);
+            PYGIM_LOG_FMT("[ConnectionPool] checkout → created new connection\n");
             return ConnectionHandle<Backend>(this, std::move(conn));
         }
 
@@ -181,18 +192,19 @@ public:
             return !m_available.empty() || m_closed;
         });
 
-        if (m_closed) {
+        if (m_closed) [[unlikely]] {
             PYGIM_LOG_FMT("[ConnectionPool] checkout → pool closed\n");
             return std::unexpected(PoolError::PoolClosed);
         }
 
-        if (!got_one || m_available.empty()) {
+        if (!got_one || m_available.empty()) [[unlikely]] {
             PYGIM_LOG_FMT("[ConnectionPool] checkout → timeout\n");
             return std::unexpected(PoolError::Timeout);
         }
 
         auto conn = std::move(m_available.back());
         m_available.pop_back();
+        lock.unlock();
         Backend::reset(conn);
         PYGIM_LOG_FMT("[ConnectionPool] checkout → acquired after wait\n");
         return ConnectionHandle<Backend>(this, std::move(conn));
@@ -257,14 +269,6 @@ private:
         m_cv.notify_one();
     }
 
-    // Create a new connection — caller must hold m_mutex
-    [[nodiscard]]
-    typename Backend::Connection create_connection_locked() {
-        [[assume(m_total_created < m_max_size)]];
-        auto conn = Backend::connect(m_conn_str);
-        ++m_total_created;
-        return conn;
-    }
 };
 
 } // namespace pygim::core

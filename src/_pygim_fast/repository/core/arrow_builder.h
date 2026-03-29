@@ -8,6 +8,7 @@
 #pragma once
 
 #include "../../utils/logging.h"
+#include <span>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -43,17 +44,17 @@ public:
         PYGIM_LOG_FMT("\n");
     }
 
-    void append_int64(std::size_t col, const int64_t* values,
-                      const uint8_t* valid, std::size_t count) {
+    void append_int64(std::size_t col, std::span<const int64_t> values,
+                      std::span<const uint8_t> valid) {
         PYGIM_LOG_FMT("[ArrowBuilder] append_int64(col=%zu, count=%zu)\n",
-                      col, count);
-        m_row_count += count;
+                      col, values.size());
+        m_row_count += values.size();
     }
 
-    void append_double(std::size_t col, const double* values,
-                       const uint8_t* valid, std::size_t count) {
+    void append_double(std::size_t col, std::span<const double> values,
+                       std::span<const uint8_t> valid) {
         PYGIM_LOG_FMT("[ArrowBuilder] append_double(col=%zu, count=%zu)\n",
-                      col, count);
+                      col, values.size());
     }
 
     void append_bool(std::size_t col, bool value) {

@@ -1,4 +1,4 @@
-// repository/core/flexible_repository.h
+// repository/format/flexible_repository.h
 // Adapter package — FlexibleRepository<Backend, Fmt>.
 //
 // Default pybind11-exposed surface.  Wraps FormatAdapter with optional
@@ -6,11 +6,11 @@
 //
 // Transform pipeline at call boundary only — not in the hot inner loop.
 // If no transforms registered → delegates directly.
-// Refactored: takes shared_ptr<ConnectionPool> and passes it to FormatAdapter.
+// Takes shared_ptr<ConnectionPool> and passes it to FormatAdapter.
 
 #pragma once
 
-#include "connection_pool.h"
+#include "../core/connection_pool.h"
 #include "format_adapter.h"
 
 #include "../../utils/logging.h"
@@ -46,7 +46,6 @@ public:
                       backend_label(), format_name(Fmt));
     }
 
-    // Static factory: creates pool + repo in one call
     [[nodiscard]]
     static FlexibleRepository create(std::string_view conn_str,
                                      std::size_t pool_size = 4) {
@@ -120,10 +119,7 @@ private:
     }
 
     static constexpr const char* backend_label() {
-        if constexpr (std::is_same_v<Backend, core::MssqlBackend>)
-            return "Mssql";
-        else
-            return "Unknown";
+        return Backend::name();
     }
 };
 

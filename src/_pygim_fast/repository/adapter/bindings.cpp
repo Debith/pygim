@@ -5,9 +5,10 @@
 // Uses if constexpr trampoline (D2) for format selection.
 // Refactored: creates ConnectionPool and passes it through.
 
-#include "../core/connection_pool.h"
-#include "../core/flexible_repository.h"
 #include "../core/query.h"
+#include "../strategy/mssql/save_impl.h"
+#include "../strategy/mssql/load_impl.h"
+#include "../format/flexible_repository.h"
 #include "../../utils/logging.h"
 
 #include <pybind11/pybind11.h>
@@ -17,12 +18,16 @@
 namespace py = pybind11;
 using namespace pygim;
 
+// Verify concept satisfaction where all types are fully defined
+static_assert(pygim::core::BackendPolicy<pygim::strategy::mssql::MssqlBackend>,
+              "MssqlBackend must satisfy BackendPolicy");
+
 // ────────────────────────────────────────────────────────────────
 // Type aliases for the concrete instantiation we expose
 // ────────────────────────────────────────────────────────────────
 
-using MssqlPolarsRepo = adapter::FlexibleRepository<core::MssqlBackend, adapter::Format::Polars>;
-using MssqlPandasRepo = adapter::FlexibleRepository<core::MssqlBackend, adapter::Format::Pandas>;
+using MssqlPolarsRepo = adapter::FlexibleRepository<strategy::mssql::MssqlBackend, adapter::Format::Polars>;
+using MssqlPandasRepo = adapter::FlexibleRepository<strategy::mssql::MssqlBackend, adapter::Format::Pandas>;
 
 // ────────────────────────────────────────────────────────────────
 // acquire_repo — Python entry point
@@ -69,8 +74,7 @@ PYBIND11_MODULE(_repository, m) {
         .def("where", &core::Query::where, py::arg("clause"),
              py::return_value_policy::reference_internal)
         .def("limit", &core::Query::limit, py::arg("n"),
-             py::return_value_policy::reference_internal)
-        .def("build", &core::Query::build);
+             py::return_value_policy::reference_internal);
 
     // FlexibleRepository<MssqlBackend, Polars>
     py::class_<MssqlPolarsRepo>(m, "MssqlPolarsRepository")

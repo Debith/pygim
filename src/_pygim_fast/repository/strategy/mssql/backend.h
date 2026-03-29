@@ -1,18 +1,16 @@
-// repository/core/backend_trait.h
-// Core C++ package — Backend concept and MssqlBackend trait.
-//
-// Target architecture: Repository<Backend> is templated on a single
-// Backend parameter.  This header defines the concept constraint and
-// the concrete MssqlBackend with its nested Connection, SaveImpl, LoadImpl.
+// repository/strategy/mssql/backend.h
+// MssqlBackend — concrete backend trait for SQL Server via ODBC.
+// Satisfies BackendPolicy concept defined in core/backend_policy.h.
 
 #pragma once
 
-#include <concepts>
-#include "../../utils/logging.h"
+#include "../../core/backend_policy.h"
+#include "../../../utils/logging.h"
+#include "dialect.h"
 #include <string>
 #include <string_view>
 
-namespace pygim::core {
+namespace pygim::strategy::mssql {
 
 // ────────────────────────────────────────────────────────────────
 // Connection handle placeholder
@@ -47,6 +45,9 @@ struct MssqlBackend {
     using Connection = OdbcConnection;
     using SaveImpl   = MssqlSaveImpl;
     using LoadImpl   = MssqlLoadImpl;
+    using Dialect    = MssqlDialect;
+
+    static constexpr const char* name() { return "mssql"; }
 
     static Connection connect(std::string_view conn_str) {
         PYGIM_LOG_FMT("[MssqlBackend] connect(\"%.*s\")\n",
@@ -63,22 +64,7 @@ struct MssqlBackend {
     }
 };
 
-// ────────────────────────────────────────────────────────────────
-// BackendPolicy concept (C++20)
-// ────────────────────────────────────────────────────────────────
+// NOTE: static_assert(BackendPolicy<MssqlBackend>) deferred to bindings.cpp
+// because MssqlSaveImpl and MssqlLoadImpl are only forward-declared here.
 
-template <typename B>
-concept BackendPolicy = requires(std::string_view s,
-                                  typename B::Connection conn) {
-    typename B::Connection;
-    typename B::SaveImpl;
-    typename B::LoadImpl;
-    { B::connect(s) }    -> std::same_as<typename B::Connection>;
-    { B::reset(conn) }   -> std::same_as<void>;
-    { conn.close() }     -> std::same_as<void>;
-};
-
-static_assert(BackendPolicy<MssqlBackend>,
-              "MssqlBackend must satisfy BackendPolicy");
-
-} // namespace pygim::core
+} // namespace pygim::strategy::mssql
