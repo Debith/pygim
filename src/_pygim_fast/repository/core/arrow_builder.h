@@ -1,9 +1,9 @@
 // repository/core/arrow_builder.h
-// Core C++ package — ArrowBuilder placeholder.
+// Columnar builder that materializes ODBC fetch results into Arrow RecordBatches.
 //
-// The one and only builder in core.  Concrete class, no virtuals.
-// Backend::LoadImpl drives this via block cursor batches.
-// finish() returns arrow::RecordBatch (placeholder: prints and returns empty).
+// Backend::LoadImpl creates an ArrowBuilder with column schema from SQLDescribeCol,
+// calls append_*() methods per column per fetch block, then finish() to produce
+// the final RecordBatch. Placeholder: logs operations without producing real arrays.
 
 #pragma once
 
@@ -19,6 +19,9 @@ namespace pygim::core {
 // Column schema placeholder
 // ────────────────────────────────────────────────────────────────
 
+/// Column data types supported by ArrowBuilder.
+/// Maps to Arrow logical types: Int64→arrow::int64(), Double→arrow::float64(),
+/// Bool→arrow::boolean(), String→arrow::utf8().
 enum class ColumnType { Int64, Double, Bool, String };
 
 struct ColumnInfo {
@@ -30,6 +33,15 @@ struct ColumnInfo {
 // ArrowBuilder — placeholder
 // ────────────────────────────────────────────────────────────────
 
+/// ArrowBuilder — Columnar batch builder for ODBC result sets → Arrow RecordBatch.
+///
+/// Lifecycle:
+///   1. LoadImpl creates ArrowBuilder with column schema from SQLDescribeCol.
+///   2. Block cursor fetch loop: append_*_batch() per column, advance_rows() per block.
+///   3. finish() finalizes the RecordBatch.
+///
+/// Placeholder: currently logs operations; real implementation will use
+/// arrow::ArrayBuilder per column.
 class ArrowBuilder {
     std::vector<ColumnInfo> m_columns;
     std::size_t             m_row_count = 0;

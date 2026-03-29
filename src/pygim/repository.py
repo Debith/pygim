@@ -1,12 +1,8 @@
 """Public repository module.
 
-Exposes the C++ ``_repository`` extension (target architecture placeholder)
-plus the ``acquire_repo`` factory function.
-
-Target architecture (Polars → Arrow → MSSQL):
-    - Core C++ knows only Arrow — no Python, no Polars/Pandas.
-    - Adapter (pybind11) handles format conversion at the edge.
-    - FlexibleRepository wraps FormatAdapter with optional transforms.
+Exposes the C++ ``_repository`` extension with ``acquire_repo`` factory.
+Core C++ operates on Arrow exclusively. Format conversion (Polars/Pandas)
+is a runtime attribute on the adapter, not a template parameter.
 
 Usage::
 
@@ -23,11 +19,12 @@ Usage::
 
 from pygim import _repository as _ext
 
-Query = _ext.Query
+Format = _ext.Format
+Repository = _ext.Repository
 acquire_repo = _ext.acquire_repo
 
-
 __all__ = [
-    "Query",
+    "Format",
+    "Repository",
     "acquire_repo",
 ]

@@ -16,6 +16,9 @@ namespace pygim::strategy::mssql {
 // Connection handle placeholder
 // ────────────────────────────────────────────────────────────────
 
+/// OdbcConnection — Placeholder for a real ODBC connection handle.
+/// In production, this wraps SQLHDBC + SQLHSTMT handles.
+/// Currently stores the connection string for logging only.
 struct OdbcConnection {
     std::string m_connection_string;
 
@@ -41,6 +44,9 @@ struct MssqlLoadImpl;
 // MssqlBackend — the concrete backend trait
 // ────────────────────────────────────────────────────────────────
 
+/// MssqlBackend — Concrete backend for SQL Server via ODBC.
+/// Satisfies BackendPolicy: provides Connection, SaveImpl, LoadImpl, Dialect.
+/// static_assert deferred to bindings.cpp where all types are fully defined.
 struct MssqlBackend {
     using Connection = OdbcConnection;
     using SaveImpl   = MssqlSaveImpl;

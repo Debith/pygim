@@ -1,13 +1,12 @@
 // repository/core/repository.h
-// Core C++ package — Repository<Backend> facade.
+// Generic Repository<Backend> facade — the core data access pattern.
 //
-// Template on Backend only (D7).  Core knows only Arrow.
-// save(ArrowTable): Backend::SaveImpl consumes Arrow directly.
-// load(source): Backend::LoadImpl drives ArrowBuilder, returns RecordBatch.
+// Templated on Backend only; core layer operates on Arrow exclusively.
+// save(): Backend::SaveImpl consumes Arrow data via a pooled connection.
+// load(): Backend::LoadImpl drives ArrowBuilder via a pooled connection.
 //
-// Refactored: Repository no longer owns a connection directly.
-// It holds a shared_ptr<ConnectionPool<Backend>> and checks out
-// connections per-operation via RAII ConnectionHandle.
+// Owns a shared_ptr<ConnectionPool<Backend>> and checks out connections
+// per-operation via RAII ConnectionHandle (no long-lived connection).
 
 #pragma once
 
@@ -24,6 +23,11 @@
 
 namespace pygim::core {
 
+/// Repository<Backend> — Generic database facade operating on Arrow data.
+///
+/// Template on Backend only; format conversion (Polars/Pandas) is handled
+/// by the adapter layer (RepositoryAdapter). Owns a shared ConnectionPool;
+/// each save()/load() checks out a connection for the duration of the call.
 template <BackendPolicy Backend>
 class Repository {
     std::shared_ptr<ConnectionPool<Backend>> m_pool;
@@ -73,7 +77,11 @@ public:
         Backend::LoadImpl::execute(handle.get(), sql, load_workers);
     }
 
-    // load from table name or raw SQL shortcut
+    /// Load from a table name or raw SQL string.
+    ///
+    /// Heuristic: if source contains a space, it is treated as raw SQL
+    /// and passed through. Otherwise it is treated as a table name and
+    /// wrapped in SELECT * FROM [table] via the backend dialect.
     void load(std::string_view source, int load_workers = 1) {
         std::string sql;
         if (source.contains(' ')) {

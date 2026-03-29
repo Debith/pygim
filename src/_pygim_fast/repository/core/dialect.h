@@ -12,6 +12,11 @@
 
 namespace pygim::core {
 
+/// DialectPolicy — contract for backend-specific SQL renderers.
+///
+/// Each backend provides a Dialect that can:
+///   render(query) — turn a Query intent into a backend-specific SQL string
+///   quote_identifier(name) — safely quote a table/column identifier
 template <typename D>
 concept DialectPolicy = requires(D const& d, Query const& q, std::string_view sv) {
     { d.render(q) }            -> std::same_as<std::string>;

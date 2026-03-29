@@ -12,6 +12,10 @@ namespace pygim::strategy::mssql {
 
 using pygim::core::Query;
 
+/// MssqlDialect — Renders Query intent into T-SQL.
+///
+/// Produces: SELECT TOP N [col1], [col2] FROM [table] WHERE ...
+/// Identifier quoting follows SQL Server rules: [brackets] with ] doubled.
 struct MssqlDialect {
     [[nodiscard]] std::string render(Query const& q) const {
         // Pre-compute estimated SQL length to avoid repeated reallocations
@@ -42,6 +46,8 @@ struct MssqlDialect {
         return sql;
     }
 
+    /// Quote a SQL Server identifier with square brackets.
+    /// Escapes embedded ']' by doubling: "my]col" → "[my]]col]".
     [[nodiscard]] std::string quote_identifier(std::string_view id) const {
         std::string result;
         result.reserve(id.size() + 2);

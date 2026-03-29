@@ -1,8 +1,9 @@
 // repository/core/query.h
-// Core C++ package — Query builder placeholder.
+// Fluent builder for SQL queries (intent storage).
 //
-// Fluent builder for SQL queries.  Backend validates dialect compatibility.
-// load() accepts both Query objects and raw strings (D9).
+// Two modes: (1) raw SQL via string constructor, or (2) structured intent
+// via select()/from_table()/where()/limit(). Dialect renders the intent
+// into backend-specific SQL. load() accepts both Query and raw strings.
 
 #pragma once
 
@@ -14,6 +15,14 @@
 
 namespace pygim::core {
 
+/// Fluent SQL query builder — stores intent, not SQL text.
+///
+/// Two usage modes:
+///   1. Raw SQL: Query("SELECT * FROM t") → is_raw()=true; dialect passes through.
+///   2. Structured: Query().select("id").from_table("t").limit(10) → dialect renders.
+///
+/// If both raw SQL and builder methods are used, raw SQL takes precedence
+/// (is_raw() checks m_raw_sql non-empty).
 class Query {
     std::string              m_table;
     std::vector<std::string> m_columns;

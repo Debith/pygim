@@ -20,9 +20,17 @@ using pygim::core::ArrowBuilder;
 using pygim::core::ColumnInfo;
 using pygim::core::ColumnType;
 
+/// MssqlLoadImpl — Block cursor load implementation for SQL Server.
+/// Drives ArrowBuilder via ODBC block cursors. No intermediate ResultSet.
+/// Placeholder: logs the pipeline without executing real ODBC calls.
 struct MssqlLoadImpl {
-    // Placeholder: in real code this executes SQL via ODBC block cursors
-    // and populates ArrowBuilder.
+    /// Execute SQL and load results into ArrowBuilder.
+    ///
+    /// @param conn         Active ODBC connection.
+    /// @param sql          SQL query string to execute.
+    /// @param load_workers Number of parallel load connections.
+    ///                     1 = single-connection block cursor; >1 = parallel
+    ///                     range-partitioned load (future).
     static void execute(OdbcConnection& conn,
                         std::string_view sql,
                         int load_workers = 1) {

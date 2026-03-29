@@ -10,6 +10,18 @@
 
 namespace pygim::core {
 
+/// BackendPolicy — the contract every database backend must satisfy.
+///
+/// Required associated types:
+///   Connection — movable handle to a single database session (e.g., ODBC)
+///   SaveImpl   — static execute() that bulk-inserts data via Connection
+///   LoadImpl   — static execute() that queries via Connection → ArrowBuilder
+///   Dialect    — satisfies DialectPolicy; renders Query into backend-specific SQL
+///
+/// Required static functions:
+///   connect(conn_str) — open and return a new Connection
+///   reset(conn)       — prepare a pooled connection for reuse (reset handles, clear state)
+///   name()            — human-readable backend label for logging and repr
 template <typename B>
 concept BackendPolicy = requires(std::string_view s, typename B::Connection& conn) {
     typename B::Connection;

@@ -1,9 +1,11 @@
 // repository/core/connection_pool.h
-// Core C++ package — Thread-safe ConnectionPool + RAII ConnectionHandle.
+// Thread-safe ConnectionPool + RAII ConnectionHandle.
 //
-// ConnectionPool owns a set of Backend::Connection instances.
-// ConnectionHandle checks out a connection and returns it on destruction.
-// Uses std::expected<T,E> (C++23) for error handling — no exceptions on pool ops.
+// ConnectionPool maintains a bounded set of Backend::Connection instances.
+// ConnectionHandle checks out a connection (checkout()) and returns it on
+// destruction or explicit release().
+// Uses std::expected<T,E> for error handling — timeout and pool-closed are
+// normal control flow, not exceptional conditions.
 
 #pragma once
 
@@ -28,9 +30,9 @@ namespace pygim::core {
 // ────────────────────────────────────────────────────────────────
 
 enum class PoolError {
-    Timeout,
-    PoolClosed,
-    ConnectionFailed,
+    Timeout,          ///< checkout() timed out waiting for an idle connection
+    PoolClosed,       ///< pool was close()'d before checkout completed
+    ConnectionFailed, ///< Backend::connect() threw during pool expansion
 };
 
 constexpr const char* pool_error_name(PoolError e) {
@@ -53,6 +55,14 @@ class ConnectionPool;
 // ConnectionHandle — RAII checkout from pool
 // ────────────────────────────────────────────────────────────────
 
+/// ConnectionHandle — RAII checkout token from ConnectionPool.
+///
+/// Holds exactly one borrowed Connection. On destruction (or explicit
+/// release()), returns the connection to the pool. Move-only: transferring
+/// ownership is safe; the source becomes invalid (m_pool set to nullptr).
+///
+/// Thread safety: a single handle should be used from one thread at a time.
+/// The return-to-pool operation (release/destructor) is thread-safe.
 template <BackendPolicy Backend>
 class ConnectionHandle {
     friend class ConnectionPool<Backend>;
@@ -120,6 +130,15 @@ public:
 // ConnectionPool — thread-safe pool of Backend::Connection
 // ────────────────────────────────────────────────────────────────
 
+/// ConnectionPool — Thread-safe, bounded pool of Backend::Connection.
+///
+/// Solves the cost of repeated connection creation by reusing idle connections.
+/// checkout() returns std::expected<ConnectionHandle, PoolError> — uses
+/// expected rather than exceptions because timeout and pool-closed are normal
+/// control flow.
+///
+/// Thread safety: all public methods are safe to call concurrently.
+/// Non-copyable, non-movable (owns mutex + condition_variable).
 template <BackendPolicy Backend>
 class ConnectionPool {
     friend class ConnectionHandle<Backend>;
@@ -156,7 +175,11 @@ public:
     ConnectionPool(ConnectionPool&&)                 = delete;
     ConnectionPool& operator=(ConnectionPool&&)      = delete;
 
-    // ── Checkout a connection (blocking with timeout) ────────────
+    /// Checkout a connection from the pool (blocking with timeout).
+    ///
+    /// Priority: (1) reuse idle connection, (2) create new if under max_size,
+    /// (3) wait up to timeout for a returned connection.
+    /// Returns PoolError::Timeout or PoolError::PoolClosed on failure.
     [[nodiscard]]
     std::expected<ConnectionHandle<Backend>, PoolError>
     checkout(std::chrono::milliseconds timeout = std::chrono::milliseconds{5000}) {

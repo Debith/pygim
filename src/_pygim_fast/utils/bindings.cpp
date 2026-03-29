@@ -1,7 +1,8 @@
 
 #include <pybind11/pybind11.h>
 #include <pybind11/functional.h>
-#include "utils.h"
+#include "core_utils.h"
+#include "adapter_utils.h"
 
 namespace py = pybind11;
 

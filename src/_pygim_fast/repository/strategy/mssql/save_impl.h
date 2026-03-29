@@ -13,9 +13,16 @@
 
 namespace pygim::strategy::mssql {
 
+/// MssqlSaveImpl — BCP bulk insert implementation for SQL Server.
+/// Placeholder: logs the BCP pipeline without executing real ODBC calls.
 struct MssqlSaveImpl {
-    // Placeholder: in real code this receives arrow::Table
-    // and the connection, then does BCP bulk insert.
+    /// Execute BCP bulk insert into the given table.
+    ///
+    /// @param conn        Active ODBC connection for the BCP session.
+    /// @param table_name  Target table (must exist and match Arrow schema).
+    /// @param bcp_workers Number of parallel BCP connections.
+    ///                    1 = single-connection path; >1 = parallel with
+    ///                    zero-copy Arrow slice partitioning.
     static void execute(OdbcConnection& conn,
                         std::string_view table_name,
                         int bcp_workers = 1) {

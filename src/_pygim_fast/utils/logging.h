@@ -3,7 +3,9 @@
 #include "quick_timer.h"
 
 #include <chrono>
+#include <cstdarg>
 #include <cstdio>
+#include <source_location>
 #include <string_view>
 
 #ifndef PYGIM_SCOPE_LOGGING_ENABLED
@@ -25,24 +27,20 @@ namespace pygim::logging {
 // Zero heap allocations — raw steady_clock + fprintf to stderr.
 class ScopeLog {
 public:
-    ScopeLog(const char *func,
-             const char *file,
-             int line,
-             std::string_view tag = {},
-             std::string_view note = {})
-        : m_func(func),
-          m_file(file),
-          m_line(line),
+    explicit ScopeLog(std::string_view tag = {},
+                      std::string_view note = {},
+                      std::source_location loc = std::source_location::current())
+        : m_func(loc.function_name()),
+          m_file(loc.file_name()),
+          m_line(static_cast<int>(loc.line())),
           m_tag(tag),
           m_note(note),
-          m_enabled(PYGIM_SCOPE_LOGGING_ENABLED != 0) {
-        if (!m_enabled) return;
-        m_start = std::chrono::steady_clock::now();
+          m_start(std::chrono::steady_clock::now())
+    {
         write_enter();
     }
 
     ~ScopeLog() {
-        if (!m_enabled) return;
         const auto micros = std::chrono::duration_cast<
             std::chrono::microseconds>(
             std::chrono::steady_clock::now() - m_start).count();
@@ -103,7 +101,6 @@ private:
     int m_line;
     std::string_view m_tag;
     std::string_view m_note;
-    bool m_enabled;
     std::chrono::steady_clock::time_point m_start;
 };
 
@@ -114,23 +111,37 @@ private:
 
 // Scope enter/exit trace
 #define PYGIM_SCOPE_LOG()                                                       \
-    ::pygim::logging::ScopeLog PYGIM_CONCAT(pygim_scope_log_, __COUNTER__)(     \
-        __func__, __FILE__, __LINE__, {}, {})
+    ::pygim::logging::ScopeLog PYGIM_CONCAT(pygim_scope_log_, __COUNTER__)()
+
 #define PYGIM_SCOPE_LOG_MSG(note)                                               \
     ::pygim::logging::ScopeLog PYGIM_CONCAT(pygim_scope_log_, __COUNTER__)(     \
-        __func__, __FILE__, __LINE__, {}, (note))
+        {}, (note))
+
 #define PYGIM_SCOPE_LOG_TAG(tag)                                                \
     ::pygim::logging::ScopeLog PYGIM_CONCAT(pygim_scope_log_, __COUNTER__)(     \
-        __func__, __FILE__, __LINE__, (tag), {})
+        (tag))
+
 #define PYGIM_SCOPE_LOG_TAG_MSG(tag, note)                                      \
     ::pygim::logging::ScopeLog PYGIM_CONCAT(pygim_scope_log_, __COUNTER__)(     \
-        __func__, __FILE__, __LINE__, (tag), (note))
+        (tag), (note))
 
 #define PYGIM_REPOSITORY_SCOPE_LOG()      PYGIM_SCOPE_LOG_TAG("repo")
 #define PYGIM_REPOSITORY_SCOPE_LOG_MSG(n) PYGIM_SCOPE_LOG_TAG_MSG("repo", (n))
 
-// Printf-style trace — all output to stderr (unified with QuickTimer).
-#define PYGIM_LOG_FMT(fmt, ...) std::fprintf(stderr, fmt, ##__VA_ARGS__)
+// Printf-style trace with compile-time format checking (gcc/clang).
+namespace pygim::logging {
+
+__attribute__((format(printf, 1, 2)))
+inline void log_fmt(const char* fmt, ...) {
+    std::va_list args;
+    va_start(args, fmt);
+    std::vfprintf(stderr, fmt, args);
+    va_end(args);
+}
+
+} // namespace pygim::logging
+
+#define PYGIM_LOG_FMT(fmt, ...) ::pygim::logging::log_fmt(fmt, ##__VA_ARGS__)
 
 // RAII QuickTimer — prints summary with sub-timer breakdown at scope exit.
 // Output goes to stderr (same stream as PYGIM_LOG_FMT and ScopeLog).

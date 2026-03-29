@@ -79,6 +79,7 @@ For every file under review, systematically scan for opportunities to use the fe
 - [ ] No circular includes
 - [ ] Binding file includes only what it binds
 - [ ] Extension has an `ext.*.toml` file
+- [ ] No backward-compatibility shim headers — files that exist solely to `#include` other headers must be eliminated; consumers should include the actual headers directly
 
 ### 5. Performance
 - [ ] No transient heap allocations in loops
