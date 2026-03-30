@@ -458,6 +458,7 @@ def print_write_result(r: dict) -> None:
     if bcp:
         click.echo(
             f"           C++: total={bcp['total_seconds']:.2f}s  "
+            f"connect={bcp.get('connect_seconds', 0):.2f}s  "
             f"row_loop={bcp['row_loop_seconds']:.2f}s  "
             f"flush={bcp['batch_flush_seconds']:.2f}s  "
             f"batches={bcp['record_batches']}"
@@ -752,12 +753,19 @@ def bench(
 
     if do_write:
         click.echo()
-        for pname in profiles:
+        for pi, pname in enumerate(profiles):
             table = PROFILES[pname]["table"]
             df = data[pname]
 
             if not no_truncate:
                 truncate_table(conn_str, table, pyodbc)
+
+            # Flush server writes between profiles to prevent I/O backpressure
+            if pi > 0 and len(profiles) > 1:
+                cn = pyodbc.connect(conn_str, timeout=30)
+                cn.autocommit = True
+                cn.execute("CHECKPOINT")
+                cn.close()
 
             click.echo(f"Writing [{pname}] …")
             r = run_write(conn_str, table, df, pname, workers, batch_size=batch_size)

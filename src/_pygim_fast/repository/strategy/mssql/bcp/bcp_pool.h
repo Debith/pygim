@@ -1,12 +1,14 @@
 #pragma once
 // BCP Connection Pool: manages M pre-connected ODBC connections for parallel
 // bulk insert.  Each connection has BCP enabled.  RAII cleanup.
+// Connections are established in parallel to minimize setup latency.
 // Not thread-safe for pool management — designed for create-once, use-parallel.
 
 #include "bcp_api.h"
 #include "../odbc_error.h"
 
 #include <string>
+#include <thread>
 #include <vector>
 #include <stdexcept>
 
@@ -21,18 +23,41 @@ public:
     };
 
     /// Create a pool of @p pool_size connections to @p conn_str.
-    /// All connections are established eagerly.
+    /// Connections are established in parallel — O(1×latency) vs O(N×latency).
     explicit BcpConnectionPool(const std::string& conn_str, int pool_size)
     {
         m_connections.resize(static_cast<size_t>(pool_size));
+
+        if (pool_size <= 1) {
+            // Single connection: skip thread overhead
+            alloc_and_connect(m_connections[0], conn_str, 0);
+            return;
+        }
+
+        // Parallel connection establishment
+        std::vector<std::exception_ptr> errors(static_cast<size_t>(pool_size));
+        std::vector<std::thread> threads;
+        threads.reserve(static_cast<size_t>(pool_size));
+
         for (int i = 0; i < pool_size; ++i) {
-            auto& c = m_connections[static_cast<size_t>(i)];
-            try {
-                alloc_and_connect(c, conn_str, i);
-            } catch (...) {
-                for (int j = 0; j < i; ++j)
+            threads.emplace_back([this, &conn_str, &errors, i]() {
+                try {
+                    alloc_and_connect(m_connections[static_cast<size_t>(i)],
+                                      conn_str, i);
+                } catch (...) {
+                    errors[static_cast<size_t>(i)] = std::current_exception();
+                }
+            });
+        }
+
+        for (auto& t : threads) t.join();
+
+        // Check for errors; cleanup all on any failure
+        for (int i = 0; i < pool_size; ++i) {
+            if (errors[static_cast<size_t>(i)]) {
+                for (int j = 0; j < pool_size; ++j)
                     cleanup_connection(m_connections[static_cast<size_t>(j)]);
-                throw;
+                std::rethrow_exception(errors[static_cast<size_t>(i)]);
             }
         }
     }

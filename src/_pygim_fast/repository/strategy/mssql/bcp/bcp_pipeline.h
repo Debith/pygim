@@ -26,6 +26,7 @@ namespace pygim::strategy::mssql::bcp {
 
 struct BcpMetrics {
     double  total_seconds{0};
+    double  connect_seconds{0};
     double  bind_seconds{0};
     double  row_loop_seconds{0};
     double  batch_flush_seconds{0};
@@ -343,8 +344,10 @@ inline void finalize_bcp(BcpContext& ctx) {
         worker_rows[idx] += batch->num_rows();
     }
 
-    // 6. Create connection pool
+    // 6. Create connection pool (parallel establishment)
+    auto t_connect_start = clock::now();
     BcpConnectionPool pool(conn_str, actual_workers);
+    auto t_connect_end = clock::now();
 
     const auto& api = ensure_bcp_api();
     auto qualified = sql::qualify_table(table);
@@ -424,6 +427,7 @@ inline void finalize_bcp(BcpContext& ctx) {
 
     // 10. Merge metrics
     BcpMetrics merged{};
+    merged.connect_seconds = std::chrono::duration<double>(t_connect_end - t_connect_start).count();
     for (int w = 0; w < actual_workers; ++w) {
         const auto& wm = results[static_cast<size_t>(w)].metrics;
         merged.bind_seconds        += wm.bind_seconds;

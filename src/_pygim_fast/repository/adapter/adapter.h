@@ -130,13 +130,14 @@ public:
         int workers = (bcp_workers >= 0) ? bcp_workers : m_bcp_workers;
 
         // BCP pipeline (GIL released — pure C++)
-        double total_s{}, bind_s{}, row_loop_s{}, batch_flush_s{};
+        double total_s{}, connect_s{}, bind_s{}, row_loop_s{}, batch_flush_s{};
         int64_t processed_rows{}, sent_rows{}, record_batches{};
         {
             py::gil_scoped_release release;
             auto m = m_repo.save(std::move(reader), table_name,
                                  m_batch_size, m_table_hint, workers);
             total_s        = m.total_seconds;
+            connect_s      = m.connect_seconds;
             bind_s         = m.bind_seconds;
             row_loop_s     = m.row_loop_seconds;
             batch_flush_s  = m.batch_flush_seconds;
@@ -150,6 +151,7 @@ public:
         // Convert metrics to Python dict (GIL re-acquired)
         py::dict result;
         result["total_seconds"]       = total_s;
+        result["connect_seconds"]     = connect_s;
         result["bind_seconds"]        = bind_s;
         result["row_loop_seconds"]    = row_loop_s;
         result["batch_flush_seconds"] = batch_flush_s;
