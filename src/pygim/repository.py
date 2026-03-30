@@ -12,9 +12,14 @@ Usage::
         "Driver={ODBC Driver 18 for SQL Server};Server=localhost,1433;"
         "Database=mydb;TrustServerCertificate=yes;",
         format="polars",
+        batch_size=100_000,
+        bcp_workers=4,
     )
-    repo.save("dbo.my_table")
-    repo.load("dbo.my_table")
+
+    import polars as pl
+    df = pl.DataFrame({"id": [1, 2, 3], "name": ["a", "b", "c"]})
+    metrics = repo.save(df, "dbo.my_table")
+    print(f"Saved {metrics['processed_rows']} rows in {metrics['total_seconds']:.2f}s")
 """
 
 from pygim import _repository as _ext

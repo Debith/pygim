@@ -11,9 +11,7 @@ from pygim.factory import Factory
 try:  # normal pybind11 extension import
 	from . import _repository as _repo_mod  # type: ignore
 	Repository = _repo_mod.Repository  # type: ignore[attr-defined]
-	Query = _repo_mod.Query  # type: ignore[attr-defined]
-	acquire_repository = _repo_mod.acquire_repository  # type: ignore[attr-defined]
-	StatusPrinter = _repo_mod.StatusPrinter  # type: ignore[attr-defined]
+	acquire_repo = _repo_mod.acquire_repo  # type: ignore[attr-defined]
 except Exception:  # pragma: no cover - if compiled extension missing
 	pass
 
@@ -64,4 +62,4 @@ def create_df(schema: dict, rows: int = 100_000, *, seed: int = 42,
 
 
 __all__ = ["PathSet", "Registry", "Factory", "create_df",
-           "Repository", "Query", "acquire_repository", "StatusPrinter"]
+           "Repository", "acquire_repo"]

@@ -1,3 +1,4 @@
 [extension]
 module = "_repository"
 sources = ["repository/adapter/bindings.cpp"]
+deps = ["odbc"]

@@ -217,17 +217,20 @@ def run_write(
     df,
     profile_name: str,
     bcp_workers: int,
+    batch_size: int = 100_000,
 ) -> dict:
     """Insert *df* via BCP and return timing metrics."""
     from pygim.repository import acquire_repo
 
-    repo = acquire_repo(conn_str, format="polars")
+    repo = acquire_repo(conn_str, format="polars",
+                        batch_size=batch_size,
+                        bcp_workers=bcp_workers)
 
     payload_bytes = estimate_size_bytes(df)
     nrows = len(df)
 
     t0 = time.perf_counter()
-    repo.save(table, bcp_workers=bcp_workers)
+    metrics = repo.save(df, table)
     elapsed = time.perf_counter() - t0
 
     mb_s = (payload_bytes / 1_048_576) / elapsed if elapsed > 0 else 0.0
@@ -241,6 +244,7 @@ def run_write(
         "mb_s":          mb_s,
         "rows_s":        nrows / elapsed if elapsed > 0 else 0.0,
         "bcp_workers":   bcp_workers,
+        "bcp_metrics":   metrics,
     }
 
 
@@ -450,6 +454,14 @@ def print_write_result(r: dict) -> None:
         f"payload={payload_mb:6.1f} MB  "
         f"workers={r['bcp_workers']}"
     )
+    bcp = r.get("bcp_metrics")
+    if bcp:
+        click.echo(
+            f"           C++: total={bcp['total_seconds']:.2f}s  "
+            f"row_loop={bcp['row_loop_seconds']:.2f}s  "
+            f"flush={bcp['batch_flush_seconds']:.2f}s  "
+            f"batches={bcp['record_batches']}"
+        )
 
 
 def print_load_result(r: dict) -> None:
@@ -677,6 +689,8 @@ def check_regression(
               help="Skip round-trip verification in 'both' mode")
 @click.option("--verify-sample", default=200, type=int, show_default=True,
               help="Rows to spot-check during verification")
+@click.option("--batch-size", default=100_000, type=int, show_default=True,
+              help="BCP batch size (rows per bcp_batch call)")
 @click.option("--no-truncate", is_flag=True,
               help="Skip TRUNCATE before each write run")
 @click.option("--warmup", is_flag=True,
@@ -690,7 +704,7 @@ def check_regression(
               show_default=True, help="Max throughput drop % before failing")
 def bench(
     conn, rows, dataset, mode, fmt, workers,
-    no_verify, verify_sample, no_truncate, warmup,
+    no_verify, verify_sample, batch_size, no_truncate, warmup,
     baseline_out, baseline_in, regression_threshold,
 ):
     """BCP throughput benchmark — target architecture (placeholder)."""
@@ -726,7 +740,7 @@ def bench(
         if not no_truncate:
             truncate_table(conn_str, PROFILES[pname0]["table"], pyodbc)
         run_write(conn_str, PROFILES[pname0]["table"], data[pname0],
-                  pname0, workers)
+                  pname0, workers, batch_size=batch_size)
 
     do_write = mode in ("write", "both")
     do_load = mode in ("load", "both")
@@ -746,7 +760,7 @@ def bench(
                 truncate_table(conn_str, table, pyodbc)
 
             click.echo(f"Writing [{pname}] …")
-            r = run_write(conn_str, table, df, pname, workers)
+            r = run_write(conn_str, table, df, pname, workers, batch_size=batch_size)
             all_results.append(r)
             print_write_result(r)
 

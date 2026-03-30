@@ -10,6 +10,7 @@
 
 #pragma once
 
+#include "arrow_import.h"
 #include "../core/connection_pool.h"
 #include "../core/query.h"
 #include "../core/repository.h"
@@ -18,6 +19,7 @@
 #include <pybind11/pybind11.h>
 #include <pybind11/functional.h>
 
+#include <cstdint>
 #include <memory>
 #include <string>
 #include <string_view>
@@ -65,26 +67,41 @@ template <core::BackendPolicy Backend>
 class RepositoryAdapter {
     core::Repository<Backend>  m_repo;
     Format                     m_format;
+    int64_t                    m_batch_size;
+    std::string                m_table_hint;
+    int                        m_bcp_workers;
     std::vector<py::function>  m_pre_transforms;
     std::vector<py::function>  m_post_transforms;
 
 public:
     RepositoryAdapter(std::shared_ptr<core::ConnectionPool<Backend>> pool,
-                      Format format)
+                      Format format,
+                      int64_t batch_size = 100000,
+                      const std::string& table_hint = "TABLOCK",
+                      int bcp_workers = 1)
         : m_repo(std::move(pool))
         , m_format(format)
+        , m_batch_size(batch_size)
+        , m_table_hint(table_hint)
+        , m_bcp_workers(bcp_workers)
     {
-        PYGIM_LOG_FMT("[RepositoryAdapter<%s>] created (format=%s)\n",
-                      Backend::name(), format_name(m_format));
+        PYGIM_LOG_FMT("[RepositoryAdapter<%s>] created (format=%s, batch_size=%lld, hint=%s, workers=%d)\n",
+                      Backend::name(), format_name(m_format),
+                      static_cast<long long>(m_batch_size),
+                      m_table_hint.c_str(), m_bcp_workers);
     }
 
     [[nodiscard]]
     static RepositoryAdapter create(std::string_view conn_str,
                                     Format format,
-                                    std::size_t pool_size = 4) {
+                                    std::size_t pool_size = 4,
+                                    int64_t batch_size = 100000,
+                                    const std::string& table_hint = "TABLOCK",
+                                    int bcp_workers = 1) {
         auto pool = std::make_shared<core::ConnectionPool<Backend>>(
             conn_str, pool_size);
-        return RepositoryAdapter(std::move(pool), format);
+        return RepositoryAdapter(std::move(pool), format,
+                                 batch_size, table_hint, bcp_workers);
     }
 
     // ── Transform hooks ──────────────────────────────────────
@@ -104,11 +121,42 @@ public:
 
     // ── Core operations ──────────────────────────────────────
 
-    void save(std::string_view table_name, int bcp_workers = 1) {
+    py::dict save(py::object data, std::string_view table_name, int bcp_workers = -1) {
         PYGIM_TIMED_SCOPE("RepositoryAdapter::save");
         run_transforms("pre_save", m_pre_transforms);
-        m_repo.save(table_name, bcp_workers);
+
+        // Import Arrow data (GIL held — needed for Python object access)
+        auto reader = import_record_batch_reader(data);
+        int workers = (bcp_workers >= 0) ? bcp_workers : m_bcp_workers;
+
+        // BCP pipeline (GIL released — pure C++)
+        double total_s{}, bind_s{}, row_loop_s{}, batch_flush_s{};
+        int64_t processed_rows{}, sent_rows{}, record_batches{};
+        {
+            py::gil_scoped_release release;
+            auto m = m_repo.save(std::move(reader), table_name,
+                                 m_batch_size, m_table_hint, workers);
+            total_s        = m.total_seconds;
+            bind_s         = m.bind_seconds;
+            row_loop_s     = m.row_loop_seconds;
+            batch_flush_s  = m.batch_flush_seconds;
+            processed_rows = m.processed_rows;
+            sent_rows      = m.sent_rows;
+            record_batches = m.record_batches;
+        }
+
         run_transforms("post_save", m_post_transforms);
+
+        // Convert metrics to Python dict (GIL re-acquired)
+        py::dict result;
+        result["total_seconds"]       = total_s;
+        result["bind_seconds"]        = bind_s;
+        result["row_loop_seconds"]    = row_loop_s;
+        result["batch_flush_seconds"] = batch_flush_s;
+        result["processed_rows"]      = processed_rows;
+        result["sent_rows"]           = sent_rows;
+        result["record_batches"]      = record_batches;
+        return result;
     }
 
     void load(std::string_view source, int load_workers = 1) {

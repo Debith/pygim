@@ -67,15 +67,20 @@ PYBIND11_MODULE(_repository_test, m) {
     // RepositoryAdapter — module-local to avoid conflict with production _repository
     py::class_<MssqlRepo>(m, "Repository", py::module_local())
         .def(py::init([](const std::string& conn_str, const std::string& format,
-                         std::size_t pool_size) {
+                         std::size_t pool_size, int64_t batch_size,
+                         const std::string& table_hint, int bcp_workers) {
             auto fmt = adapter::parse_format(format);
-            return MssqlRepo::create(conn_str, fmt, pool_size);
+            return MssqlRepo::create(conn_str, fmt, pool_size,
+                                     batch_size, table_hint, bcp_workers);
         }),
              py::arg("conn_str"),
              py::arg("format") = "polars",
-             py::arg("pool_size") = 4)
+             py::arg("pool_size") = 4,
+             py::arg("batch_size") = 100000,
+             py::arg("table_hint") = "TABLOCK",
+             py::arg("bcp_workers") = 1)
         .def("save", &MssqlRepo::save,
-             py::arg("table_name"), py::arg("bcp_workers") = 1)
+             py::arg("data"), py::arg("table_name"), py::arg("bcp_workers") = -1)
         .def("load",
              py::overload_cast<std::string_view, int>(&MssqlRepo::load),
              py::arg("source"), py::arg("load_workers") = 1)

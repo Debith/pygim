@@ -16,6 +16,7 @@
 #include "query.h"
 
 #include "../../utils/logging.h"
+#include <arrow/record_batch.h>
 #include <memory>
 #include <stdexcept>
 #include <string>
@@ -46,11 +47,17 @@ public:
         return Repository(std::move(pool));
     }
 
-    // save: checks out connection, delegates to SaveImpl, handle returns on scope exit
-    void save(std::string_view table_name, int bcp_workers = 1) {
-        PYGIM_LOG_FMT("[Repository<%s>] save(table=\"%.*s\")\n",
+    // save: checks out connection, delegates to SaveImpl with Arrow data
+    [[nodiscard]]
+    auto save(std::shared_ptr<arrow::RecordBatchReader> reader,
+              std::string_view table_name,
+              int64_t batch_size,
+              const std::string& table_hint,
+              int bcp_workers) {
+        PYGIM_LOG_FMT("[Repository<%s>] save(table=\"%.*s\", workers=%d)\n",
                       backend_name(),
-                      static_cast<int>(table_name.size()), table_name.data());
+                      static_cast<int>(table_name.size()), table_name.data(),
+                      bcp_workers);
 
         auto result = m_pool->checkout();
         if (!result) {
@@ -58,7 +65,9 @@ public:
                 std::string("Repository: checkout failed: ") + pool_error_name(result.error()));
         }
         auto handle = std::move(*result);
-        Backend::SaveImpl::execute(handle.get(), table_name, bcp_workers);
+        return Backend::SaveImpl::execute(handle.get(), std::move(reader),
+                                          table_name, batch_size, table_hint,
+                                          bcp_workers);
     }
 
     // load: accepts Query → checks out connection

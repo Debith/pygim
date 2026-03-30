@@ -1,3 +1,4 @@
 [extension]
 module = "_repository_test"
 sources = ["repository/adapter/test_bindings.cpp"]
+deps = ["odbc"]

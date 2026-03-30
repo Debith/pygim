@@ -1,59 +1,47 @@
 // repository/strategy/mssql/save_impl.h
-// MssqlSaveImpl placeholder (strategy layer).
+// MssqlSaveImpl — BCP bulk insert via Arrow RecordBatchReader.
 //
-// Compile-time dispatch: ArrowTable → BCP bulk insert.
-// Supports single-connection and parallel multi-connection BCP.
+// Delegates to bcp::bulk_insert (single-connection) or
+// bcp::bulk_insert_parallel (multi-worker) from bcp_pipeline.h.
+// Returns BcpMetrics so the adapter can report timing to Python.
 
 #pragma once
 
 #include "backend.h"
+#include "bcp/bcp_pipeline.h"
 
 #include "../../../utils/logging.h"
+#include <arrow/record_batch.h>
+#include <memory>
+#include <string>
 #include <string_view>
 
 namespace pygim::strategy::mssql {
 
 /// MssqlSaveImpl — BCP bulk insert implementation for SQL Server.
-/// Placeholder: logs the BCP pipeline without executing real ODBC calls.
+/// Routes to single-connection or parallel path based on bcp_workers.
 struct MssqlSaveImpl {
-    /// Execute BCP bulk insert into the given table.
-    ///
-    /// @param conn        Active ODBC connection for the BCP session.
-    /// @param table_name  Target table (must exist and match Arrow schema).
-    /// @param bcp_workers Number of parallel BCP connections.
-    ///                    1 = single-connection path; >1 = parallel with
-    ///                    zero-copy Arrow slice partitioning.
-    static void execute(OdbcConnection& conn,
-                        std::string_view table_name,
-                        int bcp_workers = 1) {
-        PYGIM_LOG_FMT("[MssqlSaveImpl] execute(table=\"%.*s\", workers=%d)\n",
-                      static_cast<int>(table_name.size()), table_name.data(),
-                      bcp_workers);
+    static bcp::BcpMetrics execute(
+        OdbcConnection& conn,
+        std::shared_ptr<arrow::RecordBatchReader> reader,
+        std::string_view table_name,
+        int64_t batch_size,
+        const std::string& table_hint,
+        int bcp_workers)
+    {
+        std::string table(table_name);
+
+        PYGIM_LOG_FMT("[MssqlSaveImpl] execute(table=\"%s\", workers=%d, batch_size=%lld)\n",
+                      table.c_str(), bcp_workers, static_cast<long long>(batch_size));
 
         if (bcp_workers < 2) {
-            PYGIM_LOG_FMT("[MssqlSaveImpl]   single-connection BCP path\n");
-            PYGIM_LOG_FMT("[MssqlSaveImpl]   bcp_init(\"%.*s\", TABLOCK)\n",
-                          static_cast<int>(table_name.size()), table_name.data());
-            PYGIM_LOG_FMT("[MssqlSaveImpl]   SQLBindCol per column from Arrow schema\n");
-            PYGIM_LOG_FMT("[MssqlSaveImpl]   transpose → bcp_sendrow loop\n");
-            PYGIM_LOG_FMT("[MssqlSaveImpl]   bcp_batch() at intervals\n");
-            PYGIM_LOG_FMT("[MssqlSaveImpl]   bcp_done() → final commit\n");
+            return bcp::bulk_insert(conn.dbc(), std::move(reader),
+                                    table, batch_size, table_hint);
         } else {
-            PYGIM_LOG_FMT("[MssqlSaveImpl]   parallel BCP path (%d workers)\n",
-                          bcp_workers);
-            PYGIM_LOG_FMT("[MssqlSaveImpl]   read all RecordBatches from reader\n");
-            PYGIM_LOG_FMT("[MssqlSaveImpl]   zero-copy Slice into %d sub-batches\n",
-                          bcp_workers);
-            PYGIM_LOG_FMT("[MssqlSaveImpl]   BcpConnectionPool(%d connections)\n",
-                          bcp_workers);
-            PYGIM_LOG_FMT("[MssqlSaveImpl]   spawn %d std::thread workers\n",
-                          bcp_workers);
-            PYGIM_LOG_FMT("[MssqlSaveImpl]   each worker: bcp_init → transpose → "
-                          "sendrow → bcp_done\n");
-            PYGIM_LOG_FMT("[MssqlSaveImpl]   join threads, merge metrics\n");
+            return bcp::bulk_insert_parallel(conn.conn_str(), std::move(reader),
+                                             table, batch_size, table_hint,
+                                             bcp_workers);
         }
-
-        PYGIM_LOG_FMT("[MssqlSaveImpl]   done\n");
     }
 };
 
