@@ -37,8 +37,8 @@ namespace py = pybind11;
 enum class Format { Polars, Pandas };
 
 /// Convert format string from Python boundary to enum.
-/// Throws py::value_error on unknown format.
-inline Format parse_format(std::string_view fmt) {
+/// Throws py::value_error on unknown format (prevents constexpr evaluation for invalid inputs).
+constexpr Format parse_format(std::string_view fmt) {
     if (fmt == "polars") return Format::Polars;
     if (fmt == "pandas") return Format::Pandas;
     throw py::value_error("Unknown format: '" + std::string(fmt) +
@@ -140,35 +140,25 @@ public:
         auto reader = import_record_batch_reader(data);
         int workers = (bcp_workers >= 0) ? bcp_workers : m_bcp_workers;
 
-        // BCP pipeline (GIL released — pure C++)
-        double total_s{}, connect_s{}, bind_s{}, row_loop_s{}, batch_flush_s{};
-        int64_t processed_rows{}, sent_rows{}, record_batches{};
-        {
+        // BCP pipeline (GIL released — pure C++; reacquired on IIFE return)
+        auto metrics = [&] {
             py::gil_scoped_release release;
-            auto m = m_repo.save(std::move(reader), table_name,
-                                 m_batch_size, m_table_hint, workers);
-            total_s        = m.total_seconds;
-            connect_s      = m.connect_seconds;
-            bind_s         = m.bind_seconds;
-            row_loop_s     = m.row_loop_seconds;
-            batch_flush_s  = m.batch_flush_seconds;
-            processed_rows = m.processed_rows;
-            sent_rows      = m.sent_rows;
-            record_batches = m.record_batches;
-        }
+            return m_repo.save(std::move(reader), table_name,
+                               m_batch_size, m_table_hint, workers);
+        }();
 
         run_transforms("post_save", m_post_transforms);
 
-        // Convert metrics to Python dict (GIL re-acquired)
+        // Convert metrics to Python dict (GIL held)
         py::dict result;
-        result["total_seconds"]       = total_s;
-        result["connect_seconds"]     = connect_s;
-        result["bind_seconds"]        = bind_s;
-        result["row_loop_seconds"]    = row_loop_s;
-        result["batch_flush_seconds"] = batch_flush_s;
-        result["processed_rows"]      = processed_rows;
-        result["sent_rows"]           = sent_rows;
-        result["record_batches"]      = record_batches;
+        result["total_seconds"]       = metrics.total_seconds;
+        result["connect_seconds"]     = metrics.connect_seconds;
+        result["bind_seconds"]        = metrics.bind_seconds;
+        result["row_loop_seconds"]    = metrics.row_loop_seconds;
+        result["batch_flush_seconds"] = metrics.batch_flush_seconds;
+        result["processed_rows"]      = metrics.processed_rows;
+        result["sent_rows"]           = metrics.sent_rows;
+        result["record_batches"]      = metrics.record_batches;
         return result;
     }
 
