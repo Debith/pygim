@@ -17,15 +17,11 @@
 #include <arrow/util/bit_util.h>
 #include <arrow/util/config.h>   // defines ARROW_VERSION_MAJOR
 
-#if ARROW_VERSION_MAJOR >= 15
-#define PYGIM_HAVE_ARROW_STRING_VIEW 1
-#else
-static_assert(false,
+static_assert(ARROW_VERSION_MAJOR >= 15,
     "pygim requires arrow-cpp >= 15. "
     "Polars 1.x exports strings as StringView (\"vu\" format); "
     "arrow-cpp < 15 rejects this at ImportRecordBatchReader and lacks bind_string_view. "
     "Upgrade: conda install -c conda-forge 'arrow-cpp>=15' 'pyarrow>=15'");
-#endif
 
 namespace pygim::strategy::mssql::bcp {
 
@@ -51,10 +47,8 @@ struct ColumnBinding {
     const int32_t* offsets32{nullptr};
     const int64_t* offsets64{nullptr};
     const uint8_t* str_data{nullptr};
-#if PYGIM_HAVE_ARROW_STRING_VIEW
     const arrow::StringViewArray* string_view_array{nullptr};
     const arrow::BinaryViewArray* binary_view_array{nullptr};
-#endif
     std::vector<uint8_t> str_buf;         // reusable buffer for null-terminated copy
     bool                 str_buf_bound{false};
     DBINT                last_collen{-2}; // cached bcp_collen value; -2 = unset sentinel

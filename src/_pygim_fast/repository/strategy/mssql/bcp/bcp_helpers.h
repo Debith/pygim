@@ -35,7 +35,6 @@ inline void handle_string_column(const BcpApi& bcp, SQLHDBC dbc,
         len = static_cast<DBINT>(b.offsets64[row + 1] - start);
         ptr = b.str_data + start;
     }
-#if PYGIM_HAVE_ARROW_STRING_VIEW
     else if (b.string_view_array) {
         auto view = b.string_view_array->GetView(row);
         len = static_cast<DBINT>(view.size());
@@ -46,7 +45,6 @@ inline void handle_string_column(const BcpApi& bcp, SQLHDBC dbc,
         len = static_cast<DBINT>(view.size());
         ptr = reinterpret_cast<const uint8_t*>(view.data());
     }
-#endif
     else { return; /* unreachable for valid bindings */ }
 
     const auto ulen = static_cast<size_t>(len);
