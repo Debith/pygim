@@ -21,6 +21,8 @@ namespace pygim::strategy::mssql::sql {
 
 /// Ensure table name is a valid identifier (possibly schema.table).
 /// Returns "dbo.table" if no schema part is present.
+/// Validates identifiers to prevent SQL injection — callers must route all
+/// user-supplied table names through this function.
 [[nodiscard]] inline std::string qualify_table(const std::string& table) {
     auto ok = [](const std::string& s) {
         if (is_valid_identifier(s)) return true;

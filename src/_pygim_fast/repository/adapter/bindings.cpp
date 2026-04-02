@@ -45,18 +45,24 @@ PYBIND11_MODULE(_repository, m) {
     // ONE class, not two
     py::class_<MssqlRepo>(m, "Repository")
         .def("save", &MssqlRepo::save,
-             py::arg("data"), py::arg("table_name"), py::arg("bcp_workers") = -1)
+             py::arg("data"), py::arg("table_name"), py::arg("bcp_workers") = -1,
+             "Bulk-insert data into a table via BCP. Returns a dict of timing metrics.")
         .def("load",
              py::overload_cast<std::string_view, int>(&MssqlRepo::load),
-             py::arg("source"), py::arg("load_workers") = 1)
+             py::arg("source"), py::arg("load_workers") = 1,
+             "Load data from a table name or raw SQL query (placeholder).")
         .def("load",
              py::overload_cast<core::Query const&, int>(&MssqlRepo::load),
-             py::arg("query"), py::arg("load_workers") = 1)
+             py::arg("query"), py::arg("load_workers") = 1,
+             "Load data from a Query object (placeholder).")
         .def("add_pre_transform", &MssqlRepo::add_pre_transform,
-             py::arg("fn"))
+             py::arg("fn"),
+             "Add a callable invoked before each save/load operation.")
         .def("add_post_transform", &MssqlRepo::add_post_transform,
-             py::arg("fn"))
-        .def("clear_transforms", &MssqlRepo::clear_transforms)
+             py::arg("fn"),
+             "Add a callable invoked after each save/load operation.")
+        .def("clear_transforms", &MssqlRepo::clear_transforms,
+             "Remove all pre and post transform hooks.")
         .def_property_readonly("format",
              [](MssqlRepo const& r) { return r.format(); })
         .def("__repr__", &MssqlRepo::repr);

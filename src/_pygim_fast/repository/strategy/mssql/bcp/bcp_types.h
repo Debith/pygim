@@ -68,7 +68,8 @@ struct ColumnBinding {
 };
 
 // ── BcpContext ──────────────────────────────────────────────────────────────
-/// Simplified session state — no timers, no transpose strategy pointer.
+/// Per-BCP-session mutable state: tracks the active ODBC connection, row counts,
+/// and flush cadence for one bulk insert session.
 struct BcpContext {
     const BcpApi& bcp;
     SQLHDBC       dbc;
@@ -77,6 +78,15 @@ struct BcpContext {
     int64_t       rows_until_flush{0};
     int64_t       processed_rows{0};
     int64_t       record_batches{0};
+
+    /// Accumulate row/batch counters from another context.
+    /// Session-bound fields (bcp, dbc, batch_size, rows_until_flush) are unchanged.
+    BcpContext& operator+=(const BcpContext& rhs) noexcept {
+        sent_rows      += rhs.sent_rows;
+        processed_rows += rhs.processed_rows;
+        record_batches += rhs.record_batches;
+        return *this;
+    }
 };
 
 // ── ClassifiedColumns ───────────────────────────────────────────────────────

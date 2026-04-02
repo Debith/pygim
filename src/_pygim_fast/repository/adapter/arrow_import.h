@@ -20,6 +20,7 @@ namespace pygim::adapter {
 namespace py = pybind11;
 
 /// Import a Python Arrow-compatible object as a RecordBatchReader.
+/// Must be called WITH GIL held (accesses Python objects throughout).
 /// Supports PyCapsule protocol (__arrow_c_stream__) and PyArrow's _export_to_c.
 /// @param depth  Internal recursion guard (max 1 level for to_arrow() conversion).
 [[nodiscard]]

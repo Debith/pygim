@@ -24,15 +24,49 @@ namespace pygim::strategy::mssql::bcp {
 
 // ── BcpMetrics ──────────────────────────────────────────────────────────────
 
+/// Wall-clock timing metrics for a single BCP bulk insert invocation.
+/// All `*_seconds` fields are wall-clock durations (not CPU time).
+/// For parallel inserts, `row_loop_seconds` and `batch_flush_seconds` are
+/// max-across-workers (wall-clock), while row/batch counts are summed.
 struct BcpMetrics {
-    double  total_seconds{0};
-    double  connect_seconds{0};
-    double  bind_seconds{0};
-    double  row_loop_seconds{0};
-    double  batch_flush_seconds{0};
-    int64_t processed_rows{0};
-    int64_t sent_rows{0};
-    int64_t record_batches{0};
+    double  total_seconds{0};         ///< End-to-end wall time.
+    double  connect_seconds{0};       ///< Connection pool establishment time.
+    double  bind_seconds{0};          ///< Column binding (accumulated across batches).
+    double  row_loop_seconds{0};      ///< Row loop including bind within process_batch.
+    double  batch_flush_seconds{0};   ///< Final bcp_batch + bcp_done flush.
+    int64_t processed_rows{0};        ///< Rows read from Arrow RecordBatches.
+    int64_t sent_rows{0};             ///< Rows successfully sent via bcp_sendrow.
+    int64_t record_batches{0};        ///< Number of Arrow RecordBatches processed.
+
+    /// Element-wise accumulation (all fields summed).
+    BcpMetrics& operator+=(const BcpMetrics& rhs) noexcept {
+        total_seconds       += rhs.total_seconds;
+        connect_seconds     += rhs.connect_seconds;
+        bind_seconds        += rhs.bind_seconds;
+        row_loop_seconds    += rhs.row_loop_seconds;
+        batch_flush_seconds += rhs.batch_flush_seconds;
+        processed_rows      += rhs.processed_rows;
+        sent_rows           += rhs.sent_rows;
+        record_batches      += rhs.record_batches;
+        return *this;
+    }
+
+    /// Element-wise sum of two metrics objects.
+    friend BcpMetrics operator+(BcpMetrics lhs, const BcpMetrics& rhs) noexcept {
+        return lhs += rhs;
+    }
+
+    /// Merge a parallel worker's metrics: max for wall-clock timings, sum for counts.
+    /// connect_seconds and total_seconds are left untouched (set by the orchestrator).
+    BcpMetrics& merge_parallel(const BcpMetrics& worker) noexcept {
+        bind_seconds        += worker.bind_seconds;
+        row_loop_seconds     = std::max(row_loop_seconds, worker.row_loop_seconds);
+        batch_flush_seconds  = std::max(batch_flush_seconds, worker.batch_flush_seconds);
+        processed_rows      += worker.processed_rows;
+        sent_rows           += worker.sent_rows;
+        record_batches      += worker.record_batches;
+        return *this;
+    }
 };
 
 // ── RAII BcpSessionGuard ────────────────────────────────────────────────────
@@ -174,7 +208,8 @@ inline void process_batch(BcpContext& ctx,
 
 // ── finalize_bcp ────────────────────────────────────────────────────────────
 
-/// Final flush + bcp_done.
+/// Final flush + bcp_done. Retries bcp_batch once (50ms) on transient failure
+/// before raising. Throws on bcp_done failure.
 inline void finalize_bcp(BcpContext& ctx) {
     // Flush remaining rows that didn't trigger a batch flush
     if (ctx.sent_rows > 0 && ctx.rows_until_flush < ctx.batch_size) {
@@ -193,7 +228,15 @@ inline void finalize_bcp(BcpContext& ctx) {
 
 // ── bulk_insert (single connection) ─────────────────────────────────────────
 
-/// Single-connection BCP: iterate RecordBatchReader, process each batch.
+/// Single-connection BCP bulk insert: reads Arrow RecordBatches and sends rows.
+///
+/// @param dbc          Active ODBC connection handle with BCP enabled.
+/// @param reader       Arrow RecordBatchReader supplying the data.
+/// @param table        Target table name (qualified to dbo if no schema part).
+/// @param batch_size   Rows between bcp_batch() commits; ≤0 defaults to 100K.
+/// @param table_hint   BCP hint string (e.g. "TABLOCK"); empty to skip.
+/// @return BcpMetrics with wall-clock timings and row counts.
+/// @throws std::runtime_error on Arrow read failure, zero rows, or ODBC error.
 [[nodiscard]] inline BcpMetrics bulk_insert(
     SQLHDBC dbc,
     std::shared_ptr<arrow::RecordBatchReader> reader,
@@ -254,7 +297,21 @@ inline void finalize_bcp(BcpContext& ctx) {
 
 // ── bulk_insert_parallel (multi-worker) ─────────────────────────────────────
 
-/// Multi-worker parallel BCP.
+/// Multi-worker parallel BCP: N threads, each with its own ODBC connection.
+///
+/// Reads all RecordBatches into memory, slices large batches for parallelism
+/// (zero-copy via Arrow Slice), partitions across workers by greedy
+/// least-loaded row count, then spawns std::thread workers.
+///
+/// @param conn_str     ODBC connection string (each worker gets its own conn).
+/// @param reader       Arrow RecordBatchReader supplying the data.
+/// @param table        Target table name (qualified to dbo if no schema part).
+/// @param batch_size   Rows between bcp_batch() commits; ≤0 defaults to 100K.
+/// @param table_hint   BCP hint string (e.g. "TABLOCK"); empty to skip.
+/// @param num_workers  Desired worker count; ≤0 auto-selects min(4, hw_concurrency).
+///                     Falls back to single-connection if only 1 worker needed.
+/// @return BcpMetrics  (row_loop/batch_flush = max across workers; counts = sum).
+/// @throws std::runtime_error on Arrow read failure, zero rows, or first worker error.
 [[nodiscard]] inline BcpMetrics bulk_insert_parallel(
     const std::string& conn_str,
     std::shared_ptr<arrow::RecordBatchReader> reader,
@@ -428,15 +485,8 @@ inline void finalize_bcp(BcpContext& ctx) {
     // 10. Merge metrics
     BcpMetrics merged{};
     merged.connect_seconds = std::chrono::duration<double>(t_connect_end - t_connect_start).count();
-    for (int w = 0; w < actual_workers; ++w) {
-        const auto& wm = results[static_cast<size_t>(w)].metrics;
-        merged.bind_seconds        += wm.bind_seconds;
-        merged.row_loop_seconds     = std::max(merged.row_loop_seconds, wm.row_loop_seconds);
-        merged.batch_flush_seconds  = std::max(merged.batch_flush_seconds, wm.batch_flush_seconds);
-        merged.processed_rows      += wm.processed_rows;
-        merged.sent_rows           += wm.sent_rows;
-        merged.record_batches      += wm.record_batches;
-    }
+    for (int w = 0; w < actual_workers; ++w)
+        merged.merge_parallel(results[static_cast<size_t>(w)].metrics);
     merged.total_seconds = std::chrono::duration<double>(clock::now() - t_start).count();
     return merged;
 }

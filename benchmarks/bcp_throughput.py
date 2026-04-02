@@ -695,7 +695,9 @@ def check_regression(
 @click.option("--no-truncate", is_flag=True,
               help="Skip TRUNCATE before each write run")
 @click.option("--warmup", is_flag=True,
-              help="Run one discarded warm-up pass before timing")
+              help="Run one discarded warm-up pass per profile before timing")
+@click.option("--iterations", "iterations", default=1, type=int, show_default=True,
+              help="Iterations per profile; report best (use 3 for stable results)")
 @click.option("--save-baseline", "baseline_out", type=click.Path(), default=None,
               help="Save results as JSON baseline file")
 @click.option("--check-regression", "baseline_in", type=click.Path(exists=True),
@@ -705,7 +707,7 @@ def check_regression(
               show_default=True, help="Max throughput drop % before failing")
 def bench(
     conn, rows, dataset, mode, fmt, workers,
-    no_verify, verify_sample, batch_size, no_truncate, warmup,
+    no_verify, verify_sample, batch_size, no_truncate, warmup, iterations,
     baseline_out, baseline_in, regression_threshold,
 ):
     """BCP throughput benchmark — target architecture (placeholder)."""
@@ -734,18 +736,18 @@ def bench(
             click.echo(f"  → {size_mb:.1f} MB in {gen_s:.2f}s")
             data[pname] = df
 
-    # ── Warm-up ──────────────────────────────────────────────────────────
-    if warmup and mode in ("write", "both"):
-        pname0 = profiles[0]
-        click.echo(f"\nWarm-up pass ({pname0}) …")
-        if not no_truncate:
-            truncate_table(conn_str, PROFILES[pname0]["table"], pyodbc)
-        run_write(conn_str, PROFILES[pname0]["table"], data[pname0],
-                  pname0, workers, batch_size=batch_size)
-
     do_write = mode in ("write", "both")
     do_load = mode in ("load", "both")
     do_verify = do_write and do_load and not no_verify
+
+    def _settle_server():
+        """Flush dirty pages and let I/O settle between runs."""
+        cn = pyodbc.connect(conn_str, timeout=30)
+        cn.autocommit = True
+        cn.execute("CHECKPOINT")
+        cn.execute("DBCC DROPCLEANBUFFERS")
+        cn.close()
+        time.sleep(0.5)
 
     # ── Write runs ───────────────────────────────────────────────────────
     all_results: list[dict] = []
@@ -757,20 +759,36 @@ def bench(
             table = PROFILES[pname]["table"]
             df = data[pname]
 
-            if not no_truncate:
-                truncate_table(conn_str, table, pyodbc)
+            # Warm-up: discard first run per profile to prime server caches
+            if warmup:
+                if not no_truncate:
+                    truncate_table(conn_str, table, pyodbc)
+                click.echo(f"Warm-up [{pname}] …")
+                run_write(conn_str, table, df, pname, workers,
+                          batch_size=batch_size)
+                _settle_server()
 
-            # Flush server writes between profiles to prevent I/O backpressure
-            if pi > 0 and len(profiles) > 1:
-                cn = pyodbc.connect(conn_str, timeout=30)
-                cn.autocommit = True
-                cn.execute("CHECKPOINT")
-                cn.close()
+            # Multi-iteration: keep best result (matches archive "hot" timing)
+            best: dict | None = None
+            for it in range(iterations):
+                if not no_truncate:
+                    truncate_table(conn_str, table, pyodbc)
 
-            click.echo(f"Writing [{pname}] …")
-            r = run_write(conn_str, table, df, pname, workers, batch_size=batch_size)
-            all_results.append(r)
-            print_write_result(r)
+                if pi > 0 or it > 0:
+                    _settle_server()
+
+                label = f"Writing [{pname}]" if iterations == 1 \
+                    else f"Writing [{pname}] (iter {it+1}/{iterations})"
+                click.echo(f"{label} …")
+                r = run_write(conn_str, table, df, pname, workers,
+                              batch_size=batch_size)
+                print_write_result(r)
+                if best is None or r["mb_s"] > best["mb_s"]:
+                    best = r
+
+            if iterations > 1:
+                click.echo(f"  → best: {best['mb_s']:.2f} MB/s")
+            all_results.append(best)
 
             if do_verify:
                 v = verify_round_trip(

@@ -1,7 +1,5 @@
 # -*- coding: utf-8 -*-
-"""
-CLI for Python Gimmicks.
-"""
+"""pygim \u2014 Lightweight, high-performance Python utilities backed by C++ extensions."""
 
 from pygim.pathset import PathSet
 from pygim.registry import Registry

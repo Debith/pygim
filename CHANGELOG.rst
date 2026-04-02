@@ -33,6 +33,8 @@ Added
 
 Changed
 ~~~~~~~
+- Repository: Migrated from monolithic ``mssql_strategy.cpp`` / ``repository_v2`` to a layered core/adapter/strategy architecture. ``Repository<Backend>`` generic facade, ``ConnectionPool<Backend>`` with ``std::expected`` checkout, ``RepositoryAdapter<Backend>`` one-hop pybind11 boundary, ``BackendPolicy`` C++20 concept, and ``MssqlBackend`` concrete backend. All template instantiation at the pybind11 edge (``bindings.cpp``).
+- Repository: Added ``connection_pool.h`` (thread-safe bounded pool with RAII ``ConnectionHandle``), ``backend_policy.h`` (C++20 concept), ``query.h``/``dialect.h`` (fluent query builder + dialect rendering), ``arrow_import.h`` (PyCapsule ``__arrow_c_stream__`` + depth-limited fallback import), and ``bindings.cpp`` (``acquire_repo`` factory with pool_size/batch_size/bcp_workers params).
 - Repository/MSSQL BCP: Column-major AVX2 path is now strictly opt-in: only enabled if ``PYGIM_FORCE_SIMD=avx2``. All hardware auto-detection is removed; scalar is the default.
 - Repository/MSSQL BCP: Profile-aware activation: AVX2 is only enabled if ``plan_avx2_blocks`` finds at least 2 eligible blocks. Otherwise, scalar path is used to avoid unnecessary vector overhead.
 - Repository/MSSQL BCP: Eliminated per-row ``bcp_colptr`` redirect loop in column-major path — replaced N per-column ODBC calls per row with a single ``memcpy`` from the pre-filled mini-batch buffer into the original staging buffer. Reduces redirect overhead from ~500 ms to ~24 ms for 1 M rows (exhaustive profile).

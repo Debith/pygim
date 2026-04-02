@@ -106,21 +106,32 @@ public:
 
     // ── Transform hooks ──────────────────────────────────────
 
+    /// Add a pre-save/pre-load transform (runs WITH GIL, before core operation).
     void add_pre_transform(py::function fn) {
         m_pre_transforms.push_back(std::move(fn));
     }
 
+    /// Add a post-save/post-load transform (runs WITH GIL, after core operation).
     void add_post_transform(py::function fn) {
         m_post_transforms.push_back(std::move(fn));
     }
 
+    /// Remove all pre and post transforms.
     void clear_transforms() {
         m_pre_transforms.clear();
         m_post_transforms.clear();
     }
 
     // ── Core operations ──────────────────────────────────────
-
+    /// Bulk-insert data into a database table via BCP.
+    ///
+    /// @param data          Python object: DataFrame, RecordBatch, Table, or anything
+    ///                      implementing __arrow_c_stream__.
+    /// @param table_name    Target table (qualified to dbo.table if no schema).
+    /// @param bcp_workers   Override worker count; -1 uses the instance default.
+    /// @return py::dict with timing metrics (total/connect/bind/row_loop/
+    ///         batch_flush_seconds) and row counts.
+    /// @throws std::runtime_error on zero rows, ODBC errors, or unsupported types.
     py::dict save(py::object data, std::string_view table_name, int bcp_workers = -1) {
         PYGIM_TIMED_SCOPE("RepositoryAdapter::save");
         run_transforms("pre_save", m_pre_transforms);
@@ -161,6 +172,7 @@ public:
         return result;
     }
 
+    /// Load data from a table or raw SQL query (placeholder — not yet implemented).
     void load(std::string_view source, int load_workers = 1) {
         PYGIM_TIMED_SCOPE("RepositoryAdapter::load");
         run_transforms("pre_load", m_pre_transforms);
@@ -168,6 +180,7 @@ public:
         run_transforms("post_load", m_post_transforms);
     }
 
+    /// Load data from a Query object (placeholder — not yet implemented).
     void load(core::Query const& query, int load_workers = 1) {
         PYGIM_TIMED_SCOPE("RepositoryAdapter::load(query)");
         run_transforms("pre_load", m_pre_transforms);

@@ -10,7 +10,12 @@
 namespace pygim::strategy::mssql::bcp {
 
 // ── Generic fixed-width binding ─────────────────────────────────────────────
-
+/// Create a fixed-width BCP column binding.
+/// Passes the Arrow data pointer directly to bcp_bind (zero-copy for numeric types).
+/// @param data    Raw data pointer from Arrow array (e.g. Int32Array::raw_values()).
+/// @param stride  Byte width per element (sizeof the C type).
+/// @param bcp_type  BCP type token from sql_type:: namespace.
+/// @throws std::runtime_error if bcp_bind fails.
 inline ColumnBinding make_fixed_binding(
     const BcpApi& bcp, SQLHDBC dbc,
     const void* data, size_t stride, int bcp_type,
@@ -34,7 +39,10 @@ inline ColumnBinding make_fixed_binding(
 }
 
 // ── Generic string binding ──────────────────────────────────────────────────
-
+/// Create a variable-length string BCP column binding.
+/// Uses a static dummy pointer at bind time because bcp_bind for variable-length
+/// columns requires a non-null address; actual data is redirected per-row via
+/// bcp_colptr in handle_string_column.
 inline ColumnBinding make_string_binding(
     const BcpApi& bcp, SQLHDBC dbc,
     const std::shared_ptr<arrow::Array>& array, int ordinal)
@@ -272,7 +280,12 @@ inline ColumnBinding bind_binary_view(const BcpApi& bcp, SQLHDBC dbc,
 #endif
 
 // ── Column dispatcher ───────────────────────────────────────────────────────
-
+/// Bind all columns in a RecordBatch to BCP.
+/// Dispatches each column to the appropriate per-type bind function based on
+/// Arrow type id. Supports 16+ types (int8–uint64, bool, float/double,
+/// date32, timestamp, time64, duration, string, large_string, string_view,
+/// binary_view, large_binary).
+/// @throws std::runtime_error for unsupported Arrow types.
 inline std::vector<ColumnBinding> bind_columns(
     const BcpApi& bcp, SQLHDBC dbc,
     const std::shared_ptr<arrow::RecordBatch>& batch)
@@ -317,7 +330,9 @@ inline std::vector<ColumnBinding> bind_columns(
 }
 
 // ── Column classification ───────────────────────────────────────────────────
-
+/// Split bindings into fixed-width and string/binary columns.
+/// Used by the row loop to choose fast path (no nulls, fixed only)
+/// vs general path (nulls or variable-length).
 inline ClassifiedColumns classify_columns(std::vector<ColumnBinding>& bindings) {
     ClassifiedColumns c;
     c.fixed.reserve(bindings.size());
@@ -455,6 +470,8 @@ inline void update_string(ColumnBinding& b, const std::shared_ptr<arrow::Array>&
 
 } // namespace rebind_detail
 
+/// Fast rebind: update Arrow data pointers in existing bindings without
+/// re-calling bcp_bind. Used when schema matches between consecutive batches.
 inline void rebind_columns(
     std::vector<ColumnBinding>& bindings,
     ClassifiedColumns& classified,
@@ -495,7 +512,9 @@ inline void rebind_columns(
 }
 
 // ── Staging buffer ──────────────────────────────────────────────────────────
-
+/// Allocate a single contiguous staging buffer for all fixed-width columns.
+/// Each column's bcp_colptr is pointed into this buffer at its offset, so the
+/// row loop only needs memcpy into the buffer (no per-column bcp_colptr call).
 inline std::vector<uint8_t> setup_staging(
     const BcpApi& bcp, SQLHDBC dbc,
     std::span<ColumnBinding*> fixed_cols)
