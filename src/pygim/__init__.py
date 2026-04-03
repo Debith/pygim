@@ -15,7 +15,7 @@ except Exception:  # pragma: no cover - if compiled extension missing
 
 
 def create_df(schema: dict, rows: int = 100_000, *, seed: int = 42,
-              null_fraction: float = 0.0):
+              null_fraction: float = 0.0, format: str = "polars"):
 	"""Generate a test DataFrame with the given schema.
 
 	Uses a fast C++ backend with Arrow array builders — typically
@@ -36,11 +36,15 @@ def create_df(schema: dict, rows: int = 100_000, *, seed: int = 42,
 	    Deterministic PRNG seed (default: 42).
 	null_fraction : float
 	    Fraction of NULLs per column in [0.0, 1.0] (default: 0.0).
+	format : str
+	    Output format: ``"polars"`` (default), ``"arrow"`` (PyArrow Table).
+	    Use ``"arrow"`` to preserve Arrow-native types like ``fixed_size_binary``
+	    that Polars may convert to variable-length equivalents.
 
 	Returns
 	-------
 	polars.DataFrame or pyarrow.Table
-	    Polars DataFrame if polars is installed, else PyArrow Table.
+	    Polars DataFrame by default, PyArrow Table when ``format="arrow"``.
 
 	Examples
 	--------
@@ -49,14 +53,15 @@ def create_df(schema: dict, rows: int = 100_000, *, seed: int = 42,
 	"""
 	from pygim.datagen import generate as _generate  # C++ extension
 	exporter = _generate(schema, rows, seed, null_fraction)
+	import pyarrow as pa
+	table = pa.RecordBatchReader.from_stream(exporter).read_all()
+	if format == "arrow":
+		return table
 	try:
 		import polars as pl
-		import pyarrow as pa
-		reader = pa.RecordBatchReader.from_stream(exporter)
-		return pl.from_arrow(reader.read_all())
+		return pl.from_arrow(table)
 	except ImportError:
-		import pyarrow as pa
-		return pa.RecordBatchReader.from_stream(exporter).read_all()
+		return table
 
 
 __all__ = ["PathSet", "Registry", "Factory", "create_df",

@@ -27,31 +27,36 @@ namespace pygim::strategy::mssql::bcp {
 
 // ── ColumnBinding ───────────────────────────────────────────────────────────
 /// Per-column metadata populated at bind time and consumed during the row loop.
+/// Fields ordered to minimize struct padding (bools packed, pointers grouped).
 struct ColumnBinding {
+    // ── Fixed-size scalars (4+4 = 8 bytes) ──
     int                           ordinal{0};
     arrow::Type::type             arrow_type{arrow::Type::NA};
-    std::shared_ptr<arrow::Array> array;
 
+    // ── Booleans (4 bytes packed, then DBINT for alignment) ──
     bool            has_nulls{false};
     bool            is_string{false};
     bool            is_binary{false};
-    const uint8_t*  null_bitmap{nullptr};
+    bool            str_buf_bound{false};
+    DBINT           last_collen{-2}; // cached bcp_collen value; -2 = unset sentinel
+
+    // ── Cached integer values (8 bytes each, naturally aligned) ──
     int64_t         array_offset{0};
+    size_t          value_stride{0};
+    size_t          staging_offset{0};
 
-    // Fixed-width column data (direct pointer into Arrow buffer)
-    const void* data_ptr{nullptr};
-    size_t      value_stride{0};
-    size_t      staging_offset{0};
-
-    // String column data (zero-copy from Arrow buffers)
-    const int32_t* offsets32{nullptr};
-    const int64_t* offsets64{nullptr};
-    const uint8_t* str_data{nullptr};
+    // ── Raw pointers (8 bytes each) ──
+    const uint8_t*  null_bitmap{nullptr};
+    const void*     data_ptr{nullptr};
+    const int32_t*  offsets32{nullptr};
+    const int64_t*  offsets64{nullptr};
+    const uint8_t*  str_data{nullptr};
     const arrow::StringViewArray* string_view_array{nullptr};
     const arrow::BinaryViewArray* binary_view_array{nullptr};
+
+    // ── Owning containers (heap-allocated internals) ──
+    std::shared_ptr<arrow::Array> array;
     std::vector<uint8_t> str_buf;         // reusable buffer for null-terminated copy
-    bool                 str_buf_bound{false};
-    DBINT                last_collen{-2}; // cached bcp_collen value; -2 = unset sentinel
 
     // Pre-converted buffers (kept alive by shared_ptr)
     std::shared_ptr<std::vector<uint8_t>>                bool_buffer;

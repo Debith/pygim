@@ -18,6 +18,9 @@ pyproject = toml.loads(Path("pyproject.toml").read_text())
 ext_modules = []
 base_macros = [("VERSION_INFO", repr(scm_version))]
 
+if os.environ.get("PYGIM_BCP_PROFILING", "").strip() == "1":
+    base_macros.append(("PYGIM_BCP_PROFILING", "1"))
+
 
 # Pick sensible flags per-compiler
 if sys.platform == "win32":

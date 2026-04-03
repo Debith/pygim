@@ -77,6 +77,7 @@ namespace sql_type {
     inline constexpr int timen      = 0x29;  // TIME
     inline constexpr int datetime2n = 0x2a;  // DATETIME2
     inline constexpr int binary     = 0x2d;  // BINARY / VARBINARY
+    inline constexpr int uniqueid   = 0x24;  // UNIQUEIDENTIFIER (16-byte GUID)
     inline constexpr int varlen_data = -10;  // variable-length marker
 } // namespace sql_type
 
@@ -106,7 +107,8 @@ struct BcpApi {
     bcp_control_fn control{};
 
     [[nodiscard]] constexpr bool loaded() const noexcept {
-        return init && bind && sendrow && batch && done && collen && colptr;
+        return init && bind && sendrow && batch && done && collen && colptr
+            && control;
     }
 };
 

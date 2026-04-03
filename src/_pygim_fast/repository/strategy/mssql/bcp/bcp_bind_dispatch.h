@@ -236,6 +236,15 @@ inline ColumnBinding bind_duration(const BcpApi& bcp, SQLHDBC dbc,
     return make_fixed_binding(bcp, dbc, typed->raw_values(), sizeof(int64_t), sql_type::bigint, a, ord);
 }
 
+inline ColumnBinding bind_binary(const BcpApi& bcp, SQLHDBC dbc,
+                                 const std::shared_ptr<arrow::Array>& a, int ord) {
+    auto typed = std::static_pointer_cast<arrow::BinaryArray>(a);
+    auto b = make_binary_binding(bcp, dbc, a, ord);
+    b.offsets32 = typed->raw_value_offsets();
+    b.str_data  = typed->value_data()->data();
+    return b;
+}
+
 inline ColumnBinding bind_large_binary(const BcpApi& bcp, SQLHDBC dbc,
                                        const std::shared_ptr<arrow::Array>& a, int ord) {
     auto typed = std::static_pointer_cast<arrow::LargeBinaryArray>(a);
@@ -279,6 +288,15 @@ inline ColumnBinding bind_binary_view(const BcpApi& bcp, SQLHDBC dbc,
     return b;
 }
 
+inline ColumnBinding bind_fixed_size_binary(const BcpApi& bcp, SQLHDBC dbc,
+                                            const std::shared_ptr<arrow::Array>& a, int ord) {
+    auto typed = std::static_pointer_cast<arrow::FixedSizeBinaryArray>(a);
+    const auto byte_width = static_cast<size_t>(typed->byte_width());
+    // 16-byte fixed binary → UNIQUEIDENTIFIER (native SQLGUID format)
+    const int bcp_type = (byte_width == 16) ? sql_type::uniqueid : sql_type::binary;
+    return make_fixed_binding(bcp, dbc, typed->raw_values(), byte_width, bcp_type, a, ord);
+}
+
 // ── Dispatch table ──────────────────────────────────────────────────────────
 // Compile-time function-pointer table indexed by arrow::Type::type.
 // Inspired by GBA Thumb decoder's consteval dispatch: pay the categorisation
@@ -307,11 +325,13 @@ inline constexpr auto bind_dispatch = []() consteval {
     t[arrow::Type::TIMESTAMP]    = &bind_timestamp;
     t[arrow::Type::TIME64]       = &bind_time64;
     t[arrow::Type::DURATION]     = &bind_duration;
+    t[arrow::Type::BINARY]       = &bind_binary;
     t[arrow::Type::STRING]       = &bind_string;
     t[arrow::Type::LARGE_STRING] = &bind_large_string;
     t[arrow::Type::LARGE_BINARY] = &bind_large_binary;
     t[arrow::Type::STRING_VIEW]  = &bind_string_view;
-    t[arrow::Type::BINARY_VIEW]  = &bind_binary_view;
+    t[arrow::Type::BINARY_VIEW]       = &bind_binary_view;
+    t[arrow::Type::FIXED_SIZE_BINARY] = &bind_fixed_size_binary;
     return t;
 }();
 

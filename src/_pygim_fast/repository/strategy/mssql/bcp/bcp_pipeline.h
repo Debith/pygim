@@ -5,6 +5,7 @@
 
 #include "bcp_helpers.h"
 #include "bcp_pool.h"
+#include "bcp_profiler.h"
 #include "../sql_helpers.h"
 
 #include <algorithm>
@@ -37,6 +38,7 @@ struct BcpMetrics {
     int64_t processed_rows{0};        ///< Rows read from Arrow RecordBatches.
     int64_t sent_rows{0};             ///< Rows successfully sent via bcp_sendrow.
     int64_t record_batches{0};        ///< Number of Arrow RecordBatches processed.
+    BcpProfiler profiler{};           ///< Detailed per-section breakdown (only populated when PYGIM_BCP_PROFILING defined).
 
     /// Element-wise accumulation (all fields summed).
     BcpMetrics& operator+=(const BcpMetrics& rhs) noexcept {
@@ -65,6 +67,7 @@ struct BcpMetrics {
         processed_rows      += worker.processed_rows;
         sent_rows           += worker.sent_rows;
         record_batches      += worker.record_batches;
+        profiler.merge_parallel(worker.profiler);
         return *this;
     }
 };
@@ -111,7 +114,11 @@ inline void init_session(const BcpApi& api, SQLHDBC dbc,
             SQL_ERROR, SQL_HANDLE_DBC, dbc,
             ("bcp_init(table=" + qualified_table + ")").c_str());
     }
-    if (!hint.empty() && api.control) {
+    if (!hint.empty()) {
+        if (!api.control) [[unlikely]]
+            throw std::runtime_error(
+                "BCP hint '" + hint + "' requested but bcp_control not available; "
+                "ODBC Driver 17+ required");
         if (api.control(dbc, kBcpHints,
                         const_cast<char*>(hint.c_str())) != kSucceed) {
             odbc::raise_if_error(
@@ -127,21 +134,37 @@ inline void row_loop_fast(BcpContext& ctx,
                           std::span<ColumnBinding*> fixed,
                           std::span<ColumnBinding*> string,
                           std::span<uint8_t> staging,
-                          int64_t num_rows) {
+                          int64_t num_rows,
+                          BcpProfiler& prof) {
     for (int64_t row = 0; row < num_rows; ++row) {
-        for (auto* bp : fixed) {
-            const auto* src = static_cast<const uint8_t*>(bp->data_ptr)
-                            + static_cast<size_t>(row) * bp->value_stride;
-            std::memcpy(staging.data() + bp->staging_offset, src, bp->value_stride);
+        {
+            BCP_PROF_SCOPE(prof, fixed_copy);
+            for (auto* bp : fixed) {
+                const auto* src = static_cast<const uint8_t*>(bp->data_ptr)
+                                + static_cast<size_t>(row) * bp->value_stride;
+                std::memcpy(staging.data() + bp->staging_offset, src, bp->value_stride);
+            }
+            BCP_PROF_COUNT(prof, fixed_calls);
         }
-        for (auto* bp : string)
-            handle_string_column(ctx.bcp, ctx.dbc, *bp, row);
-
-        if (ctx.bcp.sendrow(ctx.dbc) != kSucceed) [[unlikely]]
-            odbc::raise_if_error(SQL_ERROR, SQL_HANDLE_DBC, ctx.dbc, "bcp_sendrow");
+        {
+            BCP_PROF_SCOPE(prof, string_copy);
+            for (auto* bp : string) {
+                handle_string_column(ctx.bcp, ctx.dbc, *bp, row);
+                BCP_PROF_COUNT(prof, string_calls);
+            }
+        }
+        {
+            BCP_PROF_SCOPE(prof, sendrow);
+            if (ctx.bcp.sendrow(ctx.dbc) != kSucceed) [[unlikely]]
+                odbc::raise_if_error(SQL_ERROR, SQL_HANDLE_DBC, ctx.dbc, "bcp_sendrow");
+            BCP_PROF_COUNT(prof, sendrow_calls);
+        }
         ++ctx.sent_rows;
-        if (--ctx.rows_until_flush <= 0) [[unlikely]]
+        if (--ctx.rows_until_flush <= 0) [[unlikely]] {
+            BCP_PROF_SCOPE(prof, mid_flush);
             flush_batch(ctx.bcp, ctx.dbc, ctx);
+            BCP_PROF_COUNT(prof, mid_flush_calls);
+        }
     }
 }
 
@@ -150,19 +173,35 @@ inline void row_loop_general(BcpContext& ctx,
                              std::span<ColumnBinding*> fixed,
                              std::span<ColumnBinding*> string,
                              std::span<uint8_t> staging,
-                             int64_t num_rows) {
+                             int64_t num_rows,
+                             BcpProfiler& prof) {
     for (int64_t row = 0; row < num_rows; ++row) {
-        for (auto* bp : fixed)
-            copy_fixed_or_null(ctx.bcp, ctx.dbc, *bp, staging, row);
-
-        for (auto* bp : string)
-            handle_string_column(ctx.bcp, ctx.dbc, *bp, row);
-
-        if (ctx.bcp.sendrow(ctx.dbc) != kSucceed) [[unlikely]]
-            odbc::raise_if_error(SQL_ERROR, SQL_HANDLE_DBC, ctx.dbc, "bcp_sendrow");
+        {
+            BCP_PROF_SCOPE(prof, fixed_copy);
+            for (auto* bp : fixed) {
+                copy_fixed_or_null(ctx.bcp, ctx.dbc, *bp, staging, row);
+                BCP_PROF_COUNT(prof, fixed_calls);
+            }
+        }
+        {
+            BCP_PROF_SCOPE(prof, string_copy);
+            for (auto* bp : string) {
+                handle_string_column(ctx.bcp, ctx.dbc, *bp, row);
+                BCP_PROF_COUNT(prof, string_calls);
+            }
+        }
+        {
+            BCP_PROF_SCOPE(prof, sendrow);
+            if (ctx.bcp.sendrow(ctx.dbc) != kSucceed) [[unlikely]]
+                odbc::raise_if_error(SQL_ERROR, SQL_HANDLE_DBC, ctx.dbc, "bcp_sendrow");
+            BCP_PROF_COUNT(prof, sendrow_calls);
+        }
         ++ctx.sent_rows;
-        if (--ctx.rows_until_flush <= 0) [[unlikely]]
+        if (--ctx.rows_until_flush <= 0) [[unlikely]] {
+            BCP_PROF_SCOPE(prof, mid_flush);
             flush_batch(ctx.bcp, ctx.dbc, ctx);
+            BCP_PROF_COUNT(prof, mid_flush_calls);
+        }
     }
 }
 
@@ -172,11 +211,12 @@ inline void row_loop(BcpContext& ctx,
                      std::span<ColumnBinding*> string,
                      std::span<uint8_t> staging,
                      int64_t num_rows,
-                     bool any_has_nulls) {
+                     bool any_has_nulls,
+                     BcpProfiler& prof) {
     if (!any_has_nulls)
-        row_loop_fast(ctx, fixed, string, staging, num_rows);
+        row_loop_fast(ctx, fixed, string, staging, num_rows, prof);
     else
-        row_loop_general(ctx, fixed, string, staging, num_rows);
+        row_loop_general(ctx, fixed, string, staging, num_rows, prof);
 }
 
 // ── process_batch ───────────────────────────────────────────────────────────
@@ -184,26 +224,34 @@ inline void row_loop(BcpContext& ctx,
 /// Full bind or fast rebind, then row loop.
 inline void process_batch(BcpContext& ctx,
                           const std::shared_ptr<arrow::RecordBatch>& batch,
-                          BatchBindingState& state) {
+                          BatchBindingState& state,
+                          BcpProfiler& prof) {
     if (!batch || batch->num_rows() == 0 || batch->num_columns() == 0) return;
 
     ++ctx.record_batches;
     ctx.processed_rows += batch->num_rows();
 
     if (state.matches(batch->schema())) {
-        // Fast rebind: skip bcp_bind, update Arrow pointers only
+        BCP_PROF_SCOPE(prof, rebind);
         rebind_columns(state.bindings, state.classified, batch);
+        BCP_PROF_COUNT(prof, rebind_calls);
     } else {
-        // Full bind: first batch or schema changed
-        state.bindings = bind_columns(ctx.bcp, ctx.dbc, batch);
-        state.classified = classify_columns(state.bindings);
-        state.staging = setup_staging(ctx.bcp, ctx.dbc, state.classified.fixed);
+        {
+            BCP_PROF_SCOPE(prof, bind);
+            state.bindings = bind_columns(ctx.bcp, ctx.dbc, batch);
+            BCP_PROF_COUNT(prof, bind_calls);
+        }
+        {
+            BCP_PROF_SCOPE(prof, classify);
+            state.classified = classify_columns(state.bindings);
+            state.staging = setup_staging(ctx.bcp, ctx.dbc, state.classified.fixed);
+        }
         state.schema = batch->schema();
         state.initialized = true;
     }
 
     row_loop(ctx, state.classified.fixed, state.classified.string,
-             state.staging, batch->num_rows(), state.classified.any_has_nulls);
+             state.staging, batch->num_rows(), state.classified.any_has_nulls, prof);
 }
 
 // ── finalize_bcp ────────────────────────────────────────────────────────────
@@ -228,24 +276,30 @@ inline void finalize_bcp(BcpContext& ctx) {
 
 // ── bulk_insert (single connection) ─────────────────────────────────────────
 
-/// Single-connection BCP bulk insert: reads Arrow RecordBatches and sends rows.
+/// Single-connection BCP bulk insert from an in-memory Arrow Table.
+///
+/// Iterates over the Table's internal RecordBatch chunks via TableBatchReader.
+/// No upfront materialization — the Table already owns its data.
 ///
 /// @param dbc          Active ODBC connection handle with BCP enabled.
-/// @param reader       Arrow RecordBatchReader supplying the data.
+/// @param table_data   Arrow Table containing the data to insert.
 /// @param table        Target table name (qualified to dbo if no schema part).
 /// @param batch_size   Rows between bcp_batch() commits; ≤0 defaults to 100K.
 /// @param table_hint   BCP hint string (e.g. "TABLOCK"); empty to skip.
 /// @return BcpMetrics with wall-clock timings and row counts.
-/// @throws std::runtime_error on Arrow read failure, zero rows, or ODBC error.
+/// @throws std::runtime_error on zero rows or ODBC error.
 [[nodiscard]] inline BcpMetrics bulk_insert(
     SQLHDBC dbc,
-    std::shared_ptr<arrow::RecordBatchReader> reader,
+    const std::shared_ptr<arrow::Table>& table_data,
     const std::string& table,
     int64_t batch_size,
     const std::string& table_hint)
 {
     using clock = std::chrono::steady_clock;
     const auto t_start = clock::now();
+
+    if (!table_data || table_data->num_rows() == 0)
+        throw std::runtime_error("Arrow BCP received zero rows from payload");
 
     const auto& api = ensure_bcp_api();
     auto qualified = sql::qualify_table(table);
@@ -262,31 +316,36 @@ inline void finalize_bcp(BcpContext& ctx) {
 
     BatchBindingState binding_state;
     BcpMetrics metrics;
-    auto t_bind_start = clock::now();
+    BCP_PROF_DECL(prof);
 
+    auto reader = std::make_shared<arrow::TableBatchReader>(*table_data);
     while (true) {
         std::shared_ptr<arrow::RecordBatch> batch;
-        auto st = reader->ReadNext(&batch);
-        if (!st.ok())
-            throw std::runtime_error("Failed reading Arrow batch: " + st.ToString());
+        {
+            BCP_PROF_SCOPE(prof, reader_next);
+            auto st = reader->ReadNext(&batch);
+            if (!st.ok())
+                throw std::runtime_error("Failed reading Arrow batch: " + st.ToString());
+        }
         if (!batch) break;
 
         auto t0 = clock::now();
-        process_batch(ctx, batch, binding_state);
+        process_batch(ctx, batch, binding_state, prof);
         auto t1 = clock::now();
 
-        // Accumulate row_loop time (includes bind within process_batch)
         metrics.row_loop_seconds += std::chrono::duration<double>(t1 - t0).count();
     }
 
-    if (ctx.processed_rows == 0)
-        throw std::runtime_error("Arrow BCP received zero rows from payload");
-
     auto t_flush_start = clock::now();
     session_guard.dismiss();
-    finalize_bcp(ctx);
+    {
+        BCP_PROF_SCOPE(prof, final_flush);
+        finalize_bcp(ctx);
+    }
     auto t_flush_end = clock::now();
 
+    BCP_PROF_DUMP(prof, 0);
+    metrics.profiler           = prof;
     metrics.batch_flush_seconds = std::chrono::duration<double>(t_flush_end - t_flush_start).count();
     metrics.processed_rows = ctx.processed_rows;
     metrics.sent_rows      = ctx.sent_rows;
@@ -299,22 +358,22 @@ inline void finalize_bcp(BcpContext& ctx) {
 
 /// Multi-worker parallel BCP: N threads, each with its own ODBC connection.
 ///
-/// Reads all RecordBatches into memory, slices large batches for parallelism
-/// (zero-copy via Arrow Slice), partitions across workers by greedy
-/// least-loaded row count, then spawns std::thread workers.
+/// Slices the in-memory Table into N equal row-ranges (zero-copy via
+/// Arrow Table::Slice), then spawns one worker per slice. Each worker
+/// creates a TableBatchReader over its slice for the row loop.
 ///
 /// @param conn_str     ODBC connection string (each worker gets its own conn).
-/// @param reader       Arrow RecordBatchReader supplying the data.
+/// @param table_data   Arrow Table containing all data to insert.
 /// @param table        Target table name (qualified to dbo if no schema part).
 /// @param batch_size   Rows between bcp_batch() commits; ≤0 defaults to 100K.
 /// @param table_hint   BCP hint string (e.g. "TABLOCK"); empty to skip.
 /// @param num_workers  Desired worker count; ≤0 auto-selects min(4, hw_concurrency).
 ///                     Falls back to single-connection if only 1 worker needed.
 /// @return BcpMetrics  (row_loop/batch_flush = max across workers; counts = sum).
-/// @throws std::runtime_error on Arrow read failure, zero rows, or first worker error.
+/// @throws std::runtime_error on zero rows or first worker error.
 [[nodiscard]] inline BcpMetrics bulk_insert_parallel(
     const std::string& conn_str,
-    std::shared_ptr<arrow::RecordBatchReader> reader,
+    const std::shared_ptr<arrow::Table>& table_data,
     const std::string& table,
     int64_t batch_size,
     const std::string& table_hint,
@@ -323,85 +382,39 @@ inline void finalize_bcp(BcpContext& ctx) {
     using clock = std::chrono::steady_clock;
     const auto t_start = clock::now();
 
-    // 1. Read all RecordBatches into memory
-    std::vector<std::shared_ptr<arrow::RecordBatch>> all_batches;
-    int64_t total_rows = 0;
-    while (true) {
-        std::shared_ptr<arrow::RecordBatch> batch;
-        auto st = reader->ReadNext(&batch);
-        if (!st.ok())
-            throw std::runtime_error("Failed reading Arrow batch: " + st.ToString());
-        if (!batch) break;
-        total_rows += batch->num_rows();
-        all_batches.push_back(std::move(batch));
-    }
-
-    if (all_batches.empty() || total_rows == 0)
+    if (!table_data || table_data->num_rows() == 0)
         throw std::runtime_error("Arrow BCP received zero rows from payload");
 
-    // 2. Slice large batches (Polars exports 1 batch) — zero-copy
+    const int64_t total_rows = table_data->num_rows();
+
+    // 1. Resolve worker count
     const int desired = (num_workers <= 0)
         ? std::min(4, static_cast<int>(std::thread::hardware_concurrency()))
         : num_workers;
 
-    if (desired > 1
-        && all_batches.size() < static_cast<size_t>(desired)) {
-        std::vector<std::shared_ptr<arrow::RecordBatch>> sliced;
-        for (auto& batch : all_batches) {
-            const int64_t n = batch->num_rows();
-            if (n <= 1) {
-                sliced.push_back(std::move(batch));
-                continue;
-            }
-            const int parts = std::min(desired, static_cast<int>(n));
-            const int64_t chunk = n / parts;
-            int64_t offset = 0;
-            for (int p = 0; p < parts; ++p) {
-                const int64_t len = (p < parts - 1) ? chunk : (n - offset);
-                sliced.push_back(batch->Slice(offset, len));
-                offset += len;
-            }
-        }
-        all_batches = std::move(sliced);
-    }
+    // Don't create more workers than rows
+    int actual_workers = std::min(desired,
+        static_cast<int>(std::min<int64_t>(total_rows, std::thread::hardware_concurrency())));
+    actual_workers = std::max(actual_workers, 1);
 
-    // 3. Resolve worker count
-    int max_workers = static_cast<int>(std::min<size_t>(
-        std::thread::hardware_concurrency(),
-        all_batches.size()));
-    max_workers = std::max(max_workers, 1);
-
-    int actual_workers = (num_workers <= 0)
-        ? std::min(4, max_workers)
-        : std::min(num_workers, max_workers);
-
-    // 4. Fallback to single-connection if only 1 worker
+    // 2. Fallback to single-connection if only 1 worker
     if (actual_workers <= 1) {
-        auto table_obj = arrow::Table::FromRecordBatches(all_batches);
-        if (!table_obj.ok())
-            throw std::runtime_error("Failed to reassemble Arrow table: "
-                                     + table_obj.status().ToString());
-        auto single_reader = std::make_shared<arrow::TableBatchReader>(**table_obj);
-
         BcpConnectionPool pool(conn_str, 1);
-        return bulk_insert(pool[0].dbc, std::move(single_reader),
-                           table, batch_size, table_hint);
+        return bulk_insert(pool[0].dbc, table_data, table, batch_size, table_hint);
     }
 
-    // 5. Partition batches by row count (greedy least-loaded)
-    std::vector<std::vector<std::shared_ptr<arrow::RecordBatch>>>
-        partitions(static_cast<size_t>(actual_workers));
-    std::vector<int64_t> worker_rows(static_cast<size_t>(actual_workers), 0);
-
-    for (auto& batch : all_batches) {
-        auto min_it = std::min_element(worker_rows.begin(), worker_rows.end());
-        auto idx = static_cast<size_t>(
-            std::distance(worker_rows.begin(), min_it));
-        partitions[idx].push_back(batch);
-        worker_rows[idx] += batch->num_rows();
+    // 3. Slice table into N equal row-ranges (zero-copy)
+    std::vector<std::shared_ptr<arrow::Table>> slices;
+    slices.reserve(static_cast<size_t>(actual_workers));
+    const int64_t chunk = total_rows / actual_workers;
+    int64_t offset = 0;
+    for (int w = 0; w < actual_workers; ++w) {
+        const int64_t len = (w < actual_workers - 1) ? chunk : (total_rows - offset);
+        slices.push_back(table_data->Slice(offset, len));
+        offset += len;
     }
 
-    // 6. Create connection pool (parallel establishment)
+    // 4. Create connection pool (parallel establishment)
     auto t_connect_start = clock::now();
     BcpConnectionPool pool(conn_str, actual_workers);
     auto t_connect_end = clock::now();
@@ -410,7 +423,7 @@ inline void finalize_bcp(BcpContext& ctx) {
     auto qualified = sql::qualify_table(table);
     const int64_t effective_batch = batch_size > 0 ? batch_size : 100000LL;
 
-    // 7. Spawn worker threads
+    // 5. Spawn worker threads — each gets its own Table slice
     struct WorkerResult {
         BcpMetrics         metrics{};
         std::exception_ptr error{};
@@ -423,12 +436,16 @@ inline void finalize_bcp(BcpContext& ctx) {
         threads.emplace_back([&, w]() {
             auto& res = results[static_cast<size_t>(w)];
             auto& conn = pool[w];
-            auto& my_batches = partitions[static_cast<size_t>(w)];
+            auto& my_slice = slices[static_cast<size_t>(w)];
 
             try {
                 const auto wt_start = clock::now();
+                BCP_PROF_DECL(prof);
 
-                init_session(api, conn.dbc, qualified, table_hint);
+                {
+                    BCP_PROF_SCOPE(prof, init_session);
+                    init_session(api, conn.dbc, qualified, table_hint);
+                }
                 BcpSessionGuard guard(api, conn.dbc);
 
                 BcpContext ctx{
@@ -439,17 +456,35 @@ inline void finalize_bcp(BcpContext& ctx) {
                 ctx.rows_until_flush = ctx.batch_size;
 
                 BatchBindingState state;
-                auto t_loop_start = clock::now();
-                for (auto& batch : my_batches)
-                    process_batch(ctx, batch, state);
-                auto t_loop_end = clock::now();
+
+                // Iterate over the slice's internal chunks
+                auto reader = std::make_shared<arrow::TableBatchReader>(*my_slice);
+                while (true) {
+                    std::shared_ptr<arrow::RecordBatch> batch;
+                    {
+                        BCP_PROF_SCOPE(prof, reader_next);
+                        auto st = reader->ReadNext(&batch);
+                        if (!st.ok())
+                            throw std::runtime_error("Failed reading Arrow batch: " + st.ToString());
+                    }
+                    if (!batch) break;
+
+                    auto t0 = clock::now();
+                    process_batch(ctx, batch, state, prof);
+                    auto t1 = clock::now();
+                    res.metrics.row_loop_seconds += std::chrono::duration<double>(t1 - t0).count();
+                }
 
                 auto t_flush_start = clock::now();
                 guard.dismiss();
-                finalize_bcp(ctx);
+                {
+                    BCP_PROF_SCOPE(prof, final_flush);
+                    finalize_bcp(ctx);
+                }
                 auto t_flush_end = clock::now();
 
-                res.metrics.row_loop_seconds     = std::chrono::duration<double>(t_loop_end - t_loop_start).count();
+                BCP_PROF_DUMP(prof, w);
+                res.metrics.profiler              = prof;
                 res.metrics.batch_flush_seconds   = std::chrono::duration<double>(t_flush_end - t_flush_start).count();
                 res.metrics.processed_rows        = ctx.processed_rows;
                 res.metrics.sent_rows             = ctx.sent_rows;
@@ -461,11 +496,11 @@ inline void finalize_bcp(BcpContext& ctx) {
         });
     }
 
-    // 8. Join all workers
+    // 6. Join all workers
     for (auto& t : threads)
         t.join();
 
-    // 9. Check for errors (rethrow first encountered)
+    // 7. Check for errors (rethrow first encountered)
     for (int w = 0; w < actual_workers; ++w) {
         if (results[static_cast<size_t>(w)].error) {
             try {
@@ -476,13 +511,13 @@ inline void finalize_bcp(BcpContext& ctx) {
                     std::string("Parallel BCP worker ") + std::to_string(w)
                     + "/" + std::to_string(actual_workers)
                     + " failed (sent " + std::to_string(wm.sent_rows)
-                    + "/" + std::to_string(worker_rows[static_cast<size_t>(w)])
+                    + "/" + std::to_string(slices[static_cast<size_t>(w)]->num_rows())
                     + " rows): " + e.what());
             }
         }
     }
 
-    // 10. Merge metrics
+    // 8. Merge metrics
     BcpMetrics merged{};
     merged.connect_seconds = std::chrono::duration<double>(t_connect_end - t_connect_start).count();
     for (int w = 0; w < actual_workers; ++w)

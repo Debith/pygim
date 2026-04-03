@@ -136,14 +136,14 @@ public:
         PYGIM_TIMED_SCOPE("RepositoryAdapter::save");
         run_transforms("pre_save", m_pre_transforms);
 
-        // Import Arrow data (GIL held — needed for Python object access)
-        auto reader = import_record_batch_reader(data);
+        // Import Arrow data as Table (GIL held — needed for Python object access)
+        auto table_data = import_table(data);
         int workers = (bcp_workers >= 0) ? bcp_workers : m_bcp_workers;
 
         // BCP pipeline (GIL released — pure C++; reacquired on IIFE return)
         auto metrics = [&] {
             py::gil_scoped_release release;
-            return m_repo.save(std::move(reader), table_name,
+            return m_repo.save(std::move(table_data), table_name,
                                m_batch_size, m_table_hint, workers);
         }();
 
@@ -159,6 +159,31 @@ public:
         result["processed_rows"]      = metrics.processed_rows;
         result["sent_rows"]           = metrics.sent_rows;
         result["record_batches"]      = metrics.record_batches;
+
+#ifdef PYGIM_BCP_PROFILING
+        {
+            py::dict prof;
+            const auto& p = metrics.profiler;
+            prof["bind_seconds"]        = p.bind_seconds;
+            prof["rebind_seconds"]      = p.rebind_seconds;
+            prof["classify_seconds"]    = p.classify_seconds;
+            prof["fixed_copy_seconds"]  = p.fixed_copy_seconds;
+            prof["string_copy_seconds"] = p.string_copy_seconds;
+            prof["sendrow_seconds"]     = p.sendrow_seconds;
+            prof["mid_flush_seconds"]   = p.mid_flush_seconds;
+            prof["final_flush_seconds"] = p.final_flush_seconds;
+            prof["init_session_seconds"]= p.init_session_seconds;
+            prof["reader_next_seconds"] = p.reader_next_seconds;
+            prof["sendrow_calls"]       = p.sendrow_calls;
+            prof["mid_flush_calls"]     = p.mid_flush_calls;
+            prof["string_calls"]        = p.string_calls;
+            prof["fixed_calls"]         = p.fixed_calls;
+            prof["rebind_calls"]        = p.rebind_calls;
+            prof["bind_calls"]          = p.bind_calls;
+            result["profiler"]          = prof;
+        }
+#endif
+
         return result;
     }
 

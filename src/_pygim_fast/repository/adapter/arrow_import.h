@@ -1,5 +1,5 @@
 // repository/adapter/arrow_import.h
-// Converts a Python Arrow-compatible object to shared_ptr<arrow::RecordBatchReader>.
+// Converts a Python Arrow-compatible object to shared_ptr<arrow::Table>.
 //
 // This is the ONLY file in the pipeline that uses both pybind11 AND Arrow C++.
 // Supports two protocols:
@@ -11,6 +11,7 @@
 
 #include <arrow/c/bridge.h>
 #include <arrow/record_batch.h>
+#include <arrow/table.h>
 #include <pybind11/pybind11.h>
 #include <memory>
 #include <stdexcept>
@@ -61,6 +62,20 @@ import_record_batch_reader(py::object obj, int depth = 0) {
     throw py::type_error(
         "Expected an Arrow-compatible object (Polars DataFrame, PyArrow Table/RecordBatchReader) "
         "with __arrow_c_stream__ or _export_to_c protocol");
+}
+
+/// Import a Python Arrow-compatible object as a materialized arrow::Table.
+/// Drains the RecordBatchReader (GIL held) and returns a fully in-memory Table.
+/// This is the primary entry point for the save pipeline — the data is already in
+/// memory on the Python side, so materializing avoids a false streaming abstraction.
+[[nodiscard]]
+inline std::shared_ptr<arrow::Table>
+import_table(py::object obj) {
+    auto reader = import_record_batch_reader(std::move(obj));
+    auto result = reader->ToTable();
+    if (!result.ok())
+        throw std::runtime_error("Failed to materialize Arrow Table: " + result.status().ToString());
+    return *result;
 }
 
 } // namespace pygim::adapter

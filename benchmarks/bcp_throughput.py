@@ -199,6 +199,10 @@ def truncate_table(conn_str: str, table: str, pyodbc) -> None:
 # ── Payload estimation ───────────────────────────────────────────────────────
 
 def estimate_size_bytes(frame) -> int:
+    # PyArrow Table: .nbytes
+    nbytes = getattr(frame, 'nbytes', None)
+    if nbytes is not None:
+        return max(int(nbytes), 0)
     for attr in ("estimated_size", "estimated_size_bytes"):
         fn = getattr(frame, attr, None)
         if callable(fn):
@@ -283,6 +287,9 @@ def run_load(
 # ── Round-trip verification ───────────────────────────────────────────────────
 
 def _polars_row_to_pydict(df, idx: int) -> dict:
+    import pyarrow as pa
+    if isinstance(df, pa.Table):
+        return {name: df.column(name)[idx].as_py() for name in df.column_names}
     return {col: df[col][idx] for col in df.columns}
 
 
@@ -364,6 +371,17 @@ def _values_match(source, actual, col_name: str, *, float_tol: float = 1e-6) -> 
     if isinstance(source, (bytes, bytearray)) and isinstance(actual, (bytes, bytearray)):
         return bytes(source) == bytes(actual)
 
+    # bytes (fixed_size_binary UUID) vs string UUID from pyodbc
+    if isinstance(source, (bytes, bytearray)) and isinstance(actual, str):
+        # 16-byte GUID → compare as raw bytes against pyodbc's UUID string
+        if len(source) == 16:
+            try:
+                import uuid as _uuid
+                return source == _uuid.UUID(actual).bytes_le
+            except (ValueError, AttributeError):
+                pass
+        return False
+
     try:
         return str(source) == str(actual)
     except Exception:
@@ -394,7 +412,8 @@ def verify_round_trip(
     # 2. Column names
     cursor.execute(f"SELECT TOP 0 * FROM {table}")
     db_cols = [d[0] for d in cursor.description]
-    src_cols = list(source_df.columns)
+    import pyarrow as pa
+    src_cols = list(source_df.column_names) if isinstance(source_df, pa.Table) else list(source_df.columns)
     cols_ok = db_cols == src_cols
 
     # 3. Sample row comparison
@@ -705,10 +724,12 @@ def check_regression(
               help="Compare against saved baseline; exit 1 on regression")
 @click.option("--regression-threshold", default=15.0, type=float,
               show_default=True, help="Max throughput drop % before failing")
+@click.option("--recreate-tables", is_flag=True,
+              help="Drop/recreate tables and shrink DB before benchmarking")
 def bench(
     conn, rows, dataset, mode, fmt, workers,
     no_verify, verify_sample, batch_size, no_truncate, warmup, iterations,
-    baseline_out, baseline_in, regression_threshold,
+    baseline_out, baseline_in, regression_threshold, recreate_tables,
 ):
     """BCP throughput benchmark — target architecture (placeholder)."""
     conn_str = conn or os.getenv("STRESS_CONN", "").strip() or default_connection_string()
@@ -722,6 +743,18 @@ def bench(
     for pname in profiles:
         ensure_table(conn_str, PROFILES[pname]["ddl"], pyodbc)
 
+    if recreate_tables:
+        click.echo("Shrinking database after table recreation …")
+        cn = pyodbc.connect(conn_str, timeout=30)
+        cn.autocommit = True
+        cn.execute("DBCC SHRINKDATABASE(master, 10)")
+        cn.execute("CHECKPOINT")
+        cn.execute("DBCC DROPCLEANBUFFERS")
+        cn.execute("DBCC FREEPROCCACHE")
+        cn.close()
+        time.sleep(1)
+        click.echo("  → done")
+
     # ── Generate data ────────────────────────────────────────────────────
     data: dict[str, object] = {}
     if mode in ("write", "both"):
@@ -730,7 +763,7 @@ def bench(
             click.echo(f"Generating {rows:,} rows for [{pname}] "
                        f"({profile['columns']} cols) …")
             t0 = time.perf_counter()
-            df = pygim.create_df(profile["schema"], rows=rows)
+            df = pygim.create_df(profile["schema"], rows=rows, format="arrow")
             gen_s = time.perf_counter() - t0
             size_mb = estimate_size_bytes(df) / 1_048_576
             click.echo(f"  → {size_mb:.1f} MB in {gen_s:.2f}s")
@@ -768,8 +801,8 @@ def bench(
                           batch_size=batch_size)
                 _settle_server()
 
-            # Multi-iteration: keep best result (matches archive "hot" timing)
-            best: dict | None = None
+            # Multi-iteration: keep median result (robust against I/O outliers)
+            run_results: list[dict] = []
             for it in range(iterations):
                 if not no_truncate:
                     truncate_table(conn_str, table, pyodbc)
@@ -783,11 +816,16 @@ def bench(
                 r = run_write(conn_str, table, df, pname, workers,
                               batch_size=batch_size)
                 print_write_result(r)
-                if best is None or r["mb_s"] > best["mb_s"]:
-                    best = r
+                run_results.append(r)
+
+            # Pick median by MB/s for stable reporting
+            run_results.sort(key=lambda x: x["mb_s"])
+            best = run_results[len(run_results) // 2]
 
             if iterations > 1:
-                click.echo(f"  → best: {best['mb_s']:.2f} MB/s")
+                click.echo(f"  → median: {best['mb_s']:.2f} MB/s"
+                           f"  (range: {run_results[0]['mb_s']:.2f}"
+                           f" – {run_results[-1]['mb_s']:.2f})")
             all_results.append(best)
 
             if do_verify:

@@ -104,6 +104,13 @@ inline void update_string_utf8(ColumnBinding& b, const std::shared_ptr<arrow::Ar
     b.str_data  = typed->value_data()->data();
 }
 
+inline void update_binary(ColumnBinding& b, const std::shared_ptr<arrow::Array>& a) {
+    reset_string_fields(b, a);
+    auto typed = std::static_pointer_cast<arrow::BinaryArray>(a);
+    b.offsets32 = typed->raw_value_offsets();
+    b.str_data  = typed->value_data()->data();
+}
+
 inline void update_large_string(ColumnBinding& b, const std::shared_ptr<arrow::Array>& a) {
     reset_string_fields(b, a);
     auto typed = std::static_pointer_cast<arrow::LargeStringArray>(a);
@@ -128,6 +135,12 @@ inline void update_binary_view(ColumnBinding& b, const std::shared_ptr<arrow::Ar
     reset_string_fields(b, a);
     auto typed = std::static_pointer_cast<arrow::BinaryViewArray>(a);
     b.binary_view_array = typed.get();
+}
+
+inline void update_fixed_size_binary(ColumnBinding& b, const std::shared_ptr<arrow::Array>& a) {
+    update_common(b, a);
+    auto typed = std::static_pointer_cast<arrow::FixedSizeBinaryArray>(a);
+    b.data_ptr = typed->raw_values();
 }
 
 } // namespace rebind_detail
@@ -155,12 +168,14 @@ inline constexpr auto rebind_dispatch = []() consteval {
     t[arrow::Type::DATE32]       = &rebind_detail::update_date32;
     t[arrow::Type::TIMESTAMP]    = &rebind_detail::update_timestamp;
     t[arrow::Type::TIME64]       = &rebind_detail::update_time64;
-    t[arrow::Type::DURATION]     = &rebind_detail::update_numeric<arrow::DurationArray>;
-    t[arrow::Type::STRING]       = &rebind_detail::update_string_utf8;
+    t[arrow::Type::DURATION]          = &rebind_detail::update_numeric<arrow::DurationArray>;
+    t[arrow::Type::BINARY]            = &rebind_detail::update_binary;
+    t[arrow::Type::STRING]            = &rebind_detail::update_string_utf8;
     t[arrow::Type::LARGE_STRING] = &rebind_detail::update_large_string;
     t[arrow::Type::LARGE_BINARY] = &rebind_detail::update_large_binary;
     t[arrow::Type::STRING_VIEW]  = &rebind_detail::update_string_view;
-    t[arrow::Type::BINARY_VIEW]  = &rebind_detail::update_binary_view;
+    t[arrow::Type::BINARY_VIEW]       = &rebind_detail::update_binary_view;
+    t[arrow::Type::FIXED_SIZE_BINARY] = &rebind_detail::update_fixed_size_binary;
     return t;
 }();
 

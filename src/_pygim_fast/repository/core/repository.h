@@ -16,7 +16,7 @@
 #include "query.h"
 
 #include "../../utils/logging.h"
-#include <arrow/record_batch.h>
+#include <arrow/table.h>
 #include <memory>
 #include <stdexcept>
 #include <string>
@@ -47,9 +47,9 @@ public:
         return Repository(std::move(pool));
     }
 
-    // save: checks out connection, delegates to SaveImpl with Arrow data
+    // save: checks out connection, delegates to SaveImpl with Arrow Table
     [[nodiscard]]
-    auto save(std::shared_ptr<arrow::RecordBatchReader> reader,
+    auto save(std::shared_ptr<arrow::Table> table_data,
               std::string_view table_name,
               int64_t batch_size,
               const std::string& table_hint,
@@ -65,7 +65,7 @@ public:
                 std::string("Repository: checkout failed: ") + pool_error_name(result.error()));
         }
         auto handle = std::move(*result);
-        return Backend::SaveImpl::execute(handle.get(), std::move(reader),
+        return Backend::SaveImpl::execute(handle.get(), std::move(table_data),
                                           table_name, batch_size, table_hint,
                                           bcp_workers);
     }

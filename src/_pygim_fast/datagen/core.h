@@ -156,7 +156,7 @@ inline std::shared_ptr<arrow::DataType> arrow_type_for(ColType ct) {
         case ColType::Timestamp: return arrow::timestamp(arrow::TimeUnit::MICRO);
         case ColType::Duration:  return arrow::duration(arrow::TimeUnit::MICRO);
         case ColType::Binary:    return arrow::binary();
-        case ColType::Uuid:      return arrow::utf8();  // UUID stored as string
+        case ColType::Uuid:      return arrow::fixed_size_binary(16);  // 16-byte SQLGUID
         case ColType::Serial:    return arrow::int32();  // sequential 1, 2, 3, …
     }
     __builtin_unreachable();
@@ -359,21 +359,16 @@ inline std::shared_ptr<arrow::Array> gen_binary(
     return out;
 }
 
-/// UUID: deterministic UUID-v4–formatted strings.
+/// UUID: deterministic 16-byte binary GUIDs in SQLGUID layout.
+/// Generates raw bytes directly — no hex formatting overhead.
+/// Version 4 and variant 1 bits set for UUID compliance.
 inline std::shared_ptr<arrow::Array> gen_uuid(
     int64_t rows, Xorshift64& rng, double null_frac)
 {
-    arrow::StringBuilder b;
+    arrow::FixedSizeBinaryBuilder b(arrow::fixed_size_binary(16));
     DATAGEN_THROW_NOT_OK(b.Reserve(rows));
-    DATAGEN_THROW_NOT_OK(b.ReserveData(rows * 36));
 
-    static constexpr char hex[] = "0123456789abcdef";
-    char buf[37];  // 36 chars + '\0'
-
-    auto put = [&](int pos, uint8_t byte) {
-        buf[pos]     = hex[byte >> 4];
-        buf[pos + 1] = hex[byte & 0x0f];
-    };
+    uint8_t guid[16];
 
     for (int64_t i = 0; i < rows; ++i) {
         if (null_frac > 0.0 && rng.coin(null_frac)) {
@@ -381,31 +376,12 @@ inline std::shared_ptr<arrow::Array> gen_uuid(
         } else {
             uint64_t a = rng.next();
             uint64_t c = rng.next();
-
-            // Format: xxxxxxxx-xxxx-4xxx-{8|9|a|b}xxx-xxxxxxxxxxxx
-            put(0,  static_cast<uint8_t>(a >> 56));
-            put(2,  static_cast<uint8_t>(a >> 48));
-            put(4,  static_cast<uint8_t>(a >> 40));
-            put(6,  static_cast<uint8_t>(a >> 32));
-            buf[8] = '-';
-            put(9,  static_cast<uint8_t>(a >> 24));
-            put(11, static_cast<uint8_t>(a >> 16));
-            buf[13] = '-';
-            put(14, static_cast<uint8_t>(((a >> 8) & 0x0f) | 0x40));  // version 4
-            put(16, static_cast<uint8_t>(a));
-            buf[18] = '-';
-            put(19, static_cast<uint8_t>(((c >> 56) & 0x3f) | 0x80));  // variant 1
-            put(21, static_cast<uint8_t>(c >> 48));
-            buf[23] = '-';
-            put(24, static_cast<uint8_t>(c >> 40));
-            put(26, static_cast<uint8_t>(c >> 32));
-            put(28, static_cast<uint8_t>(c >> 24));
-            put(30, static_cast<uint8_t>(c >> 16));
-            put(32, static_cast<uint8_t>(c >> 8));
-            put(34, static_cast<uint8_t>(c));
-            buf[36] = '\0';
-
-            DATAGEN_THROW_NOT_OK(b.Append(buf, 36));
+            std::memcpy(guid, &a, 8);
+            std::memcpy(guid + 8, &c, 8);
+            // SQLGUID layout on LE: Data3 high byte is guid[7]
+            guid[7] = (guid[7] & 0x0F) | 0x40;  // version 4
+            guid[8] = (guid[8] & 0x3F) | 0x80;  // variant 1
+            DATAGEN_THROW_NOT_OK(b.Append(guid));
         }
     }
     std::shared_ptr<arrow::Array> out;

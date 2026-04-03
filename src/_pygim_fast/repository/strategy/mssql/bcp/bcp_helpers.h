@@ -54,7 +54,7 @@ inline void handle_string_column(const BcpApi& bcp, SQLHDBC dbc,
         constexpr size_t prefix = sizeof(DBINT);
         const auto need = prefix + ulen;
         if (need > b.str_buf.size()) [[unlikely]] {
-            b.str_buf.resize(need);
+            b.str_buf.resize(std::max(need, b.str_buf.capacity() * 2));
             b.str_buf_bound = false;
         }
         std::memcpy(b.str_buf.data(), &len, prefix);
@@ -63,7 +63,7 @@ inline void handle_string_column(const BcpApi& bcp, SQLHDBC dbc,
         // String: copy + null-terminate.
         // Skip bcp_collen when length unchanged (common for uniform strings).
         if (ulen + 1 > b.str_buf.size()) [[unlikely]] {
-            b.str_buf.resize(ulen + 1);
+            b.str_buf.resize(std::max(ulen + 1, b.str_buf.capacity() * 2));
             b.str_buf_bound = false;
         }
         std::memcpy(b.str_buf.data(), ptr, ulen);

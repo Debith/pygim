@@ -1,5 +1,5 @@
 // repository/strategy/mssql/save_impl.h
-// MssqlSaveImpl — BCP bulk insert via Arrow RecordBatchReader.
+// MssqlSaveImpl — BCP bulk insert via Arrow Table.
 //
 // Delegates to bcp::bulk_insert (single-connection) or
 // bcp::bulk_insert_parallel (multi-worker) from bcp_pipeline.h.
@@ -11,7 +11,7 @@
 #include "bcp/bcp_pipeline.h"
 
 #include "../../../utils/logging.h"
-#include <arrow/record_batch.h>
+#include <arrow/table.h>
 #include <memory>
 #include <string>
 #include <string_view>
@@ -23,7 +23,7 @@ namespace pygim::strategy::mssql {
 struct MssqlSaveImpl {
     static bcp::BcpMetrics execute(
         OdbcConnection& conn,
-        std::shared_ptr<arrow::RecordBatchReader> reader,
+        std::shared_ptr<arrow::Table> table_data,
         std::string_view table_name,
         int64_t batch_size,
         const std::string& table_hint,
@@ -35,10 +35,10 @@ struct MssqlSaveImpl {
                       table.c_str(), bcp_workers, static_cast<long long>(batch_size));
 
         if (bcp_workers < 2) {
-            return bcp::bulk_insert(conn.dbc(), std::move(reader),
+            return bcp::bulk_insert(conn.dbc(), table_data,
                                     table, batch_size, table_hint);
         } else {
-            return bcp::bulk_insert_parallel(conn.conn_str(), std::move(reader),
+            return bcp::bulk_insert_parallel(conn.conn_str(), table_data,
                                              table, batch_size, table_hint,
                                              bcp_workers);
         }
