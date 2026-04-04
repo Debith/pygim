@@ -8,6 +8,7 @@
 
 #include "backend.h"
 #include "fetch_buffer.h"
+#include "load_cache.h"
 #include "load_connection_pool.h"
 #include "load_dispatch.h"
 #include "odbc_error.h"
@@ -235,13 +236,15 @@ inline void run_worker(OdbcConnection& conn,
 /// @param partition_column  Column to range-partition on (integer type)
 /// @param load_workers      Number of parallel workers (>= 2)
 /// @param block_size        Block cursor size per worker
+/// @param load_cache        Persistent pool cache for parallel load workers
 [[nodiscard]]
 inline core::LoadResult execute_parallel(
     OdbcConnection& conn,
     std::string_view table_name,
     std::string_view partition_column,
     int load_workers,
-    int64_t block_size = 4096) {
+    int64_t block_size,
+    MssqlLoadCache& load_cache) {
     using clock = std::chrono::steady_clock;
     core::LoadMetrics metrics;
     const auto t_total = clock::now();
@@ -302,44 +305,75 @@ inline core::LoadResult execute_parallel(
         metrics.columns = static_cast<int64_t>(schema_info.col_info.size());
     }
 
-    // 4. Establish N-1 worker connections in parallel
-    const auto t_connect = clock::now();
-    LoadConnectionPool extra_pool(conn.conn_str(), load_workers - 1);
-    metrics.connect_seconds = std::chrono::duration<double>(clock::now() - t_connect).count();
-    PYGIM_LOG_FMT("[parallel_load] %d extra connections in %.3fs\n",
-                  load_workers - 1, metrics.connect_seconds);
+    // 4. Establish N-1 worker connections (cached)
+    auto run_workers = [&](MssqlLoadCache& cache) -> std::vector<detail::WorkerResult> {
+        const auto t_connect = clock::now();
+        auto* extra_pool = cache.ensure_pool(conn.conn_str(), load_workers - 1);
+        metrics.connect_seconds = std::chrono::duration<double>(clock::now() - t_connect).count();
+        PYGIM_LOG_FMT("[parallel_load] %d extra connections in %.3fs\n",
+                      load_workers - 1, metrics.connect_seconds);
 
-    // 5. Launch worker threads
-    std::vector<detail::WorkerResult> results(static_cast<std::size_t>(load_workers));
+        std::vector<detail::WorkerResult> results(static_cast<std::size_t>(load_workers));
 
-    {
-        std::vector<std::jthread> threads;
-        threads.reserve(static_cast<std::size_t>(load_workers - 1));
+        {
+            std::vector<std::jthread> threads;
+            threads.reserve(static_cast<std::size_t>(load_workers - 1));
 
-        // Workers 1..N-1 on extra connections
-        for (int w = 1; w < load_workers; ++w) {
-            threads.emplace_back([&, w]() {
-                detail::run_worker(extra_pool[w - 1],
-                                   queries[static_cast<std::size_t>(w)],
-                                   schema_info, block_size,
-                                   results[static_cast<std::size_t>(w)]);
-            });
+            // Workers 1..N-1 on extra connections
+            for (int w = 1; w < load_workers; ++w) {
+                threads.emplace_back([&, w]() {
+                    detail::run_worker((*extra_pool)[w - 1],
+                                       queries[static_cast<std::size_t>(w)],
+                                       schema_info, block_size,
+                                       results[static_cast<std::size_t>(w)]);
+                });
+            }
+
+            // Worker 0 on primary connection (this thread)
+            detail::run_worker(conn, queries[0], schema_info, block_size, results[0]);
+
+            // No manual join — jthread destructor auto-joins
         }
 
-        // Worker 0 on primary connection (this thread)
-        detail::run_worker(conn, queries[0], schema_info, block_size, results[0]);
+        return results;
+    };
 
-        // No manual join — jthread destructor auto-joins
-    }
+    // 5. First attempt
+    auto results = run_workers(load_cache);
 
-    // 6. Check for worker errors
-    for (int w = 0; w < load_workers; ++w) {
-        if (results[static_cast<std::size_t>(w)].error) {
-            std::rethrow_exception(results[static_cast<std::size_t>(w)].error);
+    // Check for connection errors — retry once with fresh connections
+    bool has_connection_error = false;
+    for (auto const& r : results) {
+        if (r.error) {
+            try {
+                std::rethrow_exception(r.error);
+            } catch (std::runtime_error const& e) {
+                std::string_view msg(e.what());
+                if (msg.contains("08S01") || msg.contains("08001") ||
+                    msg.contains("HY000") || msg.contains("Communication link")) {
+                    has_connection_error = true;
+                    break;
+                }
+                // Non-connection error — rethrow immediately
+                throw;
+            }
         }
     }
 
-    // 7. Concatenate tables
+    if (has_connection_error) {
+        PYGIM_LOG_FMT("[parallel_load] stale connection detected — retrying with fresh connections\n");
+        load_cache.clear();
+        results = run_workers(load_cache);
+        for (auto const& r : results) {
+            if (r.error) std::rethrow_exception(r.error);
+        }
+    } else {
+        for (auto const& r : results) {
+            if (r.error) std::rethrow_exception(r.error);
+        }
+    }
+
+    // 6. Concatenate tables
     const auto t_concat = clock::now();
     std::vector<std::shared_ptr<arrow::Table>> tables;
     tables.reserve(static_cast<std::size_t>(load_workers));
@@ -366,7 +400,7 @@ inline core::LoadResult execute_parallel(
     }
     metrics.concat_seconds = std::chrono::duration<double>(clock::now() - t_concat).count();
 
-    // 8. Aggregate metrics
+    // 7. Aggregate metrics
     for (auto const& r : results) {
         metrics.fetch_seconds = std::max(metrics.fetch_seconds, r.metrics.fetch_seconds);
         metrics.build_seconds = std::max(metrics.build_seconds, r.metrics.build_seconds);

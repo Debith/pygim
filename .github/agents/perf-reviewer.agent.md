@@ -8,7 +8,15 @@ You are the **Performance Reviewer** for the pygim project. You evaluate whether
 
 ## Performance Targets
 
-This library aims for maximum throughput. The repository subsystem previously achieved 598K rows/s at 47 MB/s with block cursor optimization. Every code change must be evaluated against these baselines.
+This library aims for maximum throughput. Current benchmarks (8 workers, exhaustive dataset):
+- **Write (BCP)**: 956K rows/s at 101 MB/s
+- **Load (parallel)**: 1.25M rows/s at 122 MB/s
+- **Single-threaded load**: ~200K rows/s
+
+Every code change must be evaluated against these baselines. Distinguish between:
+- **Per-row / per-block cost**: affects steady-state throughput (critical)
+- **Setup cost**: one-time cost per operation (amortized, less critical unless frequently repeated)
+- **Connection overhead**: pool checkout, connection establishment, BCP init
 
 ## Review Checklist
 
@@ -42,6 +50,14 @@ This library aims for maximum throughput. The repository subsystem previously ac
 - [ ] Hash maps used for lookup-heavy paths (no linear scans)
 - [ ] Single-probe operations where possible (registry override pattern)
 - [ ] No redundant computation or double lookups
+
+### Connection Pool & Cache Patterns
+- [ ] Persistent pools/caches reused across calls (not created per-operation)
+- [ ] Cache invalidation correct (stale entries don't cause silent failures)
+- [ ] Stale connection detection uses SQLSTATE codes, not string matching on messages
+- [ ] Pool checkout returns fast (no blocking on connection creation in hot path)
+- [ ] Cache hit path is zero-allocation (return pointer/reference, not copy)
+- [ ] Pool size matches worker count (no over/under-provisioning)
 
 ### Benchmarkability
 - [ ] Performance-sensitive changes have corresponding benchmarks

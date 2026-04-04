@@ -22,11 +22,21 @@ src/_pygim/         → Internal Python (exceptions, CLI, typing)
 ```
 Core Package (C++ only)         Adapter Package (pybind11 edge)
   Repository<Backend>             FormatAdapter<Backend, Fmt>
-  BackendTrait + MssqlBackend     FlexibleRepository (transforms)
+  BackendPolicy concept           FlexibleRepository (transforms)
   SaveImpl / LoadImpl             bindings.cpp (Python exposure)
   ArrowBuilder                    acquire_repo()
   Query builder
+  ConnectionPool (shared ops)     GIL released before core ops
+  LoadConnectionPool (parallel)
+  LoadCache (persistent pool)
+  PK auto-detection (ODBC meta)
 ```
+
+**Key architecture decisions:**
+- `BackendPolicy` C++20 concept requires: Connection, SaveImpl, LoadImpl, Dialect, **LoadCache** types + connect/reset/close/name
+- **Dual pool pattern**: `ConnectionPool` for shared operations (save, metadata), `LoadConnectionPool` for dedicated parallel workers (load). They serve different purposes — don't merge.
+- `LoadCache`: Backend-provided persistent cache for parallel load pools. `MssqlLoadCache` owns a `LoadConnectionPool`; `NullLoadCache` is zero-cost for non-pool backends.
+- `pk_detect.h`: ODBC metadata (SQLPrimaryKeys + SQLColumns) for partition column auto-detection. Two-pass necessary because ODBC can't combine PK names + types in one call.
 
 ## Review Checklist
 

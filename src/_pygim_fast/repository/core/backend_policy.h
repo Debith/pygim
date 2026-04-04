@@ -17,6 +17,7 @@ namespace pygim::core {
 ///   SaveImpl   — static execute() that bulk-inserts data via Connection
 ///   LoadImpl   — static execute() that queries via Connection → ArrowBuilder
 ///   Dialect    — satisfies DialectPolicy; renders Query into backend-specific SQL
+///   LoadCache  — persistent cache for parallel load resources (or NullLoadCache)
 ///
 /// Required static functions:
 ///   connect(conn_str) — open and return a new Connection
@@ -28,6 +29,7 @@ concept BackendPolicy = requires(std::string_view s, typename B::Connection& con
     typename B::SaveImpl;
     typename B::LoadImpl;
     typename B::Dialect;
+    typename B::LoadCache;
     { B::connect(s) }    -> std::same_as<typename B::Connection>;
     { B::reset(conn) }   -> std::same_as<void>;
     { conn.close() }     -> std::same_as<void>;

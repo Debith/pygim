@@ -52,12 +52,16 @@ PYBIND11_MODULE(_repository, m) {
              py::overload_cast<std::string_view, int, std::string_view>(&MssqlRepo::load),
              py::arg("source"), py::arg("load_workers") = 1,
              py::arg("partition_column") = "",
-             "Load data from a table name or raw SQL query. Returns a DataFrame.")
+             "Load data from a table name or raw SQL query. Returns a DataFrame.\n"
+             "When load_workers > 1 and partition_column is empty, the integer\n"
+             "primary key column is auto-detected via ODBC metadata.")
         .def("load",
              py::overload_cast<core::Query const&, int, std::string_view>(&MssqlRepo::load),
              py::arg("query"), py::arg("load_workers") = 1,
              py::arg("partition_column") = "",
-             "Load data from a Query object. Returns a DataFrame.")
+             "Load data from a Query object. Returns a DataFrame.\n"
+             "When load_workers > 1 and partition_column is empty, the integer\n"
+             "primary key column is auto-detected via ODBC metadata.")
         .def("add_pre_transform", &MssqlRepo::add_pre_transform,
              py::arg("fn"),
              "Add a callable invoked before each save/load operation.")

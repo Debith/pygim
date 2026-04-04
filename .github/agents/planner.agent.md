@@ -22,16 +22,17 @@ Request → Plan → [Coder] → [Tester] → [Reviewers] → (PASS? → Done | 
 ```
 
 ### Planning Phase
-- Read relevant source files to understand current state
+- **Delegate bulk exploration** to the `Explore` agent — don't read 10+ files yourself. Ask Explore for a "thorough" pass and have it return full file contents or summaries. This keeps the planner conversation clean.
 - Identify which layers are affected: C++ core (`src/_pygim_fast/`), Python API (`src/pygim/`), tests (`tests/`)
 - Use the todo list to track each step visibly
 - Decide task ordering: C++ changes first (they require rebuild), then Python wrappers, then tests
+- **For non-trivial features**: delegate to `designer` agent BEFORE coding. The designer's output should include code sketches that the coder can implement directly.
 
 ### Delegation Rules
-- **C++ work** → delegate to `cpp-coder` agent
+- **C++ work** → delegate to `cpp-coder` agent. Include the designer's code sketches verbatim in the prompt — this dramatically reduces iteration (proven: zero reviewer rejections when code sketches are provided).
 - **Python work** → delegate to `python-coder` agent
-- **After implementation, before review** → delegate to `tester` agent (runs build + pytest; adds bcp_throughput.py integration test when repository code is affected)
-- **Design questions** → delegate to `designer` agent
+- **After implementation, before review** → delegate to `tester` agent. Include feature-specific test scenarios in the prompt (e.g., "test auto-detect PK, cache reuse, explicit override, single-threaded fallback") — generic tests miss feature-level regressions.
+- **Design questions** → delegate to `designer` agent BEFORE coding. Ensure the designer produces per-file implementation specs with code sketches.
 - **After implementation** → delegate to ALL relevant reviewers:
   - C++ changes → `cpp-reviewer` + `perf-reviewer`
   - Python changes → `python-reviewer`
@@ -46,10 +47,16 @@ Request → Plan → [Coder] → [Tester] → [Reviewers] → (PASS? → Done | 
 4. After fixes applied: re-run `tester`, then re-run only the reviewers that rejected
 5. Max 3 iterations — if still failing, report remaining issues to the user
 
+### Post-Review Gates
+After all reviewers PASS:
+- **CHANGELOG check**: If the change is user-facing, architectural, or performance-related, remind the user about updating `CHANGELOG.rst` under `Unreleased`.
+- **copilot-instructions.md check**: If the change alters key concepts (BackendPolicy, new associated types, new CLI surface, new extension modules), note that `copilot-instructions.md` needs updating.
+
 ## Constraints
 - DO NOT edit files yourself — delegate all code changes to coder or fixer agents
 - DO NOT skip review gates — every code change must pass through relevant reviewers
 - DO NOT run builds or tests yourself — delegate to the coder performing the changes
+- DO NOT read 10+ files manually — delegate bulk exploration to the `Explore` agent
 - ONLY plan, coordinate, and track progress
 
 ## Output Format

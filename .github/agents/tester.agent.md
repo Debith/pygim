@@ -51,6 +51,23 @@ cd /home/debith/projects/pygim && conda run -n py312 python benchmarks/bcp_throu
 - 1000 rows is sufficient to reveal type mapping, schema, and pipeline issues.
 - If this fails, report the **full error traceback**.
 
+## Tier 2.5 — Feature-Specific Integration Tests (conditional)
+
+Only run when the **planner's prompt includes specific test scenarios**. These are ad-hoc tests tailored to the feature being implemented.
+
+The planner may provide:
+- A Python script to execute
+- Specific scenarios to test (e.g., "test auto-detect PK", "verify cache reuse latency")
+- Expected outcomes for each scenario
+
+Run each scenario and report:
+- Scenario name
+- PASS/FAIL
+- Key metrics if applicable (e.g., latency, row counts)
+- Connection string used and worker count for parallel tests
+
+If the planner does not include Tier 2.5 scenarios, skip this tier entirely.
+
 ## Verdict
 
 Return a structured verdict at the end:
@@ -68,8 +85,8 @@ or
 
 ```
 Verdict: FAIL
-Tier: <1 or 2>
+Tier: <1, 2, or 2.5>
 Error: <summary of failure>
 ```
 
-Always include exact test counts from Tier 1. If Tier 2 was skipped, say so explicitly.
+Always include exact test counts from Tier 1. If Tier 2 was skipped, say so explicitly. If Tier 2.5 was included, list each scenario result.

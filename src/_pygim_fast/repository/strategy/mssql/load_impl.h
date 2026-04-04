@@ -11,6 +11,7 @@
 #include "load_dispatch.h"
 #include "odbc_error.h"
 #include "parallel_load.h"
+#include "pk_detect.h"
 #include "schema_describe.h"
 #include "sql_type_map.h"
 #include "stmt_handle.h"
@@ -53,12 +54,14 @@ struct MssqlLoadImpl {
     ///                          >1 = parallel range-partitioned load.
     /// @param partition_column  Column to range-partition on (integer type).
     /// @param table_name        Table name for parallel load (needed for MIN/MAX).
+    /// @param load_cache        Persistent pool cache for parallel load workers.
     [[nodiscard]]
     static core::LoadResult execute(OdbcConnection& conn,
                                     std::string_view sql,
-                                    int load_workers = 1,
-                                    std::string_view partition_column = "",
-                                    std::string_view table_name = "") {
+                                    int load_workers,
+                                    std::string_view partition_column,
+                                    std::string_view table_name,
+                                    MssqlLoadCache& load_cache) {
         using clock = std::chrono::steady_clock;
         core::LoadMetrics metrics;
         const auto t_total = clock::now();
@@ -67,13 +70,21 @@ struct MssqlLoadImpl {
                       static_cast<int>(sql.size()), sql.data(), load_workers);
 
         if (load_workers > 1) {
-            if (partition_column.empty() || table_name.empty()) {
-                PYGIM_LOG_FMT("[MssqlLoadImpl] parallel load (%d workers) requested "
-                              "but no partition_column/table_name — falling back to single-threaded\n",
-                              load_workers);
+            if (!table_name.empty()) {
+                std::string resolved_partition(partition_column);
+                if (resolved_partition.empty()) {
+                    resolved_partition = detect_partition_column(conn.dbc(), table_name);
+                }
+                if (!resolved_partition.empty()) {
+                    return execute_parallel(conn, table_name, resolved_partition,
+                                            load_workers, kDefaultBlockSize, load_cache);
+                }
+                PYGIM_LOG_FMT("[MssqlLoadImpl] no integer PK found for '%.*s' "
+                              "— falling back to single-threaded\n",
+                              static_cast<int>(table_name.size()), table_name.data());
             } else {
-                return execute_parallel(conn, table_name, partition_column,
-                                        load_workers, kDefaultBlockSize);
+                PYGIM_LOG_FMT("[MssqlLoadImpl] raw SQL with parallel load "
+                              "— falling back to single-threaded\n");
             }
         }
 

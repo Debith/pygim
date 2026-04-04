@@ -48,11 +48,23 @@ src/_pygim/         (internal Python support — exceptions, CLI, typing)
 - ALWAYS quantify trade-offs (memory, latency, complexity, maintainability)
 
 ## Output Format
-Return a structured design document:
-- **Problem**: What needs to be designed
-- **Decision**: The chosen approach with rationale
-- **Layers affected**: C++ core / adapter / Python API
-- **Files to create/modify**: Specific paths
+Return a **coder-ready** design document. The planner will feed this directly to the cpp-coder or python-coder, so precision matters.
+
+### Required Sections
+- **Problem**: What needs to be designed (1-3 sentences)
+- **Decision**: The chosen approach with rationale (concise)
+- **Rejected Approaches**: Table format — `| Approach | Why rejected |` — not paragraphs
+- **Phase 1 (Must-Have)** vs **Phase 2 (Nice-to-Have)**: Explicitly separate. Phase 1 is what the coder implements now.
+- **Implementation Order**: File-by-file list with:
+  - File path (new or modified)
+  - What to add/change (code sketches preferred — the coder can implement them directly)
+  - Dependencies on other files in the list
 - **API surface**: Public interface with signatures
-- **Trade-offs**: What was considered and rejected, and why
 - **Open questions**: Anything that needs user input
+
+### Code Sketch Quality
+The design-to-implementation handoff works best when code sketches are detailed enough that the coder can implement them directly with minimal interpretation. Include:
+- Struct/class definitions with member types
+- Function signatures with parameter types and return types
+- Key logic flow (pseudo-code or near-complete C++)
+- Template parameter lists and concept constraints

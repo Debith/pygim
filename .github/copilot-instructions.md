@@ -30,7 +30,7 @@ Concise, actionable guidance for AI agents contributing to this repo. Focus on t
 | DDD Interfaces | `_pygim/_core/interfaces.py` | Abstract base interfaces (Entity, Repository, Service, etc.). Do NOT inject domain logic; only use for type/structural contracts. |
 | CLI | `_pygim/_cli/_cli_app.py`, `pygim/__main__.py` | Simple click-based tasks: cleanup, coverage, AI placeholder. Expand by adding methods on `GimmicksCliApp`, then expose via a new `@cli.command()` in `__main__.py`. |
 | Testing Helpers | `pygim/core/testing.py` | `run_tests()` wrapper w/ optional coverage; re-imports module for top-level coverage lines. Use when adding stand-alone test scripts. |
-| Repository | `_pygim_fast/repository/{core,strategy,adapter}/` | Core/adapter one-hop architecture: `Repository<Backend>` generic facade, `RepositoryAdapter<Backend>` pybind11 boundary, `ConnectionPool<Backend>` thread-safe pool with `std::expected`. MSSQL backend via BCP pipeline (`strategy/mssql/bcp/`). `BackendPolicy` C++20 concept verified via `static_assert` in `bindings.cpp`. Arrow-only core (no `py::object` below adapter). GIL released before core operations. Build requires `arrow-cpp >= 15` and ODBC Driver 18. |
+| Repository | `_pygim_fast/repository/{core,strategy,adapter}/` | Core/adapter one-hop architecture: `Repository<Backend>` generic facade, `RepositoryAdapter<Backend>` pybind11 boundary, `ConnectionPool<Backend>` thread-safe pool with `std::expected`. MSSQL backend via BCP pipeline (`strategy/mssql/bcp/`). `BackendPolicy` C++20 concept verified via `static_assert` in `bindings.cpp`. Arrow-only core (no `py::object` below adapter). GIL released before core operations. Build requires `arrow-cpp >= 15` and ODBC Driver 18. LoadCache for persistent parallel pool reuse. PK auto-detection via ODBC metadata. Benchmarks: 956K rows/s write (101 MB/s), 1.25M rows/s load (122 MB/s) with 8 workers. |
 
 ## 3. Developer Workflows
 - Environment: Project typically uses a conda env named `py312` (activate first: `conda activate py312`). Always confirm `python -V` matches supported versions before building extensions.
@@ -57,10 +57,14 @@ Concise, actionable guidance for AI agents contributing to this repo. Focus on t
 - PathSet Filtering: Pattern matching uses custom `match_pattern` supporting `*`, `?`, and special cases `*` and `*.*`; replicate logic via C++ instead of re-implementing in Python for consistency.
 - Coverage Helper: Re-import (`reload`) is required; don't restructure to module-level side effects that break idempotent reload during coverage.
 - Repository GIL Pattern: Adapter releases GIL (`py::gil_scoped_release`) before calling core `save()`/`load()`. No `py::object` crosses into `core/`; Arrow C Data Interface is the boundary.
-- Repository BackendPolicy: New backends must satisfy the `BackendPolicy` concept (Connection, SaveImpl, LoadImpl, Dialect types + connect/reset/close/name). Verified via `static_assert` in `bindings.cpp`.
+- Repository BackendPolicy: New backends must satisfy the `BackendPolicy` concept (Connection, SaveImpl, LoadImpl, Dialect, **LoadCache** types + connect/reset/close/name). Verified via `static_assert` in `bindings.cpp`.
 - Repository BCP Ordering: BCP must be enabled on the connection (`SQL_COPT_SS_BCP`) BEFORE `SQLDriverConnect`. Violating this causes silent BCP failures.
 - Repository Connection Pool: `checkout()` returns `std::expected<ConnectionHandle, PoolError>` — timeout and pool-closed are control flow, not exceptions.
 - Repository Arrow Import: `import_record_batch_reader()` must be called WITH GIL held. Supports PyCapsule (`__arrow_c_stream__`), Polars DataFrame (recursive `.to_arrow()` with depth guard), and PyArrow RecordBatchReader/Table.
+- Repository LoadCache: `MssqlLoadCache` provides persistent `LoadConnectionPool` reuse across `load()` calls — eliminates per-load connection establishment cost. `NullLoadCache` is zero-cost for non-MSSQL backends. Cache invalidates on connection string or pool size change.
+- Repository PK Auto-Detect: When `partition_column` is empty and `workers > 1`, `detect_partition_column()` uses SQLPrimaryKeys() + SQLColumns() to find the first integer PK column. Falls back to single-threaded load if none found.
+- Repository Stale Connection Retry: Parallel load retries once on stale connection (SQLSTATE 08S01, 08001, HY000). Clears cache before retry. No proactive health checks (avoids latency on the common path).
+- Repository Dual Pool Pattern: `ConnectionPool` for shared operations (save, metadata), `LoadConnectionPool` for dedicated parallel load workers. They serve different purposes — don't merge.
 
 ### C++ Performance Philosophy
 - Standard: Target C++20 features by default (concepts, `std::variant`, ranges, designated initializers where sensible) — prefer zero-overhead abstractions.

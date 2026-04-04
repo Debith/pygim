@@ -156,11 +156,12 @@ struct OdbcConnection {
 };
 
 // ────────────────────────────────────────────────────────────────
-// Forward declarations (defined in save_impl.h / load_impl.h)
+// Forward declarations (defined in save_impl.h / load_impl.h / load_cache.h)
 // ────────────────────────────────────────────────────────────────
 
 struct MssqlSaveImpl;
 struct MssqlLoadImpl;
+struct MssqlLoadCache;
 
 // ────────────────────────────────────────────────────────────────
 // MssqlBackend — the concrete backend trait
@@ -174,6 +175,7 @@ struct MssqlBackend {
     using SaveImpl   = MssqlSaveImpl;
     using LoadImpl   = MssqlLoadImpl;
     using Dialect    = MssqlDialect;
+    using LoadCache  = MssqlLoadCache;
 
     static constexpr const char* name() { return "mssql"; }
 

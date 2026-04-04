@@ -74,6 +74,15 @@ For every file under review, systematically scan for opportunities to use the fe
 - [ ] Disabled features compiled out via templates (e.g., `EnableHooks`), not runtime branches
 - [ ] Single-probe lookups — no double-lookup patterns in maps
 
+### ODBC-Specific Patterns (when reviewing repository code)
+- [ ] `StmtHandle` RAII used for all ODBC statement handles (no raw `SQLFreeHandle`)
+- [ ] `const_cast` used correctly for ODBC API `SQLCHAR*` parameters (ODBC API is not const-correct)
+- [ ] Catalog functions (SQLPrimaryKeys, SQLColumns, SQLTables) check `SQL_SUCCESS` and `SQL_SUCCESS_WITH_INFO`
+- [ ] Connection pool checkout uses `std::expected` — error paths are control flow, not exceptions
+- [ ] Stale connection detection uses SQLSTATE codes (08S01, 08001, HY000), not error message string matching
+- [ ] BCP `SQL_COPT_SS_BCP` is set BEFORE `SQLDriverConnect` (reversing order causes silent failures)
+- [ ] `SQLFetch` return value handled for `SQL_NO_DATA` (not just `SQL_SUCCESS`)
+
 ### 4. Structure
 - [ ] Headers are self-contained (include what they use)
 - [ ] No circular includes

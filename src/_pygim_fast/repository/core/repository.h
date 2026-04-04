@@ -33,6 +33,7 @@ namespace pygim::core {
 template <BackendPolicy Backend>
 class Repository {
     std::shared_ptr<ConnectionPool<Backend>> m_pool;
+    typename Backend::LoadCache              m_load_cache;
 
 public:
     explicit Repository(std::shared_ptr<ConnectionPool<Backend>> pool)
@@ -88,7 +89,8 @@ public:
         }
         auto handle = std::move(*result);
         return Backend::LoadImpl::execute(handle.get(), sql, load_workers,
-                                          partition_column, table_name_str);
+                                          partition_column, table_name_str,
+                                          m_load_cache);
     }
 
     /// Load from a table name or raw SQL string.
@@ -123,7 +125,8 @@ public:
         }
         auto handle = std::move(*result);
         return Backend::LoadImpl::execute(handle.get(), sql, load_workers,
-                                          partition_column, table_name_str);
+                                          partition_column, table_name_str,
+                                          m_load_cache);
     }
 
     [[nodiscard]] std::string_view connection_string() const {
