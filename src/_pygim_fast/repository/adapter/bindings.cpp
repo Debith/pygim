@@ -49,12 +49,14 @@ PYBIND11_MODULE(_repository, m) {
              py::arg("data"), py::arg("table_name"), py::arg("bcp_workers") = -1,
              "Bulk-insert data into a table via BCP. Returns a dict of timing metrics.")
         .def("load",
-             py::overload_cast<std::string_view, int>(&MssqlRepo::load),
+             py::overload_cast<std::string_view, int, std::string_view>(&MssqlRepo::load),
              py::arg("source"), py::arg("load_workers") = 1,
+             py::arg("partition_column") = "",
              "Load data from a table name or raw SQL query. Returns a DataFrame.")
         .def("load",
-             py::overload_cast<core::Query const&, int>(&MssqlRepo::load),
+             py::overload_cast<core::Query const&, int, std::string_view>(&MssqlRepo::load),
              py::arg("query"), py::arg("load_workers") = 1,
+             py::arg("partition_column") = "",
              "Load data from a Query object. Returns a DataFrame.")
         .def("add_pre_transform", &MssqlRepo::add_pre_transform,
              py::arg("fn"),

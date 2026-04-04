@@ -17,9 +17,12 @@ struct LoadMetrics {
     double  describe_seconds{0};    // SQLDescribeCol loop
     double  fetch_seconds{0};       // all SQLFetch calls (cumulative)
     double  build_seconds{0};       // Arrow builder append + finish
+    double  connect_seconds{0};     // parallel connection establishment
+    double  concat_seconds{0};      // ConcatenateTables time
     int64_t fetched_rows{0};
     int64_t fetched_blocks{0};      // number of SQLFetch calls
     int64_t columns{0};
+    int     workers_used{1};        // actual parallelism level
 };
 
 /// Holds the materialised Arrow table and the metrics that describe how it was produced.

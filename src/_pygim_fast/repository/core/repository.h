@@ -73,9 +73,11 @@ public:
 
     // load: accepts Query → checks out connection, returns Arrow Table + metrics
     [[nodiscard]]
-    LoadResult load(Query const& query, int load_workers = 1) {
+    LoadResult load(Query const& query, int load_workers = 1,
+                    std::string_view partition_column = "") {
         typename Backend::Dialect const dialect{};
         auto sql = build_sql(query, dialect);
+        std::string table_name_str(query.table());
         PYGIM_LOG_FMT("[Repository<%s>] load(sql=\"%s\")\n",
                       backend_name(), sql.c_str());
 
@@ -85,7 +87,8 @@ public:
                 std::string("Repository: checkout failed: ") + pool_error_name(result.error()));
         }
         auto handle = std::move(*result);
-        return Backend::LoadImpl::execute(handle.get(), sql, load_workers);
+        return Backend::LoadImpl::execute(handle.get(), sql, load_workers,
+                                          partition_column, table_name_str);
     }
 
     /// Load from a table name or raw SQL string.
@@ -94,11 +97,15 @@ public:
     /// and passed through. Otherwise it is treated as a table name and
     /// wrapped in SELECT * FROM [table] via the backend dialect.
     [[nodiscard]]
-    LoadResult load(std::string_view source, int load_workers = 1) {
+    LoadResult load(std::string_view source, int load_workers = 1,
+                    std::string_view partition_column = "") {
         std::string sql;
+        std::string table_name_str;
         if (source.contains(' ')) {
             sql = std::string(source);
+            // Raw SQL — no table name available for parallel
         } else {
+            table_name_str = std::string(source);
             Query q;
             q.from_table(source);
             typename Backend::Dialect const dialect{};
@@ -115,7 +122,8 @@ public:
                 std::string("Repository: checkout failed: ") + pool_error_name(result.error()));
         }
         auto handle = std::move(*result);
-        return Backend::LoadImpl::execute(handle.get(), sql, load_workers);
+        return Backend::LoadImpl::execute(handle.get(), sql, load_workers,
+                                          partition_column, table_name_str);
     }
 
     [[nodiscard]] std::string_view connection_string() const {

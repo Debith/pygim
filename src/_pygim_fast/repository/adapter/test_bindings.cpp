@@ -82,11 +82,13 @@ PYBIND11_MODULE(_repository_test, m) {
         .def("save", &MssqlRepo::save,
              py::arg("data"), py::arg("table_name"), py::arg("bcp_workers") = -1)
         .def("load",
-             py::overload_cast<std::string_view, int>(&MssqlRepo::load),
-             py::arg("source"), py::arg("load_workers") = 1)
+             py::overload_cast<std::string_view, int, std::string_view>(&MssqlRepo::load),
+             py::arg("source"), py::arg("load_workers") = 1,
+             py::arg("partition_column") = "")
         .def("load",
-             py::overload_cast<core::Query const&, int>(&MssqlRepo::load),
-             py::arg("query"), py::arg("load_workers") = 1)
+             py::overload_cast<core::Query const&, int, std::string_view>(&MssqlRepo::load),
+             py::arg("query"), py::arg("load_workers") = 1,
+             py::arg("partition_column") = "")
         .def("add_pre_transform", &MssqlRepo::add_pre_transform,
              py::arg("fn"))
         .def("add_post_transform", &MssqlRepo::add_post_transform,

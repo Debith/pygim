@@ -190,14 +190,15 @@ public:
 
     /// Load data from a table name or raw SQL query.
     /// Returns a Polars or Pandas DataFrame (based on format setting).
-    py::object load(std::string_view source, int load_workers = 1) {
+    py::object load(std::string_view source, int load_workers = 1,
+                    std::string_view partition_column = "") {
         PYGIM_TIMED_SCOPE("RepositoryAdapter::load");
         run_transforms("pre_load", m_pre_transforms);
 
         // Release GIL for ODBC operations (pure C++)
         auto result = [&] {
             py::gil_scoped_release release;
-            return m_repo.load(source, load_workers);
+            return m_repo.load(source, load_workers, partition_column);
         }();
 
         // Export Arrow Table → Python DataFrame (GIL held)
@@ -210,13 +211,14 @@ public:
 
     /// Load data from a Query object.
     /// Returns a Polars or Pandas DataFrame (based on format setting).
-    py::object load(core::Query const& query, int load_workers = 1) {
+    py::object load(core::Query const& query, int load_workers = 1,
+                    std::string_view partition_column = "") {
         PYGIM_TIMED_SCOPE("RepositoryAdapter::load(query)");
         run_transforms("pre_load", m_pre_transforms);
 
         auto result = [&] {
             py::gil_scoped_release release;
-            return m_repo.load(query, load_workers);
+            return m_repo.load(query, load_workers, partition_column);
         }();
 
         auto df = export_table(std::move(result.table),

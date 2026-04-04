@@ -10,6 +10,8 @@
 #include "fetch_buffer.h"
 #include "load_dispatch.h"
 #include "odbc_error.h"
+#include "parallel_load.h"
+#include "schema_describe.h"
 #include "sql_type_map.h"
 #include "stmt_handle.h"
 
@@ -44,15 +46,19 @@ struct MssqlLoadImpl {
 
     /// Execute a SQL query and return results as Arrow Table + metrics.
     ///
-    /// @param conn         Active ODBC connection.
-    /// @param sql          SQL query string to execute.
-    /// @param load_workers Number of parallel load connections.
-    ///                     1 = single-connection block cursor;
-    ///                     >1 = parallel range-partitioned load (future).
+    /// @param conn              Active ODBC connection.
+    /// @param sql               SQL query string to execute.
+    /// @param load_workers      Number of parallel load connections.
+    ///                          1 = single-connection block cursor;
+    ///                          >1 = parallel range-partitioned load.
+    /// @param partition_column  Column to range-partition on (integer type).
+    /// @param table_name        Table name for parallel load (needed for MIN/MAX).
     [[nodiscard]]
     static core::LoadResult execute(OdbcConnection& conn,
                                     std::string_view sql,
-                                    int load_workers = 1) {
+                                    int load_workers = 1,
+                                    std::string_view partition_column = "",
+                                    std::string_view table_name = "") {
         using clock = std::chrono::steady_clock;
         core::LoadMetrics metrics;
         const auto t_total = clock::now();
@@ -61,9 +67,14 @@ struct MssqlLoadImpl {
                       static_cast<int>(sql.size()), sql.data(), load_workers);
 
         if (load_workers > 1) {
-            PYGIM_LOG_FMT("[MssqlLoadImpl] parallel load (%d workers) not yet "
-                          "implemented — falling back to single-threaded\n",
-                          load_workers);
+            if (partition_column.empty() || table_name.empty()) {
+                PYGIM_LOG_FMT("[MssqlLoadImpl] parallel load (%d workers) requested "
+                              "but no partition_column/table_name — falling back to single-threaded\n",
+                              load_workers);
+            } else {
+                return execute_parallel(conn, table_name, partition_column,
+                                        load_workers, kDefaultBlockSize);
+            }
         }
 
         // ── 1. Allocate statement handle ────────────────────────
@@ -87,54 +98,19 @@ struct MssqlLoadImpl {
         }
 
         // ── 3. Describe result columns → schema ────────────────
-        std::shared_ptr<arrow::Schema> schema;
-        std::vector<std::pair<std::string, TypeMapping>> col_info;
-        std::vector<bool> nullable_flags;
+        SchemaInfo schema_info;
         {
             const auto t0 = clock::now();
-
-            SQLSMALLINT num_cols = 0;
-            SQLRETURN ret = SQLNumResultCols(stmt, &num_cols);
-            odbc::raise_if_error(ret, SQL_HANDLE_STMT, stmt,
-                                 "SQLNumResultCols");
-
-            col_info.reserve(static_cast<std::size_t>(num_cols));
-            nullable_flags.reserve(static_cast<std::size_t>(num_cols));
-
-            for (SQLUSMALLINT i = 1; i <= static_cast<SQLUSMALLINT>(num_cols);
-                 ++i) {
-                SQLCHAR col_name[256];
-                SQLSMALLINT name_len    = 0;
-                SQLSMALLINT sql_type    = 0;
-                SQLULEN     col_size    = 0;
-                SQLSMALLINT dec_digits  = 0;
-                SQLSMALLINT nullable    = 0;
-
-                ret = SQLDescribeCol(stmt, i, col_name,
-                                     static_cast<SQLSMALLINT>(sizeof(col_name)),
-                                     &name_len, &sql_type, &col_size,
-                                     &dec_digits, &nullable);
-                odbc::raise_if_error(ret, SQL_HANDLE_STMT, stmt,
-                                     "SQLDescribeCol");
-
-                nullable_flags.push_back(nullable != SQL_NO_NULLS);
-                auto mapping = resolve_type(sql_type, col_size, dec_digits);
-                col_info.emplace_back(
-                    std::string(reinterpret_cast<const char*>(col_name),
-                                static_cast<std::size_t>(name_len)),
-                    std::move(mapping));
-            }
-
-            schema = build_schema(col_info);
-            metrics.columns = static_cast<int64_t>(num_cols);
+            schema_info = describe_columns(stmt);
+            metrics.columns = static_cast<int64_t>(schema_info.col_info.size());
             metrics.describe_seconds =
                 std::chrono::duration<double>(clock::now() - t0).count();
         }
 
         // ── 4. Set up builder + fetch buffers + dispatch ──────
-        core::ArrowBuilder builder(schema);
-        auto buffers = FetchBufferSet::allocate(col_info, kDefaultBlockSize);
-        auto dispatch = build_column_dispatch(schema, nullable_flags);
+        core::ArrowBuilder builder(schema_info.schema);
+        auto buffers = FetchBufferSet::allocate(schema_info.col_info, kDefaultBlockSize);
+        auto dispatch = build_column_dispatch(schema_info.schema, schema_info.nullable_flags);
 
         // ── 5. Configure block cursor ───────────────────────────
         {
@@ -155,7 +131,7 @@ struct MssqlLoadImpl {
         buffers.bind(stmt);
 
         // ── 7. Block-cursor fetch loop ──────────────────────────
-        const std::size_t ncols = col_info.size();
+        const std::size_t ncols = schema_info.col_info.size();
         std::vector<uint8_t> valid;   // reusable validity buffer
 
         while (true) {
@@ -202,6 +178,7 @@ struct MssqlLoadImpl {
 
         // ── 8. Finalize ────────────────────────────────────────
         auto table = builder.finish();
+        metrics.workers_used = 1;
         metrics.total_seconds =
             std::chrono::duration<double>(clock::now() - t_total).count();
 
