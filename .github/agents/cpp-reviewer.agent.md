@@ -90,6 +90,19 @@ For every file under review, systematically scan for opportunities to use the fe
 - [ ] `std::span` used at function boundaries instead of pointer+size or vector-by-ref
 - [ ] `std::format` preferred over stream-based or printf-style string building
 
+### 6. Design & Necessity Review
+
+For each code change, systematically evaluate:
+
+- [ ] **Necessity**: Does every line of new/changed code earn its place? Could the same result be achieved with less code or by reusing existing infrastructure?
+- [ ] **Grand scheme fit**: Does this change make sense in the overall architecture? Does it align with the project's dual-layer design (C++ core for performance, Python for ergonomics)?
+- [ ] **Better alternatives**: Is there a fundamentally better way to implement this? A different data structure, algorithm, or API shape that would be cleaner?
+- [ ] **Cohesion (OOP)**: Would the code benefit from being in its own class or struct? Are related data and operations grouped together, or scattered across free functions? Does the change respect single responsibility — one class/struct does one thing well?
+- [ ] **Coupling**: Does the change introduce unnecessary dependencies between components? Could it be more self-contained?
+- [ ] **Dead weight**: Does the change leave behind unused code paths, unnecessary abstractions, or speculative generality?
+
+Flag as MAJOR if code could be significantly simpler, more cohesive, or better organized. Flag as CRITICAL if the design fundamentally doesn't fit the architecture.
+
 ## Verdict Format
 
 ```

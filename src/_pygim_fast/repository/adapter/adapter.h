@@ -10,6 +10,7 @@
 
 #pragma once
 
+#include "arrow_export.h"
 #include "arrow_import.h"
 #include "../core/connection_pool.h"
 #include "../core/query.h"
@@ -187,20 +188,42 @@ public:
         return result;
     }
 
-    /// Load data from a table or raw SQL query (placeholder — not yet implemented).
-    void load(std::string_view source, int load_workers = 1) {
+    /// Load data from a table name or raw SQL query.
+    /// Returns a Polars or Pandas DataFrame (based on format setting).
+    py::object load(std::string_view source, int load_workers = 1) {
         PYGIM_TIMED_SCOPE("RepositoryAdapter::load");
         run_transforms("pre_load", m_pre_transforms);
-        m_repo.load(source, load_workers);
+
+        // Release GIL for ODBC operations (pure C++)
+        auto result = [&] {
+            py::gil_scoped_release release;
+            return m_repo.load(source, load_workers);
+        }();
+
+        // Export Arrow Table → Python DataFrame (GIL held)
+        auto df = export_table(std::move(result.table),
+                               m_format == Format::Polars);
+
         run_transforms("post_load", m_post_transforms);
+        return df;
     }
 
-    /// Load data from a Query object (placeholder — not yet implemented).
-    void load(core::Query const& query, int load_workers = 1) {
+    /// Load data from a Query object.
+    /// Returns a Polars or Pandas DataFrame (based on format setting).
+    py::object load(core::Query const& query, int load_workers = 1) {
         PYGIM_TIMED_SCOPE("RepositoryAdapter::load(query)");
         run_transforms("pre_load", m_pre_transforms);
-        m_repo.load(query, load_workers);
+
+        auto result = [&] {
+            py::gil_scoped_release release;
+            return m_repo.load(query, load_workers);
+        }();
+
+        auto df = export_table(std::move(result.table),
+                               m_format == Format::Polars);
+
         run_transforms("post_load", m_post_transforms);
+        return df;
     }
 
     // ── Introspection ────────────────────────────────────────

@@ -264,13 +264,15 @@ def run_load(
     repo = acquire_repo(conn_str, format="polars")
 
     t0 = time.perf_counter()
-    repo.load(table, load_workers=load_workers)
+    df = repo.load(table, load_workers=load_workers)
     elapsed = time.perf_counter() - t0
 
-    # Placeholder: real code would measure actual returned DataFrame
-    nrows = 0
-    payload_bytes = 0
-    mb_s = 0.0
+    nrows = len(df)
+    try:
+        payload_bytes = df.estimated_size()  # Polars
+    except AttributeError:
+        payload_bytes = df.memory_usage(deep=True).sum()  # Pandas
+    mb_s = (payload_bytes / 1_048_576) / elapsed if elapsed > 0 else 0.0
 
     return {
         "profile":       profile_name,

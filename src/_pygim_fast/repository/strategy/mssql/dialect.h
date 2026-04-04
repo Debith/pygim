@@ -39,11 +39,22 @@ struct MssqlDialect {
                 sql += quote_identifier(q.columns()[i]);
             }
         }
-        sql += " FROM " + quote_identifier(q.table());
+        sql += " FROM " + quote_table_name(q.table());
         if (!q.where_clause().empty()) {
             sql += " WHERE " + std::string(q.where_clause());
         }
         return sql;
+    }
+
+    /// Quote a dotted qualified table name (e.g. "dbo.my_table" → "[dbo].[my_table]").
+    /// Handles one level of qualification (schema.table); unqualified names delegate
+    /// to quote_identifier().
+    [[nodiscard]] std::string quote_table_name(std::string_view name) const {
+        if (auto dot = name.find('.'); dot != std::string_view::npos) {
+            return quote_identifier(name.substr(0, dot)) + "." +
+                   quote_identifier(name.substr(dot + 1));
+        }
+        return quote_identifier(name);
     }
 
     /// Quote a SQL Server identifier with square brackets.

@@ -37,16 +37,7 @@ using LPCWSTR = const SQLWCHAR*;
 #endif
 #endif
 
-// SQL_SS_TIME2_STRUCT equivalent for Linux (defined in msodbcsql.h on Windows).
-#ifndef SQL_SS_TIME2_STRUCT_DEFINED
-#define SQL_SS_TIME2_STRUCT_DEFINED
-typedef struct tagSS_TIME2_STRUCT {
-    SQLUSMALLINT hour;
-    SQLUSMALLINT minute;
-    SQLUSMALLINT second;
-    SQLUINTEGER  fraction;  // in 100-nanosecond units
-} SQL_SS_TIME2_STRUCT;
-#endif
+#include "../../../odbc_compat.h"
 
 #endif // !Windows
 

@@ -13,6 +13,7 @@
 #include "backend_policy.h"
 #include "connection_pool.h"
 #include "dialect.h"
+#include "load_result.h"
 #include "query.h"
 
 #include "../../utils/logging.h"
@@ -70,8 +71,9 @@ public:
                                           bcp_workers);
     }
 
-    // load: accepts Query → checks out connection
-    void load(Query const& query, int load_workers = 1) {
+    // load: accepts Query → checks out connection, returns Arrow Table + metrics
+    [[nodiscard]]
+    LoadResult load(Query const& query, int load_workers = 1) {
         typename Backend::Dialect const dialect{};
         auto sql = build_sql(query, dialect);
         PYGIM_LOG_FMT("[Repository<%s>] load(sql=\"%s\")\n",
@@ -83,7 +85,7 @@ public:
                 std::string("Repository: checkout failed: ") + pool_error_name(result.error()));
         }
         auto handle = std::move(*result);
-        Backend::LoadImpl::execute(handle.get(), sql, load_workers);
+        return Backend::LoadImpl::execute(handle.get(), sql, load_workers);
     }
 
     /// Load from a table name or raw SQL string.
@@ -91,7 +93,8 @@ public:
     /// Heuristic: if source contains a space, it is treated as raw SQL
     /// and passed through. Otherwise it is treated as a table name and
     /// wrapped in SELECT * FROM [table] via the backend dialect.
-    void load(std::string_view source, int load_workers = 1) {
+    [[nodiscard]]
+    LoadResult load(std::string_view source, int load_workers = 1) {
         std::string sql;
         if (source.contains(' ')) {
             sql = std::string(source);
@@ -112,7 +115,7 @@ public:
                 std::string("Repository: checkout failed: ") + pool_error_name(result.error()));
         }
         auto handle = std::move(*result);
-        Backend::LoadImpl::execute(handle.get(), sql, load_workers);
+        return Backend::LoadImpl::execute(handle.get(), sql, load_workers);
     }
 
     [[nodiscard]] std::string_view connection_string() const {

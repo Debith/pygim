@@ -37,6 +37,19 @@ Python in this project should be **minimal glue**. If you see Python reimplement
 - [ ] Tests validate runtime behavior, not structural introspection
 - [ ] Edge cases covered: duplicate rejection, override failure, negative forms
 
+### Design & Necessity Review
+
+For each code change, systematically evaluate:
+
+- [ ] **Necessity**: Does every line of new/changed code earn its place? Could the same result be achieved with less code or by reusing existing infrastructure?
+- [ ] **Grand scheme fit**: Does this change make sense in the overall architecture? Python should be thin ergonomic glue over C++ — is this change adding weight where it shouldn't?
+- [ ] **Better alternatives**: Is there a fundamentally better way to implement this? A simpler API, a different approach, leveraging existing C++ functionality?
+- [ ] **Cohesion (OOP)**: Would the code benefit from being in its own class? Are related data and operations grouped together? Does the change respect single responsibility?
+- [ ] **Coupling**: Does the change introduce unnecessary dependencies between modules?
+- [ ] **Dead weight**: Does the change leave behind unused imports, unnecessary abstractions, or speculative generality?
+
+Flag as MAJOR if code could be significantly simpler, more cohesive, or better organized. Flag as CRITICAL if the design fundamentally doesn't fit the architecture.
+
 ## Verdict Format
 
 ```

@@ -18,7 +18,7 @@ You orchestrate multi-step implementation tasks by:
 ## Workflow
 
 ```
-Request → Plan → [Coder] → [Reviewers] → (PASS? → Done | REJECT? → [Fixer] → [Reviewers]) → Done
+Request → Plan → [Coder] → [Tester] → [Reviewers] → (PASS? → Done | REJECT? → [Fixer] → [Tester] → [Reviewers]) → Done
 ```
 
 ### Planning Phase
@@ -30,6 +30,7 @@ Request → Plan → [Coder] → [Reviewers] → (PASS? → Done | REJECT? → [
 ### Delegation Rules
 - **C++ work** → delegate to `cpp-coder` agent
 - **Python work** → delegate to `python-coder` agent
+- **After implementation, before review** → delegate to `tester` agent (runs build + pytest; adds bcp_throughput.py integration test when repository code is affected)
 - **Design questions** → delegate to `designer` agent
 - **After implementation** → delegate to ALL relevant reviewers:
   - C++ changes → `cpp-reviewer` + `perf-reviewer`
@@ -39,10 +40,11 @@ Request → Plan → [Coder] → [Reviewers] → (PASS? → Done | REJECT? → [
 - **Review rejections** → delegate back to the relevant coder (`cpp-coder` or `python-coder`) with the rejection details
 
 ### Iteration Protocol
-1. Collect all reviewer verdicts
-2. If any REJECT: bundle all rejection details and send to the relevant coder for fixes
-3. After fixes applied: re-run only the reviewers that rejected
-4. Max 3 iterations — if still failing, report remaining issues to the user
+1. After coder finishes: run `tester` agent. If tests fail, send failure back to coder before review.
+2. Collect all reviewer verdicts
+3. If any REJECT: bundle all rejection details and send to the relevant coder for fixes
+4. After fixes applied: re-run `tester`, then re-run only the reviewers that rejected
+5. Max 3 iterations — if still failing, report remaining issues to the user
 
 ## Constraints
 - DO NOT edit files yourself — delegate all code changes to coder or fixer agents
