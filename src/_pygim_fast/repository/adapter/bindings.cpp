@@ -4,6 +4,7 @@
 // Binds ONE class: RepositoryAdapter<MssqlBackend>.
 // Format is runtime enum, not template parameter — single instantiation.
 // Test-specific bindings (Query, pool internals) live in test_bindings.cpp.
+// Fetch benchmarks live in bench_bindings.cpp (_fetch_benchmark module).
 
 #include "../core/query.h"
 #include "../strategy/mssql/save_impl.h"

@@ -7,14 +7,38 @@
 
 #include "../../core/backend_policy.h"
 #include "../../../utils/logging.h"
+#include "../../../utils/core_utils.h"
 #include "dialect.h"
 #include "odbc_error.h"
 #include "bcp/bcp_api.h"   // SQL_COPT_SS_BCP, SQL_BCP_ON
 
+#include <format>
 #include <string>
 #include <string_view>
 
 namespace pygim::strategy::mssql {
+
+inline constexpr int kDefaultPacketSize = 16384;
+
+/// Ensure the connection string contains a PacketSize setting.
+/// If the user already specified PacketSize (or "Packet Size"), their value is preserved.
+/// Otherwise, appends ";PacketSize=<default_size>".
+[[nodiscard]] inline std::string ensure_packet_size(std::string_view conn_str,
+                                                     int packet_size = kDefaultPacketSize)
+{
+    // Case-insensitive, whitespace-insensitive search for "packetsize="
+    auto lower = to_lower_copy(std::string(conn_str));
+    std::erase(lower, ' ');
+
+    if (lower.contains("packetsize="))
+        return std::string(conn_str);  // User specified — respect it
+
+    std::string result(conn_str);
+    if (!result.empty() && result.back() != ';')
+        result += ';';
+    result += std::format("PacketSize={}", packet_size);
+    return result;
+}
 
 // ────────────────────────────────────────────────────────────────
 // OdbcConnection — real ODBC connection (SQLHENV + SQLHDBC)
@@ -58,7 +82,7 @@ struct OdbcConnection {
 
     /// Open an ODBC connection with BCP enabled.
     void open(std::string_view conn_str) {
-        m_conn_str = std::string(conn_str);
+        m_conn_str = ensure_packet_size(conn_str);
 
         // 1. Allocate environment handle + set ODBC 3.x
         if (SQLAllocHandle(SQL_HANDLE_ENV, SQL_NULL_HANDLE, &m_env) != SQL_SUCCESS)
