@@ -49,7 +49,7 @@ def create_df(schema: dict, rows: int = 100_000, *, seed: int = 42,
 	Examples
 	--------
 	>>> import pygim
-	>>> df = pygim.create_df({"id": "int32", "name": "string"}, rows=10)
+	>>> df = pygim.create_df({"id": "int32", "name": "string"}, rows=10)  # doctest: +SKIP
 	"""
 	from pygim.datagen import generate as _generate  # C++ extension
 	exporter = _generate(schema, rows, seed, null_fraction)

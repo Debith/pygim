@@ -1,13 +1,21 @@
 import re
 import pytest
 
-from pygim._repository_test import (
-    Repository as TestRepository,
-    Query,
-    MssqlDialect,
-    Format as TestFormat,
+_repository_test = pytest.importorskip(
+    "pygim._repository_test",
+    reason="C++ repository extension not built (Arrow/ODBC not installed)",
 )
-from pygim.repository import acquire_repo, Format
+TestRepository = _repository_test.Repository
+Query = _repository_test.Query
+MssqlDialect = _repository_test.MssqlDialect
+TestFormat = _repository_test.Format
+
+_repository_module = pytest.importorskip(
+    "pygim._repository",
+    reason="C++ repository extension not built (Arrow/ODBC not installed)",
+)
+acquire_repo = _repository_module.acquire_repo
+Format = _repository_module.Format
 
 
 # ─── Fixtures ────────────────────────────────────────────────────────────────

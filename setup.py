@@ -57,6 +57,18 @@ def _base_kwargs():
     }
 
 
+def _dep_available(dep_name):
+    """Return True if the extension for *dep_name* can be built on this platform."""
+    if dep_name == "odbc" and sys.platform == "win32":
+        # ODBC extensions link against 'odbc' (unixODBC) which doesn't exist on
+        # Windows — the Windows equivalent is 'odbc32'.  Skip until the build
+        # configuration handles this platform difference.
+        print("[setup.py] Skipping odbc extensions: not supported on Windows "
+              "(library name incompatibility: 'odbc' vs 'odbc32').")
+        return False
+    return True  # All other deps must be present; build fails fast if not.
+
+
 _DEP_CONFIGURATORS = {
     "arrow": lambda kw: _apply_arrow(kw),
     "odbc":  lambda kw: _apply_odbc(kw),
@@ -64,14 +76,36 @@ _DEP_CONFIGURATORS = {
 
 
 def _apply_arrow(kw):
+    # pyarrow (declared in [build-system] requires) bundles Arrow C++ headers
+    # and shared libraries — works cross-platform without any system packages.
+    import pyarrow as _pa
+    kw.setdefault("include_dirs", []).append(_pa.get_include())
+    for libdir in _pa.get_library_dirs():
+        kw.setdefault("library_dirs", []).append(libdir)
     kw.setdefault("libraries", []).append("arrow")
+    # Set RPATH relative to the installed extension so it can locate the
+    # bundled Arrow libraries inside the pyarrow package at runtime.
+    # Standard pip install places both pygim/ and pyarrow/ as siblings inside
+    # site-packages, so @loader_path/../pyarrow (macOS) / $ORIGIN/../pyarrow
+    # (Linux) resolves correctly to pyarrow's library directory.
+    if sys.platform == "darwin":
+        kw.setdefault("extra_link_args", []).append(
+            "-Wl,-rpath,@loader_path/../pyarrow")
+    elif sys.platform.startswith("linux"):
+        kw.setdefault("extra_link_args", []).append(
+            "-Wl,-rpath,$ORIGIN/../pyarrow")
+    # Also honour conda / system installations (e.g. dev envs with conda-forge Arrow).
     if conda_prefix:
-        kw.setdefault("include_dirs", []).append(f"{conda_prefix}/include")
-        kw.setdefault("library_dirs", []).append(f"{conda_prefix}/lib")
+        inc = "Library/include" if sys.platform == "win32" else "include"
+        lib = "Library/lib"     if sys.platform == "win32" else "lib"
+        kw.setdefault("include_dirs", []).append(f"{conda_prefix}/{inc}")
+        kw.setdefault("library_dirs", []).append(f"{conda_prefix}/{lib}")
 
 
 def _apply_odbc(kw):
-    kw.setdefault("libraries", []).extend(["odbc", "arrow", "parquet"])
+    _apply_arrow(kw)  # Arrow + Parquet headers/libs and rpath are shared.
+    kw.setdefault("libraries", []).extend(["odbc", "parquet"])
+    # MSSQL ODBC Driver 18 shared library (Linux).
     mssql_odbc_lib = Path("/opt/microsoft/msodbcsql18/lib64")
     if mssql_odbc_lib.exists():
         kw.setdefault("library_dirs", []).append(str(mssql_odbc_lib))
@@ -80,9 +114,14 @@ def _apply_odbc(kw):
             kw.setdefault("libraries", []).append(f":{lib_files[0].name}")
             kw.setdefault("extra_link_args", []).append(
                 f"-Wl,-rpath,{mssql_odbc_lib}")
-    if conda_prefix:
-        kw.setdefault("include_dirs", []).append(f"{conda_prefix}/include")
-        kw.setdefault("library_dirs", []).append(f"{conda_prefix}/lib")
+    # unixODBC headers and library installed via Homebrew (macOS).
+    for brew_prefix in [Path("/opt/homebrew"), Path("/usr/local")]:
+        brew_inc = brew_prefix / "include"
+        brew_lib = brew_prefix / "lib"
+        if brew_inc.exists():
+            kw.setdefault("include_dirs", []).append(str(brew_inc))
+        if brew_lib.exists():
+            kw.setdefault("library_dirs", []).append(str(brew_lib))
 
 
 # ── Extension discovery via ext.*.toml ─────────────────────────────────────
@@ -99,6 +138,13 @@ for ext_toml in sorted(FAST_ROOT.glob("ext.*.toml")):
     ext_cfg = toml.loads(ext_toml.read_text())["extension"]
     module_name = f"pygim.{ext_cfg['module']}"
 
+    # Skip extensions whose system dependencies are not installed.
+    deps = ext_cfg.get("deps", [])
+    missing = [d for d in deps if not _dep_available(d)]
+    if missing:
+        print(f"[setup.py] Skipping {module_name}: missing system deps {missing}")
+        continue
+
     # Resolve sources relative to FAST_ROOT
     ext_stem = ext_toml.stem.split(".", 1)[1]  # "ext.factory" → "factory"
     if "sources" in ext_cfg:
@@ -108,7 +154,7 @@ for ext_toml in sorted(FAST_ROOT.glob("ext.*.toml")):
 
     # Build kwargs from dep presets
     kwargs = _base_kwargs()
-    for dep in ext_cfg.get("deps", []):
+    for dep in deps:
         configurator = _DEP_CONFIGURATORS.get(dep)
         if configurator:
             configurator(kwargs)
