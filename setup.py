@@ -110,7 +110,7 @@ def _ensure_arrow_symlinks(libdir):
         if target.exists() or not candidates:
             continue
         try:
-            target.symlink_to(candidates[0].name)
+            target.symlink_to(candidates[-1].name)
         except OSError:
             pass
 
