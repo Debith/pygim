@@ -11,6 +11,17 @@ Changelog
 
 Unreleased
 ----------
+Changed
+~~~~~~~
+- Build: Upgrade base C++ standard from C++20 to C++23 for all platforms (GCC, Clang, MSVC).
+- Build: Set ``MACOSX_DEPLOYMENT_TARGET`` default to 13.3 in ``setup.py`` (required for ``std::format`` and ``std::to_chars`` with floating-point).
+- CI: Update ``MACOSX_DEPLOYMENT_TARGET`` from 10.15 to 13.3 in ``python-packages.yml``.
+
+Fixed
+~~~~~
+- Fix macOS compilation failure caused by ``std::format`` with floating-point requiring ``std::to_chars`` (unavailable below macOS 13.3).
+- Fix Windows (MSVC) compilation failure: replace GCC-only ``__builtin_unreachable()`` with C++23 ``std::unreachable()`` in ``datagen/core.h``.
+
 Added
 ~~~~~
 - Initial CHANGELOG with retroactive notes for registry enhancement work.

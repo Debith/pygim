@@ -22,13 +22,18 @@ if os.environ.get("PYGIM_BCP_PROFILING", "").strip() == "1":
     base_macros.append(("PYGIM_BCP_PROFILING", "1"))
 
 
+# Ensure macOS deployment target is high enough for C++23 library features
+# (std::format with floating-point and std::to_chars require macOS 13.3+).
+if sys.platform == "darwin":
+    os.environ.setdefault("MACOSX_DEPLOYMENT_TARGET", "13.3")
+
 # Pick sensible flags per-compiler
 if sys.platform == "win32":
-    extra_compile_args = ["/std:c++20", "/O2", "/GL"]
+    extra_compile_args = ["/std:c++23", "/O2", "/GL"]
     extra_link_args_global = ["/LTCG"]
 else:
     extra_compile_args = [
-        "-std=c++20",
+        "-std=c++23",
         "-O3",
         "-funroll-loops",
         "-fno-math-errno",
@@ -147,13 +152,7 @@ def _apply_arrow(kw):
 def _apply_odbc(kw):
     _apply_arrow(kw)  # Arrow + Parquet headers/libs and rpath are shared.
     kw.setdefault("libraries", []).extend(["odbc", "parquet"])
-    # ODBC extensions use C++23 features (std::expected).  Bump from the
-    # base C++20 standard on Unix (ODBC is already skipped on Windows).
-    if sys.platform != "win32":
-        args = kw.get("extra_compile_args", [])
-        kw["extra_compile_args"] = [
-            a for a in args if not a.startswith("-std=")
-        ] + ["-std=c++23"]
+    # Base standard is already C++23 (required for std::expected etc.).
     # MSSQL ODBC Driver 18 shared library (Linux).
     mssql_odbc_lib = Path("/opt/microsoft/msodbcsql18/lib64")
     if mssql_odbc_lib.exists():
