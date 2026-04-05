@@ -24,14 +24,12 @@ if os.environ.get("PYGIM_BCP_PROFILING", "").strip() == "1":
 
 # Pick sensible flags per-compiler
 if sys.platform == "win32":
-    extra_compile_args = ["/std:c++23", "/O2", "/GL"]
+    extra_compile_args = ["/std:c++20", "/O2", "/GL"]
     extra_link_args_global = ["/LTCG"]
 else:
     extra_compile_args = [
-        "-std=c++23",
+        "-std=c++20",
         "-O3",
-        "-march=native",
-        "-mtune=native",
         "-funroll-loops",
         "-fno-math-errno",
         "-flto",
@@ -66,6 +64,24 @@ def _dep_available(dep_name):
         print("[setup.py] Skipping odbc extensions: not supported on Windows "
               "(library name incompatibility: 'odbc' vs 'odbc32').")
         return False
+    if dep_name == "arrow" and sys.platform == "win32":
+        # pyarrow pip package on Windows ships DLLs but not the import
+        # libraries (.lib) that MSVC needs at link time.  Skip unless
+        # Arrow C++ is installed separately (e.g. via conda).
+        try:
+            import pyarrow as _pa
+            for d in _pa.get_library_dirs():
+                if (Path(d) / "arrow.lib").exists():
+                    return True
+        except ImportError:
+            pass
+        if conda_prefix:
+            lib = Path(f"{conda_prefix}/Library/lib")
+            if (lib / "arrow.lib").exists():
+                return True
+        print("[setup.py] Skipping arrow extensions on Windows: "
+              "Arrow C++ import libraries (.lib) not found.")
+        return False
     return True  # All other deps must be present; build fails fast if not.
 
 
@@ -75,6 +91,30 @@ _DEP_CONFIGURATORS = {
 }
 
 
+def _ensure_arrow_symlinks(libdir):
+    """Create unversioned .so/.dylib symlinks for pyarrow-bundled Arrow libs.
+
+    pyarrow ships versioned shared objects (e.g. libarrow.so.2300) but omits
+    the unversioned symlinks (libarrow.so) that the linker expects when using
+    ``-larrow``.  Create them if missing; silently skip on permission errors.
+    """
+    p = Path(libdir)
+    for name in ("arrow", "parquet", "arrow_python",
+                 "arrow_acero", "arrow_dataset", "arrow_compute"):
+        if sys.platform == "darwin":
+            target = p / f"lib{name}.dylib"
+            candidates = sorted(p.glob(f"lib{name}.*.dylib"))
+        else:
+            target = p / f"lib{name}.so"
+            candidates = sorted(p.glob(f"lib{name}.so.*"))
+        if target.exists() or not candidates:
+            continue
+        try:
+            target.symlink_to(candidates[0].name)
+        except OSError:
+            pass
+
+
 def _apply_arrow(kw):
     # pyarrow (declared in [build-system] requires) bundles Arrow C++ headers
     # and shared libraries — works cross-platform without any system packages.
@@ -82,6 +122,8 @@ def _apply_arrow(kw):
     kw.setdefault("include_dirs", []).append(_pa.get_include())
     for libdir in _pa.get_library_dirs():
         kw.setdefault("library_dirs", []).append(libdir)
+        # Ensure the unversioned symlinks exist for the linker.
+        _ensure_arrow_symlinks(libdir)
     kw.setdefault("libraries", []).append("arrow")
     # Set RPATH relative to the installed extension so it can locate the
     # bundled Arrow libraries inside the pyarrow package at runtime.
@@ -105,6 +147,13 @@ def _apply_arrow(kw):
 def _apply_odbc(kw):
     _apply_arrow(kw)  # Arrow + Parquet headers/libs and rpath are shared.
     kw.setdefault("libraries", []).extend(["odbc", "parquet"])
+    # ODBC extensions use C++23 features (std::expected).  Bump from the
+    # base C++20 standard on Unix (ODBC is already skipped on Windows).
+    if sys.platform != "win32":
+        args = kw.get("extra_compile_args", [])
+        kw["extra_compile_args"] = [
+            a for a in args if not a.startswith("-std=")
+        ] + ["-std=c++23"]
     # MSSQL ODBC Driver 18 shared library (Linux).
     mssql_odbc_lib = Path("/opt/microsoft/msodbcsql18/lib64")
     if mssql_odbc_lib.exists():
