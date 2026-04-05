@@ -22,14 +22,17 @@ Usage::
     print(f"Saved {metrics['processed_rows']} rows in {metrics['total_seconds']:.2f}s")
 """
 
-from pygim import _repository as _ext
+try:
+    from pygim import _repository as _ext  # type: ignore
 
-Format = _ext.Format
-Repository = _ext.Repository
-acquire_repo = _ext.acquire_repo
+    Format = _ext.Format
+    Repository = _ext.Repository
+    acquire_repo = _ext.acquire_repo
 
-__all__ = [
-    "Format",
-    "Repository",
-    "acquire_repo",
-]
+    __all__ = [
+        "Format",
+        "Repository",
+        "acquire_repo",
+    ]
+except ImportError:  # pragma: no cover – extension absent (Arrow/ODBC not installed)
+    __all__ = []

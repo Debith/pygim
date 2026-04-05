@@ -57,6 +57,35 @@ def _base_kwargs():
     }
 
 
+def _header_in_search_dirs(header):
+    """Return True if *header* is found in any of the standard include dirs."""
+    search_dirs = [
+        Path("/usr/include"),
+        Path("/usr/local/include"),
+        Path("/opt/homebrew/include"),           # macOS Apple Silicon
+        Path("/opt/homebrew/opt/apache-arrow/include"),
+    ]
+    if conda_prefix:
+        search_dirs.insert(0, Path(conda_prefix) / "include")
+    return any((d / header).exists() for d in search_dirs)
+
+
+def _dep_available(dep_name):
+    """Return True if all prerequisites for *dep_name* are discoverable."""
+    if dep_name == "arrow":
+        return _header_in_search_dirs("arrow/api.h")
+    if dep_name == "odbc":
+        # ODBC extensions require ODBC headers AND the MS ODBC Driver 18
+        # library (the only currently supported backend).
+        if not Path("/opt/microsoft/msodbcsql18/lib64").exists():
+            return False
+        return _header_in_search_dirs("sql.h")
+    # Unknown dep: warn and assume unavailable so the build fails fast if
+    # someone adds a new dep type without updating this function.
+    print(f"[setup.py] WARNING: unknown dep '{dep_name}' – skipping extension.")
+    return False
+
+
 _DEP_CONFIGURATORS = {
     "arrow": lambda kw: _apply_arrow(kw),
     "odbc":  lambda kw: _apply_odbc(kw),
@@ -99,6 +128,13 @@ for ext_toml in sorted(FAST_ROOT.glob("ext.*.toml")):
     ext_cfg = toml.loads(ext_toml.read_text())["extension"]
     module_name = f"pygim.{ext_cfg['module']}"
 
+    # Skip extensions whose system dependencies are not installed.
+    deps = ext_cfg.get("deps", [])
+    missing = [d for d in deps if not _dep_available(d)]
+    if missing:
+        print(f"[setup.py] Skipping {module_name}: missing system deps {missing}")
+        continue
+
     # Resolve sources relative to FAST_ROOT
     ext_stem = ext_toml.stem.split(".", 1)[1]  # "ext.factory" → "factory"
     if "sources" in ext_cfg:
@@ -108,7 +144,7 @@ for ext_toml in sorted(FAST_ROOT.glob("ext.*.toml")):
 
     # Build kwargs from dep presets
     kwargs = _base_kwargs()
-    for dep in ext_cfg.get("deps", []):
+    for dep in deps:
         configurator = _DEP_CONFIGURATORS.get(dep)
         if configurator:
             configurator(kwargs)
