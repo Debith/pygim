@@ -34,19 +34,26 @@ template <BackendPolicy Backend>
 class Repository {
     std::shared_ptr<ConnectionPool<Backend>> m_pool;
     typename Backend::LoadCache              m_load_cache;
+    int64_t                                  m_block_size;
+    int                                      m_packet_size;
 
 public:
-    explicit Repository(std::shared_ptr<ConnectionPool<Backend>> pool)
+    explicit Repository(std::shared_ptr<ConnectionPool<Backend>> pool,
+                        int64_t block_size = 4096,
+                        int packet_size = 16384)
         : m_pool(std::move(pool))
+        , m_block_size(block_size)
+        , m_packet_size(packet_size)
     {
         PYGIM_LOG_FMT("[Repository<%s>] constructing (pool-backed)\n", backend_name());
     }
 
     // Static factory: creates pool + repo in one call
     [[nodiscard]]
-    static Repository create(std::string_view conn_str, std::size_t pool_size = 4) {
-        auto pool = std::make_shared<ConnectionPool<Backend>>(conn_str, pool_size);
-        return Repository(std::move(pool));
+    static Repository create(std::string_view conn_str, std::size_t pool_size = 4,
+                             int64_t block_size = 4096, int packet_size = 16384) {
+        auto pool = std::make_shared<ConnectionPool<Backend>>(conn_str, pool_size, packet_size);
+        return Repository(std::move(pool), block_size, packet_size);
     }
 
     // save: checks out connection, delegates to SaveImpl with Arrow Table
@@ -90,7 +97,8 @@ public:
         auto handle = std::move(*result);
         return Backend::LoadImpl::execute(handle.get(), sql, load_workers,
                                           partition_column, table_name_str,
-                                          m_load_cache);
+                                          m_load_cache, m_block_size,
+                                          m_packet_size);
     }
 
     /// Load from a table name or raw SQL string.
@@ -126,7 +134,8 @@ public:
         auto handle = std::move(*result);
         return Backend::LoadImpl::execute(handle.get(), sql, load_workers,
                                           partition_column, table_name_str,
-                                          m_load_cache);
+                                          m_load_cache, m_block_size,
+                                          m_packet_size);
     }
 
     [[nodiscard]] std::string_view connection_string() const {

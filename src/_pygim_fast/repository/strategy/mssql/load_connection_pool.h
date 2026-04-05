@@ -18,14 +18,15 @@ namespace pygim::strategy::mssql {
 class LoadConnectionPool {
 public:
     /// Create @p pool_size connections to @p conn_str in parallel.
-    explicit LoadConnectionPool(std::string_view conn_str, int pool_size)
+    explicit LoadConnectionPool(std::string_view conn_str, int pool_size,
+                                int packet_size = 16384)
     {
         if (pool_size <= 0) return;
 
         m_connections.resize(static_cast<std::size_t>(pool_size));
 
         if (pool_size == 1) {
-            m_connections[0].open(conn_str);
+            m_connections[0].open(conn_str, packet_size);
             return;
         }
 
@@ -36,9 +37,9 @@ public:
         std::string conn_str_copy(conn_str);  // stable storage for threads
 
         for (int i = 0; i < pool_size; ++i) {
-            threads.emplace_back([this, &conn_str_copy, &errors, i]() {
+            threads.emplace_back([this, &conn_str_copy, &errors, i, packet_size]() {
                 try {
-                    m_connections[static_cast<std::size_t>(i)].open(conn_str_copy);
+                    m_connections[static_cast<std::size_t>(i)].open(conn_str_copy, packet_size);
                 } catch (...) {
                     errors[static_cast<std::size_t>(i)] = std::current_exception();
                 }

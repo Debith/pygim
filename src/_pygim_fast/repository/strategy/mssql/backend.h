@@ -81,8 +81,8 @@ struct OdbcConnection {
     OdbcConnection& operator=(const OdbcConnection&) = delete;
 
     /// Open an ODBC connection with BCP enabled.
-    void open(std::string_view conn_str) {
-        m_conn_str = ensure_packet_size(conn_str);
+    void open(std::string_view conn_str, int packet_size = kDefaultPacketSize) {
+        m_conn_str = ensure_packet_size(conn_str, packet_size);
 
         // 1. Allocate environment handle + set ODBC 3.x
         if (SQLAllocHandle(SQL_HANDLE_ENV, SQL_NULL_HANDLE, &m_env) != SQL_SUCCESS)
@@ -179,10 +179,10 @@ struct MssqlBackend {
 
     static constexpr const char* name() { return "mssql"; }
 
-    static Connection connect(std::string_view conn_str) {
+    static Connection connect(std::string_view conn_str, int packet_size = kDefaultPacketSize) {
         PYGIM_LOG_FMT("[MssqlBackend] connect()\n");
         Connection conn;
-        conn.open(conn_str);
+        conn.open(conn_str, packet_size);
         return conn;
     }
 

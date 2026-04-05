@@ -222,13 +222,17 @@ def run_write(
     profile_name: str,
     bcp_workers: int,
     batch_size: int = 100_000,
+    block_size: int = 4096,
+    packet_size: int = 16384,
 ) -> dict:
     """Insert *df* via BCP and return timing metrics."""
     from pygim.repository import acquire_repo
 
     repo = acquire_repo(conn_str, format="polars",
                         batch_size=batch_size,
-                        bcp_workers=bcp_workers)
+                        bcp_workers=bcp_workers,
+                        block_size=block_size,
+                        packet_size=packet_size)
 
     payload_bytes = estimate_size_bytes(df)
     nrows = len(df)
@@ -257,11 +261,15 @@ def run_load(
     table: str,
     profile_name: str,
     load_workers: int,
+    block_size: int = 4096,
+    packet_size: int = 16384,
 ) -> dict:
     """Load all rows from *table* via Repository.load() (Arrow → Polars)."""
     from pygim.repository import acquire_repo
 
-    repo = acquire_repo(conn_str, format="polars")
+    repo = acquire_repo(conn_str, format="polars",
+                        block_size=block_size,
+                        packet_size=packet_size)
 
     t0 = time.perf_counter()
     df = repo.load(table, load_workers=load_workers)
@@ -594,7 +602,8 @@ def _system_info() -> dict:
 
 
 def save_baseline(results: list[dict], rows: int, workers: int,
-                   path: str) -> None:
+                   path: str, *, batch_size: int = 100_000,
+                   block_size: int = 4096, packet_size: int = 16384) -> None:
     by_key: dict[str, dict] = {}
     for r in results:
         direction = r.get("direction", "write")
@@ -614,7 +623,9 @@ def save_baseline(results: list[dict], rows: int, workers: int,
     baseline = {
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "system": _system_info(),
-        "config": {"rows": rows, "workers": workers},
+        "config": {"rows": rows, "workers": workers,
+                   "batch_size": batch_size, "block_size": block_size,
+                   "packet_size": packet_size},
         "results": by_key,
     }
     with open(path, "w") as f:
@@ -713,6 +724,10 @@ def check_regression(
               help="Rows to spot-check during verification")
 @click.option("--batch-size", default=100_000, type=int, show_default=True,
               help="BCP batch size (rows per bcp_batch call)")
+@click.option("--block-size", default=8192, type=int, show_default=True,
+              help="ODBC fetch block size (rows per SQLFetch call)")
+@click.option("--packet-size", default=16384, type=int, show_default=True,
+              help="TDS packet size in bytes (network buffer)")
 @click.option("--no-truncate", is_flag=True,
               help="Skip TRUNCATE before each write run")
 @click.option("--warmup", is_flag=True,
@@ -730,7 +745,7 @@ def check_regression(
               help="Drop/recreate tables and shrink DB before benchmarking")
 def bench(
     conn, rows, dataset, mode, fmt, workers,
-    no_verify, verify_sample, batch_size, no_truncate, warmup, iterations,
+    no_verify, verify_sample, batch_size, block_size, packet_size, no_truncate, warmup, iterations,
     baseline_out, baseline_in, regression_threshold, recreate_tables,
 ):
     """BCP throughput benchmark — target architecture (placeholder)."""
@@ -800,7 +815,9 @@ def bench(
                     truncate_table(conn_str, table, pyodbc)
                 click.echo(f"Warm-up [{pname}] …")
                 run_write(conn_str, table, df, pname, workers,
-                          batch_size=batch_size)
+                          batch_size=batch_size,
+                          block_size=block_size,
+                          packet_size=packet_size)
                 _settle_server()
 
             # Multi-iteration: keep median result (robust against I/O outliers)
@@ -816,7 +833,9 @@ def bench(
                     else f"Writing [{pname}] (iter {it+1}/{iterations})"
                 click.echo(f"{label} …")
                 r = run_write(conn_str, table, df, pname, workers,
-                              batch_size=batch_size)
+                              batch_size=batch_size,
+                              block_size=block_size,
+                              packet_size=packet_size)
                 print_write_result(r)
                 run_results.append(r)
 
@@ -844,7 +863,8 @@ def bench(
         for pname in profiles:
             table = PROFILES[pname]["table"]
             click.echo(f"Loading [{pname}] …")
-            r = run_load(conn_str, table, pname, workers)
+            r = run_load(conn_str, table, pname, workers,
+                         block_size=block_size, packet_size=packet_size)
             all_results.append(r)
             print_load_result(r)
 
@@ -868,7 +888,9 @@ def bench(
 
     # ── Regression gate ──────────────────────────────────────────────────
     if baseline_out:
-        save_baseline(all_results, rows, workers, baseline_out)
+        save_baseline(all_results, rows, workers, baseline_out,
+                      batch_size=batch_size, block_size=block_size,
+                      packet_size=packet_size)
 
     if baseline_in:
         ok = check_regression(

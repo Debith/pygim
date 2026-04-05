@@ -21,7 +21,8 @@ struct MssqlLoadCache {
     /// Ensure a load pool of the right size exists. Returns pointer to it.
     /// Recreates if conn_str or pool_size changed since last call.
     [[nodiscard]]
-    LoadConnectionPool* ensure_pool(std::string_view conn_str, int pool_size) {
+    LoadConnectionPool* ensure_pool(std::string_view conn_str, int pool_size,
+                                    int packet_size = 16384) {
         if (m_pool && m_cached_size == pool_size && m_cached_conn_str == conn_str) {
             PYGIM_LOG_FMT("[MssqlLoadCache] reusing cached pool (%d connections)\n",
                           pool_size);
@@ -29,7 +30,7 @@ struct MssqlLoadCache {
         }
         PYGIM_LOG_FMT("[MssqlLoadCache] creating new pool (%d connections)\n",
                       pool_size);
-        m_pool = std::make_unique<LoadConnectionPool>(conn_str, pool_size);
+        m_pool = std::make_unique<LoadConnectionPool>(conn_str, pool_size, packet_size);
         m_cached_size = pool_size;
         m_cached_conn_str = std::string(conn_str);
         return m_pool.get();

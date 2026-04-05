@@ -43,7 +43,7 @@ namespace pygim::strategy::mssql {
 /// Executes a SQL query via ODBC, fetches results in blocks, and
 /// materialises them into an Arrow Table through ArrowBuilder.
 struct MssqlLoadImpl {
-    static constexpr int64_t kDefaultBlockSize = 4096;
+    static constexpr int64_t kDefaultBlockSize = 8192;
 
     /// Execute a SQL query and return results as Arrow Table + metrics.
     ///
@@ -55,13 +55,17 @@ struct MssqlLoadImpl {
     /// @param partition_column  Column to range-partition on (integer type).
     /// @param table_name        Table name for parallel load (needed for MIN/MAX).
     /// @param load_cache        Persistent pool cache for parallel load workers.
+    /// @param block_size        Block cursor size (rows per fetch).
+    /// @param packet_size       ODBC packet size for parallel load connections.
     [[nodiscard]]
     static core::LoadResult execute(OdbcConnection& conn,
                                     std::string_view sql,
                                     int load_workers,
                                     std::string_view partition_column,
                                     std::string_view table_name,
-                                    MssqlLoadCache& load_cache) {
+                                    MssqlLoadCache& load_cache,
+                                    int64_t block_size = kDefaultBlockSize,
+                                    int packet_size = kDefaultPacketSize) {
         using clock = std::chrono::steady_clock;
         core::LoadMetrics metrics;
         const auto t_total = clock::now();
@@ -77,7 +81,8 @@ struct MssqlLoadImpl {
                 }
                 if (!resolved_partition.empty()) {
                     return execute_parallel(conn, table_name, resolved_partition,
-                                            load_workers, kDefaultBlockSize, load_cache);
+                                            load_workers, block_size, load_cache,
+                                            packet_size);
                 }
                 PYGIM_LOG_FMT("[MssqlLoadImpl] no integer PK found for '%.*s' "
                               "— falling back to single-threaded\n",
@@ -120,14 +125,14 @@ struct MssqlLoadImpl {
 
         // ── 4. Set up builder + fetch buffers + dispatch ──────
         core::ArrowBuilder builder(schema_info.schema);
-        auto buffers = FetchBufferSet::allocate(schema_info.col_info, kDefaultBlockSize);
+        auto buffers = FetchBufferSet::allocate(schema_info.col_info, block_size);
         auto dispatch = build_column_dispatch(schema_info.schema, schema_info.nullable_flags);
 
-        // ── 5. Configure block cursor ───────────────────────────
+        // ── 5. Configure block cursor ───────────────────────────────
         {
             SQLRETURN ret = SQLSetStmtAttr(
                 stmt, SQL_ATTR_ROW_ARRAY_SIZE,
-                reinterpret_cast<SQLPOINTER>(kDefaultBlockSize), 0);
+                reinterpret_cast<SQLPOINTER>(block_size), 0);
             odbc::raise_if_error(ret, SQL_HANDLE_STMT, stmt,
                                  "SQLSetStmtAttr(ROW_ARRAY_SIZE)");
 

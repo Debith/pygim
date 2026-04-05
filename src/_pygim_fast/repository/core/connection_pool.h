@@ -147,16 +147,19 @@ class ConnectionPool {
     std::vector<typename Backend::Connection>  m_available;
     std::size_t                               m_total_created;
     std::size_t                               m_max_size;
+    int                                       m_packet_size;
     bool                                      m_closed;
     mutable std::mutex                        m_mutex;
     std::condition_variable                   m_cv;
 
 public:
     explicit ConnectionPool(std::string_view conn_str,
-                            std::size_t max_size = 8)
+                            std::size_t max_size = 8,
+                            int packet_size = 16384)
         : m_conn_str(conn_str)
         , m_total_created(0)
         , m_max_size(max_size)
+        , m_packet_size(packet_size)
         , m_closed(false)
     {
         m_available.reserve(max_size);
@@ -202,7 +205,7 @@ public:
         if (m_total_created < m_max_size) {
             ++m_total_created;
             lock.unlock();
-            auto conn = Backend::connect(m_conn_str);
+            auto conn = Backend::connect(m_conn_str, m_packet_size);
             PYGIM_LOG_FMT("[ConnectionPool] checkout → created new connection\n");
             return ConnectionHandle<Backend>(this, std::move(conn));
         }

@@ -69,6 +69,8 @@ class RepositoryAdapter {
     core::Repository<Backend>  m_repo;
     Format                     m_format;
     int64_t                    m_batch_size;
+    int64_t                    m_block_size;
+    int                        m_packet_size;
     std::string                m_table_hint;
     int                        m_bcp_workers;
     std::vector<py::function>  m_pre_transforms;
@@ -79,10 +81,14 @@ public:
                       Format format,
                       int64_t batch_size = 100000,
                       const std::string& table_hint = "TABLOCK",
-                      int bcp_workers = 1)
-        : m_repo(std::move(pool))
+                      int bcp_workers = 1,
+                      int64_t block_size = 4096,
+                      int packet_size = 16384)
+        : m_repo(std::move(pool), block_size, packet_size)
         , m_format(format)
         , m_batch_size(batch_size)
+        , m_block_size(block_size)
+        , m_packet_size(packet_size)
         , m_table_hint(table_hint)
         , m_bcp_workers(bcp_workers)
     {
@@ -98,11 +104,14 @@ public:
                                     std::size_t pool_size = 4,
                                     int64_t batch_size = 100000,
                                     const std::string& table_hint = "TABLOCK",
-                                    int bcp_workers = 1) {
+                                    int bcp_workers = 1,
+                                    int64_t block_size = 4096,
+                                    int packet_size = 16384) {
         auto pool = std::make_shared<core::ConnectionPool<Backend>>(
-            conn_str, pool_size);
+            conn_str, pool_size, packet_size);
         return RepositoryAdapter(std::move(pool), format,
-                                 batch_size, table_hint, bcp_workers);
+                                 batch_size, table_hint, bcp_workers,
+                                 block_size, packet_size);
     }
 
     // ── Transform hooks ──────────────────────────────────────

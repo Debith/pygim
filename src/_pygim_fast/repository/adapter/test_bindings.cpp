@@ -68,17 +68,21 @@ PYBIND11_MODULE(_repository_test, m) {
     py::class_<MssqlRepo>(m, "Repository", py::module_local())
         .def(py::init([](const std::string& conn_str, const std::string& format,
                          std::size_t pool_size, int64_t batch_size,
-                         const std::string& table_hint, int bcp_workers) {
+                         const std::string& table_hint, int bcp_workers,
+                         int64_t block_size, int packet_size) {
             auto fmt = adapter::parse_format(format);
             return MssqlRepo::create(conn_str, fmt, pool_size,
-                                     batch_size, table_hint, bcp_workers);
+                                     batch_size, table_hint, bcp_workers,
+                                     block_size, packet_size);
         }),
              py::arg("conn_str"),
              py::arg("format") = "polars",
              py::arg("pool_size") = 4,
              py::arg("batch_size") = 100000,
              py::arg("table_hint") = "TABLOCK",
-             py::arg("bcp_workers") = 1)
+             py::arg("bcp_workers") = 1,
+             py::arg("block_size") = 4096,
+             py::arg("packet_size") = 16384)
         .def("save", &MssqlRepo::save,
              py::arg("data"), py::arg("table_name"), py::arg("bcp_workers") = -1)
         .def("load",

@@ -237,6 +237,7 @@ inline void run_worker(OdbcConnection& conn,
 /// @param load_workers      Number of parallel workers (>= 2)
 /// @param block_size        Block cursor size per worker
 /// @param load_cache        Persistent pool cache for parallel load workers
+/// @param packet_size       ODBC packet size for parallel load connections
 [[nodiscard]]
 inline core::LoadResult execute_parallel(
     OdbcConnection& conn,
@@ -244,7 +245,8 @@ inline core::LoadResult execute_parallel(
     std::string_view partition_column,
     int load_workers,
     int64_t block_size,
-    MssqlLoadCache& load_cache) {
+    MssqlLoadCache& load_cache,
+    int packet_size = 16384) {
     using clock = std::chrono::steady_clock;
     core::LoadMetrics metrics;
     const auto t_total = clock::now();
@@ -308,7 +310,7 @@ inline core::LoadResult execute_parallel(
     // 4. Establish N-1 worker connections (cached)
     auto run_workers = [&](MssqlLoadCache& cache) -> std::vector<detail::WorkerResult> {
         const auto t_connect = clock::now();
-        auto* extra_pool = cache.ensure_pool(conn.conn_str(), load_workers - 1);
+        auto* extra_pool = cache.ensure_pool(conn.conn_str(), load_workers - 1, packet_size);
         metrics.connect_seconds = std::chrono::duration<double>(clock::now() - t_connect).count();
         PYGIM_LOG_FMT("[parallel_load] %d extra connections in %.3fs\n",
                       load_workers - 1, metrics.connect_seconds);

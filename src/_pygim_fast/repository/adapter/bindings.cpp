@@ -28,10 +28,13 @@ static py::object acquire_repo(const std::string& conn_str,
                                std::size_t pool_size,
                                int64_t batch_size,
                                const std::string& table_hint,
-                               int bcp_workers) {
+                               int bcp_workers,
+                               int64_t block_size,
+                               int packet_size) {
     auto fmt = adapter::parse_format(format);
     return py::cast(MssqlRepo::create(conn_str, fmt, pool_size,
-                                      batch_size, table_hint, bcp_workers));
+                                      batch_size, table_hint, bcp_workers,
+                                      block_size, packet_size));
 }
 
 PYBIND11_MODULE(_repository, m) {
@@ -82,6 +85,8 @@ PYBIND11_MODULE(_repository, m) {
           py::arg("batch_size") = 100000,
           py::arg("table_hint") = "TABLOCK",
           py::arg("bcp_workers") = 1,
+          py::arg("block_size") = 4096,
+          py::arg("packet_size") = 16384,
           R"doc(
           Create a repository from a connection string.
 
@@ -99,5 +104,9 @@ PYBIND11_MODULE(_repository, m) {
               BCP table hint (default: "TABLOCK").
           bcp_workers : int
               Number of parallel BCP workers (default: 1).
+          block_size : int
+              Block cursor size for load operations (default: 4096).
+          packet_size : int
+              ODBC connection packet size (default: 16384).
           )doc");
 }
