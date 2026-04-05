@@ -26,6 +26,23 @@ jobs:
       with:
         python-version: ${{ matrix.python-version }}
 
+    - name: Install MSSQL ODBC Driver 18 (Linux)
+      if: matrix.os == 'ubuntu-latest'
+      run: |
+        curl -sSL https://packages.microsoft.com/keys/microsoft.asc \
+          | sudo tee /etc/apt/trusted.gpg.d/microsoft.asc
+        DISTRO="$(lsb_release -rs)"
+        curl -sSL "https://packages.microsoft.com/config/ubuntu/${DISTRO}/prod.list" \
+          | sudo tee /etc/apt/sources.list.d/mssql-release.list
+        sudo apt-get update
+        sudo ACCEPT_EULA=Y apt-get install -y msodbcsql18 unixodbc-dev
+
+    - name: Install MSSQL ODBC Driver 18 (macOS)
+      if: matrix.os == 'macos-latest'
+      run: |
+        brew tap microsoft/mssql-release https://github.com/microsoft/homebrew-mssql-release
+        HOMEBREW_ACCEPT_EULA=Y brew install msodbcsql18 unixodbc
+
     - name: Install dependencies (Linux & MacOS)
       if: matrix.os != 'windows-latest'
       run: |

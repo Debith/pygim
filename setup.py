@@ -57,33 +57,16 @@ def _base_kwargs():
     }
 
 
-def _header_in_search_dirs(header):
-    """Return True if *header* is found in any of the standard include dirs."""
-    search_dirs = [
-        Path("/usr/include"),
-        Path("/usr/local/include"),
-        Path("/opt/homebrew/include"),           # macOS Apple Silicon
-        Path("/opt/homebrew/opt/apache-arrow/include"),
-    ]
-    if conda_prefix:
-        search_dirs.insert(0, Path(conda_prefix) / "include")
-    return any((d / header).exists() for d in search_dirs)
-
-
 def _dep_available(dep_name):
-    """Return True if all prerequisites for *dep_name* are discoverable."""
-    if dep_name == "arrow":
-        return _header_in_search_dirs("arrow/api.h")
-    if dep_name == "odbc":
-        # ODBC extensions require ODBC headers AND the MS ODBC Driver 18
-        # library (the only currently supported backend).
-        if not Path("/opt/microsoft/msodbcsql18/lib64").exists():
-            return False
-        return _header_in_search_dirs("sql.h")
-    # Unknown dep: warn and assume unavailable so the build fails fast if
-    # someone adds a new dep type without updating this function.
-    print(f"[setup.py] WARNING: unknown dep '{dep_name}' – skipping extension.")
-    return False
+    """Return True if the extension for *dep_name* can be built on this platform."""
+    if dep_name == "odbc" and sys.platform == "win32":
+        # ODBC extensions link against 'odbc' (unixODBC) which doesn't exist on
+        # Windows — the Windows equivalent is 'odbc32'.  Skip until the build
+        # configuration handles this platform difference.
+        print("[setup.py] Skipping odbc extensions: not supported on Windows "
+              "(library name incompatibility: 'odbc' vs 'odbc32').")
+        return False
+    return True  # All other deps must be present; build fails fast if not.
 
 
 _DEP_CONFIGURATORS = {
@@ -93,14 +76,36 @@ _DEP_CONFIGURATORS = {
 
 
 def _apply_arrow(kw):
+    # pyarrow (declared in [build-system] requires) bundles Arrow C++ headers
+    # and shared libraries — works cross-platform without any system packages.
+    import pyarrow as _pa
+    kw.setdefault("include_dirs", []).append(_pa.get_include())
+    for libdir in _pa.get_library_dirs():
+        kw.setdefault("library_dirs", []).append(libdir)
     kw.setdefault("libraries", []).append("arrow")
+    # Set RPATH relative to the installed extension so it can locate the
+    # bundled Arrow libraries inside the pyarrow package at runtime.
+    # Standard pip install places both pygim/ and pyarrow/ as siblings inside
+    # site-packages, so @loader_path/../pyarrow (macOS) / $ORIGIN/../pyarrow
+    # (Linux) resolves correctly to pyarrow's library directory.
+    if sys.platform == "darwin":
+        kw.setdefault("extra_link_args", []).append(
+            "-Wl,-rpath,@loader_path/../pyarrow")
+    elif sys.platform.startswith("linux"):
+        kw.setdefault("extra_link_args", []).append(
+            "-Wl,-rpath,$ORIGIN/../pyarrow")
+    # Also honour conda / system installations (e.g. dev envs with conda-forge Arrow).
     if conda_prefix:
-        kw.setdefault("include_dirs", []).append(f"{conda_prefix}/include")
-        kw.setdefault("library_dirs", []).append(f"{conda_prefix}/lib")
+        inc = "Library/include" if sys.platform == "win32" else "include"
+        lib = "Library/lib"     if sys.platform == "win32" else "lib"
+        kw.setdefault("include_dirs", []).append(f"{conda_prefix}/{inc}")
+        kw.setdefault("library_dirs", []).append(f"{conda_prefix}/{lib}")
 
 
 def _apply_odbc(kw):
-    kw.setdefault("libraries", []).extend(["odbc", "arrow", "parquet"])
+    _apply_arrow(kw)  # Arrow + Parquet headers/libs and rpath are shared.
+    kw.setdefault("libraries", []).extend(["odbc", "parquet"])
+    # MSSQL ODBC Driver 18 shared library (Linux).
     mssql_odbc_lib = Path("/opt/microsoft/msodbcsql18/lib64")
     if mssql_odbc_lib.exists():
         kw.setdefault("library_dirs", []).append(str(mssql_odbc_lib))
@@ -109,9 +114,14 @@ def _apply_odbc(kw):
             kw.setdefault("libraries", []).append(f":{lib_files[0].name}")
             kw.setdefault("extra_link_args", []).append(
                 f"-Wl,-rpath,{mssql_odbc_lib}")
-    if conda_prefix:
-        kw.setdefault("include_dirs", []).append(f"{conda_prefix}/include")
-        kw.setdefault("library_dirs", []).append(f"{conda_prefix}/lib")
+    # unixODBC headers and library installed via Homebrew (macOS).
+    for brew_prefix in [Path("/opt/homebrew"), Path("/usr/local")]:
+        brew_inc = brew_prefix / "include"
+        brew_lib = brew_prefix / "lib"
+        if brew_inc.exists():
+            kw.setdefault("include_dirs", []).append(str(brew_inc))
+        if brew_lib.exists():
+            kw.setdefault("library_dirs", []).append(str(brew_lib))
 
 
 # ── Extension discovery via ext.*.toml ─────────────────────────────────────
