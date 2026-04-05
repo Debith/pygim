@@ -1,46 +1,68 @@
-# Repository Module — Architecture & Roadmap
+# Repository Module — Architecture
 
-Current as of the `core/repository` branch. Replaces the archived
-`repository_file_structure.md` (which referenced the deleted `format/` directory
-and `FormatAdapter`/`FlexibleRepository` classes). This is the single source
-of truth for the repository module's design.
+Current as of April 2026 (`core/repository` branch). Single source of truth for the
+repository module's design. Replaces all prior architecture documents
+(archived under `__archive__/repository/design/`).
+
+**Diagrams** (PlantUML, same directory):
+
+- `repository_abstract_architecture.puml` — Layer architecture overview
+- `repository_class_diagram.puml` — Detailed class diagram
+- `repository_save_sequence.puml` — Save path sequence (Python → BCP)
+- `repository_load_sequence.puml` — Load path sequence (Python → ODBC → Arrow)
 
 ---
 
 ## 1. Directory Layout
 
-```
+```text
 src/_pygim_fast/repository/
-├── core/                       ← Backend-agnostic concepts + generic logic
-│   ├── arrow_builder.h         ← ArrowBuilder columnar builder (ODBC results → Arrow)
-│   ├── backend_policy.h        ← BackendPolicy concept (C++20)
-│   ├── connection_pool.h       ← Thread-safe ConnectionPool + RAII ConnectionHandle
-│   ├── dialect.h               ← DialectPolicy concept + build_sql() free function
-│   ├── query.h                 ← Fluent Query builder (intent-only + accessors)
-│   └── repository.h            ← Generic Repository<Backend> facade
-├── strategy/
-│   └── mssql/                  ← SQL Server concrete backend
-│       ├── backend.h           ← OdbcConnection (real ODBC) + MssqlBackend struct
-│       ├── dialect.h           ← MssqlDialect (TOP N, [bracket]-quoting)
-│       ├── odbc_error.h        ← ODBC diagnostic collection + raise_if_error()
-│       ├── sql_helpers.h       ← Table identifier validation + qualification
-│       ├── save_impl.h         ← MssqlSaveImpl — delegates to BCP pipeline
-│       ├── load_impl.h         ← MssqlLoadImpl (block cursor → ArrowBuilder) — PLACEHOLDER
-│       └── bcp/                ← BCP bulk insert pipeline
-│           ├── bcp_api.h       ← Thread-safe BCP function pointer loading (dlopen)
-│           ├── bcp_types.h     ← ColumnBinding, BcpContext, temporal converters
-│           ├── bcp_bind.h      ← 16+ per-type Arrow→BCP column bindings + dispatcher
-│           ├── bcp_helpers.h   ← Row-level helpers (string/binary/flush)
-│           ├── bcp_pool.h      ← Parallel eager BCP connection pool
-│           └── bcp_pipeline.h  ← Single + parallel BCP orchestrator + BcpMetrics
-└── adapter/                    ← Python bindings (pybind11 edge)
-    ├── adapter.h               ← RepositoryAdapter<Backend> (owns Repository directly)
-    ├── arrow_import.h          ← py::object → shared_ptr<RecordBatchReader> (PyCapsule)
-    ├── bindings.cpp            ← Production: Repository + Format enum + acquire_repo()
-    └── test_bindings.cpp       ← Test-only: Query, MssqlDialect, Repository (module_local)
+├── core/                           ← Backend-agnostic concepts + generic logic
+│   ├── arrow_builder.h             ← Columnar builder: ODBC block buffers → Arrow Table
+│   ├── backend_policy.h            ← BackendPolicy concept (C++20) — includes LoadCache type
+│   ├── connection_pool.h           ← Thread-safe ConnectionPool + RAII ConnectionHandle
+│   ├── dialect.h                   ← DialectPolicy concept + build_sql()
+│   ├── load_result.h               ← LoadMetrics + LoadResult (table + timing)
+│   ├── null_load_cache.h           ← NullLoadCache (zero-cost for non-MSSQL backends)
+│   ├── query.h                     ← Fluent Query builder (intent-only)
+│   └── repository.h                ← Repository<Backend> facade
+├── strategy/mssql/                 ← SQL Server concrete backend
+│   ├── backend.h                   ← OdbcConnection + MssqlBackend trait struct
+│   ├── dialect.h                   ← MssqlDialect ([bracket]-quoting, TOP N)
+│   ├── fetch_buffer.h              ← FetchBuffer + FetchBufferSet (block cursor storage)
+│   ├── load_cache.h                ← MssqlLoadCache (persistent LoadConnectionPool cache)
+│   ├── load_connection_pool.h      ← LoadConnectionPool (parallel worker connections)
+│   ├── load_dispatch.h             ← O(1) dispatch table (arrow type → block append fn)
+│   ├── load_impl.h                 ← MssqlLoadImpl (block cursor + parallel dispatch)
+│   ├── odbc_compat.h               ← SQL_SS_TIME2 platform compatibility
+│   ├── odbc_error.h                ← ODBC diagnostic collection + raise_if_error()
+│   ├── parallel_load.h             ← execute_parallel (range-partitioned multi-worker load)
+│   ├── pk_detect.h                 ← Auto-detect integer PK for partition column
+│   ├── schema_describe.h           ← describe_columns(): SchemaInfo from ODBC metadata
+│   ├── sql_helpers.h               ← Table identifier validation + qualification
+│   ├── sql_type_map.h              ← ODBC SQL type → Arrow type mapping (TypeMapping)
+│   ├── stmt_handle.h               ← StmtHandle RAII wrapper (SQLHSTMT)
+│   ├── save_impl.h                 ← MssqlSaveImpl (delegates to BCP pipeline)
+│   └── bcp/                        ← BCP bulk insert pipeline
+│       ├── bcp_api.h               ← Thread-safe BCP function pointer loading (dlopen)
+│       ├── bcp_bind.h              ← Column binding orchestration
+│       ├── bcp_bind_dispatch.h     ← Compile-time bind dispatch table
+│       ├── bcp_helpers.h           ← Row-level BCP operations (string/flush/null)
+│       ├── bcp_pipeline.h          ← Single + parallel BCP orchestrator + BcpMetrics
+│       ├── bcp_pool.h              ← BcpConnectionPool (pre-connected parallel pool)
+│       ├── bcp_profiler.h          ← Optional per-section profiling (PYGIM_BCP_PROFILING)
+│       ├── bcp_rebind_dispatch.h   ← Fast rebind for multi-batch streaming
+│       ├── bcp_types.h             ← ColumnBinding, BcpContext, ClassifiedColumns
+│       └── fetch_benchmark.h       ← Low-level SQLFetch throughput microbench
+├── adapter/                        ← Python bindings (pybind11 edge)
+│   ├── adapter.h                   ← RepositoryAdapter<Backend> (owns Repository directly)
+│   ├── arrow_export.h              ← shared_ptr<arrow::Table> → Python DataFrame
+│   ├── arrow_import.h              ← py::object → shared_ptr<arrow::Table> (PyCapsule)
+│   ├── bindings.cpp                ← Production: Repository + Format + acquire_repo()
+│   └── test_bindings.cpp           ← Test-only: Query, MssqlDialect, Repository (module_local)
 
 src/pygim/
-└── repository.py               ← Public Python API: re-exports acquire_repo, Repository, Format
+└── repository.py                   ← Public Python API: re-exports acquire_repo, Repository, Format
 ```
 
 ### Build Configuration
@@ -56,12 +78,12 @@ src/pygim/
 
 | Directory              | C++ Namespace                   | Responsibility                                        |
 |------------------------|---------------------------------|-------------------------------------------------------|
-| `core/`                | `pygim::core`                   | Concepts, generic templates, Query                    |
-| `strategy/mssql/`      | `pygim::strategy::mssql`        | MSSQL-specific types + SQL dialect                    |
+| `core/`                | `pygim::core`                   | Concepts, generic templates, Query, ArrowBuilder      |
+| `strategy/mssql/`      | `pygim::strategy::mssql`        | MSSQL-specific types, dialect, load/save pipeline     |
 | `strategy/mssql/bcp/`  | `pygim::strategy::mssql::bcp`   | BCP bulk insert pipeline (bind, row loop, pool)       |
 | `strategy/mssql/`      | `pygim::strategy::mssql::odbc`  | ODBC diagnostics (shared helper namespace)            |
 | `strategy/mssql/`      | `pygim::strategy::mssql::sql`   | Table identifier validation + qualification           |
-| `adapter/`             | `pygim::adapter`                | Format enum, RepositoryAdapter, Arrow import, bindings|
+| `adapter/`             | `pygim::adapter`                | Format enum, RepositoryAdapter, Arrow import/export   |
 
 ---
 
@@ -75,28 +97,30 @@ bindings.cpp
   │     │     ├── core/backend_policy.h
   │     │     │     └── core/dialect.h → core/query.h
   │     │     ├── strategy/mssql/dialect.h → core/query.h
-  │     │     └── utils/logging.h
+  │     │     └── strategy/mssql/odbc_error.h
   │     └── strategy/mssql/bcp/bcp_pipeline.h
-  │           ├── bcp/bcp_helpers.h
-  │           │     └── bcp/bcp_types.h
-  │           │           ├── bcp/bcp_api.h         ← BCP func ptrs (dlopen)
-  │           │           └── <arrow/table.h>
-  │           ├── bcp/bcp_pool.h
-  │           │     └── strategy/mssql/backend.h    (already included)
+  │           ├── bcp/bcp_helpers.h → bcp/bcp_types.h → bcp/bcp_api.h, <arrow/table.h>
+  │           ├── bcp/bcp_bind.h → bcp/bcp_bind_dispatch.h
+  │           ├── bcp/bcp_rebind_dispatch.h
+  │           ├── bcp/bcp_pool.h → backend.h
   │           └── strategy/mssql/sql_helpers.h
   ├── strategy/mssql/load_impl.h
   │     ├── core/arrow_builder.h
-  │     └── strategy/mssql/backend.h  (already included)
+  │     ├── strategy/mssql/schema_describe.h → sql_type_map.h
+  │     ├── strategy/mssql/fetch_buffer.h → sql_type_map.h
+  │     ├── strategy/mssql/load_dispatch.h → fetch_buffer.h, arrow_builder.h
+  │     ├── strategy/mssql/stmt_handle.h → odbc_error.h
+  │     ├── strategy/mssql/parallel_load.h
+  │     │     ├── strategy/mssql/load_cache.h → load_connection_pool.h → backend.h
+  │     │     ├── strategy/mssql/pk_detect.h
+  │     │     └── strategy/mssql/schema_describe.h (shared)
+  │     └── strategy/mssql/backend.h (already included)
   └── adapter/adapter.h
-        ├── adapter/arrow_import.h                  ← py::object → RecordBatchReader
-        ├── core/connection_pool.h
-        │     └── core/backend_policy.h  (already included)
-        ├── core/query.h  (already included)
-        └── core/repository.h
-              ├── core/backend_policy.h  (already included)
-              ├── core/connection_pool.h (already included)
-              ├── core/dialect.h         (already included)
-              └── core/query.h           (already included)
+        ├── adapter/arrow_import.h        ← py::object → RecordBatchReader
+        ├── adapter/arrow_export.h        ← Table → py::object
+        ├── core/connection_pool.h → core/backend_policy.h
+        ├── core/query.h (already included)
+        └── core/repository.h → backend_policy.h, connection_pool.h, dialect.h, query.h
 ```
 
 ---
@@ -115,6 +139,8 @@ concept BackendPolicy = requires(std::string_view s, typename B::Connection& con
     typename B::SaveImpl;
     typename B::LoadImpl;
     typename B::Dialect;
+    typename B::LoadCache;
+
     { B::connect(s) }  -> std::same_as<typename B::Connection>;
     { B::reset(conn) } -> std::same_as<void>;
     { conn.close() }   -> std::same_as<void>;
@@ -128,7 +154,7 @@ concept BackendPolicy = requires(std::string_view s, typename B::Connection& con
 renders intent into backend-specific SQL. `build_sql(Query, Dialect)` dispatches
 at compile time.
 
-- `MssqlDialect` → `SELECT TOP N [col] FROM [table] WHERE ...`
+- `MssqlDialect` → `SELECT TOP N [col] FROM [schema].[table] WHERE ...`
 - (future) `PostgresDialect` → `SELECT "col" FROM "table" WHERE ... LIMIT N`
 
 ### 4.3 Strategy Isolation
@@ -139,9 +165,6 @@ Core headers never include strategy headers. Only `bindings.cpp` (and
 verifies concept satisfaction at compile time.
 
 ### 4.4 Format as Runtime Enum (Not Template Parameter)
-
-`format/` directory was deleted. `FormatAdapter<Backend, Fmt>` and
-`FlexibleRepository<Backend, Fmt>` are gone.
 
 `RepositoryAdapter<Backend>` in `adapter/adapter.h` owns `core::Repository<Backend>`
 directly — ONE hop, matching the Registry/Factory adapter pattern. Format is a
@@ -162,8 +185,9 @@ Python  →  RepositoryAdapter<MssqlBackend>  →  core::Repository<MssqlBackend
 ```
 
 - Pre/post transforms: `std::vector<py::function>` hooks run at the Python boundary
-- Arrow import: `import_record_batch_reader()` in `arrow_import.h` converts py::object → `shared_ptr<RecordBatchReader>` via PyCapsule (`__arrow_c_stream__`) with depth-limited recursion fallback for Polars DataFrames
-- GIL release: adapter releases GIL before calling core `save()` — core is GIL-free
+- Arrow import: `import_table()` converts py::object → `shared_ptr<arrow::Table>` via PyCapsule
+- Arrow export: `export_table()` converts `shared_ptr<arrow::Table>` → Polars/Pandas via C Data Interface
+- GIL release: adapter releases GIL before calling core `save()`/`load()` — core is GIL-free
 - Core operates on Arrow exclusively — no `py::object` in `core/`
 
 ### 4.7 Connection Pool
@@ -174,192 +198,338 @@ Python  →  RepositoryAdapter<MssqlBackend>  →  core::Repository<MssqlBackend
 - `std::expected<ConnectionHandle, PoolError>` for checkout — timeout and pool-closed are control flow, not exceptions
 - Priority: reuse idle → create new → wait with timeout
 
+### 4.8 Dual Pool Pattern
+
+Two distinct pool types serve different purposes:
+
+| Pool                      | Purpose                              | Lifetime                          |
+|---------------------------|--------------------------------------|-----------------------------------|
+| `ConnectionPool<Backend>` | Shared save + metadata operations    | Repository lifetime               |
+| `LoadConnectionPool`      | Dedicated parallel load workers      | Per-load or cached via LoadCache  |
+
+Load workers need dedicated connections held for the entire query duration.
+Save/metadata connections are short-lived checkouts. Don't merge them.
+
+### 4.9 LoadCache Pattern
+
+`MssqlLoadCache` persists a `LoadConnectionPool` across multiple `load()` calls.
+Invalidates when `conn_str` or `pool_size` changes. `NullLoadCache` is zero-cost
+for non-MSSQL backends (empty struct). Eliminates 0.06–0.15s per-load connection
+establishment overhead for repeated load operations.
+
+### 4.10 O(1) Dispatch Tables
+
+Both save and load paths use function-pointer dispatch tables indexed by
+`arrow::Type::type` (compile-time populated `std::array`):
+
+- **Save**: `bcp_bind_dispatch` — per-type bind functions; `bcp_rebind_dispatch` — fast pointer-only rebind
+- **Load**: `load_dispatch` — per-type block-append functions with nullable flag
+
+Zero branching in hot loops. Type resolution happens once during schema setup.
+
+### 4.11 Block Cursor Architecture
+
+ODBC block cursors fetch multiple rows per `SQLFetch()` call:
+
+1. `FetchBufferSet::allocate(col_info, block_size)` — pre-allocate per-column buffers
+2. `SQLSetStmtAttr(SQL_ATTR_ROW_ARRAY_SIZE, block_size)` — configure block fetch
+3. `SQLFetch()` fills buffers + writes `rows_fetched`
+4. `indicators_to_valid_bytes()` — branchless null conversion (compiles to `cmp` + `setne`)
+5. `dispatch[c].fn(builder, col, buf, nrows, valid)` — O(1) type dispatch
+
+Configurable `block_size` (default 4096). Tunable via `acquire_repo(block_size=...)`.
+
+### 4.12 PK Auto-Detection
+
+When `partition_column` is empty and `load_workers > 1`:
+1. `detect_partition_column()` calls `SQLPrimaryKeys()` to enumerate PK columns
+2. `SQLColumns()` checks if the PK column is an integer type (`SQL_INTEGER`, `SQL_BIGINT`, `SQL_SMALLINT`, `SQL_TINYINT`)
+3. Returns the first integer PK column, or empty string if none found
+4. Falls back to single-threaded load when no suitable partition key exists
+5. Supports `catalog.schema.table` parsing via `parse_table_name()`
+
 ---
 
 ## 5. Implementation Status
 
-Save path is fully implemented with real ODBC BCP bulk insert. Load path remains placeholder.
+All components are fully implemented and tested.
 
-| Component               | Status         | Description                                                    |
-|-------------------------|----------------|----------------------------------------------------------------|
-| `OdbcConnection`        | **Implemented** | Real ODBC connection (SQLDriverConnect) with BCP support        |
-| `MssqlSaveImpl`         | **Implemented** | Delegates to `bcp::bulk_insert` / `bcp::bulk_insert_parallel`  |
-| `BCP pipeline`          | **Implemented** | Full Arrow→BCP bind/row-loop/flush (16+ column types)          |
-| `BcpConnectionPool`     | **Implemented** | Parallel eager pool — O(1×latency) via `std::thread`           |
-| `arrow_import.h`        | **Implemented** | PyCapsule + fallback import for py::object → RecordBatchReader  |
-| `MssqlLoadImpl`         | Placeholder    | Logs block cursor steps (fetch, bind, advance)                 |
-| `ArrowBuilder`          | Placeholder    | Logs append operations; has ColumnType enum                    |
-| `ConnectionPool`        | **Implemented** | Thread-safe pool with `std::expected` checkout                 |
-| `Query` / `MssqlDialect`| **Implemented** | Intent builder + SQL rendering work correctly                  |
+| Component               | Status          | Description                                                     |
+|-------------------------|-----------------|-----------------------------------------------------------------|
+| `OdbcConnection`        | **Implemented** | Real ODBC connection (SQLDriverConnect) with BCP + packet_size  |
+| `MssqlSaveImpl`         | **Implemented** | Single + parallel BCP via bcp_pipeline.h                        |
+| `BCP pipeline`          | **Implemented** | Full Arrow→BCP bind/row-loop/flush (16+ column types)           |
+| `BcpConnectionPool`     | **Implemented** | Parallel eager pool — O(1×latency) via std::thread              |
+| `BCP rebind dispatch`   | **Implemented** | Fast pointer-only rebind for multi-batch streaming              |
+| `BCP profiler`          | **Implemented** | Optional per-section profiling (PYGIM_BCP_PROFILING)            |
+| `arrow_import.h`        | **Implemented** | PyCapsule + Polars + PyArrow fallback                           |
+| `arrow_export.h`        | **Implemented** | Arrow C Data Interface → PyArrow → Polars/Pandas               |
+| `MssqlLoadImpl`         | **Implemented** | Block cursor + parallel range-partitioned load                  |
+| `ArrowBuilder`          | **Implemented** | Full columnar builder (all ODBC types → Arrow)                  |
+| `load_dispatch`         | **Implemented** | O(1) block-append dispatch table                                |
+| `FetchBufferSet`        | **Implemented** | Per-column ODBC buffer allocation + bind                        |
+| `schema_describe`       | **Implemented** | SQLDescribeCol → SchemaInfo (schema + nullable flags)           |
+| `parallel_load`         | **Implemented** | N-worker range-partitioned load + ConcatenateTables             |
+| `LoadConnectionPool`    | **Implemented** | Dedicated parallel worker connections                           |
+| `MssqlLoadCache`        | **Implemented** | Persistent pool cache (invalidate on change)                    |
+| `pk_detect`             | **Implemented** | SQLPrimaryKeys + SQLColumns integer PK detection                |
+| `ConnectionPool`        | **Implemented** | Thread-safe pool with std::expected checkout                    |
+| `Query / MssqlDialect`  | **Implemented** | Intent builder + T-SQL rendering                                |
 
 ---
 
-## 6. BCP Implementation Roadmap
+## 6. Save Pipeline
 
-Based on proven archive performance (77.8 MB/s parallel BCP with 16 workers).
-Phases 1–3 are **completed**; Phases 4–5 remain planned.
+### 6.1 Single-Connection BCP Save
 
-### Phase 1: Real ODBC Connection — COMPLETED
+**Pipeline:**
+1. Adapter converts py::object → `shared_ptr<arrow::Table>` via `import_table()` (with GIL)
+2. Adapter releases GIL, calls `core::Repository::save(table, table_name, ...)`
+3. `MssqlSaveImpl` dispatches to `bcp::bulk_insert(dbc, table, table_name, batch_size, hint)`
+4. `init_session()`: `bcp_init(table, DB_IN)` + optional `bcp_control(BCPHINTS, "TABLOCK")`
+5. Per-RecordBatch:
+   - First batch: `bind_columns()` — full `bcp_bind` per column via `bcp_bind_dispatch`
+   - Subsequent batches: `rebind_columns()` — pointer-only update via `bcp_rebind_dispatch` (same schema)
+   - Classify columns: fixed/string/temporal + check `any_has_nulls`
+   - Fast path (no nulls): `row_loop_fast()` — memcpy staging + `bcp_sendrow`
+   - General path (has nulls): `row_loop_general()` — per-cell null check → `bcp_collen(SQL_NULL_DATA)`
+   - `flush_batch()` at configurable intervals (default 100K rows)
+6. `finalize_bcp()`: `bcp_batch()` + `bcp_done()` with retry on transient failure
+7. `BcpSessionGuard` provides RAII safety — calls `bcp_done()` on exception
 
-**Implemented in:** `strategy/mssql/backend.h`
+### 6.2 Parallel BCP Save
 
-`OdbcConnection` uses real ODBC handles (SQLHENV, SQLHDBC) with per-connection
-environment allocation. `open()` calls SQLAllocHandle → SQLSetEnvAttr(ODBC3) →
-SQLDriverConnect. BCP is enabled on the connection via `SQL_COPT_SS_BCP` before
-connect. `close()` disconnects and frees handles.
-
-`MssqlBackend::reset()` is a no-op (no cached statement handle currently).
-
-### Phase 2: Single-Connection BCP Save — COMPLETED
-
-**Implemented in:** `strategy/mssql/bcp/` (6 headers)
-
-**Pipeline (actual):**
-1. Adapter converts py::object → `shared_ptr<RecordBatchReader>` via `arrow_import.h`
-   (PyCapsule `__arrow_c_stream__` protocol with depth-limited recursion fallback)
-2. Adapter releases GIL, calls `core::Repository::save(reader, table, ...)`
-3. `MssqlSaveImpl` dispatches to `bcp::bulk_insert(dbc, reader, table, batch_size, hint)`
-4. `bcp_init(table, DB_IN)` with `TABLOCK` hint via `init_session()`
-5. Per-batch: `bind_columns()` dispatches 16+ Arrow types → BCP column bindings:
-   - Fixed-width: bind into shared staging buffer via `setup_staging()`
-   - String/binary: per-row redirect via `bcp_colptr`/`bcp_collen`
-   - Temporal (date/time/timestamp): pre-convert to SQL structs
-   - Boolean: bit-unpack to byte buffer
-6. Row loop: fast path (no nulls) or general path (per-row null checks)
-7. `bcp_batch()` at configurable intervals (default 100K rows)
-8. `bcp_done()` via `finalize_bcp()` with retry on transient failure
-
-`BcpMetrics` returned: total/connect/bind/row_loop/batch_flush seconds + row counts.
-
-### Phase 3: Parallel BCP Save — COMPLETED
-
-**Implemented in:** `bcp_pipeline.h::bulk_insert_parallel()`, `bcp_pool.h`
-
-**Architecture (actual):**
 ```
 RepositoryAdapter::save(df, table, bcp_workers=N)
   │
-  ├── adapter: df → RecordBatchReader (with GIL, via arrow_import.h)
+  ├── adapter: df → arrow::Table (with GIL, via import_table)
   ├── adapter: release GIL
   │
-  └── core → MssqlSaveImpl → bcp::bulk_insert_parallel(conn_str, reader, ...)
+  └── core → MssqlSaveImpl → bcp::bulk_insert_parallel(conn_str, table, ...)
         │
         ├── Read all RecordBatches into memory
-        ├── Slice large batches into N sub-batches (zero-copy via Slice())
+        ├── Slice large batches into N sub-batches (zero-copy via arrow::Slice())
         ├── Greedy least-loaded partition across workers
         ├── BcpConnectionPool(conn_str, N) — parallel establishment
         │
-        └── spawn N std::thread workers:
+        └── spawn N std::jthread workers:
               worker_i:
                 init_session(table, TABLOCK)
                 for each batch: process_batch (bind/rebind + row loop)
                 finalize_bcp()
         │
         ├── Join all, rethrow first error
-        └── Merge metrics (max for wall-clock, sum for counts)
+        └── merge_parallel(worker_metrics) — max wall-clock, sum counts
 ```
 
-**Achieved:** ~55–85 MB/s depending on column mix (best-of-3, Docker SQL Server).
+### 6.3 BcpMetrics
 
-### Phase 4: Single-Connection Block Cursor Load
+Returned from both single and parallel paths:
 
-**Goal:** Real ODBC block cursor fetch → ArrowBuilder → RecordBatch.
+| Field                  | Type     | Semantics                                      |
+|------------------------|----------|-------------------------------------------------|
+| `total_seconds`        | double   | Wall-clock (max across parallel workers)        |
+| `connect_seconds`      | double   | Connection establishment time                   |
+| `bind_seconds`         | double   | Column binding time                             |
+| `row_loop_seconds`     | double   | Data copy + sendrow time                        |
+| `batch_flush_seconds`  | double   | bcp_batch() + bcp_done() time                   |
+| `processed_rows`       | int64_t  | Total rows processed (sum across workers)       |
+| `sent_rows`            | int64_t  | Rows confirmed sent by BCP (sum)                |
+| `record_batches`       | int64_t  | Arrow RecordBatches processed (sum)             |
 
-**Files:** `strategy/mssql/load_impl.h`, `core/arrow_builder.h`
-
-**Pipeline:**
-1. `SQLPrepare(sql)` + `SQLExecute()`
-2. `SQLDescribeCol()` → build `vector<ColumnInfo>` → create `ArrowBuilder`
-3. Set `SQL_ATTR_ROW_ARRAY_SIZE = 1024` (configurable block size)
-4. `SQLBindCol` per column into staging buffers
-5. Fetch loop:
-   - `SQLFetch()` fills block
-   - Build validity bitmask from `SQL_NULL_DATA` indicators
-   - `append_*_batch()` per column into ArrowBuilder
-   - Repeat until `SQL_NO_DATA`
-6. `ArrowBuilder::finish()` → `ArrowArray` + `ArrowSchema` (C Data Interface)
-7. Adapter imports back into Polars/Pandas (with GIL)
-
-**ArrowBuilder upgrade:** Use raw allocation + Arrow C Data Interface structs
-(not Arrow C++ library) to minimize dependencies.
-
-### Phase 5: Parallel Range-Partitioned Load
-
-**Goal:** N workers each executing a range-partitioned query, merge results.
-
-**Architecture:**
-```
-Repository::load(query, load_workers=N)
-  │
-  ├── Probe query: SELECT MIN(pk), MAX(pk), COUNT(*) FROM table
-  ├── Compute N range boundaries
-  │
-  └── spawn N std::thread workers:
-        worker_i:
-          conn = pool.checkout()
-          sql_i = "SELECT ... WHERE pk >= lo_i AND pk < hi_i"
-          block cursor fetch → ArrowBuilder → RecordBatch_i
-          conn auto-returns to pool
-  │
-  └── ConcatenateTables(batch_0 .. batch_N-1) → single RecordBatch
-```
-
-**Limitations:**
-- Requires an ordered/indexed column (typically PK) for range partitioning
-- Skewed data distributions create uneven worker loads
-- Fallback: single-connection path when no suitable partition key exists
+Optional `BcpProfiler` sub-struct (enabled via `PYGIM_BCP_PROFILING` compile flag)
+provides per-section breakdown: bind/rebind/classify/fixed_copy/string_copy/
+sendrow/mid_flush/final_flush/init_session/reader_next seconds + call counts.
 
 ---
 
-## 7. Multithreading Strategy
+## 7. Load Pipeline
 
-### GIL Release Pattern
+### 7.1 Single-Connection Block Cursor Load
+
+**Pipeline:**
+1. Adapter releases GIL, calls `Repository::load(source, load_workers, partition_column)`
+2. Repository resolves source: raw SQL (contains space) or table name → `build_sql(Query, dialect)`
+3. `MssqlLoadImpl::execute()`:
+   - `StmtHandle(dbc)` — RAII statement allocation
+   - `SQLPrepare(sql)` + `SQLExecute()`
+   - `describe_columns(stmt)` → `SchemaInfo` (Arrow schema + `TypeMapping` per column + nullable flags)
+   - `ArrowBuilder(schema)` — columnar builder with per-type array builders
+   - `FetchBufferSet::allocate(col_info, block_size)` — pre-allocate per-column fetch buffers
+   - `build_column_dispatch(schema, nullable_flags)` → `vector<ColumnDispatch>` (O(1) lookup)
+   - `SQLSetStmtAttr(SQL_ATTR_ROW_ARRAY_SIZE, block_size)` — configure block fetch
+   - `buffers.bind(stmt)` — `SQLBindCol` for all columns
+4. Fetch loop (until `SQL_NO_DATA`):
+   - `SQLFetch()` fills block buffers; driver writes `rows_fetched`
+   - Per column: `indicators_to_valid_bytes()` (branchless null conversion)
+   - Per column: `dispatch[c].fn(builder, col, buf, nrows, valid_ptr)` (O(1) type dispatch)
+5. `builder.finish()` → `shared_ptr<arrow::Table>`
+6. Return `LoadResult{table, metrics}`
+7. Adapter acquires GIL, calls `export_table(table, use_polars)` → Polars/Pandas DataFrame
+
+### 7.2 Parallel Range-Partitioned Load
+
+Triggered when `load_workers > 1` and a suitable integer PK column is found
+(either explicit `partition_column` or auto-detected via `pk_detect`):
+
+```
+Repository::load(table, load_workers=N)
+  │
+  ├── checkout primary connection
+  ├── MssqlLoadImpl::execute() detects partition_column
+  │     └── detect_partition_column(dbc, table) via SQLPrimaryKeys + SQLColumns
+  │
+  └── execute_parallel(conn, table, partition_col, N, block_size, load_cache, packet_size)
+        │
+        ├── query_min_max(conn, table, col) → RangeInfo{min, max}
+        ├── Adjust N if range < N workers
+        ├── generate_worker_queries() → N range-partitioned WHERE clauses
+        ├── describe_columns(stmt) → SchemaInfo (shared across workers)
+        │
+        ├── load_cache.ensure_pool(conn_str, N-1, packet_size)
+        │     └── Reuse existing pool if conn_str + size unchanged
+        │         OR create new LoadConnectionPool(conn_str, N-1, packet_size)
+        │
+        └── spawn N std::jthread workers:
+              Worker 0: primary connection (this thread's checkout)
+              Workers 1..N-1: LoadConnectionPool connections
+              Each worker:
+                StmtHandle → SQLPrepare(range_sql) → SQLExecute
+                FetchBufferSet::allocate(shared_schema, block_size)
+                build_column_dispatch + buffers.bind
+                fetch loop → ArrowBuilder → finish()
+        │
+        ├── ConcatenateTables(worker_tables) → single arrow::Table
+        └── Aggregate metrics (max wall-clock, sum counts)
+```
+
+### 7.3 Stale Connection Retry
+
+On connection errors (`SQLSTATE 08S01, 08001, HY000`) during parallel load:
+1. Clear `MssqlLoadCache` (force fresh connections on retry)
+2. Retry the entire parallel load once with new connections
+3. No proactive health checks (avoids latency on the common path)
+
+### 7.4 LoadResult / LoadMetrics
+
+| Field                | Type     | Description                                   |
+|----------------------|----------|-----------------------------------------------|
+| `total_seconds`      | double   | End-to-end wall-clock                         |
+| `prepare_seconds`    | double   | SQLPrepare + SQLExecute                       |
+| `describe_seconds`   | double   | describe_columns() + dispatch table build     |
+| `fetch_seconds`      | double   | Block cursor fetch loop                       |
+| `build_seconds`      | double   | ArrowBuilder append + finish                  |
+| `connect_seconds`    | double   | LoadConnectionPool establishment              |
+| `concat_seconds`     | double   | ConcatenateTables (parallel only)             |
+| `fetched_rows`       | int64_t  | Total rows fetched                            |
+| `fetched_blocks`     | int64_t  | Number of SQLFetch blocks processed           |
+| `columns`            | int64_t  | Column count                                  |
+| `workers_used`       | int      | Actual parallelism level (may be < requested) |
+
+---
+
+## 8. Arrow Import / Export
+
+### 8.1 Import (Save Path)
+
+`import_table(py::object)` → `shared_ptr<arrow::Table>`. Called WITH GIL.
+
+| Protocol                   | Detection                       | Path                                          |
+|----------------------------|---------------------------------|-----------------------------------------------|
+| PyCapsule (modern)         | `__arrow_c_stream__` attribute  | `ImportRecordBatchReader(c_stream)` → `ToTable()` |
+| Polars DataFrame           | `to_arrow()` method             | Recurse `depth=1` → re-enter import           |
+| PyArrow legacy             | `_export_to_c` method           | `_export_to_c(addr)` → import                 |
+
+### 8.2 Export (Load Path)
+
+`export_table(shared_ptr<arrow::Table>, use_polars)` → `py::object`. Called WITH GIL.
+
+1. `arrow::Table` → `TableBatchReader` → `ExportRecordBatchReader`
+2. `ArrowArrayStream` (C Data Interface) → `PyArrow.RecordBatchReader._import_from_c(addr)`
+3. `reader.read_all()` → PyArrow Table
+4. `polars.from_arrow(table)` or `table.to_pandas()`
+
+---
+
+## 9. Multithreading Strategy
+
+### 9.1 GIL Release Pattern
 
 ```
 Python → adapter (with GIL)
-  convert DataFrame → Arrow C Data Interface pointers
+  convert DataFrame ↔ Arrow via import/export helpers
   py::gil_scoped_release release;
   → core C++ (no GIL, no py::object)
     pool checkout, spawn workers, do ODBC work
-  ← return Arrow C Data Interface pointers
+  ← return Arrow pointers
   py::gil_scoped_acquire acquire;  // implicit on scope exit
   convert Arrow → DataFrame
 ← return to Python
 ```
 
 **Rules:**
-- No `py::object` crosses into `core/` — Arrow C Data Interface is the boundary
+- No `py::object` crosses into `core/` — Arrow is the boundary
 - Pre/post transform hooks execute WITH GIL (they are Python callables)
 - Core C++ is GIL-free: thread spawning, ODBC calls, Arrow building
 
-### Thread Management
+### 9.2 Thread Management
 
-- `std::thread` workers (not `std::async` — need deterministic join)
+- `std::jthread` workers for parallel load (auto-join on scope exit)
+- `std::thread` workers for parallel save
 - Exception capture: each worker catches into `std::exception_ptr`; after join, rethrow first
 - No detached threads — all workers joined before returning to adapter
 - Pool handles connection lifecycle; workers only hold `ConnectionHandle` (RAII)
 
-### Pool Sizing
+### 9.3 Pool Sizing
 
-| Operation         | Connections needed | Recommendation                        |
-|-------------------|--------------------|---------------------------------------|
-| Single save       | 1                  | Default `pool_size=4` sufficient      |
-| Parallel save (N) | N                  | `pool_size ≥ N`; validate in `save()` |
-| Single load       | 1                  | Default sufficient                    |
-| Parallel load (N) | N + 1              | +1 for probe query                    |
+| Operation         | Pool Used              | Connections Needed | Notes                              |
+|-------------------|------------------------|--------------------|------------------------------------|
+| Single save       | ConnectionPool         | 1                  | Default `pool_size=4` sufficient   |
+| Parallel save (N) | BcpConnectionPool      | N                  | Separate pool, not from main pool  |
+| Single load       | ConnectionPool         | 1                  | Default sufficient                 |
+| Parallel load (N) | ConnectionPool + LoadCP | 1 + (N-1)         | Primary from main pool; rest from LoadConnectionPool |
 
 ---
 
-## 8. Other Backends & Approaches
+## 10. Performance
 
-### 8.1 PostgreSQL (Future)
+### 10.1 Benchmarks (Docker SQL Server, 8 workers, exhaustive dataset)
+
+| Direction | Rows/s        | MB/s    | Dataset                    |
+|-----------|---------------|---------|----------------------------|
+| Write     | ~956K         | ~101    | 18 columns, 1M rows       |
+| Load      | ~1.25M        | ~122    | 18 columns, 1M rows       |
+
+### 10.2 Configurable Tuning Parameters
+
+All parameters are configurable via `acquire_repo()` and the benchmark CLI:
+
+| Parameter         | Default   | Scope         | Effect                                      | CLI flag          |
+|-------------------|-----------|---------------|----------------------------------------------|-------------------|
+| `block_size`      | 4096      | Load          | Rows per SQLFetch call (block cursor)        | `--block-size`    |
+| `packet_size`     | 16384     | Load + Pool   | TDS network packet size (bytes)              | `--packet-size`   |
+| `batch_size`      | 100,000   | Save          | Rows per bcp_batch flush                     | `--batch-size`    |
+| `bcp_workers`     | 1         | Save          | Parallel BCP threads                         | `--workers`       |
+| `load_workers`    | 1         | Load          | Parallel range-partitioned workers           | `--workers`       |
+| `pool_size`       | 4         | ConnectionPool| Max shared pooled connections                | —                 |
+
+**Tuning findings (exhaustive dataset, 1M rows, 8 workers):**
+- `block_size=4096` is the user-facing default; internal benchmark constant `kDefaultBlockSize` is 8192 — consider propagating to adapter defaults
+- `block_size=16384` can improve load by ~28% but increases memory per worker
+- `batch_size=100K` is optimal — both smaller and larger values degrade write
+- `packet_size` is capped at 16384 with `Encrypt=yes` (TLS record limit)
+
+---
+
+## 11. Other Backends & Approaches
+
+### 11.1 PostgreSQL (Future)
 
 | Aspect       | MSSQL (BCP)                      | PostgreSQL (COPY)               |
 |--------------|----------------------------------|---------------------------------|
 | Bulk insert  | ODBC BCP API (`bcp_sendrow`)     | `COPY FROM STDIN` (binary/CSV)  |
 | Bulk load    | Block cursor over ODBC           | `COPY TO STDOUT` (binary/CSV)   |
-| Parallel insert | N connections, each BCP       | N connections, each COPY        |
-| Parallel load| Range-partitioned SELECT         | Range-partitioned SELECT        |
+| Parallel     | N connections, each BCP / range  | N connections, each COPY / range|
 | Driver       | ODBC (unixODBC + MS driver)      | libpq (native C API)           |
 | Dialect      | `[bracket]` quoting, `TOP N`     | `"double-quote"`, `LIMIT N`    |
 
@@ -367,56 +537,30 @@ Python → adapter (with GIL)
 ```
 strategy/postgres/
 ├── backend.h       ← PgConnection + PostgresBackend
-├── dialect.h       ← PostgresDialect ("double-quote", LIMIT N)
+├── dialect.h       ← PostgresDialect
 ├── save_impl.h     ← COPY FROM STDIN with Arrow data
-└── load_impl.h     ← COPY TO STDOUT → ArrowBuilder, or block cursor
+└── load_impl.h     ← COPY TO STDOUT → ArrowBuilder
 ```
 
-**Key difference:** PostgreSQL's `COPY` protocol is stream-based, not row-based
-like BCP. SaveImpl would format Arrow columns into COPY binary format and push
-via `PQputCopyData()`. Fundamentally different from BCP's bind+sendrow pattern,
-but fits the same `SaveImpl::execute()` static interface.
+### 11.2 SQLite (Testing / In-Memory)
 
-### 8.2 SQLite (Testing / In-Memory)
+Useful for offline tests without a real DB server. ConnectionPool degenerates
+to single-connection (SQLite single-writer). LoadCache uses `NullLoadCache`.
 
-Useful for offline tests without a real DB server.
+### 11.3 Read-Only Analytical Patterns
 
-```
-strategy/sqlite/
-├── backend.h       ← SqliteConnection (wraps sqlite3*)
-├── dialect.h       ← SqliteDialect (no bracket quoting, no TOP N)
-├── save_impl.h     ← Prepared INSERT batches
-└── load_impl.h     ← sqlite3_step() → ArrowBuilder
-```
-
-**Trade-off:** SQLite lacks BCP/COPY, so save performance is low. But for tests
-that exercise the Repository API contract without network I/O, it's ideal.
-ConnectionPool degenerates to single-connection pool (SQLite single-writer).
-
-### 8.3 Generic ODBC Fallback
-
-A `GenericOdbcBackend` using standard `SQLBulkOperations` or parameterized
-INSERT for save, and block cursor for load. No vendor-specific BCP or COPY.
-
-**Assessment:** Low priority. BCP is the performance path; ODBC fallback adds
-maintenance cost for a use case better served by existing Python libraries
-(SQLAlchemy, connectorx). Defer unless a concrete user need arises.
-
-### 8.4 Read-Only Analytical Patterns
-
-- Export to Parquet: `load()` → Arrow RecordBatch → Parquet via PyArrow
-- This is a Python-layer concern, not a backend concern
-- Implement as a post-transform hook: `repo.add_post_transform(write_parquet_fn)`
+Export to Parquet or other formats is a Python-layer concern. Implement as
+a post-transform hook: `repo.add_post_transform(write_parquet_fn)`.
 
 ---
 
-## 9. Generalization & Reuse Analysis
+## 12. Generalization & Reuse Analysis
 
 ### What in `core/` Is Truly Backend-Agnostic?
 
 | Component         | Backend-agnostic? | Notes                                              |
 |-------------------|-------------------|----------------------------------------------------|
-| `BackendPolicy`   | Yes               | Pure concept — defines the contract                 |
+| `BackendPolicy`   | Yes               | Pure concept — defines the contract (+ LoadCache)   |
 | `DialectPolicy`   | Yes               | Pure concept — defines SQL rendering contract       |
 | `Query`           | Yes               | Stores intent; no backend-specific SQL              |
 | `build_sql()`     | Yes               | Delegates to dialect; compile-time dispatch         |
@@ -424,17 +568,20 @@ maintenance cost for a use case better served by existing Python libraries
 | `ConnectionHandle`| Yes               | RAII wrapper; backend-agnostic                      |
 | `ArrowBuilder`    | Mostly            | Column types generic; ODBC fetch semantics may leak |
 | `Repository`      | Yes               | Delegates save/load to `Backend::SaveImpl/LoadImpl` |
+| `LoadResult`      | Yes               | Arrow Table + timing metrics                        |
+| `NullLoadCache`   | Yes               | Zero-cost for backends without persistent caching   |
 
 ### What Would a New Backend Need to Implement?
 
-**Minimum viable backend (4 files):**
+**Minimum viable backend (4 files + LoadCache):**
 
 ```cpp
 struct NewDbBackend {
-    using Connection = NewDbConnection;  // must have close()
-    using SaveImpl   = NewDbSaveImpl;    // static execute(conn, ...)
-    using LoadImpl   = NewDbLoadImpl;    // static execute(conn, ...)
-    using Dialect    = NewDbDialect;     // satisfies DialectPolicy
+    using Connection = NewDbConnection;    // must have close()
+    using SaveImpl   = NewDbSaveImpl;      // static execute(conn, ...)
+    using LoadImpl   = NewDbLoadImpl;      // static execute(conn, ...)
+    using Dialect    = NewDbDialect;       // satisfies DialectPolicy
+    using LoadCache  = NullLoadCache;      // or custom persistent cache
 
     static Connection connect(std::string_view conn_str);
     static void reset(Connection& conn);
@@ -448,72 +595,31 @@ static_assert(BackendPolicy<NewDbBackend>);
 using NewDbRepo = adapter::RepositoryAdapter<NewDbBackend>;
 ```
 
-### Are the Concepts Sufficient?
-
-**Current gaps for future backends:**
-
-| Gap                          | Impact                                          | Remediation                            |
-|------------------------------|-------------------------------------------------|----------------------------------------|
-| `SaveImpl::execute` signature| Needs Arrow data pointers when moving beyond placeholder | Add `ArrowArray*`/`ArrowSchema*` params. Update `BackendPolicy` or leave `SaveImpl` unconstrained. |
-| `LoadImpl::execute` return   | Currently void. Should return Arrow C Data Interface pointers. | Change return type to struct with `ArrowArray` + `ArrowSchema`. |
-| No async/streaming support   | `load()` is synchronous; can't stream partial results. | Out of scope. Could add `load_batches()` iterator later. |
-| No schema introspection      | Can't discover table schemas without a query. | Add optional `describe(table)` to `BackendPolicy` in a future phase. |
-
-**Recommendation:** Don't expand the concepts now. Let Phase 2 (real BCP save)
-drive the signature changes. Over-constraining `SaveImpl`/`LoadImpl` at the
-concept level forces all backends into a single function signature, which may
-not fit (PostgreSQL COPY uses stream semantics, not row-batch semantics).
-
-### ConnectionPool Reuse
-
-`ConnectionPool<Backend>` works for any backend satisfying `BackendPolicy`.
-No changes needed for PostgreSQL or SQLite — they just provide different
-`Connection` types with `close()`.
-
-**SQLite caveat:** Single-writer constraint. Construct with `pool_size=1`.
-The pool handles this naturally.
-
 ---
 
-## 10. Risks & Trade-offs
+## 13. Risks & Trade-offs
 
 | Risk                                      | Likelihood | Impact   | Mitigation                                                      |
 |-------------------------------------------|------------|----------|-----------------------------------------------------------------|
 | ODBC driver differences (Linux vs Windows)| Medium     | High     | CI on both platforms; abstract platform-specific alloc if needed |
-| `bcp_sendrow` remains the bottleneck      | High       | Medium   | Parallel connections are the only path to higher throughput (proven) |
-| Arrow C++ library dependency bloat        | Medium     | Medium   | Use Arrow C Data Interface (raw structs) — zero dependency      |
-| String column null-termination copies     | High       | Low      | Archive proved <5% impact; staging buffer is simple and correct  |
+| `bcp_sendrow` remains the bottleneck      | High       | Medium   | Parallel connections are the only path to higher throughput      |
+| Arrow C++ library dependency bloat        | Medium     | Medium   | Arrow C Data Interface (raw structs) used at adapter boundary   |
+| String column null-termination copies     | High       | Low      | <5% impact; staging buffer is simple and correct                |
 | GIL contention in transform hooks         | Low        | Low      | Transforms run before/after GIL release; don't interleave       |
-| Pool exhaustion during parallel save      | Low        | Medium   | Validate `pool_size ≥ bcp_workers` upfront; clear error message |
-| Range-partitioned load skew               | Medium     | Medium   | Fall back to single-connection; expose `partition_key` param    |
-| ArrowBuilder memory for large results     | Medium     | Medium   | Chunked building with configurable chunk size                   |
+| Range-partitioned load skew               | Medium     | Medium   | Auto-adjust workers based on range; fallback to single-thread   |
+| LoadCache invalidation edge cases         | Low        | Medium   | Invalidate on conn_str or pool_size change; stale retry once    |
+| `packet_size` > 16384 with TLS            | N/A        | N/A      | Hard limit by ODBC Driver 18; document as known constraint      |
 
 ---
 
-## 11. Implementation Priority
-
-| Phase | Description                     | Dependency  | Effort | Impact                         |
-|-------|---------------------------------|-------------|--------|--------------------------------|
-| 1     | Real ODBC connection            | None        | Medium | Enables all subsequent phases  |
-| 2     | Single-connection BCP save      | Phase 1     | High   | Core write path                |
-| 3     | Parallel BCP save               | Phase 2     | Medium | 2× throughput (proven)         |
-| 4     | Single-connection block load    | Phase 1     | High   | Core read path                 |
-| 5     | Parallel range load             | Phase 4     | Medium | Read scalability               |
-| 6     | PostgreSQL backend              | Phase 1–4   | High   | Multi-backend validation       |
-| 7     | SQLite test backend             | Phase 1     | Low    | Offline CI testing             |
-
-Phases 1–4 are the critical path. Phase 5 is incremental. Phases 6–7 validate
-generalization but are not blocking for MSSQL production use.
-
----
-
-## 12. Adding a New Backend (Checklist)
+## 14. Adding a New Backend (Checklist)
 
 1. Create `strategy/<name>/` with `backend.h`, `dialect.h`, `save_impl.h`, `load_impl.h`
-2. Backend struct satisfies `BackendPolicy` concept
+2. Backend struct satisfies `BackendPolicy` concept (including `LoadCache` type)
 3. Dialect struct satisfies `DialectPolicy` concept
-4. Add `static_assert(BackendPolicy<NewBackend>)` in bindings
-5. Add `ext.<name>.toml` build configuration
-6. Add `test_bindings.cpp` with `py::module_local()` for test isolation
-7. No changes to `core/` required (if concepts are sufficient)
-8. Add unit tests parametrized by backend (extend existing test matrix)
+4. Set `using LoadCache = NullLoadCache` unless persistent caching is needed
+5. Add `static_assert(BackendPolicy<NewBackend>)` in bindings
+6. Add `ext.<name>.toml` build configuration
+7. Add `test_bindings.cpp` with `py::module_local()` for test isolation
+8. No changes to `core/` required (if concepts are sufficient)
+9. Add unit tests parametrized by backend (extend existing test matrix)

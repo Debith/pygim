@@ -1,0 +1,355 @@
+@startuml repository_class_diagram
+!theme plain
+skinparam backgroundColor #FEFEFE
+skinparam defaultFontName Consolas
+skinparam defaultFontSize 10
+skinparam shadowing false
+skinparam classAttributeIconSize 0
+skinparam classFontStyle bold
+skinparam packageFontStyle italic
+skinparam stereotypeFontSize 9
+skinparam arrowThickness 1.2
+
+title Repository Module — Detailed Class Diagram
+
+' ═══════════════════════ CORE ═══════════════════════
+
+package "pygim::core" as p_core #FFF3E0 {
+
+    class "<<concept>>\nBackendPolicy<B>" as BP {
+        {abstract} typename B::Connection
+        {abstract} typename B::SaveImpl
+        {abstract} typename B::LoadImpl
+        {abstract} typename B::Dialect
+        {abstract} typename B::LoadCache
+        --
+        {abstract} B::connect(string_view) → Connection
+        {abstract} B::reset(Connection&) → void
+        {abstract} conn.close() → void
+        {abstract} B::name() → const char*
+    }
+
+    class "<<concept>>\nDialectPolicy<D>" as DP {
+        {abstract} D::quote_identifier(sv) → string
+        {abstract} D::render(Query) → string
+    }
+
+    class "Repository<Backend>" as Repo <<template>> {
+        - m_pool : shared_ptr<ConnectionPool<Backend>>
+        - m_load_cache : Backend::LoadCache
+        - m_block_size : int64_t
+        - m_packet_size : int
+        --
+        + {static} create(conn_str, pool_size, block_size, packet_size)
+        + save(table, name, batch_size, hint, workers) : BcpMetrics
+        + load(Query, workers, partition_col) : LoadResult
+        + load(source, workers, partition_col) : LoadResult
+        + connection_string() : string_view
+        + pool() : shared_ptr<ConnectionPool>&
+    }
+
+    class "ConnectionPool<Backend>" as Pool <<template>> {
+        - m_available : vector<Connection>
+        - m_total_created : size_t
+        - m_max_size : size_t
+        - m_conn_str : string
+        - m_packet_size : int
+        - m_mutex : mutex
+        - m_cv : condition_variable
+        --
+        + checkout(timeout) : expected<ConnectionHandle, PoolError>
+        + connection_string() : string_view
+        + close() : void
+        - return_connection(Connection) : void
+    }
+
+    class "ConnectionHandle<Backend>" as Handle <<RAII>> {
+        - m_connection : Connection
+        - m_pool : ConnectionPool*
+        --
+        + get() : Connection&
+        + release() : Connection
+        ~ ~ConnectionHandle() : auto-return
+    }
+
+    enum PoolError {
+        Timeout
+        PoolClosed
+        ConnectionFailed
+    }
+
+    class Query {
+        - m_table : string
+        - m_columns : vector<string>
+        - m_where : string
+        - m_limit : optional<int>
+        - m_raw_sql : string
+        --
+        + from_table(sv) : Query&
+        + select(columns) : Query&
+        + where(sv) : Query&
+        + limit(n) : Query&
+        + is_raw() : bool
+    }
+
+    class LoadMetrics <<struct>> {
+        + total_seconds : double
+        + prepare_seconds : double
+        + describe_seconds : double
+        + fetch_seconds : double
+        + build_seconds : double
+        + connect_seconds : double
+        + concat_seconds : double
+        + fetched_rows : int64_t
+        + fetched_blocks : int64_t
+        + columns : int64_t
+        + workers_used : int
+    }
+
+    class LoadResult <<struct>> {
+        + table : shared_ptr<arrow::Table>
+        + metrics : LoadMetrics
+    }
+
+    class ArrowBuilder {
+        - m_schema : shared_ptr<arrow::Schema>
+        - m_builders : vector<unique_ptr<ArrayBuilder>>
+        - m_rows : int64_t
+        --
+        + ArrowBuilder(schema, pool)
+        + append_bool(col, values, count, valid)
+        + append_strings(col, data, ind, count, stride)
+        + append_binary(col, data, ind, count, stride)
+        + append_dates(col, structs, count, valid)
+        + append_timestamps(col, structs, count, valid)
+        + finish() : shared_ptr<arrow::Table>
+    }
+
+    class "NullLoadCache" as NLC <<struct>> {
+        .. zero-cost no-op ..
+    }
+
+    Repo *-right-> Pool : shared_ptr
+    Pool ..> Handle : creates
+    Pool ..> PoolError : returns
+    Repo ..> BP : requires Backend
+    LoadResult *-- LoadMetrics
+}
+
+' ═══════════════════════ ADAPTER ═══════════════════════
+
+package "pygim::adapter" as p_adapter #E3F2FD {
+
+    enum Format {
+        Polars
+        Pandas
+    }
+
+    class "RepositoryAdapter<Backend>" as Adapter <<template>> {
+        - m_repo : Repository<Backend>
+        - m_format : Format
+        - m_batch_size : int64_t
+        - m_block_size : int64_t
+        - m_packet_size : int
+        - m_table_hint : string
+        - m_bcp_workers : int
+        - m_pre_transforms : vector<py::function>
+        - m_post_transforms : vector<py::function>
+        --
+        + {static} create(conn_str, format, ...)
+        + save(py::object, table_name, workers) : py::dict
+        + load(source, workers, partition_col) : py::object
+        + load(Query, workers, partition_col) : py::object
+        + add_pre_transform(fn) : void
+        + add_post_transform(fn) : void
+        + clear_transforms() : void
+        + repr() : string
+    }
+
+    class "import_table()" as ImpTbl <<free function>> {
+        py::object → shared_ptr<arrow::Table>
+        --
+        PyCapsule __arrow_c_stream__
+        PyArrow _export_to_c
+        Polars to_arrow() (depth=1)
+    }
+
+    class "export_table()" as ExpTbl <<free function>> {
+        shared_ptr<arrow::Table> → py::object
+        --
+        Arrow C Data Interface
+        → PyArrow RecordBatchReader
+        → polars.from_arrow / to_pandas
+    }
+
+    Adapter *-down-> Repo : owns directly
+    Adapter --> Format
+    Adapter ..> ImpTbl : save path
+    Adapter ..> ExpTbl : load path
+}
+
+' ═══════════════════════ MSSQL STRATEGY ═══════════════════════
+
+package "pygim::strategy::mssql" as p_mssql #FCE4EC {
+
+    class MssqlBackend <<struct>> {
+        + {type} Connection = OdbcConnection
+        + {type} SaveImpl = MssqlSaveImpl
+        + {type} LoadImpl = MssqlLoadImpl
+        + {type} Dialect = MssqlDialect
+        + {type} LoadCache = MssqlLoadCache
+        --
+        + {static} connect(conn_str, packet_size)
+        + {static} reset(conn) : void
+        + {static} name() : "mssql"
+    }
+
+    class OdbcConnection {
+        - m_env : SQLHENV
+        - m_dbc : SQLHDBC
+        - m_conn_str : string
+        - m_connected : bool
+        --
+        + open(conn_str, packet_size) : void
+        + close() : void
+        + dbc() : SQLHDBC
+        + conn_str() : string_view
+    }
+
+    class MssqlDialect {
+        + quote_identifier(sv) : string
+        + quote_table_name(sv) : string
+        + render(Query) : string
+    }
+
+    class MssqlSaveImpl <<struct>> {
+        + {static} execute(conn, table, name,
+        ..  batch_size, hint, workers) : BcpMetrics
+    }
+
+    class MssqlLoadImpl <<struct>> {
+        + {static} kDefaultBlockSize = 8192
+        --
+        + {static} execute(conn, sql, workers,
+        ..  partition_col, table_name,
+        ..  load_cache, block_size, packet_size)
+        ..  : LoadResult
+    }
+
+    class MssqlLoadCache {
+        - m_pool : unique_ptr<LoadConnectionPool>
+        - m_cached_size : int
+        - m_cached_conn_str : string
+        --
+        + ensure_pool(conn_str, N, packet_size)
+        + clear() : void
+        + has_pool() : bool
+    }
+
+    class LoadConnectionPool {
+        - m_connections : vector<OdbcConnection>
+        --
+        + LoadConnectionPool(conn_str, N, packet_size)
+        + operator[](i) : OdbcConnection&
+        + size() : int
+    }
+
+    class SchemaInfo <<struct>> {
+        + schema : shared_ptr<arrow::Schema>
+        + col_info : vector<pair<string, TypeMapping>>
+        + nullable_flags : vector<bool>
+    }
+
+    class FetchBufferSet <<struct>> {
+        + columns : vector<FetchBuffer>
+        + rows_fetched : SQLULEN
+        + block_size : int64_t
+        --
+        + {static} allocate(col_info, block_size)
+        + bind(stmt) : void
+    }
+
+    class StmtHandle <<RAII>> {
+        - m_stmt : SQLHSTMT
+        --
+        + StmtHandle(dbc)
+        + handle() : SQLHSTMT
+        ~ ~StmtHandle() : SQLFreeHandle
+    }
+
+    MssqlBackend .up.> BP : <<satisfies>>
+    MssqlBackend --> OdbcConnection
+    MssqlBackend --> MssqlSaveImpl
+    MssqlBackend --> MssqlLoadImpl
+    MssqlBackend --> MssqlDialect
+    MssqlBackend --> MssqlLoadCache
+    MssqlDialect .up.> DP : <<satisfies>>
+    MssqlLoadCache *--> LoadConnectionPool : unique_ptr
+    MssqlLoadImpl ..> SchemaInfo : uses
+    MssqlLoadImpl ..> FetchBufferSet : uses
+    MssqlLoadImpl ..> StmtHandle : uses
+}
+
+' ═══════════════════════ BCP ═══════════════════════
+
+package "pygim::strategy::mssql::bcp" as p_bcp #F3E5F5 {
+
+    class BcpMetrics <<struct>> {
+        + total_seconds : double
+        + connect_seconds : double
+        + bind_seconds : double
+        + row_loop_seconds : double
+        + batch_flush_seconds : double
+        + processed_rows : int64_t
+        + sent_rows : int64_t
+        + record_batches : int64_t
+        --
+        + merge_parallel(worker) : BcpMetrics&
+    }
+
+    class BcpConnectionPool {
+        - m_connections : vector<Connection>
+        --
+        + BcpConnectionPool(conn_str, N)
+        + operator[](i) : Connection&
+        + size() : int
+    }
+
+    class "bulk_insert()" as BI <<free function>> {
+        dbc, table, batch_size, hint
+        --
+        init_session → process_batch loop
+        → finalize → BcpMetrics
+    }
+
+    class "bulk_insert_parallel()" as BIP <<free function>> {
+        conn_str, table, N workers
+        --
+        Slice → BcpConnectionPool
+        → spawn N threads → merge
+    }
+
+    class ColumnBinding <<struct>> {
+        + ordinal : int
+        + arrow_type : Type::type
+        + has_nulls : bool
+        + is_string : bool
+        + data_ptr, null_bitmap : const uint8_t*
+        + staging_offset : size_t
+    }
+
+    class BcpContext <<struct>> {
+        + bcp : const BcpApi&
+        + dbc : SQLHDBC
+        + batch_size : int64_t
+        + sent_rows : int64_t
+    }
+
+    MssqlSaveImpl ..> BI : single worker
+    MssqlSaveImpl ..> BIP : multi worker
+    BIP ..> BcpConnectionPool : creates
+    BI ..> ColumnBinding : uses
+    BI ..> BcpContext : uses
+}
+
+@enduml

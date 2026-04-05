@@ -1,0 +1,129 @@
+@startuml repository_save_sequence
+!theme plain
+skinparam backgroundColor #FEFEFE
+skinparam defaultFontName Consolas
+skinparam defaultFontSize 10
+skinparam shadowing false
+skinparam sequenceArrowThickness 1.5
+skinparam sequenceParticipantBorderColor #555
+skinparam sequenceLifeLineBorderColor #999
+skinparam sequenceGroupHeaderFontSize 11
+
+title Save Path — Full Sequence (Python → BCP)
+
+actor "Python" as PY
+participant "RepositoryAdapter\n<MssqlBackend>" as AD #E3F2FD
+participant "import_table()" as IMP #E3F2FD
+participant "Repository\n<MssqlBackend>" as REPO #FFF3E0
+participant "ConnectionPool" as POOL #FFF3E0
+participant "MssqlSaveImpl" as SAVE #FCE4EC
+participant "bcp::bulk_insert()" as BCP1 #F3E5F5
+participant "bcp::bulk_insert\n_parallel()" as BCPN #F3E5F5
+participant "BcpConnectionPool" as BPOOL #F3E5F5
+
+== WITH GIL ==
+
+PY -> AD : save(py::object data, table_name, bcp_workers)
+activate AD
+
+AD -> AD : run pre_transforms
+
+AD -> IMP : import_table(data)
+activate IMP
+    alt PyCapsule protocol
+        IMP -> IMP : data.__arrow_c_stream__()
+        IMP -> IMP : arrow::ImportRecordBatchReader
+    else Polars DataFrame
+        IMP -> IMP : data.to_arrow() → recurse (depth=1)
+    else PyArrow legacy
+        IMP -> IMP : data._export_to_c(addr)
+    end
+    IMP -> IMP : reader->ToTable()
+IMP --> AD : shared_ptr<arrow::Table>
+deactivate IMP
+
+== GIL RELEASED (py::gil_scoped_release) ==
+
+AD -> REPO : save(table, name, batch_size, hint, workers)
+activate REPO
+
+REPO -> POOL : checkout()
+activate POOL
+POOL --> REPO : expected<ConnectionHandle, PoolError>
+deactivate POOL
+
+REPO -> SAVE : execute(conn, table, name, batch_size, hint, workers)
+activate SAVE
+
+alt bcp_workers < 2 (Single Worker)
+
+    SAVE -> BCP1 : bulk_insert(dbc, table, name, batch_size, hint)
+    activate BCP1
+
+    BCP1 -> BCP1 : init_session(table, DB_IN, TABLOCK)
+    note right: bcp_init + bcp_control(HINT)
+
+    loop for each RecordBatch
+        BCP1 -> BCP1 : bind_columns(batch)\n[classify → fixed / string / temporal]
+        note right
+            First batch: full bcp_bind
+            Subsequent: rebind_dispatch
+            (pointer update only)
+        end note
+
+        alt no nulls (fast path)
+            BCP1 -> BCP1 : row_loop_fast()\n[memcpy staging → bcp_sendrow]
+        else has nulls
+            BCP1 -> BCP1 : row_loop_general()\n[per-cell null → collen(SQL_NULL_DATA)]
+        end
+
+        BCP1 -> BCP1 : flush_batch() [every batch_size rows]
+    end
+
+    BCP1 -> BCP1 : finalize_bcp()\n[bcp_batch + bcp_done]
+    BCP1 --> SAVE : BcpMetrics
+    deactivate BCP1
+
+else bcp_workers >= 2 (Parallel)
+
+    SAVE -> BCPN : bulk_insert_parallel(conn_str, table, name, ...)
+    activate BCPN
+
+    BCPN -> BCPN : Read all RecordBatches into memory
+    BCPN -> BCPN : Slice into N sub-batches (zero-copy)
+    BCPN -> BCPN : Greedy least-loaded partitioning
+
+    BCPN -> BPOOL : BcpConnectionPool(conn_str, N)
+    activate BPOOL
+    BPOOL -> BPOOL : Parallel connection establishment\n(N threads)
+    BPOOL --> BCPN : ready
+    deactivate BPOOL
+
+    par N workers (std::jthread)
+        BCPN -> BCPN : worker_i:\n  init_session\n  → process_batch loop\n  → finalize_bcp
+    end
+
+    BCPN -> BCPN : Join all, rethrow first error
+    BCPN -> BCPN : merge_parallel(worker_metrics)
+    BCPN --> SAVE : BcpMetrics (merged)
+    deactivate BCPN
+
+end
+
+SAVE --> REPO : BcpMetrics
+deactivate SAVE
+
+note over REPO : ConnectionHandle ~dtor\nauto-returns to pool
+
+REPO --> AD : BcpMetrics
+deactivate REPO
+
+== GIL REACQUIRED (scope exit) ==
+
+AD -> AD : run post_transforms
+AD -> AD : BcpMetrics → py::dict
+
+AD --> PY : py::dict metrics
+deactivate AD
+
+@enduml
