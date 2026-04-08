@@ -23,7 +23,7 @@
 #include <memory>
 #include <stdexcept>
 #include <string>
-#include <utility>
+#include <utility>  // std::unreachable (C++23)
 #include <vector>
 
 namespace pygim::datagen {
@@ -159,7 +159,7 @@ inline std::shared_ptr<arrow::DataType> arrow_type_for(ColType ct) {
         case ColType::Uuid:      return arrow::fixed_size_binary(16);  // 16-byte SQLGUID
         case ColType::Serial:    return arrow::int32();  // sequential 1, 2, 3, …
     }
-    __builtin_unreachable();
+    std::unreachable();
 }
 
 // ── Per-type column generators ──────────────────────────────────────────────
@@ -440,7 +440,7 @@ inline std::shared_ptr<arrow::Array> generate_column(
         case ColType::Serial:
             return gen_sequential<arrow::Int32Builder, int32_t>(rows);
     }
-    __builtin_unreachable();
+    std::unreachable();
 }
 
 /// Build a complete Arrow RecordBatch from column specifications.
