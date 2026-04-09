@@ -31,10 +31,10 @@
 #include <utility>
 #include <vector>
 
-// SQLLEN must be int64_t — required by the SQLLEN* → int64_t* casts
-// in append_strings / append_binary.  std::is_same_v prevents strict-aliasing UB.
-static_assert(std::is_same_v<SQLLEN, int64_t>,
-              "SQLLEN must be int64_t for zero-copy indicator passing");
+// SQLLEN must be 64-bit signed — required by the SQLLEN* → int64_t* casts
+// in append_strings / append_binary.
+static_assert(sizeof(SQLLEN) == 8 && std::is_signed_v<SQLLEN>,
+              "SQLLEN must be 64-bit signed for zero-copy indicator passing");
 
 namespace pygim::strategy::mssql {
 

@@ -138,8 +138,6 @@ inline void run_worker(OdbcConnection& conn,
                        WorkerResult& out) {
     using clock = std::chrono::steady_clock;
     auto& metrics = out.metrics;
-    const auto t_start = clock::now();
-
     try {
         StmtHandle stmt(conn.dbc());
 
@@ -318,7 +316,7 @@ inline core::LoadResult execute_parallel(
         std::vector<detail::WorkerResult> results(static_cast<std::size_t>(load_workers));
 
         {
-            std::vector<std::jthread> threads;
+            std::vector<std::thread> threads;
             threads.reserve(static_cast<std::size_t>(load_workers - 1));
 
             // Workers 1..N-1 on extra connections
@@ -334,7 +332,7 @@ inline core::LoadResult execute_parallel(
             // Worker 0 on primary connection (this thread)
             detail::run_worker(conn, queries[0], schema_info, block_size, results[0]);
 
-            // No manual join — jthread destructor auto-joins
+            for (auto& t : threads) t.join();
         }
 
         return results;

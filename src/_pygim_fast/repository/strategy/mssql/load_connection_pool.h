@@ -12,6 +12,7 @@
 #include <thread>
 #include <vector>
 #include <stdexcept>
+#include <exception>
 
 namespace pygim::strategy::mssql {
 

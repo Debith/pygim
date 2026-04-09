@@ -29,7 +29,7 @@ if sys.platform == "darwin":
 
 # Pick sensible flags per-compiler
 if sys.platform == "win32":
-    extra_compile_args = ["/std:c++23", "/O2", "/GL"]
+    extra_compile_args = ["/std:c++latest", "/O2", "/GL"]
     extra_link_args_global = ["/LTCG"]
 else:
     extra_compile_args = [

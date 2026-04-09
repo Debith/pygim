@@ -74,7 +74,7 @@ public:
         for (const py::handle &item : m_iterable) {
             if (!py::hasattr(item, name.c_str())) {
                 std::ostringstream msg;
-                msg << '\'' << py::str(item.get_type()).cast<std::string>()
+                msg << '\'' << py::str(py::type::of(item)).cast<std::string>()
                     << "' object has no attribute '" << name << '\'';
                 collected.emplace_back(attr_err_cls(msg.str()));
                 continue;
