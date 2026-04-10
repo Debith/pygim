@@ -7,10 +7,11 @@
 #include "bcp_api.h"
 #include "../odbc_error.h"
 
+#include <exception>
+#include <stdexcept>
 #include <string>
 #include <thread>
 #include <vector>
-#include <stdexcept>
 
 namespace pygim::strategy::mssql::bcp {
 
