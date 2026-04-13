@@ -34,9 +34,9 @@ PYBIND11_MODULE(pathset, m)
         .def("__repr__",        &PathSet::repr)
         .def("__str__",         &PathSet::str)
         .def("__contains__",    &PathSet::contains)
-        // Iterator over PathSet using internal m_paths
+        // Iterator over PathSet via public begin()/end()
         .def("__iter__", [](const PathSet &ps) {
-             return py::make_iterator(ps.m_paths.begin(), ps.m_paths.end(), py::return_value_policy::reference_internal);
+             return py::make_iterator(ps.begin(), ps.end(), py::return_value_policy::reference_internal);
          }, py::keep_alive<0,1>())
         // heterogeneous operators: PathSet  &/|  Filter  → Query
         .def("__and__",
@@ -71,7 +71,7 @@ PYBIND11_MODULE(pathset, m)
         // iterating in Python triggers a lazy eval under the hood
         .def("__iter__", [](const QueryPS& q) {
              auto ps = std::make_shared<PathSet>(q.eval());
-             return py::make_iterator(ps->m_paths.begin(), ps->m_paths.end(), py::return_value_policy::reference_internal);
+             return py::make_iterator(ps->begin(), ps->end(), py::return_value_policy::reference_internal);
          }, py::keep_alive<0,1>());
 
     /* -------------  helper factory functions ------------- */

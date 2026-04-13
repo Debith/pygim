@@ -242,7 +242,7 @@ public:
     [[nodiscard]] Format format() const { return m_format; }
 
     [[nodiscard]] std::string repr() const {
-        return std::string("Repository(backend=") + Backend::name()
+        return std::string("DataStore(backend=") + Backend::name()
              + ", format=" + format_name(m_format)
              + ", transforms=" + std::to_string(m_pre_transforms.size())
              + "/" + std::to_string(m_post_transforms.size()) + ")";

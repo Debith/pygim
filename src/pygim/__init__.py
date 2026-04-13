@@ -8,9 +8,9 @@ from pygim.factory import Factory
 # Import C++ extension modules explicitly
 try:  # normal pybind11 extension import
 	from . import _repository as _repo_mod  # type: ignore
-	Repository = _repo_mod.Repository  # type: ignore[attr-defined]
-	acquire_repo = _repo_mod.acquire_repo  # type: ignore[attr-defined]
-except Exception:  # pragma: no cover - if compiled extension missing
+	DataStore = _repo_mod.DataStore  # type: ignore[attr-defined]
+	acquire_datastore = _repo_mod.acquire_datastore  # type: ignore[attr-defined]
+except (ImportError, ModuleNotFoundError):  # pragma: no cover - if compiled extension missing
 	pass
 
 
@@ -65,4 +65,4 @@ def create_df(schema: dict, rows: int = 100_000, *, seed: int = 42,
 
 
 __all__ = ["PathSet", "Registry", "Factory", "create_df",
-           "Repository", "acquire_repo"]
+           "DataStore", "acquire_datastore"]

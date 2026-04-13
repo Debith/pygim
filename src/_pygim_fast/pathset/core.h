@@ -84,10 +84,6 @@ inline Filter ext(std::string_view x)
 
 class PathSet {
 public:
-    // TODO: m_paths is being accessed by pybind11 bindings. Ideally,
-    // this should be private, but then need to find a way to expose iterators.
-    std::set<fs::path> m_paths;
-
     auto begin() const { return m_paths.begin(); }
     auto end()   const { return m_paths.end();   }
 
@@ -192,6 +188,9 @@ public:
     }
 
     // Other methods as needed
+
+private:
+    std::set<fs::path> m_paths;
 };
 
 /*------------  Lazy query = source + predicate  -------------*/

@@ -3,10 +3,10 @@
 BCP throughput benchmark — target architecture (placeholder).
 
 Exercises the full Repository pipeline:
-  acquire_repo → save (Polars → Arrow → BCP) → load (ODBC → Arrow → Polars)
+  acquire_datastore → save (Polars → Arrow → BCP) → load (ODBC → Arrow → Polars)
 
 Uses the new target architecture API:
-  from pygim.repository import acquire_repo, Query
+  from pygim.repository import acquire_datastore, Query
 
 Profiles:
   simple     – 7 columns  (INT, BIGINT, FLOAT, NVARCHAR, DATE, DATETIME2)
@@ -226,19 +226,19 @@ def run_write(
     packet_size: int = 16384,
 ) -> dict:
     """Insert *df* via BCP and return timing metrics."""
-    from pygim.repository import acquire_repo
+    from pygim.repository import acquire_datastore
 
-    repo = acquire_repo(conn_str, format="polars",
-                        batch_size=batch_size,
-                        bcp_workers=bcp_workers,
-                        block_size=block_size,
-                        packet_size=packet_size)
+    store = acquire_datastore(conn_str, format="polars",
+                              batch_size=batch_size,
+                              bcp_workers=bcp_workers,
+                              block_size=block_size,
+                              packet_size=packet_size)
 
     payload_bytes = estimate_size_bytes(df)
     nrows = len(df)
 
     t0 = time.perf_counter()
-    metrics = repo.save(df, table)
+    metrics = store.save(df, table)
     elapsed = time.perf_counter() - t0
 
     mb_s = (payload_bytes / 1_048_576) / elapsed if elapsed > 0 else 0.0
@@ -265,14 +265,14 @@ def run_load(
     packet_size: int = 16384,
 ) -> dict:
     """Load all rows from *table* via Repository.load() (Arrow → Polars)."""
-    from pygim.repository import acquire_repo
+    from pygim.repository import acquire_datastore
 
-    repo = acquire_repo(conn_str, format="polars",
-                        block_size=block_size,
-                        packet_size=packet_size)
+    store = acquire_datastore(conn_str, format="polars",
+                              block_size=block_size,
+                              packet_size=packet_size)
 
     t0 = time.perf_counter()
-    df = repo.load(table, load_workers=load_workers)
+    df = store.load(table, load_workers=load_workers)
     elapsed = time.perf_counter() - t0
 
     nrows = len(df)

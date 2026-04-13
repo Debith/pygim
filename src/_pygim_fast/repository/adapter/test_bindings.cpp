@@ -65,7 +65,7 @@ PYBIND11_MODULE(_repository_test, m) {
         .export_values();
 
     // RepositoryAdapter — module-local to avoid conflict with production _repository
-    py::class_<MssqlRepo>(m, "Repository", py::module_local())
+    py::class_<MssqlRepo>(m, "DataStore", py::module_local())
         .def(py::init([](const std::string& conn_str, const std::string& format,
                          std::size_t pool_size, int64_t batch_size,
                          const std::string& table_hint, int bcp_workers,

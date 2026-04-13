@@ -15,8 +15,8 @@ title Repository Module — Layer Architecture
 ' ────────────────────────── Python Layer ──────────────────────────
 package "Python API" as PY #E8F5E9 {
     component "pygim.repository" as py_repo <<module>> {
-        component "acquire_repo()" as acquire
-        component "Repository (re-export)" as py_cls
+        component "acquire_datastore()" as acquire
+        component "DataStore (re-export)" as py_cls
         component "Format enum (re-export)" as py_fmt
     }
     note right of py_repo

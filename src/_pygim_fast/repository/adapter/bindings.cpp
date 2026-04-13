@@ -23,7 +23,7 @@ static_assert(core::BackendPolicy<strategy::mssql::MssqlBackend>,
 
 using MssqlRepo = adapter::RepositoryAdapter<strategy::mssql::MssqlBackend>;
 
-static py::object acquire_repo(const std::string& conn_str,
+static py::object acquire_datastore(const std::string& conn_str,
                                const std::string& format,
                                std::size_t pool_size,
                                int64_t batch_size,
@@ -38,7 +38,7 @@ static py::object acquire_repo(const std::string& conn_str,
 }
 
 PYBIND11_MODULE(_repository, m) {
-    m.doc() = "Repository — database access with Arrow core and format conversion";
+    m.doc() = "DataStore — database access with Arrow core and format conversion";
 
     // Format enum exposed to Python
     py::enum_<adapter::Format>(m, "Format")
@@ -47,7 +47,7 @@ PYBIND11_MODULE(_repository, m) {
         .export_values();
 
     // ONE class, not two
-    py::class_<MssqlRepo>(m, "Repository")
+    py::class_<MssqlRepo>(m, "DataStore")
         .def("save", &MssqlRepo::save,
              py::arg("data"), py::arg("table_name"), py::arg("bcp_workers") = -1,
              "Bulk-insert data into a table via BCP. Returns a dict of timing metrics.")
@@ -78,7 +78,7 @@ PYBIND11_MODULE(_repository, m) {
         .def("__repr__", &MssqlRepo::repr);
 
     // Factory function
-    m.def("acquire_repo", &acquire_repo,
+    m.def("acquire_datastore", &acquire_datastore,
           py::arg("conn_str"),
           py::arg("format") = "polars",
           py::arg("pool_size") = 4,
@@ -88,7 +88,7 @@ PYBIND11_MODULE(_repository, m) {
           py::arg("block_size") = 4096,
           py::arg("packet_size") = 16384,
           R"doc(
-          Create a repository from a connection string.
+          Create a DataStore from a connection string.
 
           Parameters
           ----------

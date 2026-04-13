@@ -16,11 +16,28 @@ Changed
 - Build: Upgrade base C++ standard from C++20 to C++23 for all platforms (GCC, Clang, MSVC).
 - Build: Set ``MACOSX_DEPLOYMENT_TARGET`` default to 13.3 in ``setup.py`` (required for ``std::format`` and ``std::to_chars`` with floating-point).
 - CI: Update ``MACOSX_DEPLOYMENT_TARGET`` from 10.15 to 13.3 in ``python-packages.yml``.
+- CI: Drop Python 3.8 (EOL); add Python 3.14 to test matrix and cibuildwheel build targets.
+- Repository: Rename Python-facing class from ``Repository`` to ``DataStore``. Aligns naming with actual DAO/Table Gateway semantics; DDD ``Repository`` protocol remains in ``interfaces.py``.
+- Repository: Rename ``acquire_repo`` to ``acquire_datastore``.
+- DDD interfaces: Convert all 17 ABC-based interfaces to ``@runtime_checkable`` Protocols. Remove ``I`` prefix (e.g., ``IEntity`` → ``Entity``). Drop unused ``DomainEventType`` enum.
+- Each module: Rename ``each.h`` to ``adapter.h`` to match core/adapter convention (module is inherently pybind11-dependent).
+- PathSet: Encapsulate ``m_paths`` (moved from ``public`` to ``private``); iterator access via ``begin()``/``end()``.
 
 Fixed
 ~~~~~
 - Fix macOS compilation failure caused by ``std::format`` with floating-point requiring ``std::to_chars`` (unavailable below macOS 13.3).
 - Fix Windows (MSVC) compilation failure: replace GCC-only ``__builtin_unreachable()`` with C++23 ``std::unreachable()`` in ``datagen/core.h``.
+- Fix ``_cli_app.py`` ``NameError``: ``PathSet`` was used but never imported. Rewrite ``clean_up()`` to use ``pathlib.Path.rglob()`` and ``shutil.rmtree()`` (old PathSet API removed).
+- Fix ``testing.py`` dead ``pytest_args`` parameter: reversed ``or`` operands so caller-supplied args take precedence.
+- Fix ``interfaces.py`` inverted import: internal module was importing from public ``pygim.core.explib``.
+- Fix ``pygim/__init__.py`` overly broad ``except Exception:`` → ``except (ImportError, ModuleNotFoundError):``.
+- Fix ``_error_msgs.py`` stray ``]`` in type-is-type f-string branch.
+- Fix ``_typing.py`` re-exporting entire ``typing``/``typing_extensions`` ``__all__`` into package namespace.
+
+Removed
+~~~~~~~
+- Remove 7 dead ``x_test_*`` functions from ``test_pathset.py`` (tested APIs that no longer exist: ``prefixed``, ``dirs``, ``files``, ``by_suffix``, ``drop``, ``dropped``, ``FS.delete_all``).
+- Remove ``DomainEventType`` enum (empty, unused) from interfaces.
 
 Added
 ~~~~~

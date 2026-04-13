@@ -58,11 +58,11 @@ src/_pygim_fast/repository/
 │   ├── adapter.h                   ← RepositoryAdapter<Backend> (owns Repository directly)
 │   ├── arrow_export.h              ← shared_ptr<arrow::Table> → Python DataFrame
 │   ├── arrow_import.h              ← py::object → shared_ptr<arrow::Table> (PyCapsule)
-│   ├── bindings.cpp                ← Production: Repository + Format + acquire_repo()
-│   └── test_bindings.cpp           ← Test-only: Query, MssqlDialect, Repository (module_local)
+│   ├── bindings.cpp                ← Production: DataStore + Format + acquire_datastore()
+│   └── test_bindings.cpp           ← Test-only: Query, MssqlDialect, DataStore (module_local)
 
 src/pygim/
-└── repository.py                   ← Public Python API: re-exports acquire_repo, Repository, Format
+└── repository.py                   ← Public Python API: re-exports acquire_datastore, DataStore, Format
 ```
 
 ### Build Configuration
@@ -237,7 +237,7 @@ ODBC block cursors fetch multiple rows per `SQLFetch()` call:
 4. `indicators_to_valid_bytes()` — branchless null conversion (compiles to `cmp` + `setne`)
 5. `dispatch[c].fn(builder, col, buf, nrows, valid)` — O(1) type dispatch
 
-Configurable `block_size` (default 4096). Tunable via `acquire_repo(block_size=...)`.
+Configurable `block_size` (default 4096). Tunable via `acquire_datastore(block_size=...)`.
 
 ### 4.12 PK Auto-Detection
 
@@ -502,7 +502,7 @@ Python → adapter (with GIL)
 
 ### 10.2 Configurable Tuning Parameters
 
-All parameters are configurable via `acquire_repo()` and the benchmark CLI:
+All parameters are configurable via `acquire_datastore()` and the benchmark CLI:
 
 | Parameter         | Default   | Scope         | Effect                                      | CLI flag          |
 |-------------------|-----------|---------------|----------------------------------------------|-------------------|

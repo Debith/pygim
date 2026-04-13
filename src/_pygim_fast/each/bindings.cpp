@@ -1,11 +1,11 @@
 // each/bindings.cpp – pybind11 module definition
 // ------------------------------------------------------
 // This file *only* contains the binding glue.  All runtime logic lives in
-// each.h so that this translation unit stays tiny and fast to
+// adapter.h so that this translation unit stays tiny and fast to
 // compile.
 
 #include <pybind11/pybind11.h>
-#include "each.h"
+#include "adapter.h"
 
 namespace py = pybind11;
 

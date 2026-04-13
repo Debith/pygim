@@ -23,7 +23,8 @@ __all__ = [
     "AnyCallable",
 ]
 
-__all__ += t.__all__ + te.__all__
+# Intentionally NOT re-exporting typing/typing_extensions __all__;
+# only the symbols defined in this module are part of our public surface.
 
 
 @runtime_checkable

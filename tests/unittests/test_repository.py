@@ -5,7 +5,7 @@ _repository_test = pytest.importorskip(
     "pygim._repository_test",
     reason="C++ repository extension not built (Arrow/ODBC not installed)",
 )
-TestRepository = _repository_test.Repository
+TestDataStore = _repository_test.DataStore
 Query = _repository_test.Query
 MssqlDialect = _repository_test.MssqlDialect
 TestFormat = _repository_test.Format
@@ -14,7 +14,7 @@ _repository_module = pytest.importorskip(
     "pygim._repository",
     reason="C++ repository extension not built (Arrow/ODBC not installed)",
 )
-acquire_repo = _repository_module.acquire_repo
+acquire_datastore = _repository_module.acquire_datastore
 Format = _repository_module.Format
 
 
@@ -28,7 +28,7 @@ def fmt(request):
 
 @pytest.fixture
 def repo(fmt):
-    return TestRepository("test_conn", format=fmt, pool_size=2)
+    return TestDataStore("test_conn", format=fmt, pool_size=2)
 
 
 @pytest.fixture
@@ -39,7 +39,7 @@ def dialect():
 # ─── Adapter: Construction & Repr ────────────────────────────────────────────
 
 REPR_RE = re.compile(
-    r"^Repository\(backend=mssql, format=(polars|pandas), transforms=\d+/\d+\)$"
+    r"^DataStore\(backend=mssql, format=(polars|pandas), transforms=\d+/\d+\)$"
 )
 
 
@@ -85,7 +85,7 @@ def test_load_with_query_fails_without_odbc(repo):
 
 def test_invalid_format():
     with pytest.raises(ValueError, match="Unknown format"):
-        TestRepository("conn", format="arrow", pool_size=1)
+        TestDataStore("conn", format="arrow", pool_size=1)
 
 
 # ─── Adapter: Transforms ────────────────────────────────────────────────────
@@ -143,7 +143,7 @@ def test_multiple_transforms(repo):
 
 @pytest.mark.parametrize("pool_size", [1, 8])
 def test_pool_size(pool_size):
-    r = TestRepository("conn", format="polars", pool_size=pool_size)
+    r = TestDataStore("conn", format="polars", pool_size=pool_size)
     assert REPR_RE.match(repr(r))
 
 
@@ -152,24 +152,24 @@ def test_pool_size(pool_size):
 
 @pytest.mark.parametrize("batch_size", [1, 50_000, 500_000])
 def test_batch_size_accepted(batch_size):
-    r = TestRepository("conn", format="polars", batch_size=batch_size)
+    r = TestDataStore("conn", format="polars", batch_size=batch_size)
     assert REPR_RE.match(repr(r))
 
 
 @pytest.mark.parametrize("table_hint", ["TABLOCK", "NOLOCK", ""])
 def test_table_hint_accepted(table_hint):
-    r = TestRepository("conn", format="polars", table_hint=table_hint)
+    r = TestDataStore("conn", format="polars", table_hint=table_hint)
     assert REPR_RE.match(repr(r))
 
 
 @pytest.mark.parametrize("bcp_workers", [1, 4, 8])
 def test_bcp_workers_accepted(bcp_workers):
-    r = TestRepository("conn", format="polars", bcp_workers=bcp_workers)
+    r = TestDataStore("conn", format="polars", bcp_workers=bcp_workers)
     assert REPR_RE.match(repr(r))
 
 
 def test_all_new_params_combined():
-    r = TestRepository(
+    r = TestDataStore(
         "conn", format="polars", pool_size=2,
         batch_size=50_000, table_hint="NOLOCK", bcp_workers=4,
     )
@@ -177,13 +177,13 @@ def test_all_new_params_combined():
 
 
 @pytest.mark.parametrize("fmt", ["polars", "pandas"])
-def test_acquire_repo_new_params(fmt):
-    """Production acquire_repo accepts new constructor params."""
-    repo = acquire_repo(
+def test_acquire_datastore_new_params(fmt):
+    """Production acquire_datastore accepts new constructor params."""
+    store = acquire_datastore(
         "conn", format=fmt, batch_size=10_000,
         table_hint="TABLOCK", bcp_workers=2,
     )
-    assert repo.format.name == fmt
+    assert store.format.name == fmt
 
 
 # ─── Query: Builder ─────────────────────────────────────────────────────────
@@ -257,19 +257,19 @@ def test_dialect_quote_identifier_space(dialect):
 
 
 @pytest.mark.parametrize("fmt", ["polars", "pandas"])
-def test_acquire_repo_save_load(fmt):
-    repo = acquire_repo("conn", format=fmt, pool_size=2)
+def test_acquire_datastore_save_load(fmt):
+    store = acquire_datastore("conn", format=fmt, pool_size=2)
     # save requires Arrow data, load requires ODBC
     with pytest.raises(TypeError, match="Arrow-compatible"):
-        repo.save("not_arrow", "table", bcp_workers=1)
+        store.save("not_arrow", "table", bcp_workers=1)
     with pytest.raises(RuntimeError, match="SQLDriverConnect"):
-        repo.load("table", load_workers=1)
-    assert repo.format.name == fmt
+        store.load("table", load_workers=1)
+    assert store.format.name == fmt
 
 
-def test_acquire_repo_invalid_format():
+def test_acquire_datastore_invalid_format():
     with pytest.raises(ValueError, match="Unknown format"):
-        acquire_repo("conn", format="arrow")
+        acquire_datastore("conn", format="arrow")
 
 
 # NOTE: save() returns a dict with metrics (processed_rows, total_seconds, etc.)
