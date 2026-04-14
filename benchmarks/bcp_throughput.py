@@ -13,6 +13,7 @@ Profiles:
   mixed      – 9 columns  (adds DECIMAL, wider NVARCHAR)
   complex    – 11 columns (adds BIT, DECIMAL, NCHAR, UNIQUEIDENTIFIER)
   exhaustive – 19 columns (every supported Arrow type)
+  timeseries – 2 columns  (DATETIME2, FLOAT) — lightweight I/O-bound profile
 
 Modes:
   both  – write + read-back + verify (default)
@@ -88,6 +89,11 @@ _SCHEMA_EXHAUSTIVE = {
     "col_date": "date", "col_time": "time", "col_datetime2": "timestamp",
     "col_duration_us": "duration", "col_nvarchar": "string",
     "col_binary": "binary",
+}
+
+_SCHEMA_TIMESERIES = {
+    "ts": "timestamp",
+    "data": "float64",
 }
 
 
@@ -175,9 +181,20 @@ CREATE TABLE dbo.bcp_bench_exhaustive (
         "schema": _SCHEMA_EXHAUSTIVE,
         "columns": 18,
     },
+    "timeseries": {
+        "table": "dbo.bcp_bench_timeseries",
+        "ddl": """
+DROP TABLE IF EXISTS dbo.bcp_bench_timeseries;
+CREATE TABLE dbo.bcp_bench_timeseries (
+    ts    DATETIME2(6) NOT NULL,
+    data  FLOAT        NOT NULL
+);""",
+        "schema": _SCHEMA_TIMESERIES,
+        "columns": 2,
+    },
 }
 
-PROFILE_ORDER = ["simple", "mixed", "complex", "exhaustive"]
+PROFILE_ORDER = ["simple", "mixed", "complex", "exhaustive", "timeseries"]
 
 
 # ── SQL helpers ──────────────────────────────────────────────────────────────
@@ -425,6 +442,24 @@ def verify_round_trip(
     import pyarrow as pa
     src_cols = list(source_df.column_names) if isinstance(source_df, pa.Table) else list(source_df.columns)
     cols_ok = db_cols == src_cols
+
+    # If no id column, skip per-row verification (unordered data)
+    if "id" not in src_cols:
+        passed = count_ok and cols_ok
+        cursor.close()
+        cn.close()
+        return {
+            "passed":           passed,
+            "row_count_ok":     count_ok,
+            "src_rows":         src_count,
+            "db_rows":          db_count,
+            "cols_ok":          cols_ok,
+            "src_cols":         src_cols,
+            "db_cols":          db_cols,
+            "rows_checked":     0,
+            "mismatches":       [],
+            "total_mismatches": 0,
+        }
 
     # 3. Sample row comparison
     sample_ids = sorted(random.sample(

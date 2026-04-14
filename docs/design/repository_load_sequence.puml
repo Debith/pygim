@@ -145,7 +145,7 @@ deactivate REPO
 
 AD -> EXP : export_table(table, use_polars)
 activate EXP
-EXP -> EXP : TableBatchReader\n→ ExportRecordBatchReader\n→ ArrowArrayStream (C Data Interface)
+EXP -> EXP : TableBatchReader\n→ ExportRecordBatchReader\n→ unique_ptr<ArrowArrayStream> (RAII)
 EXP -> EXP : PyArrow._import_from_c(addr)\n→ reader.read_all()
 alt Polars
     EXP -> EXP : polars.from_arrow(table)

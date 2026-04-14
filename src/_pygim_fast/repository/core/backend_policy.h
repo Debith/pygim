@@ -20,20 +20,21 @@ namespace pygim::core {
 ///   LoadCache  — persistent cache for parallel load resources (or NullLoadCache)
 ///
 /// Required static functions:
-///   connect(conn_str) — open and return a new Connection
+///   connect(conn_str, packet_size) — open and return a new Connection
 ///   reset(conn)       — prepare a pooled connection for reuse (reset handles, clear state)
 ///   name()            — human-readable backend label for logging and repr
 template <typename B>
-concept BackendPolicy = requires(std::string_view s, typename B::Connection& conn) {
+concept BackendPolicy = requires(std::string_view s, int packet_size,
+                                 typename B::Connection& conn) {
     typename B::Connection;
     typename B::SaveImpl;
     typename B::LoadImpl;
     typename B::Dialect;
     typename B::LoadCache;
-    { B::connect(s) }    -> std::same_as<typename B::Connection>;
-    { B::reset(conn) }   -> std::same_as<void>;
-    { conn.close() }     -> std::same_as<void>;
-    { B::name() }        -> std::convertible_to<const char*>;
+    { B::connect(s, packet_size) } -> std::same_as<typename B::Connection>;
+    { B::reset(conn) }            -> std::same_as<void>;
+    { conn.close() }              -> std::same_as<void>;
+    { B::name() }                 -> std::convertible_to<const char*>;
 } && DialectPolicy<typename B::Dialect>;
 
 } // namespace pygim::core

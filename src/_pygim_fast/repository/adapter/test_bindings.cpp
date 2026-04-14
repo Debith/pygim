@@ -23,6 +23,9 @@ using MssqlRepo = adapter::RepositoryAdapter<strategy::mssql::MssqlBackend>;
 PYBIND11_MODULE(_repository_test, m) {
     m.doc() = "Test-only bindings for repository internals";
 
+    // Bridge C++ std::runtime_error to GimError (RuntimeError subclass).
+    static auto gim_error = py::exception<std::runtime_error>(m, "GimError", PyExc_RuntimeError);
+
     // Query builder — needed for testing structured queries
     py::class_<core::Query>(m, "Query", py::module_local())
         .def(py::init<>())

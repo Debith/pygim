@@ -5,11 +5,14 @@ from pygim.pathset import PathSet
 from pygim.registry import Registry
 from pygim.factory import Factory
 
+__all__ = ["PathSet", "Registry", "Factory", "create_df"]
+
 # Import C++ extension modules explicitly
 try:  # normal pybind11 extension import
 	from . import _repository as _repo_mod  # type: ignore
 	DataStore = _repo_mod.DataStore  # type: ignore[attr-defined]
 	acquire_datastore = _repo_mod.acquire_datastore  # type: ignore[attr-defined]
+	__all__ += ["DataStore", "acquire_datastore"]
 except (ImportError, ModuleNotFoundError):  # pragma: no cover - if compiled extension missing
 	pass
 
@@ -62,7 +65,3 @@ def create_df(schema: dict, rows: int = 100_000, *, seed: int = 42,
 		return pl.from_arrow(table)
 	except ImportError:
 		return table
-
-
-__all__ = ["PathSet", "Registry", "Factory", "create_df",
-           "DataStore", "acquire_datastore"]

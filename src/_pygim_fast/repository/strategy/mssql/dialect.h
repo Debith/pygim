@@ -5,6 +5,7 @@
 #pragma once
 
 #include "../../core/query.h"
+#include <format>
 #include <string>
 #include <string_view>
 
@@ -29,7 +30,7 @@ struct MssqlDialect {
         sql.reserve(estimate);
         sql += "SELECT ";
         if (q.limit_value()) {
-            sql += "TOP " + std::to_string(*q.limit_value()) + " ";
+            sql += std::format("TOP {} ", *q.limit_value());
         }
         if (q.columns().empty()) {
             sql += "*";

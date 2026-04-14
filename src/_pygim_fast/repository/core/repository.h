@@ -18,6 +18,7 @@
 
 #include "../../utils/logging.h"
 #include <arrow/table.h>
+#include <format>
 #include <memory>
 #include <stdexcept>
 #include <string>
@@ -71,7 +72,7 @@ public:
         auto result = m_pool->checkout();
         if (!result) {
             throw std::runtime_error(
-                std::string("Repository: checkout failed: ") + pool_error_name(result.error()));
+                std::format("Repository: checkout failed: {}", pool_error_name(result.error())));
         }
         auto handle = std::move(*result);
         return Backend::SaveImpl::execute(handle.get(), std::move(table_data),
@@ -92,7 +93,7 @@ public:
         auto result = m_pool->checkout();
         if (!result) {
             throw std::runtime_error(
-                std::string("Repository: checkout failed: ") + pool_error_name(result.error()));
+                std::format("Repository: checkout failed: {}", pool_error_name(result.error())));
         }
         auto handle = std::move(*result);
         return Backend::LoadImpl::execute(handle.get(), sql, load_workers,
@@ -129,7 +130,7 @@ public:
         auto result = m_pool->checkout();
         if (!result) {
             throw std::runtime_error(
-                std::string("Repository: checkout failed: ") + pool_error_name(result.error()));
+                std::format("Repository: checkout failed: {}", pool_error_name(result.error())));
         }
         auto handle = std::move(*result);
         return Backend::LoadImpl::execute(handle.get(), sql, load_workers,

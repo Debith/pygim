@@ -58,6 +58,8 @@ Added
 - Repository/MSSQL BCP: Parallel BCP with ``bcp_workers=N`` parameter on ``persist_dataframe()``. Creates N independent ODBC connections, partitions Arrow RecordBatches by row count, and runs worker threads in parallel. ``bcp_workers=0`` (default) uses single-connection. Falls back to single-connection when batch count < workers.
 - Repository/MSSQL BCP: ``BcpConnectionPool`` (``bcp_connection_pool.h``) — RAII pool of M pre-connected ODBC handles with BCP enabled. Exception-safe constructor with rollback. Used per parallel persist call.
 - Benchmark: ``--workers N`` CLI argument in ``benchmarks/bcp_throughput.py`` for parallel BCP benchmarking.
+- Tests: ``test_datastore_satisfies_repository_protocol`` verifying ``DataStore`` satisfies the ``Repository`` protocol via ``isinstance``.
+- Tests: ``test_public_module_reexports`` validating ``pygim.repository`` re-exports ``DataStore``, ``acquire_datastore``, ``Format``.
 
 Changed
 ~~~~~~~
@@ -96,6 +98,8 @@ Changed
 - Repository: Updated ``StrategyCapabilities`` from five flags to three (``can_fetch``, ``can_save``, ``can_persist``); bulk-level granularity was premature given the single-strategy-per-repo invariant.
 - Docs: Updated abstract PlantUML diagrams (architecture + sequence) to represent ideal end-state for all backlog phases (Phase 1–5 + M), including pipeline internals, SchemaCache, BufferPool, and MeasurementHarness.
 - Repository: ``persist_dataframe`` gains ``bcp_batch_size=0`` parameter; when 0 (default), BCP uses its 100 000-row commit default; pass an explicit value to bound memory per batch on very wide or high-cardinality datasets.
+- C++23 modernization: replace ``std::string`` concatenation with ``std::format`` across ``repository.h``, ``adapter.h``, ``sql_helpers.h``, ``odbc_error.h``, ``dialect.h``.
+- C++23 modernization: replace ``std::all_of`` with ``std::ranges::all_of`` in ``sql_helpers.h``.
 
 Fixed
 ~~~~~- Repository/MSSQL BCP: Fix parallel BCP never activating — Polars exports the entire DataFrame as a single ``RecordBatch``, so ``max_workers`` was clamped to ``min(hw_concurrency, 1) = 1`` and always fell back to single-connection. Fix: slice large ``RecordBatch``es into N sub-batches (zero-copy via ``RecordBatch::Slice``) before partitioning across workers. Additionally fix ``batch_flush_seconds`` metric aggregation from ``+=`` (sum) to ``std::max`` (wall-clock) for consistent parallel reporting.- Repository: Fix BCP commit-frequency regression — ``persist_dataframe`` was passing ``batch_size=1000`` directly to BCP, causing 1 000 ``bcp_batch()`` server-side commits for a 1 M-row load; MERGE used the same parameter but runs all batches inside a single transaction (one commit), so BCP was paradoxically slower (2.88 MB/s) than MERGE (5.98 MB/s). Root cause was a units mismatch: ``batch_size`` on the MERGE path caps SQL parameter count per statement, while on the BCP path it sets the commit frequency. Fix: add separate ``bcp_batch_size=0`` parameter to ``persist_dataframe``; when 0, BCP uses its internal 100 000-row default (10 commits for 1 M rows instead of 1 000), restoring expected throughput ordering.
@@ -104,6 +108,12 @@ Fixed
 - Added edge-case tests for factory missing getitem/override behavior and registry key tuple validation + ``find_id`` variant fallback.
 - Repository/MSSQL Arrow BCP: Fix variable-length text/date/timestamp binding requirements (terminator metadata) and per-row fixed-width column pointer binding to prevent fallback/duplicate-row insertion behavior.
 - Repository/MSSQL Arrow persist: Added c-stream compatibility bridge using Arrow reader ``_export_to_c`` when table-level ``__arrow_c_stream__`` is unavailable, enabling ``arrow_c_stream_bcp`` on environments that previously fell back to IPC.
+- Fix ``pygim/__init__.py`` unconditional ``__all__`` causing ``NameError`` when repository extension is not installed. ``DataStore``/``acquire_datastore`` now conditionally included.
+- Fix ``arrow_export.h`` raw ``new``/``delete`` pattern for ``ArrowArrayStream``. Replaced with ``std::unique_ptr`` + custom deleter for exception-safe RAII cleanup.
+- Fix ``BackendPolicy`` concept underspecification: ``connect()`` now requires 2-arg signature ``(string_view, int)`` matching actual ``ConnectionPool`` usage.
+- Fix ``ArrowBuilder`` coupling to ODBC headers: replaced ``SQL_DATE_STRUCT``/``SQL_TIMESTAMP_STRUCT``/``SQL_SS_TIME2_STRUCT`` with portable ``detail::DateStruct``/``detail::TimestampStruct``/``detail::Time2Struct``. Layout verified via ``static_assert`` in strategy layer.
+- Fix inconsistent exception types at Python boundary: register ``py::exception<std::runtime_error>`` as ``GimError`` (``RuntimeError`` subclass) in ``bindings.cpp``, aligning with project ``GimError`` hierarchy.
+- Fix magic number ``256`` in ``bcp_bind_dispatch.h``: extracted to named constant ``kInitialStringBufSize``.
 
 Performance
 ~~~~~~~~~~~
@@ -119,6 +129,8 @@ Docs
 - Added inline binding docstrings for new registry APIs.
 - Added educational examples demonstrating hooks and override semantics.
 - Expanded class- and method-level documentation in registry/factory core+adapter headers with explicit rationale, argument, return, and exception notes.
+- Update PlantUML diagrams (class, abstract architecture, load sequence) to reflect ``BackendPolicy`` 2-arg connect, portable temporal structs, ``unique_ptr`` RAII export, and ``GimError`` bridge.
+- Update ``repository_architecture.md`` with new subsections: Portable Temporal Structs (§4.7), RAII Arrow Export (§4.8), GimError Exception Bridge (§4.9).
 
 0.0.1 (Initial)
 ---------------

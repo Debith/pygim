@@ -33,32 +33,30 @@ inline py::object export_table(std::shared_ptr<arrow::Table> table,
     // Wrap Table in a TableBatchReader (no copy — reads existing chunks)
     auto reader = std::make_shared<arrow::TableBatchReader>(*table);
 
-    // Export to ArrowArrayStream (C Data Interface)
-    auto* c_stream = new ArrowArrayStream;
-    std::memset(c_stream, 0, sizeof(*c_stream));
+    // RAII wrapper: releases the stream (if still active) then frees the struct.
+    auto stream_deleter = [](ArrowArrayStream* s) {
+        if (s->release) s->release(s);
+        delete s;
+    };
+    std::unique_ptr<ArrowArrayStream, decltype(stream_deleter)> c_stream(
+        new ArrowArrayStream, stream_deleter);
+    std::memset(c_stream.get(), 0, sizeof(ArrowArrayStream));
 
-    auto status = arrow::ExportRecordBatchReader(reader, c_stream);
+    auto status = arrow::ExportRecordBatchReader(reader, c_stream.get());
     if (!status.ok()) [[unlikely]] {
-        delete c_stream;
         throw std::runtime_error("export_table: ExportRecordBatchReader failed: "
                                  + status.ToString());
     }
 
-    // Import into PyArrow via C Data Interface address
-    // _import_from_c consumes the stream (calls release), then we delete the struct.
+    // Import into PyArrow via C Data Interface address.
+    // _import_from_c consumes the stream (sets release to nullptr).
     auto pa = py::module_::import("pyarrow");
-    auto addr = py::int_(reinterpret_cast<uintptr_t>(c_stream));
-    py::object reader_obj;
-    try {
-        reader_obj = pa.attr("RecordBatchReader").attr("_import_from_c")(addr);
-    } catch (...) {
-        // If import fails, clean up the stream ourselves
-        if (c_stream->release) c_stream->release(c_stream);
-        delete c_stream;
-        throw;
-    }
-    // _import_from_c consumed the stream (set release to nullptr), safe to delete struct
-    delete c_stream;
+    auto addr = py::int_(reinterpret_cast<uintptr_t>(c_stream.get()));
+    auto reader_obj = pa.attr("RecordBatchReader").attr("_import_from_c")(addr);
+
+    // _import_from_c consumed the stream — release is now nullptr.
+    // unique_ptr destructor will call delete (release guard is a no-op).
+    c_stream.reset();
 
     auto pa_table = reader_obj.attr("read_all")();
 

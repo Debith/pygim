@@ -2,6 +2,7 @@
 // ODBC error-handling utility.
 // Shared by BCP pipeline, backend, and connection pool.
 
+#include <format>
 #include <stdexcept>
 #include <string>
 
@@ -49,7 +50,7 @@ inline void raise_if_error(SQLRETURN ret, SQLSMALLINT type,
 
     auto diag = collect_diagnostics(type, handle);
     if (!diag.empty()) {
-        throw std::runtime_error(std::string(what) + " failed: " + diag);
+        throw std::runtime_error(std::format("{} failed: {}", what, diag));
     }
 
     const char* code_hint = "";
@@ -59,7 +60,7 @@ inline void raise_if_error(SQLRETURN ret, SQLSMALLINT type,
     else if (ret == SQL_NEED_DATA)      code_hint = " (SQL_NEED_DATA)";
 
     throw std::runtime_error(
-        std::string(what) + " failed (no diagnostics" + code_hint + ")");
+        std::format("{} failed (no diagnostics{})", what, code_hint));
 }
 
 } // namespace pygim::strategy::mssql::odbc

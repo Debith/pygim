@@ -195,4 +195,9 @@ build_column_dispatch(const std::shared_ptr<arrow::Schema>& schema,
     return result;
 }
 
+// Verify portable temporal structs match ODBC wire format.
+static_assert(sizeof(core::detail::DateStruct)      == sizeof(SQL_DATE_STRUCT));
+static_assert(sizeof(core::detail::TimestampStruct)  == sizeof(SQL_TIMESTAMP_STRUCT));
+static_assert(sizeof(core::detail::Time2Struct)       == sizeof(SQL_SS_TIME2_STRUCT));
+
 } // namespace pygim::strategy::mssql

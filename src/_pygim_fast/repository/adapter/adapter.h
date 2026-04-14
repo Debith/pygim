@@ -21,6 +21,7 @@
 #include <pybind11/functional.h>
 
 #include <cstdint>
+#include <format>
 #include <memory>
 #include <string>
 #include <string_view>
@@ -242,10 +243,9 @@ public:
     [[nodiscard]] Format format() const { return m_format; }
 
     [[nodiscard]] std::string repr() const {
-        return std::string("DataStore(backend=") + Backend::name()
-             + ", format=" + format_name(m_format)
-             + ", transforms=" + std::to_string(m_pre_transforms.size())
-             + "/" + std::to_string(m_post_transforms.size()) + ")";
+        return std::format("DataStore(backend={}, format={}, transforms={}/{})",
+                           Backend::name(), format_name(m_format),
+                           m_pre_transforms.size(), m_post_transforms.size());
     }
 
 private:

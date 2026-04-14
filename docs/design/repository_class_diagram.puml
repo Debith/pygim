@@ -23,7 +23,7 @@ package "pygim::core" as p_core #FFF3E0 {
         {abstract} typename B::Dialect
         {abstract} typename B::LoadCache
         --
-        {abstract} B::connect(string_view) → Connection
+        {abstract} B::connect(string_view, int) → Connection
         {abstract} B::reset(Connection&) → void
         {abstract} conn.close() → void
         {abstract} B::name() → const char*
@@ -125,6 +125,12 @@ package "pygim::core" as p_core #FFF3E0 {
         + finish() : shared_ptr<arrow::Table>
     }
 
+    note right of ArrowBuilder
+      Uses portable temporal structs
+      (DateStruct, TimestampStruct, Time2Struct)
+      — no ODBC dependency in core.
+    end note
+
     class "NullLoadCache" as NLC <<struct>> {
         .. zero-cost no-op ..
     }
@@ -177,6 +183,7 @@ package "pygim::adapter" as p_adapter #E3F2FD {
     class "export_table()" as ExpTbl <<free function>> {
         shared_ptr<arrow::Table> → py::object
         --
+        unique_ptr<ArrowArrayStream> (RAII)
         Arrow C Data Interface
         → PyArrow RecordBatchReader
         → polars.from_arrow / to_pandas

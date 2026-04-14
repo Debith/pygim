@@ -12,8 +12,6 @@
 #include <arrow/type.h>
 #include <arrow/type_fwd.h>
 
-#include "../odbc_compat.h"
-
 #include <cstdint>
 #include <memory>
 #include <stdexcept>
@@ -44,6 +42,31 @@ constexpr int32_t days_from_civil(int y, unsigned m, unsigned d) noexcept {
     const unsigned doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
     return era * 146097 + static_cast<int>(doe) - 719468;
 }
+
+/// Portable temporal structs matching the ODBC wire format.
+/// Keeps ArrowBuilder independent of ODBC headers.
+struct DateStruct {
+    int16_t  year;
+    uint16_t month;
+    uint16_t day;
+};
+
+struct TimestampStruct {
+    int16_t  year;
+    uint16_t month;
+    uint16_t day;
+    uint16_t hour;
+    uint16_t minute;
+    uint16_t second;
+    uint32_t fraction;  // nanoseconds
+};
+
+struct Time2Struct {
+    uint16_t hour;
+    uint16_t minute;
+    uint16_t second;
+    uint32_t fraction;  // 100-nanosecond units
+};
 
 } // namespace detail
 
@@ -157,7 +180,7 @@ public:
                       int64_t count, const uint8_t* valid_bytes = nullptr)
     {
         auto* b        = static_cast<arrow::Date32Builder*>(m_builders[col].get());
-        const auto* ds = static_cast<const SQL_DATE_STRUCT*>(date_structs);
+        const auto* ds = static_cast<const detail::DateStruct*>(date_structs);
 
         // Batch-convert to int32_t days, then AppendValues in one shot.
         m_scratch_i32.resize(static_cast<std::size_t>(count));
@@ -179,7 +202,7 @@ public:
                            int64_t count, const uint8_t* valid_bytes = nullptr)
     {
         auto* b        = static_cast<arrow::TimestampBuilder*>(m_builders[col].get());
-        const auto* ts = static_cast<const SQL_TIMESTAMP_STRUCT*>(ts_structs);
+        const auto* ts = static_cast<const detail::TimestampStruct*>(ts_structs);
 
         m_scratch_i64.resize(static_cast<std::size_t>(count));
         for (int64_t i = 0; i < count; ++i) {
@@ -208,7 +231,7 @@ public:
                           int64_t count, const uint8_t* valid_bytes = nullptr)
     {
         auto* b         = static_cast<arrow::Time64Builder*>(m_builders[col].get());
-        const auto* tms = static_cast<const SQL_SS_TIME2_STRUCT*>(time_structs);
+        const auto* tms = static_cast<const detail::Time2Struct*>(time_structs);
 
         m_scratch_i64.resize(static_cast<std::size_t>(count));
         for (int64_t i = 0; i < count; ++i) {

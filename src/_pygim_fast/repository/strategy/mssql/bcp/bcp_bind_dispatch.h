@@ -11,6 +11,10 @@
 
 namespace pygim::strategy::mssql::bcp {
 
+/// Initial capacity for variable-length string buffers.
+/// Sized to handle typical short-to-medium strings without reallocation.
+inline constexpr std::size_t kInitialStringBufSize = 256;
+
 // ── Generic fixed-width binding ─────────────────────────────────────────────
 /// Create a fixed-width BCP column binding.
 /// Passes the Arrow data pointer directly to bcp_bind (zero-copy for numeric types).
@@ -60,7 +64,7 @@ inline ColumnBinding make_string_binding(
     b.null_bitmap  = array->null_bitmap_data();
     b.array_offset = array->offset();
     b.is_string    = true;
-    b.str_buf.resize(256);
+    b.str_buf.resize(kInitialStringBufSize);
     b.last_collen  = -2;  // sentinel: never matches a real length
 
     auto ret = bcp.bind(dbc, reinterpret_cast<LPCBYTE>(&dummy),
@@ -89,7 +93,7 @@ inline ColumnBinding make_binary_binding(
     b.array_offset = array->offset();
     b.is_string    = true;   // reuse variable-length row loop path
     b.is_binary    = true;
-    b.str_buf.resize(256 + sizeof(DBINT));
+    b.str_buf.resize(kInitialStringBufSize + sizeof(DBINT));
 
     auto ret = bcp.bind(dbc, reinterpret_cast<LPCBYTE>(&dummy),
                         static_cast<int>(sizeof(DBINT)),  // 4-byte prefix

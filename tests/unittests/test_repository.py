@@ -5,10 +5,10 @@ _repository_test = pytest.importorskip(
     "pygim._repository_test",
     reason="C++ repository extension not built (Arrow/ODBC not installed)",
 )
-TestDataStore = _repository_test.DataStore
+LocalDataStore = _repository_test.DataStore
 Query = _repository_test.Query
 MssqlDialect = _repository_test.MssqlDialect
-TestFormat = _repository_test.Format
+LocalFormat = _repository_test.Format
 
 _repository_module = pytest.importorskip(
     "pygim._repository",
@@ -28,7 +28,7 @@ def fmt(request):
 
 @pytest.fixture
 def repo(fmt):
-    return TestDataStore("test_conn", format=fmt, pool_size=2)
+    return LocalDataStore("test_conn", format=fmt, pool_size=2)
 
 
 @pytest.fixture
@@ -85,7 +85,7 @@ def test_load_with_query_fails_without_odbc(repo):
 
 def test_invalid_format():
     with pytest.raises(ValueError, match="Unknown format"):
-        TestDataStore("conn", format="arrow", pool_size=1)
+        LocalDataStore("conn", format="arrow", pool_size=1)
 
 
 # ─── Adapter: Transforms ────────────────────────────────────────────────────
@@ -143,7 +143,7 @@ def test_multiple_transforms(repo):
 
 @pytest.mark.parametrize("pool_size", [1, 8])
 def test_pool_size(pool_size):
-    r = TestDataStore("conn", format="polars", pool_size=pool_size)
+    r = LocalDataStore("conn", format="polars", pool_size=pool_size)
     assert REPR_RE.match(repr(r))
 
 
@@ -152,24 +152,24 @@ def test_pool_size(pool_size):
 
 @pytest.mark.parametrize("batch_size", [1, 50_000, 500_000])
 def test_batch_size_accepted(batch_size):
-    r = TestDataStore("conn", format="polars", batch_size=batch_size)
+    r = LocalDataStore("conn", format="polars", batch_size=batch_size)
     assert REPR_RE.match(repr(r))
 
 
 @pytest.mark.parametrize("table_hint", ["TABLOCK", "NOLOCK", ""])
 def test_table_hint_accepted(table_hint):
-    r = TestDataStore("conn", format="polars", table_hint=table_hint)
+    r = LocalDataStore("conn", format="polars", table_hint=table_hint)
     assert REPR_RE.match(repr(r))
 
 
 @pytest.mark.parametrize("bcp_workers", [1, 4, 8])
 def test_bcp_workers_accepted(bcp_workers):
-    r = TestDataStore("conn", format="polars", bcp_workers=bcp_workers)
+    r = LocalDataStore("conn", format="polars", bcp_workers=bcp_workers)
     assert REPR_RE.match(repr(r))
 
 
 def test_all_new_params_combined():
-    r = TestDataStore(
+    r = LocalDataStore(
         "conn", format="polars", pool_size=2,
         batch_size=50_000, table_hint="NOLOCK", bcp_workers=4,
     )
@@ -288,7 +288,37 @@ def test_format_values():
 
 def test_format_from_both_modules():
     # Enums are defined in separate C++ modules; compare by name/value
-    assert Format.polars.name == TestFormat.polars.name
-    assert Format.pandas.name == TestFormat.pandas.name
-    assert Format.polars.value == TestFormat.polars.value
-    assert Format.pandas.value == TestFormat.pandas.value
+    assert Format.polars.name == LocalFormat.polars.name
+    assert Format.pandas.name == LocalFormat.pandas.name
+    assert Format.polars.value == LocalFormat.polars.value
+    assert Format.pandas.value == LocalFormat.pandas.value
+
+
+# ─── Protocol Conformance ────────────────────────────────────────────────────
+
+
+def test_datastore_satisfies_repository_protocol():
+    """DataStore structurally satisfies the Repository protocol from interfaces.py."""
+    from pygim.core.protocols import Repository as RepositoryProtocol
+    store = LocalDataStore("test_conn", format="polars", pool_size=1)
+    assert isinstance(store, RepositoryProtocol), (
+        "DataStore must satisfy the Repository protocol (load + save)"
+    )
+
+
+# ─── Public Module Import ────────────────────────────────────────────────────
+
+
+def test_public_module_reexports():
+    """Verify pygim.repository re-exports match the compiled extension."""
+    from pygim.repository import DataStore as PubDataStore
+    from pygim.repository import Format as PubFormat
+    from pygim.repository import acquire_datastore as pub_acquire
+
+    # Must be the exact same objects as the direct extension imports
+    assert PubDataStore is _repository_module.DataStore
+    assert pub_acquire is _repository_module.acquire_datastore
+
+    # Enum values should match across modules
+    assert PubFormat.polars.name == Format.polars.name
+    assert PubFormat.pandas.name == Format.pandas.name

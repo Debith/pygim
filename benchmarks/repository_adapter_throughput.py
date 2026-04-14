@@ -13,12 +13,31 @@ from __future__ import annotations
 import time
 
 import click
+import polars as pl
 
-from pygim._repository_test import Query, Repository
+from pygim._repository_test import Query, DataStore
+
+# Connection string with non-existent driver — makes ODBC fail immediately
+# instead of hanging on DNS resolution (as "bench_conn" would).
+_BENCH_CONN = "DRIVER={NOT_A_REAL_DRIVER};Server=x;"
 
 
 def _noop():
     pass
+
+
+def _try_save(repo, df):
+    try:
+        repo.save(df, "bench_table", bcp_workers=1)
+    except Exception:
+        pass
+
+
+def _try_load(repo, source, workers=1):
+    try:
+        repo.load(source, load_workers=workers)
+    except Exception:
+        pass
 
 
 def _bench(fn, iterations: int) -> float:
@@ -78,35 +97,41 @@ def main(iterations: int, warmup: int) -> None:
     click.echo(f"  iterations={iterations:,}  warmup={warmup:,}")
     click.echo()
 
+    dummy_df = pl.DataFrame({"id": [1, 2, 3], "name": ["a", "b", "c"]})
     query = Query().select("id").select("name").from_table("bench_table").where("id > 0").limit(100)
     results: list[dict] = []
 
+    # Pool size must cover all calls: each failed connect() exhausts one slot.
+    # The "no transforms" repo handles 3 scenarios × (warmup + iterations).
+    pool_budget = 3 * (warmup + iterations) + 100
+    xform_budget = warmup + iterations + 100
+
     # ── No transforms ────────────────────────────────────────────────────
-    repo = Repository("bench_conn", format="polars", pool_size=2)
+    repo = DataStore(_BENCH_CONN, format="polars", pool_size=pool_budget)
 
     results.append(_run_scenario(
-        "save (no transforms)", lambda: repo.save("bench_table", bcp_workers=1),
+        "save (no transforms)", lambda: _try_save(repo, dummy_df),
         iterations, warmup, 0,
     ))
     results.append(_run_scenario(
-        "load string (no transforms)", lambda: repo.load("bench_table", load_workers=1),
+        "load string (no transforms)", lambda: _try_load(repo, "bench_table"),
         iterations, warmup, 0,
     ))
     results.append(_run_scenario(
-        "load Query (no transforms)", lambda: repo.load(query, load_workers=1),
+        "load Query (no transforms)", lambda: _try_load(repo, query),
         iterations, warmup, 0,
     ))
 
     # ── With transforms ──────────────────────────────────────────────────
     for n in (1, 5, 10):
-        repo_t = Repository("bench_conn", format="polars", pool_size=2)
+        repo_t = DataStore(_BENCH_CONN, format="polars", pool_size=xform_budget)
         for _ in range(n):
             repo_t.add_pre_transform(_noop)
             repo_t.add_post_transform(_noop)
 
         results.append(_run_scenario(
             f"save ({n} pre + {n} post transforms)",
-            lambda r=repo_t: r.save("bench_table", bcp_workers=1),
+            lambda r=repo_t: _try_save(r, dummy_df),
             iterations, warmup, n * 2,
         ))
 

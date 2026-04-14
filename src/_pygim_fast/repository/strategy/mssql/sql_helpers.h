@@ -3,6 +3,8 @@
 // BCP session setup and table qualification.
 
 #include <algorithm>
+#include <format>
+#include <ranges>
 #include <stdexcept>
 #include <string>
 
@@ -13,7 +15,7 @@ namespace pygim::strategy::mssql::sql {
 [[nodiscard]] inline bool is_valid_identifier(const std::string& s) {
     if (s.empty()) return false;
     if (std::isdigit(static_cast<unsigned char>(s[0]))) return false;
-    return std::all_of(s.begin(), s.end(), [](char c) {
+    return std::ranges::all_of(s, [](char c) {
         auto uc = static_cast<unsigned char>(c);
         return std::isalnum(uc) || c == '_';
     });
@@ -35,7 +37,7 @@ namespace pygim::strategy::mssql::sql {
     };
     if (!ok(table))
         throw std::runtime_error("Invalid table identifier: " + table);
-    return (table.find('.') == std::string::npos) ? "dbo." + table : table;
+    return (table.find('.') == std::string::npos) ? std::format("dbo.{}", table) : table;
 }
 
 } // namespace pygim::strategy::mssql::sql

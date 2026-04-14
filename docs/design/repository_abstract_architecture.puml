@@ -33,7 +33,7 @@ package "Adapter Layer  (pybind11 boundary)" as AD #E3F2FD {
         component "pre/post transforms" as hooks
     }
     component "arrow_import.h" as imp <<PyCapsule / to_arrow()>>
-    component "arrow_export.h" as exp <<C Data Interface → DataFrame>>
+    component "arrow_export.h" as exp <<unique_ptr RAII + C Data Interface>>
     component "Format (Polars|Pandas)" as fmt
 
     adapter -[hidden]down- imp
@@ -112,5 +112,12 @@ note as N1
 end note
 N1 .. imp
 N1 .. exp
+
+note as N2
+  **Core is ODBC-free**
+  ArrowBuilder uses portable temporal structs.
+  Layout verified via static_assert in strategy.
+end note
+N2 .. builder
 
 @enduml

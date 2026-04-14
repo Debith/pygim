@@ -40,6 +40,11 @@ static py::object acquire_datastore(const std::string& conn_str,
 PYBIND11_MODULE(_repository, m) {
     m.doc() = "DataStore — database access with Arrow core and format conversion";
 
+    // Bridge C++ std::runtime_error to GimError (RuntimeError subclass).
+    // This aligns with the project's GimError exception hierarchy while
+    // maintaining backward compatibility with existing except RuntimeError catches.
+    static auto gim_error = py::exception<std::runtime_error>(m, "GimError", PyExc_RuntimeError);
+
     // Format enum exposed to Python
     py::enum_<adapter::Format>(m, "Format")
         .value("polars", adapter::Format::Polars)

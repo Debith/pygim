@@ -134,17 +134,18 @@ of concrete backends. New backends satisfy the concepts — no core code changes
 
 ```cpp
 template <typename B>
-concept BackendPolicy = requires(std::string_view s, typename B::Connection& conn) {
+concept BackendPolicy = requires(std::string_view s, int packet_size,
+                                 typename B::Connection& conn) {
     typename B::Connection;
     typename B::SaveImpl;
     typename B::LoadImpl;
     typename B::Dialect;
     typename B::LoadCache;
 
-    { B::connect(s) }  -> std::same_as<typename B::Connection>;
-    { B::reset(conn) } -> std::same_as<void>;
-    { conn.close() }   -> std::same_as<void>;
-    { B::name() }      -> std::convertible_to<const char*>;
+    { B::connect(s, packet_size) } -> std::same_as<typename B::Connection>;
+    { B::reset(conn) }            -> std::same_as<void>;
+    { conn.close() }              -> std::same_as<void>;
+    { B::name() }                 -> std::convertible_to<const char*>;
 } && DialectPolicy<typename B::Dialect>;
 ```
 
@@ -190,7 +191,30 @@ Python  →  RepositoryAdapter<MssqlBackend>  →  core::Repository<MssqlBackend
 - GIL release: adapter releases GIL before calling core `save()`/`load()` — core is GIL-free
 - Core operates on Arrow exclusively — no `py::object` in `core/`
 
-### 4.7 Connection Pool
+### 4.7 Portable Temporal Structs
+
+`ArrowBuilder` in `core/` does NOT include ODBC headers. Instead, it defines
+portable structs (`detail::DateStruct`, `detail::TimestampStruct`, `detail::Time2Struct`)
+that are binary-compatible with their ODBC counterparts. The strategy layer
+(`load_dispatch.h`) includes a `static_assert` verifying layout compatibility.
+This keeps the core layer free of platform-specific ODBC dependencies.
+
+### 4.8 RAII Arrow Export
+
+`export_table()` wraps the `ArrowArrayStream` in a `std::unique_ptr` with a
+custom deleter that calls `release()` (if active) then `delete`. This eliminates
+the previous manual `new`/`delete` pattern and ensures cleanup on exception paths
+without explicit try/catch.
+
+### 4.9 GimError Exception Bridge
+
+`bindings.cpp` registers `py::exception<std::runtime_error>(m, "GimError", PyExc_RuntimeError)`.
+This maps all C++ `std::runtime_error` exceptions to `GimError` (a `RuntimeError` subclass)
+at the Python boundary. Existing `except RuntimeError` catches remain compatible.
+This aligns with the project convention of using `GimError` hierarchy for library-level
+failures (defined in `pygim.core.explib`).
+
+### 4.10 Connection Pool
 
 `ConnectionPool<Backend>` is thread-safe with:
 - Bounded creation (`max_size` constructor param)
@@ -198,7 +222,7 @@ Python  →  RepositoryAdapter<MssqlBackend>  →  core::Repository<MssqlBackend
 - `std::expected<ConnectionHandle, PoolError>` for checkout — timeout and pool-closed are control flow, not exceptions
 - Priority: reuse idle → create new → wait with timeout
 
-### 4.8 Dual Pool Pattern
+### 4.11 Dual Pool Pattern
 
 Two distinct pool types serve different purposes:
 
@@ -210,14 +234,14 @@ Two distinct pool types serve different purposes:
 Load workers need dedicated connections held for the entire query duration.
 Save/metadata connections are short-lived checkouts. Don't merge them.
 
-### 4.9 LoadCache Pattern
+### 4.12 LoadCache Pattern
 
 `MssqlLoadCache` persists a `LoadConnectionPool` across multiple `load()` calls.
 Invalidates when `conn_str` or `pool_size` changes. `NullLoadCache` is zero-cost
 for non-MSSQL backends (empty struct). Eliminates 0.06–0.15s per-load connection
 establishment overhead for repeated load operations.
 
-### 4.10 O(1) Dispatch Tables
+### 4.13 O(1) Dispatch Tables
 
 Both save and load paths use function-pointer dispatch tables indexed by
 `arrow::Type::type` (compile-time populated `std::array`):
@@ -227,7 +251,7 @@ Both save and load paths use function-pointer dispatch tables indexed by
 
 Zero branching in hot loops. Type resolution happens once during schema setup.
 
-### 4.11 Block Cursor Architecture
+### 4.14 Block Cursor Architecture
 
 ODBC block cursors fetch multiple rows per `SQLFetch()` call:
 
@@ -239,7 +263,7 @@ ODBC block cursors fetch multiple rows per `SQLFetch()` call:
 
 Configurable `block_size` (default 4096). Tunable via `acquire_datastore(block_size=...)`.
 
-### 4.12 PK Auto-Detection
+### 4.15 PK Auto-Detection
 
 When `partition_column` is empty and `load_workers > 1`:
 1. `detect_partition_column()` calls `SQLPrimaryKeys()` to enumerate PK columns
@@ -445,7 +469,7 @@ On connection errors (`SQLSTATE 08S01, 08001, HY000`) during parallel load:
 `export_table(shared_ptr<arrow::Table>, use_polars)` → `py::object`. Called WITH GIL.
 
 1. `arrow::Table` → `TableBatchReader` → `ExportRecordBatchReader`
-2. `ArrowArrayStream` (C Data Interface) → `PyArrow.RecordBatchReader._import_from_c(addr)`
+2. `unique_ptr<ArrowArrayStream>` (RAII) → `PyArrow.RecordBatchReader._import_from_c(addr)`
 3. `reader.read_all()` → PyArrow Table
 4. `polars.from_arrow(table)` or `table.to_pandas()`
 
@@ -583,7 +607,7 @@ struct NewDbBackend {
     using Dialect    = NewDbDialect;       // satisfies DialectPolicy
     using LoadCache  = NullLoadCache;      // or custom persistent cache
 
-    static Connection connect(std::string_view conn_str);
+    static Connection connect(std::string_view conn_str, int packet_size = 0);
     static void reset(Connection& conn);
     static constexpr const char* name() { return "newdb"; }
 };
