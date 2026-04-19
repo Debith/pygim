@@ -1,4 +1,4 @@
 [extension]
-module = "_repository"
-sources = ["repository/adapter/bindings.cpp"]
+module = "_persistence"
+sources = ["persistence/adapter/bindings.cpp"]
 deps = ["odbc"]

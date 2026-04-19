@@ -1,4 +1,4 @@
-// repository/strategy/mssql/parallel_load.h
+// persistence/strategy/mssql/parallel_load.h
 // Parallel range-partitioned load: N workers, each fetching a slice of the table.
 // Primary connection = worker 0. N-1 fresh connections for workers 1..N-1.
 // Each worker: SQLFetch block cursor → ArrowBuilder → Table.

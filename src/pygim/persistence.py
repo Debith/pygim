@@ -1,13 +1,13 @@
-"""Public repository module.
+"""Public persistence module.
 
-Exposes the C++ ``_repository`` extension as ``DataStore`` with
+Exposes the C++ ``_persistence`` extension as ``DataStore`` with
 ``acquire_datastore`` factory.  Core C++ operates on Arrow exclusively.
 Format conversion (Polars/Pandas) is a runtime attribute on the adapter,
 not a template parameter.
 
 Usage::
 
-    from pygim.repository import acquire_datastore
+    from pygim.persistence import acquire_datastore
 
     store = acquire_datastore(
         "Driver={ODBC Driver 18 for SQL Server};Server=localhost,1433;"
@@ -24,7 +24,7 @@ Usage::
 """
 
 try:
-    from pygim import _repository as _ext  # type: ignore
+    from pygim import _persistence as _ext  # type: ignore
 
     Format = _ext.Format
     DataStore = _ext.DataStore

@@ -20,7 +20,7 @@ Design systems and components that maximize performance while maintaining clean 
 2. **Compile-time dispatch**: Prefer templates, concepts, `if constexpr` over runtime polymorphism. Virtual functions are a last resort.
 3. **Policy-based design**: Follow the existing pattern — `Registry<KeyPolicy, EnableHooks>`, `Repository<Backend>`. New components should accept behavior via template params.
 4. **Arrow as lingua franca**: For data-intensive paths, Arrow RecordBatch is the interchange format between C++ core and Python.
-5. **Two-package architecture** (repository): Core (C++ only, Arrow-native) and Adapter (pybind11, format conversion at edge).
+5. **Two-package architecture** (persistence): Core (C++ only, Arrow-native) and Adapter (pybind11, format conversion at edge).
 6. **Minimal API surface**: Expose only what users need. Internal machinery stays in `_pygim` / private headers.
 
 ## Architecture Layers

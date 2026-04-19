@@ -1,4 +1,4 @@
-@startuml repository_abstract_architecture
+@startuml persistence_abstract_architecture
 !theme plain
 skinparam backgroundColor #FEFEFE
 skinparam componentStyle rectangle
@@ -10,11 +10,11 @@ skinparam packageStyle frame
 skinparam noteFontSize 10
 skinparam arrowThickness 1.5
 
-title Repository Module — Layer Architecture
+title Persistence Module — Layer Architecture
 
 ' ────────────────────────── Python Layer ──────────────────────────
 package "Python API" as PY #E8F5E9 {
-    component "pygim.repository" as py_repo <<module>> {
+    component "pygim.persistence" as py_repo <<module>> {
         component "acquire_datastore()" as acquire
         component "DataStore (re-export)" as py_cls
         component "Format enum (re-export)" as py_fmt

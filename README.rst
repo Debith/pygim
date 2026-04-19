@@ -64,10 +64,10 @@ This library is divided into multiple different smaller packages.
 
   * pygim: This is the main project that contains the CLI and all the examples.
 
-Repository (Experimental)
--------------------------
+Persistence (Experimental)
+--------------------------
 
-An experimental high-performance Repository abstraction (DDD-style) now exists as a C++ extension:
+An experimental high-performance persistence layer (DDD-style DataStore) now exists as a C++ extension:
 
 * Strategies: pluggable objects with ``fetch(key)->data|None`` and ``save(key,value)``.
 * Optional transformer pipeline (pre-save / post-load) when enabled at construction.
@@ -80,26 +80,25 @@ Example (read):
 
 .. code-block:: python
 
-        from pygim import repository as rv2
+        from pygim import persistence
 
-        repo = rv2.Repository("mssql://localhost/test")
+        store = persistence.acquire_datastore("Driver={ODBC Driver 18 for SQL Server};Server=localhost;...")
 
-        q = rv2.Query().select(["id","name"]).from_table("users").where("id=?", 1).build()
-        row = repo[("users", 1)]  # Strategy interprets key
-        print(row)
+        df = store.load("users")
+        print(df)
 
-Write (upsert) example: ``docs/examples/repository/mssql_write_example.py``.
+Write (upsert) example: ``docs/examples/persistence/mssql_write_example.py``.
 
 Architecture Diagram:
 
-See PlantUML: ``docs/design/repository_architecture.puml`` for component relationships.
+See PlantUML: ``docs/design/persistence_class_diagram.puml`` for component relationships.
 
 .. note:: The MSSQL native strategy uses a pybind-free core/adapter split. ODBC headers must be available at build time for native SQL Server support.
 
 Query Security & Dialect Notes
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Passing a built ``Query`` object directly to ``Repository.fetch_raw(query)``
+Passing a built ``Query`` object directly to ``DataStore.load(query)``
 will bind parameters using ODBC. The builder renders
 queries via ``MssqlDialect``, emitting ``TOP n`` for SQL Server.
 
@@ -107,21 +106,20 @@ Native Arrow Persist Path
 ~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Bulk DataFrame persistence is handled inside native bindings via
-``Repository.persist_dataframe(...)``. The strategy prefers Arrow C Data
+``DataStore.save(...)``. The strategy prefers Arrow C Data
 Interface (``__arrow_c_stream__``) and falls back to IPC serialization only
 when needed.
 
 .. code-block:: python
 
-    from pygim import repository
-    from gen_data import generate_polars_dataset
+    from pygim import persistence
 
     conn = "Driver={ODBC Driver 18 for SQL Server};Server=localhost;..."
-    repo = repository.acquire_repository(conn, transformers=False)
+    store = persistence.acquire_datastore(conn)
     df = generate_polars_dataset(n=100_000)
 
-    stats = repo.persist_dataframe("stress_data", df, key_column="id", prefer_arrow=True)
-    print(stats["mode"])  # arrow_c_stream_bcp | arrow_ipc_bcp | bulk_upsert
+    metrics = store.save(df, "stress_data")
+    print(metrics)
 
 
 

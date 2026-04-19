@@ -1,21 +1,21 @@
 import re
 import pytest
 
-_repository_test = pytest.importorskip(
-    "pygim._repository_test",
-    reason="C++ repository extension not built (Arrow/ODBC not installed)",
+_persistence_test = pytest.importorskip(
+    "pygim._persistence_test",
+    reason="C++ persistence extension not built (Arrow/ODBC not installed)",
 )
-LocalDataStore = _repository_test.DataStore
-Query = _repository_test.Query
-MssqlDialect = _repository_test.MssqlDialect
-LocalFormat = _repository_test.Format
+LocalDataStore = _persistence_test.DataStore
+Query = _persistence_test.Query
+MssqlDialect = _persistence_test.MssqlDialect
+LocalFormat = _persistence_test.Format
 
-_repository_module = pytest.importorskip(
-    "pygim._repository",
-    reason="C++ repository extension not built (Arrow/ODBC not installed)",
+_persistence_module = pytest.importorskip(
+    "pygim._persistence",
+    reason="C++ persistence extension not built (Arrow/ODBC not installed)",
 )
-acquire_datastore = _repository_module.acquire_datastore
-Format = _repository_module.Format
+acquire_datastore = _persistence_module.acquire_datastore
+Format = _persistence_module.Format
 
 
 # ─── Fixtures ────────────────────────────────────────────────────────────────
@@ -310,14 +310,14 @@ def test_datastore_satisfies_repository_protocol():
 
 
 def test_public_module_reexports():
-    """Verify pygim.repository re-exports match the compiled extension."""
-    from pygim.repository import DataStore as PubDataStore
-    from pygim.repository import Format as PubFormat
-    from pygim.repository import acquire_datastore as pub_acquire
+    """Verify pygim.persistence re-exports match the compiled extension."""
+    from pygim.persistence import DataStore as PubDataStore
+    from pygim.persistence import Format as PubFormat
+    from pygim.persistence import acquire_datastore as pub_acquire
 
     # Must be the exact same objects as the direct extension imports
-    assert PubDataStore is _repository_module.DataStore
-    assert pub_acquire is _repository_module.acquire_datastore
+    assert PubDataStore is _persistence_module.DataStore
+    assert pub_acquire is _persistence_module.acquire_datastore
 
     # Enum values should match across modules
     assert PubFormat.polars.name == Format.polars.name

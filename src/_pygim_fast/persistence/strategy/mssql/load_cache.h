@@ -1,4 +1,4 @@
-// repository/strategy/mssql/load_cache.h
+// persistence/strategy/mssql/load_cache.h
 // Persistent cache for parallel load resources.
 // Lazily creates and reuses LoadConnectionPool across load() calls.
 // Eliminates per-load connection establishment cost (~0.06-0.15s).

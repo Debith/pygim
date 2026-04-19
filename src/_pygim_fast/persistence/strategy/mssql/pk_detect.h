@@ -1,4 +1,4 @@
-// repository/strategy/mssql/pk_detect.h
+// persistence/strategy/mssql/pk_detect.h
 // Auto-detect partition column for parallel load via ODBC metadata.
 // Uses SQLPrimaryKeys() for PK discovery, SQLColumns() for type checking.
 

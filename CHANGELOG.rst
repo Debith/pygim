@@ -17,8 +17,9 @@ Changed
 - Build: Set ``MACOSX_DEPLOYMENT_TARGET`` default to 13.3 in ``setup.py`` (required for ``std::format`` and ``std::to_chars`` with floating-point).
 - CI: Update ``MACOSX_DEPLOYMENT_TARGET`` from 10.15 to 13.3 in ``python-packages.yml``.
 - CI: Drop Python 3.8 (EOL); add Python 3.14 to test matrix and cibuildwheel build targets.
-- Repository: Rename Python-facing class from ``Repository`` to ``DataStore``. Aligns naming with actual DAO/Table Gateway semantics; DDD ``Repository`` protocol remains in ``interfaces.py``.
-- Repository: Rename ``acquire_repo`` to ``acquire_datastore``.
+- Persistence: Rename module from ``repository`` to ``persistence``. Folder ``src/_pygim_fast/repository/`` → ``persistence/``, Python module ``pygim.repository`` → ``pygim.persistence``, C++ extension ``_repository`` → ``_persistence``. C++ class names (``Repository``, ``RepositoryAdapter``) and DDD protocol names unchanged.
+- Persistence: Rename Python-facing class from ``Repository`` to ``DataStore``. Aligns naming with actual DAO/Table Gateway semantics; DDD ``Repository`` protocol remains in ``interfaces.py``.
+- Persistence: Rename ``acquire_repo`` to ``acquire_datastore``.
 - DDD interfaces: Convert all 17 ABC-based interfaces to ``@runtime_checkable`` Protocols. Remove ``I`` prefix (e.g., ``IEntity`` → ``Entity``). Drop unused ``DomainEventType`` enum.
 - Each module: Rename ``each.h`` to ``adapter.h`` to match core/adapter convention (module is inherently pybind11-dependent).
 - PathSet: Encapsulate ``m_paths`` (moved from ``public`` to ``private``); iterator access via ``begin()``/``end()``.
@@ -55,25 +56,25 @@ Added
 - Added native C++ ``QuickTimer`` utility (`src/_pygim_fast/utils/quick_timer.h`) with ordered subtimers, immediate stop reporting, and destructor summary output.
 - Benchmark: Consolidated ``benchmarks/bcp_throughput.py`` into a multi-profile benchmark with simple (7 cols), mixed (9 cols), and complex (11 cols) dataset profiles. Supports ``--dataset all`` for side-by-side comparison and ``--compare-strategies`` for row_major vs column_major matrix runs.
 - Benchmark: Regression gate — ``--save-baseline FILE`` and ``--check-regression FILE`` in ``benchmarks/bcp_throughput.py``. Saves/compares per-profile MB/s against a JSON baseline. ``--regression-threshold PCT`` (default 15%) controls sensitivity. Exits 1 on failure for CI integration.
-- Repository/MSSQL BCP: Parallel BCP with ``bcp_workers=N`` parameter on ``persist_dataframe()``. Creates N independent ODBC connections, partitions Arrow RecordBatches by row count, and runs worker threads in parallel. ``bcp_workers=0`` (default) uses single-connection. Falls back to single-connection when batch count < workers.
-- Repository/MSSQL BCP: ``BcpConnectionPool`` (``bcp_connection_pool.h``) — RAII pool of M pre-connected ODBC handles with BCP enabled. Exception-safe constructor with rollback. Used per parallel persist call.
+- Persistence/MSSQL BCP: Parallel BCP with ``bcp_workers=N`` parameter on ``persist_dataframe()``. Creates N independent ODBC connections, partitions Arrow RecordBatches by row count, and runs worker threads in parallel. ``bcp_workers=0`` (default) uses single-connection. Falls back to single-connection when batch count < workers.
+- Persistence/MSSQL BCP: ``BcpConnectionPool`` (``bcp_connection_pool.h``) — RAII pool of M pre-connected ODBC handles with BCP enabled. Exception-safe constructor with rollback. Used per parallel persist call.
 - Benchmark: ``--workers N`` CLI argument in ``benchmarks/bcp_throughput.py`` for parallel BCP benchmarking.
 - Tests: ``test_datastore_satisfies_repository_protocol`` verifying ``DataStore`` satisfies the ``Repository`` protocol via ``isinstance``.
-- Tests: ``test_public_module_reexports`` validating ``pygim.repository`` re-exports ``DataStore``, ``acquire_datastore``, ``Format``.
+- Tests: ``test_public_module_reexports`` validating ``pygim.persistence`` re-exports ``DataStore``, ``acquire_datastore``, ``Format``.
 
 Changed
 ~~~~~~~
-- Repository: Migrated from monolithic ``mssql_strategy.cpp`` / ``repository_v2`` to a layered core/adapter/strategy architecture. ``Repository<Backend>`` generic facade, ``ConnectionPool<Backend>`` with ``std::expected`` checkout, ``RepositoryAdapter<Backend>`` one-hop pybind11 boundary, ``BackendPolicy`` C++20 concept, and ``MssqlBackend`` concrete backend. All template instantiation at the pybind11 edge (``bindings.cpp``).
-- Repository: Added ``connection_pool.h`` (thread-safe bounded pool with RAII ``ConnectionHandle``), ``backend_policy.h`` (C++20 concept), ``query.h``/``dialect.h`` (fluent query builder + dialect rendering), ``arrow_import.h`` (PyCapsule ``__arrow_c_stream__`` + depth-limited fallback import), and ``bindings.cpp`` (``acquire_repo`` factory with pool_size/batch_size/bcp_workers params).
-- Repository/MSSQL BCP: Column-major AVX2 path is now strictly opt-in: only enabled if ``PYGIM_FORCE_SIMD=avx2``. All hardware auto-detection is removed; scalar is the default.
-- Repository/MSSQL BCP: Profile-aware activation: AVX2 is only enabled if ``plan_avx2_blocks`` finds at least 2 eligible blocks. Otherwise, scalar path is used to avoid unnecessary vector overhead.
-- Repository/MSSQL BCP: Eliminated per-row ``bcp_colptr`` redirect loop in column-major path — replaced N per-column ODBC calls per row with a single ``memcpy`` from the pre-filled mini-batch buffer into the original staging buffer. Reduces redirect overhead from ~500 ms to ~24 ms for 1 M rows (exhaustive profile).
-- Repository/MSSQL BCP: Promoted micro-metrics (fixed-copy, colptr-redirect, string-pack, sendrow) from hot-only to stage-level timing — always collected when any timing is enabled (~1 % overhead on 1 M rows). Makes per-component breakdown visible in default benchmark runs.
-- Repository/MSSQL BCP: DRY refactor of BcpMetrics→Python dict builder in ``repository.h`` — extracted lambda eliminates duplicated 18-field dict construction across RowMajor/ColumnMajor strategy casts.
-- Repository/MSSQL BCP: Column-major AVX2 transpose now precomputes eligible contiguous 8x4-byte blocks once per run and reuses the per-column copied marker buffer across mini-batches, removing repeated block eligibility scans and hot-loop allocations.
-- Repository/MSSQL BCP: Added AVX2 4x4 transpose support for contiguous 8-byte fixed-width columns (int64/uint64/double/duration) behind ``PYGIM_ENABLE_AVX2_8B=1`` for controlled validation; default AVX2 path remains 4-byte-block optimized.
+- Persistence: Migrated from monolithic ``mssql_strategy.cpp`` / ``repository_v2`` to a layered core/adapter/strategy architecture. ``Repository<Backend>`` generic facade, ``ConnectionPool<Backend>`` with ``std::expected`` checkout, ``RepositoryAdapter<Backend>`` one-hop pybind11 boundary, ``BackendPolicy`` C++20 concept, and ``MssqlBackend`` concrete backend. All template instantiation at the pybind11 edge (``bindings.cpp``).
+- Persistence: Added ``connection_pool.h`` (thread-safe bounded pool with RAII ``ConnectionHandle``), ``backend_policy.h`` (C++20 concept), ``query.h``/``dialect.h`` (fluent query builder + dialect rendering), ``arrow_import.h`` (PyCapsule ``__arrow_c_stream__`` + depth-limited fallback import), and ``bindings.cpp`` (``acquire_repo`` factory with pool_size/batch_size/bcp_workers params).
+- Persistence/MSSQL BCP: Column-major AVX2 path is now strictly opt-in: only enabled if ``PYGIM_FORCE_SIMD=avx2``. All hardware auto-detection is removed; scalar is the default.
+- Persistence/MSSQL BCP: Profile-aware activation: AVX2 is only enabled if ``plan_avx2_blocks`` finds at least 2 eligible blocks. Otherwise, scalar path is used to avoid unnecessary vector overhead.
+- Persistence/MSSQL BCP: Eliminated per-row ``bcp_colptr`` redirect loop in column-major path — replaced N per-column ODBC calls per row with a single ``memcpy`` from the pre-filled mini-batch buffer into the original staging buffer. Reduces redirect overhead from ~500 ms to ~24 ms for 1 M rows (exhaustive profile).
+- Persistence/MSSQL BCP: Promoted micro-metrics (fixed-copy, colptr-redirect, string-pack, sendrow) from hot-only to stage-level timing — always collected when any timing is enabled (~1 % overhead on 1 M rows). Makes per-component breakdown visible in default benchmark runs.
+- Persistence/MSSQL BCP: DRY refactor of BcpMetrics→Python dict builder in ``repository.h`` — extracted lambda eliminates duplicated 18-field dict construction across RowMajor/ColumnMajor strategy casts.
+- Persistence/MSSQL BCP: Column-major AVX2 transpose now precomputes eligible contiguous 8x4-byte blocks once per run and reuses the per-column copied marker buffer across mini-batches, removing repeated block eligibility scans and hot-loop allocations.
+- Persistence/MSSQL BCP: Added AVX2 4x4 transpose support for contiguous 8-byte fixed-width columns (int64/uint64/double/duration) behind ``PYGIM_ENABLE_AVX2_8B=1`` for controlled validation; default AVX2 path remains 4-byte-block optimized.
 - Packaging: Made ``tabulate>=0.9`` a required runtime dependency (no fallback formatter in ``benchmarks/bcp_throughput.py``).
-- Repository/MSSQL BCP: Added row-loop micro-metrics (fixed-copy, colptr redirect, string packing, sendrow) and exposed them via ``persist_dataframe(...)['bcp_metrics']`` for benchmark analysis.
+- Persistence/MSSQL BCP: Added row-loop micro-metrics (fixed-copy, colptr redirect, string packing, sendrow) and exposed them via ``persist_dataframe(...)['bcp_metrics']`` for benchmark analysis.
 - Utils/Timing: Added structured ``QuickTimer`` reporting API (snapshot with total + subtimers) and switched BCP metric extraction to consume ``timer.report()`` instead of repeated ad-hoc lookups.
 - Build: Raised minimum arrow-cpp build dependency to >= 15 (tested at 23.0.1). Enforced at compile time via ``static_assert`` in ``bcp_types.h`` — builds against arrow-cpp < 15 fail with an explicit message directing the user to ``conda install -c conda-forge 'arrow-cpp>=15' 'pyarrow>=15'``. Removed the ``PYGIM_HAVE_ARROW_STRING_VIEW`` compile-time gate; ``bind_string_view`` is now unconditionally compiled.
 - Build: Removed ``PYGIM_HAVE_ODBC`` and ``PYGIM_HAVE_ARROW`` compile-time feature flags. ODBC and Arrow C++ are now mandatory build dependencies (fail-fast philosophy).
@@ -87,27 +88,27 @@ Changed
 - Project instructions updated to reflect new registry surface area (PR #4).
 - Refactored factory and registry internals into explicit ``core`` (pybind-free) and ``adapter`` (pybind boundary) headers.
 - Renamed pybind module translation units to ``bindings.cpp`` and updated build naming logic so modules remain ``pygim.factory`` and ``pygim.registry``.
-- Repository/MSSQL: Simplified native ``persist_dataframe`` Arrow path to prefer DataFrame ``__arrow_c_stream__`` for direct native ingestion, with IPC serialization (``write_ipc``) as fallback, removing Python-side Arrow orchestration from the hot path.
-- Repository/MSSQL: Process Arrow input batch-by-batch in BCP ingestion to avoid full-table materialization and preserve correctness for multi-batch data.
+- Persistence/MSSQL: Simplified native ``persist_dataframe`` Arrow path to prefer DataFrame ``__arrow_c_stream__`` for direct native ingestion, with IPC serialization (``write_ipc``) as fallback, removing Python-side Arrow orchestration from the hot path.
+- Persistence/MSSQL: Process Arrow input batch-by-batch in BCP ingestion to avoid full-table materialization and preserve correctness for multi-batch data.
 - Playground stress harness: Add explicit ``--arrow`` CLI flag (mutually exclusive with ``--no-arrow``) to set ``PYGIM_ENABLE_ARROW_BCP`` for reproducible Arrow-path runs.
-- Repository/MSSQL: Split ``persist_dataframe`` orchestration helpers into dedicated detail translation units (Arrow strategies vs bulk-upsert/result shaping) to keep ``mssql_strategy.cpp`` focused on pybind bindings.
-- Repository/MSSQL: Introduced OOP-style ``persist_dataframe`` orchestration with lightweight request/view objects and path-specific classes (Arrow path vs bulk-upsert path), delegating pybind lambda control flow to a dedicated orchestrator.
-- Repository: Introduced ``ExtractionPolicy`` as the single, explicit point of ``py::object`` inspection for bulk data — Arrow C stream, Polars, and Python iterables all convert here to a ``DataView`` before reaching any strategy.
-- Repository: Introduced ``DataView = std::variant<ArrowView, TypedBatchView>`` to replace per-method data passing; ``ArrowView`` carries a zero-copy ``RecordBatchReader``, ``TypedBatchView`` carries a column-major ``TypedColumnBatch``.
-- Repository: Collapsed ``bulk_insert``, ``bulk_upsert``, and ``persist_arrow`` virtual methods on ``Strategy`` into a single ``persist(TableSpec, DataView, PersistOptions)``; ``PersistMode`` enum (Insert/Upsert) and ``PersistOptions`` carry all per-call parameters.
-- Repository: Updated ``StrategyCapabilities`` from five flags to three (``can_fetch``, ``can_save``, ``can_persist``); bulk-level granularity was premature given the single-strategy-per-repo invariant.
+- Persistence/MSSQL: Split ``persist_dataframe`` orchestration helpers into dedicated detail translation units (Arrow strategies vs bulk-upsert/result shaping) to keep ``mssql_strategy.cpp`` focused on pybind bindings.
+- Persistence/MSSQL: Introduced OOP-style ``persist_dataframe`` orchestration with lightweight request/view objects and path-specific classes (Arrow path vs bulk-upsert path), delegating pybind lambda control flow to a dedicated orchestrator.
+- Persistence: Introduced ``ExtractionPolicy`` as the single, explicit point of ``py::object`` inspection for bulk data — Arrow C stream, Polars, and Python iterables all convert here to a ``DataView`` before reaching any strategy.
+- Persistence: Introduced ``DataView = std::variant<ArrowView, TypedBatchView>`` to replace per-method data passing; ``ArrowView`` carries a zero-copy ``RecordBatchReader``, ``TypedBatchView`` carries a column-major ``TypedColumnBatch``.
+- Persistence: Collapsed ``bulk_insert``, ``bulk_upsert``, and ``persist_arrow`` virtual methods on ``Strategy`` into a single ``persist(TableSpec, DataView, PersistOptions)``; ``PersistMode`` enum (Insert/Upsert) and ``PersistOptions`` carry all per-call parameters.
+- Persistence: Updated ``StrategyCapabilities`` from five flags to three (``can_fetch``, ``can_save``, ``can_persist``); bulk-level granularity was premature given the single-strategy-per-repo invariant.
 - Docs: Updated abstract PlantUML diagrams (architecture + sequence) to represent ideal end-state for all backlog phases (Phase 1–5 + M), including pipeline internals, SchemaCache, BufferPool, and MeasurementHarness.
-- Repository: ``persist_dataframe`` gains ``bcp_batch_size=0`` parameter; when 0 (default), BCP uses its 100 000-row commit default; pass an explicit value to bound memory per batch on very wide or high-cardinality datasets.
+- Persistence: ``persist_dataframe`` gains ``bcp_batch_size=0`` parameter; when 0 (default), BCP uses its 100 000-row commit default; pass an explicit value to bound memory per batch on very wide or high-cardinality datasets.
 - C++23 modernization: replace ``std::string`` concatenation with ``std::format`` across ``repository.h``, ``adapter.h``, ``sql_helpers.h``, ``odbc_error.h``, ``dialect.h``.
 - C++23 modernization: replace ``std::all_of`` with ``std::ranges::all_of`` in ``sql_helpers.h``.
 
 Fixed
 ~~~~~- Repository/MSSQL BCP: Fix parallel BCP never activating — Polars exports the entire DataFrame as a single ``RecordBatch``, so ``max_workers`` was clamped to ``min(hw_concurrency, 1) = 1`` and always fell back to single-connection. Fix: slice large ``RecordBatch``es into N sub-batches (zero-copy via ``RecordBatch::Slice``) before partitioning across workers. Additionally fix ``batch_flush_seconds`` metric aggregation from ``+=`` (sum) to ``std::max`` (wall-clock) for consistent parallel reporting.- Repository: Fix BCP commit-frequency regression — ``persist_dataframe`` was passing ``batch_size=1000`` directly to BCP, causing 1 000 ``bcp_batch()`` server-side commits for a 1 M-row load; MERGE used the same parameter but runs all batches inside a single transaction (one commit), so BCP was paradoxically slower (2.88 MB/s) than MERGE (5.98 MB/s). Root cause was a units mismatch: ``batch_size`` on the MERGE path caps SQL parameter count per statement, while on the BCP path it sets the commit frequency. Fix: add separate ``bcp_batch_size=0`` parameter to ``persist_dataframe``; when 0, BCP uses its internal 100 000-row default (10 commits for 1 M rows instead of 1 000), restoring expected throughput ordering.
-- Repository: Remove ``to_arrow(compat_level=oldest)`` compat materialization path from ``ExtractionPolicy`` — superseded by the Arrow C++ >= 15 build requirement. ``ImportRecordBatchReader`` and ``bind_string_view`` now accept Polars 1.x ``StringView`` (``"vu"`` format) natively; no Python-side IPC round-trip needed.
+- Persistence: Remove ``to_arrow(compat_level=oldest)`` compat materialization path from ``ExtractionPolicy`` — superseded by the Arrow C++ >= 15 build requirement. ``ImportRecordBatchReader`` and ``bind_string_view`` now accept Polars 1.x ``StringView`` (``"vu"`` format) natively; no Python-side IPC round-trip needed.
 - Tests: Ensured override semantics correctly raise when ``override=True`` and key is missing.
 - Added edge-case tests for factory missing getitem/override behavior and registry key tuple validation + ``find_id`` variant fallback.
-- Repository/MSSQL Arrow BCP: Fix variable-length text/date/timestamp binding requirements (terminator metadata) and per-row fixed-width column pointer binding to prevent fallback/duplicate-row insertion behavior.
-- Repository/MSSQL Arrow persist: Added c-stream compatibility bridge using Arrow reader ``_export_to_c`` when table-level ``__arrow_c_stream__`` is unavailable, enabling ``arrow_c_stream_bcp`` on environments that previously fell back to IPC.
+- Persistence/MSSQL Arrow BCP: Fix variable-length text/date/timestamp binding requirements (terminator metadata) and per-row fixed-width column pointer binding to prevent fallback/duplicate-row insertion behavior.
+- Persistence/MSSQL Arrow persist: Added c-stream compatibility bridge using Arrow reader ``_export_to_c`` when table-level ``__arrow_c_stream__`` is unavailable, enabling ``arrow_c_stream_bcp`` on environments that previously fell back to IPC.
 - Fix ``pygim/__init__.py`` unconditional ``__all__`` causing ``NameError`` when repository extension is not installed. ``DataStore``/``acquire_datastore`` now conditionally included.
 - Fix ``arrow_export.h`` raw ``new``/``delete`` pattern for ``ArrowArrayStream``. Replaced with ``std::unique_ptr`` + custom deleter for exception-safe RAII cleanup.
 - Fix ``BackendPolicy`` concept underspecification: ``connect()`` now requires 2-arg signature ``(string_view, int)`` matching actual ``ConnectionPool`` usage.
@@ -117,7 +118,7 @@ Fixed
 
 Performance
 ~~~~~~~~~~~
-- Repository/MSSQL BCP: Parallel BCP now achieves **65–78 MB/s** (4–16 workers) on 1 M rows × 11 columns vs 33 MB/s single-connection — a 2–2.4× throughput improvement. Docker SQL Server w/ tmpfs + delayed durability.
+- Persistence/MSSQL BCP: Parallel BCP now achieves **65–78 MB/s** (4–16 workers) on 1 M rows × 11 columns vs 33 MB/s single-connection — a 2–2.4× throughput improvement. Docker SQL Server w/ tmpfs + delayed durability.
 - Reduced overhead on override operations through consolidated probe.
 
 Docs

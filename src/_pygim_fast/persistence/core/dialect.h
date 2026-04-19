@@ -1,4 +1,4 @@
-// repository/core/dialect.h
+// persistence/core/dialect.h
 // DialectPolicy concept — contract for SQL dialect renderers.
 // Each backend strategy provides a concrete Dialect that can render
 // a Query intent into backend-specific SQL.

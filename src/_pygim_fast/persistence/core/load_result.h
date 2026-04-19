@@ -1,4 +1,4 @@
-// repository/core/load_result.h
+// persistence/core/load_result.h
 // LoadMetrics and LoadResult — pure data structs for the load pipeline.
 // No logic, no dependencies beyond Arrow table pointer.
 

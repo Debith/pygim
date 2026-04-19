@@ -1,4 +1,4 @@
-// repository/core/repository.h
+// persistence/core/repository.h
 // Generic Repository<Backend> facade — the core data access pattern.
 //
 // Templated on Backend only; core layer operates on Arrow exclusively.

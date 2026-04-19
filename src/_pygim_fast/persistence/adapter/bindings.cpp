@@ -1,5 +1,5 @@
-// repository/adapter/bindings.cpp
-// Production pybind11 bindings for the _repository module.
+// persistence/adapter/bindings.cpp
+// Production pybind11 bindings for the _persistence module.
 //
 // Binds ONE class: RepositoryAdapter<MssqlBackend>.
 // Format is runtime enum, not template parameter — single instantiation.
@@ -37,7 +37,7 @@ static py::object acquire_datastore(const std::string& conn_str,
                                       block_size, packet_size));
 }
 
-PYBIND11_MODULE(_repository, m) {
+PYBIND11_MODULE(_persistence, m) {
     m.doc() = "DataStore — database access with Arrow core and format conversion";
 
     // Bridge C++ std::runtime_error to GimError (RuntimeError subclass).

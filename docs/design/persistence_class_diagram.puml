@@ -1,4 +1,4 @@
-@startuml repository_class_diagram
+@startuml persistence_class_diagram
 !theme plain
 skinparam backgroundColor #FEFEFE
 skinparam defaultFontName Consolas
@@ -10,7 +10,7 @@ skinparam packageFontStyle italic
 skinparam stereotypeFontSize 9
 skinparam arrowThickness 1.2
 
-title Repository Module — Detailed Class Diagram
+title Persistence Module — Detailed Class Diagram
 
 ' ═══════════════════════ CORE ═══════════════════════
 

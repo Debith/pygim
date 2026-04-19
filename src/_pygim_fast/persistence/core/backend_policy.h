@@ -1,4 +1,4 @@
-// repository/core/backend_policy.h
+// persistence/core/backend_policy.h
 // BackendPolicy concept — the contract every database backend must satisfy.
 // No concrete backends defined here — those live in strategy/<backend>/.
 

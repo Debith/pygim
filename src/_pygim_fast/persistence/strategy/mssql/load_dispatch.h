@@ -1,4 +1,4 @@
-// repository/strategy/mssql/load_dispatch.h
+// persistence/strategy/mssql/load_dispatch.h
 // Compile-time dispatch table for the load pipeline's block-append loop.
 // Mirrors bcp_bind_dispatch.h pattern: O(1) branch-free type routing.
 

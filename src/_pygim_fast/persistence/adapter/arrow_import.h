@@ -1,4 +1,4 @@
-// repository/adapter/arrow_import.h
+// persistence/adapter/arrow_import.h
 // Converts a Python Arrow-compatible object to shared_ptr<arrow::Table>.
 //
 // This is the ONLY file in the pipeline that uses both pybind11 AND Arrow C++.

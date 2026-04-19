@@ -1,4 +1,4 @@
-// repository/adapter/arrow_export.h
+// persistence/adapter/arrow_export.h
 // Export Arrow Table to Python DataFrame via Arrow C Data Interface.
 // Reverse of arrow_import.h — this is the load-path boundary.
 //

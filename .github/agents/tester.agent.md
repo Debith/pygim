@@ -1,5 +1,5 @@
 ---
-description: "Use when: running tests after code changes. Executes unit tests (pytest) and optionally integration tests (bcp_throughput.py with 1000 rows) when repository code is affected."
+description: "Use when: running tests after code changes. Executes unit tests (pytest) and optionally integration tests (bcp_throughput.py with 1000 rows) when persistence code is affected."
 tools:
   - read
   - search
@@ -35,8 +35,8 @@ cd /home/debith/projects/pygim && conda run -n py312 python -m pytest tests/ -x 
 ## Tier 2 — Integration / Exhaustive Tests (conditional)
 
 Only run Tier 2 when changes touch any of:
-- `src/_pygim_fast/repository/` (any file under this directory)
-- `src/pygim/repository.py`
+- `src/_pygim_fast/persistence/` (any file under this directory)
+- `src/pygim/persistence.py`
 - `benchmarks/bcp_throughput.py`
 
 To determine affected files, inspect the current git diff or the context of what was changed in this session.
@@ -72,7 +72,7 @@ If the planner does not include Tier 2.5 scenarios, skip this tier entirely.
 
 Return a structured verdict at the end:
 
-- **PASS** — Both tiers passed (or Tier 2 was skipped because no repository code was affected).
+- **PASS** — Both tiers passed (or Tier 2 was skipped because no persistence code was affected).
 - **FAIL** — State which tier failed and what the error was.
 
 Format:

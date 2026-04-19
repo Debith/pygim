@@ -1,4 +1,4 @@
-// repository/odbc_compat.h
+// persistence/odbc_compat.h
 // Shared ODBC type definitions for platform compatibility.
 // SQL Server extended types not defined in standard unixODBC headers.
 

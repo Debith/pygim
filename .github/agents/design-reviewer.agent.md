@@ -18,7 +18,7 @@ src/_pygim_fast/    → C++ extensions (performance core)
 src/_pygim/         → Internal Python (exceptions, CLI, typing)
 ```
 
-### Repository-Specific Architecture
+### Persistence-Specific Architecture
 ```
 Core Package (C++ only)         Adapter Package (pybind11 edge)
   Repository<Backend>             FormatAdapter<Backend, Fmt>

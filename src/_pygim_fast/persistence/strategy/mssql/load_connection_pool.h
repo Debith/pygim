@@ -1,4 +1,4 @@
-// repository/strategy/mssql/load_connection_pool.h
+// persistence/strategy/mssql/load_connection_pool.h
 // Ephemeral connection pool for parallel load workers.
 // Creates N OdbcConnection instances in parallel, RAII cleanup.
 // Primary connection (already checked out) is NOT managed here —

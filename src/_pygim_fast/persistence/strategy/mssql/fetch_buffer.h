@@ -1,4 +1,4 @@
-// repository/strategy/mssql/fetch_buffer.h
+// persistence/strategy/mssql/fetch_buffer.h
 // Column-oriented fetch buffers for ODBC block cursors.
 
 #pragma once

@@ -1,4 +1,4 @@
-// repository/strategy/mssql/fetch_benchmark.h
+// persistence/strategy/mssql/fetch_benchmark.h
 // Temporary benchmark — measures raw SQLFetch throughput at various block sizes.
 // Strips all Arrow/conversion overhead to find the ODBC download floor.
 

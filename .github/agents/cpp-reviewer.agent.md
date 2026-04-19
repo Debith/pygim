@@ -74,7 +74,7 @@ For every file under review, systematically scan for opportunities to use the fe
 - [ ] Disabled features compiled out via templates (e.g., `EnableHooks`), not runtime branches
 - [ ] Single-probe lookups — no double-lookup patterns in maps
 
-### ODBC-Specific Patterns (when reviewing repository code)
+### ODBC-Specific Patterns (when reviewing persistence code)
 - [ ] `StmtHandle` RAII used for all ODBC statement handles (no raw `SQLFreeHandle`)
 - [ ] `const_cast` used correctly for ODBC API `SQLCHAR*` parameters (ODBC API is not const-correct)
 - [ ] Catalog functions (SQLPrimaryKeys, SQLColumns, SQLTables) check `SQL_SUCCESS` and `SQL_SUCCESS_WITH_INFO`

@@ -1,4 +1,4 @@
-// repository/core/query.h
+// persistence/core/query.h
 // Fluent builder for SQL queries (intent storage).
 //
 // Two modes: (1) raw SQL via string constructor, or (2) structured intent

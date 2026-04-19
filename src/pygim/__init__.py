@@ -9,9 +9,9 @@ __all__ = ["PathSet", "Registry", "Factory", "create_df"]
 
 # Import C++ extension modules explicitly
 try:  # normal pybind11 extension import
-	from . import _repository as _repo_mod  # type: ignore
-	DataStore = _repo_mod.DataStore  # type: ignore[attr-defined]
-	acquire_datastore = _repo_mod.acquire_datastore  # type: ignore[attr-defined]
+	from . import _persistence as _persist_mod  # type: ignore
+	DataStore = _persist_mod.DataStore  # type: ignore[attr-defined]
+	acquire_datastore = _persist_mod.acquire_datastore  # type: ignore[attr-defined]
 	__all__ += ["DataStore", "acquire_datastore"]
 except (ImportError, ModuleNotFoundError):  # pragma: no cover - if compiled extension missing
 	pass

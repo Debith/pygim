@@ -2,11 +2,11 @@
 """
 BCP throughput benchmark — target architecture (placeholder).
 
-Exercises the full Repository pipeline:
+Exercises the full Persistence pipeline:
   acquire_datastore → save (Polars → Arrow → BCP) → load (ODBC → Arrow → Polars)
 
 Uses the new target architecture API:
-  from pygim.repository import acquire_datastore, Query
+  from pygim.persistence import acquire_datastore, Query
 
 Profiles:
   simple     – 7 columns  (INT, BIGINT, FLOAT, NVARCHAR, DATE, DATETIME2)
@@ -243,7 +243,7 @@ def run_write(
     packet_size: int = 16384,
 ) -> dict:
     """Insert *df* via BCP and return timing metrics."""
-    from pygim.repository import acquire_datastore
+    from pygim.persistence import acquire_datastore
 
     store = acquire_datastore(conn_str, format="polars",
                               batch_size=batch_size,
@@ -281,8 +281,8 @@ def run_load(
     block_size: int = 4096,
     packet_size: int = 16384,
 ) -> dict:
-    """Load all rows from *table* via Repository.load() (Arrow → Polars)."""
-    from pygim.repository import acquire_datastore
+    """Load all rows from *table* via DataStore.load() (Arrow → Polars)."""
+    from pygim.persistence import acquire_datastore
 
     store = acquire_datastore(conn_str, format="polars",
                               block_size=block_size,

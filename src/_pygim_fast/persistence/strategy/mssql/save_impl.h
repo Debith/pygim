@@ -1,4 +1,4 @@
-// repository/strategy/mssql/save_impl.h
+// persistence/strategy/mssql/save_impl.h
 // MssqlSaveImpl — BCP bulk insert via Arrow Table.
 //
 // Delegates to bcp::bulk_insert (single-connection) or

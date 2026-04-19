@@ -6,17 +6,17 @@ repository module's design. Replaces all prior architecture documents
 
 **Diagrams** (PlantUML, same directory):
 
-- `repository_abstract_architecture.puml` — Layer architecture overview
-- `repository_class_diagram.puml` — Detailed class diagram
-- `repository_save_sequence.puml` — Save path sequence (Python → BCP)
-- `repository_load_sequence.puml` — Load path sequence (Python → ODBC → Arrow)
+- `persistence_abstract_architecture.puml` — Layer architecture overview
+- `persistence_class_diagram.puml` — Detailed class diagram
+- `persistence_save_sequence.puml` — Save path sequence (Python → BCP)
+- `persistence_load_sequence.puml` — Load path sequence (Python → ODBC → Arrow)
 
 ---
 
 ## 1. Directory Layout
 
 ```text
-src/_pygim_fast/repository/
+src/_pygim_fast/persistence/
 ├── core/                           ← Backend-agnostic concepts + generic logic
 │   ├── arrow_builder.h             ← Columnar builder: ODBC block buffers → Arrow Table
 │   ├── backend_policy.h            ← BackendPolicy concept (C++20) — includes LoadCache type
@@ -25,7 +25,7 @@ src/_pygim_fast/repository/
 │   ├── load_result.h               ← LoadMetrics + LoadResult (table + timing)
 │   ├── null_load_cache.h           ← NullLoadCache (zero-cost for non-MSSQL backends)
 │   ├── query.h                     ← Fluent Query builder (intent-only)
-│   └── repository.h                ← Repository<Backend> facade
+│   └── persistence.h                ← Repository<Backend> facade
 ├── strategy/mssql/                 ← SQL Server concrete backend
 │   ├── backend.h                   ← OdbcConnection + MssqlBackend trait struct
 │   ├── dialect.h                   ← MssqlDialect ([bracket]-quoting, TOP N)
@@ -62,15 +62,15 @@ src/_pygim_fast/repository/
 │   └── test_bindings.cpp           ← Test-only: Query, MssqlDialect, DataStore (module_local)
 
 src/pygim/
-└── repository.py                   ← Public Python API: re-exports acquire_datastore, DataStore, Format
+└── persistence.py                   ← Public Python API: re-exports acquire_datastore, DataStore, Format
 ```
 
 ### Build Configuration
 
 | TOML file                  | Module name         | Sources                                  | Purpose       |
 |----------------------------|---------------------|------------------------------------------|---------------|
-| `ext.repository.toml`      | `_repository`       | `repository/adapter/bindings.cpp`        | Production    |
-| `ext.repository_test.toml` | `_repository_test`  | `repository/adapter/test_bindings.cpp`   | Test-only     |
+| `ext.persistence.toml`      | `_persistence`      | `persistence/adapter/bindings.cpp`        | Production    |
+| `ext.persistence_test.toml` | `_persistence_test`  | `persistence/adapter/test_bindings.cpp`   | Test-only     |
 
 ---
 
@@ -120,7 +120,7 @@ bindings.cpp
         ├── adapter/arrow_export.h        ← Table → py::object
         ├── core/connection_pool.h → core/backend_policy.h
         ├── core/query.h (already included)
-        └── core/repository.h → backend_policy.h, connection_pool.h, dialect.h, query.h
+        └── core/persistence.h → backend_policy.h, connection_pool.h, dialect.h, query.h
 ```
 
 ---

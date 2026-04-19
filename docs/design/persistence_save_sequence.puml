@@ -1,4 +1,4 @@
-@startuml repository_save_sequence
+@startuml persistence_save_sequence
 !theme plain
 skinparam backgroundColor #FEFEFE
 skinparam defaultFontName Consolas

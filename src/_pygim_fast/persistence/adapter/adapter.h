@@ -1,4 +1,4 @@
-// repository/adapter/adapter.h
+// persistence/adapter/adapter.h
 // RepositoryAdapter<Backend> — pybind11 boundary adapter for Repository<Backend>.
 //
 // Follows the established core/adapter pattern (cf. registry/adapter.h,

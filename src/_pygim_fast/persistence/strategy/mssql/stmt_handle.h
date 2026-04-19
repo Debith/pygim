@@ -1,4 +1,4 @@
-// repository/strategy/mssql/stmt_handle.h
+// persistence/strategy/mssql/stmt_handle.h
 // RAII wrapper for SQLHSTMT. Move-only, mirrors OdbcConnection pattern.
 
 #pragma once

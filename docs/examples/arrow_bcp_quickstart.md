@@ -3,11 +3,11 @@
 ## TL;DR
 
 ```python
-from pygim import repository
+from pygim import persistence
 from gen_data import generate_polars_dataset
 
 conn_str = "Driver={ODBC Driver 18 for SQL Server};Server=localhost;..."
-repo = repository.acquire_repository(conn_str, transformers=False)
+store = persistence.acquire_datastore(conn_str)
 
 df = generate_polars_dataset(n=1_000_000)
 stats = repo.persist_dataframe(
@@ -43,4 +43,4 @@ python __playground__/stresss_test.py --rows 1000000 --no-arrow
 - The native path first attempts Arrow C Data Interface (`__arrow_c_stream__`).
 - If stream import is unavailable, native code falls back to IPC serialization.
 - Use `--arrow` in the stress harness to explicitly test the Arrow BCP path.
-- If Arrow persist fails, repository falls back to `bulk_upsert`.
+- If Arrow persist fails, persistence falls back to `bulk_upsert`.

@@ -1,4 +1,4 @@
-// repository/strategy/mssql/schema_describe.h
+// persistence/strategy/mssql/schema_describe.h
 // Shared column description utility for load pipelines.
 // Extracts column metadata via SQLDescribeCol after SQLPrepare (no execute needed).
 

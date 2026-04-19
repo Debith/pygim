@@ -72,12 +72,12 @@ class GimmicksCliApp:
     def show_support(self):
         rows = []
         try:
-            repo_mod = import_module("pygim._repository")
-            rows.append(("repository extension", True))
+            repo_mod = import_module("pygim._persistence")
+            rows.append(("persistence extension", True))
             rows.append(("odbc", True))
             rows.append(("arrow (c++)", True))
         except ImportError:
-            rows.append(("repository extension", False))
+            rows.append(("persistence extension", False))
         click.echo("Feature support:")
         for name, supported in rows:
             status = "supported" if supported else "missing"

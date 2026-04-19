@@ -1,4 +1,4 @@
-// repository/strategy/mssql/sql_type_map.h
+// persistence/strategy/mssql/sql_type_map.h
 // Maps ODBC SQL types to Arrow types for the load pipeline.
 
 #pragma once

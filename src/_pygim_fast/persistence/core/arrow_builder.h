@@ -1,4 +1,4 @@
-// repository/core/arrow_builder.h
+// persistence/core/arrow_builder.h
 // Columnar builder that materializes ODBC block-cursor results into an Arrow Table.
 //
 // Backend::LoadImpl creates an ArrowBuilder from the query's arrow::Schema,

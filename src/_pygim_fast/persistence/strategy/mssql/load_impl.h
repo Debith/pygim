@@ -1,4 +1,4 @@
-// repository/strategy/mssql/load_impl.h
+// persistence/strategy/mssql/load_impl.h
 // MssqlLoadImpl — ODBC block-cursor fetch → Arrow Table.
 //
 // Drives ArrowBuilder via SQLFetch with SQL_ATTR_ROW_ARRAY_SIZE.

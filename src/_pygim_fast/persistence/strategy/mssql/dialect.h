@@ -1,4 +1,4 @@
-// repository/strategy/mssql/dialect.h
+// persistence/strategy/mssql/dialect.h
 // MssqlDialect — renders Query intent into T-SQL.
 // SELECT TOP N [col1], [col2] FROM [table] WHERE ...
 

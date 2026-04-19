@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """
-Repository adapter throughput benchmark.
+Persistence adapter throughput benchmark.
 
-Measures the overhead of the adapter layer (RepositoryAdapter → Repository core)
+Measures the overhead of the adapter layer (RepositoryAdapter → core)
 independent of actual DB I/O. Uses placeholder backend.
 
 Usage:
-    python benchmarks/repository_adapter_throughput.py [--iterations N] [--warmup W]
+    python benchmarks/persistence_adapter_throughput.py [--iterations N] [--warmup W]
 """
 from __future__ import annotations
 
@@ -15,7 +15,7 @@ import time
 import click
 import polars as pl
 
-from pygim._repository_test import Query, DataStore
+from pygim._persistence_test import Query, DataStore
 
 # Connection string with non-existent driver — makes ODBC fail immediately
 # instead of hanging on DNS resolution (as "bench_conn" would).
@@ -92,8 +92,8 @@ def _print_results(results: list[dict]) -> None:
 @click.option("--iterations", "-n", default=10_000, show_default=True, help="Number of measured iterations.")
 @click.option("--warmup", "-w", default=100, show_default=True, help="Warmup iterations before measurement.")
 def main(iterations: int, warmup: int) -> None:
-    """Benchmark repository adapter overhead (placeholder backend)."""
-    click.echo(f"Repository adapter throughput benchmark")
+    """Benchmark persistence adapter overhead (placeholder backend)."""
+    click.echo(f"Persistence adapter throughput benchmark")
     click.echo(f"  iterations={iterations:,}  warmup={warmup:,}")
     click.echo()
 

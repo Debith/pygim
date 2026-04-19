@@ -1,4 +1,4 @@
-// repository/core/connection_pool.h
+// persistence/core/connection_pool.h
 // Thread-safe ConnectionPool + RAII ConnectionHandle.
 //
 // ConnectionPool maintains a bounded set of Backend::Connection instances.

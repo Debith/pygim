@@ -1,4 +1,4 @@
-// repository/strategy/mssql/backend.h
+// persistence/strategy/mssql/backend.h
 // MssqlBackend — concrete backend trait for SQL Server via ODBC.
 // Real ODBC connection with BCP support enabled before connect.
 // Satisfies BackendPolicy concept defined in core/backend_policy.h.

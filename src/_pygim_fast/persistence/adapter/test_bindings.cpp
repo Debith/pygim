@@ -1,7 +1,7 @@
-// repository/adapter/test_bindings.cpp
-// Test-only pybind11 bindings for repository internals.
+// persistence/adapter/test_bindings.cpp
+// Test-only pybind11 bindings for persistence internals.
 //
-// Compiled as pygim._repository_test, NOT included in production builds.
+// Compiled as pygim._persistence_test, NOT included in production builds.
 // Exposes Query builder and other core internals for black-box testing.
 
 #include "../core/query.h"
@@ -20,8 +20,8 @@ using namespace pygim;
 
 using MssqlRepo = adapter::RepositoryAdapter<strategy::mssql::MssqlBackend>;
 
-PYBIND11_MODULE(_repository_test, m) {
-    m.doc() = "Test-only bindings for repository internals";
+PYBIND11_MODULE(_persistence_test, m) {
+    m.doc() = "Test-only bindings for persistence internals";
 
     // Bridge C++ std::runtime_error to GimError (RuntimeError subclass).
     static auto gim_error = py::exception<std::runtime_error>(m, "GimError", PyExc_RuntimeError);
@@ -61,13 +61,13 @@ PYBIND11_MODULE(_repository_test, m) {
         .def("quote_identifier", &strategy::mssql::MssqlDialect::quote_identifier,
              py::arg("name"));
 
-    // Format enum (module-local to avoid conflict with production _repository)
+    // Format enum (module-local to avoid conflict with production _persistence)
     py::enum_<adapter::Format>(m, "Format", py::module_local())
         .value("polars", adapter::Format::Polars)
         .value("pandas", adapter::Format::Pandas)
         .export_values();
 
-    // RepositoryAdapter — module-local to avoid conflict with production _repository
+    // RepositoryAdapter — module-local to avoid conflict with production _persistence
     py::class_<MssqlRepo>(m, "DataStore", py::module_local())
         .def(py::init([](const std::string& conn_str, const std::string& format,
                          std::size_t pool_size, int64_t batch_size,
