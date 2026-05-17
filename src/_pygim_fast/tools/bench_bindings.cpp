@@ -1,10 +1,10 @@
-// persistence/adapter/bench_bindings.cpp
+// tools/bench_bindings.cpp
 // Standalone pybind11 module for ODBC fetch throughput benchmarks.
 // Separated from production _persistence module to keep the main library lean.
 
-#include "../strategy/mssql/backend.h"
-#include "../strategy/mssql/fetch_benchmark.h"
-#include "../strategy/mssql/sql_helpers.h"
+#include "../persistence/strategy/mssql/backend.h"
+#include "fetch_benchmark.h"
+#include "../persistence/strategy/mssql/sql_helpers.h"
 
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>

@@ -11,6 +11,7 @@
 // Each worker owns a BcpProfiler instance.  After the row loop, call
 // prof.dump() for stderr output or read fields directly.
 
+#include <algorithm>
 #include <chrono>
 #include <cstdint>
 #include <cstdio>
@@ -19,30 +20,38 @@ namespace pygim::strategy::mssql::bcp {
 
 #ifdef PYGIM_BCP_PROFILING
 
+#define PYGIM_BCP_APPLY_sum(lhs, rhs, field) ((lhs).field += (rhs).field)
+#define PYGIM_BCP_APPLY_max(lhs, rhs, field) ((lhs).field = std::max((lhs).field, (rhs).field))
+
+#define PYGIM_BCP_PROFILER_FIELDS(X) \
+    X(bind_seconds, double, max) \
+    X(rebind_seconds, double, max) \
+    X(classify_seconds, double, max) \
+    X(fixed_copy_seconds, double, max) \
+    X(string_copy_seconds, double, max) \
+    X(sendrow_seconds, double, max) \
+    X(mid_flush_seconds, double, max) \
+    X(final_flush_seconds, double, max) \
+    X(init_session_seconds, double, max) \
+    X(reader_next_seconds, double, max) \
+    X(sendrow_calls, int64_t, sum) \
+    X(mid_flush_calls, int64_t, sum) \
+    X(string_calls, int64_t, sum) \
+    X(fixed_calls, int64_t, sum) \
+    X(rebind_calls, int64_t, sum) \
+    X(bind_calls, int64_t, sum)
+
 /// Per-worker profiling accumulator.  All durations in seconds.
 struct BcpProfiler {
     using clock = std::chrono::steady_clock;
     using tp    = clock::time_point;
 
-    // ── Accumulated durations (seconds) ─────────────────────────────────
-    double bind_seconds{0};           ///< Full bind_columns (first batch).
-    double rebind_seconds{0};         ///< Fast rebind_columns (subsequent batches).
-    double classify_seconds{0};       ///< classify_columns + setup_staging.
-    double fixed_copy_seconds{0};     ///< Fixed-width memcpy in row loop.
-    double string_copy_seconds{0};    ///< String/binary handle_string_column.
-    double sendrow_seconds{0};        ///< bcp_sendrow calls.
-    double mid_flush_seconds{0};      ///< Mid-loop bcp_batch flushes.
-    double final_flush_seconds{0};    ///< finalize_bcp (final batch + done).
-    double init_session_seconds{0};   ///< bcp_init + hints.
-    double reader_next_seconds{0};    ///< TableBatchReader::ReadNext.
-
-    // ── Counters ────────────────────────────────────────────────────────
-    int64_t sendrow_calls{0};
-    int64_t mid_flush_calls{0};
-    int64_t string_calls{0};          ///< Per-cell string handling invocations.
-    int64_t fixed_calls{0};           ///< Per-cell fixed copy invocations.
-    int64_t rebind_calls{0};
-    int64_t bind_calls{0};
+    // Durations (seconds): bind, rebind, classify, fixed/string copy,
+    // sendrow, flushes, session init, and reader-next.
+    // Counters: sendrow, mid_flush, string/fixed cell handling, rebind, bind.
+#define PYGIM_BCP_DECLARE_PROFILER_FIELD(name, type, merge_policy) type name{0};
+    PYGIM_BCP_PROFILER_FIELDS(PYGIM_BCP_DECLARE_PROFILER_FIELD)
+#undef PYGIM_BCP_DECLARE_PROFILER_FIELD
 
     /// Dump to stderr for quick inspection.
     void dump(int worker_id = -1) const noexcept {
@@ -80,25 +89,17 @@ struct BcpProfiler {
 
     /// Merge another profiler (max for durations, sum for counts).
     BcpProfiler& merge_parallel(const BcpProfiler& other) noexcept {
-        bind_seconds        = std::max(bind_seconds, other.bind_seconds);
-        rebind_seconds      = std::max(rebind_seconds, other.rebind_seconds);
-        classify_seconds    = std::max(classify_seconds, other.classify_seconds);
-        fixed_copy_seconds  = std::max(fixed_copy_seconds, other.fixed_copy_seconds);
-        string_copy_seconds = std::max(string_copy_seconds, other.string_copy_seconds);
-        sendrow_seconds     = std::max(sendrow_seconds, other.sendrow_seconds);
-        mid_flush_seconds   = std::max(mid_flush_seconds, other.mid_flush_seconds);
-        final_flush_seconds = std::max(final_flush_seconds, other.final_flush_seconds);
-        init_session_seconds = std::max(init_session_seconds, other.init_session_seconds);
-        reader_next_seconds = std::max(reader_next_seconds, other.reader_next_seconds);
-        sendrow_calls       += other.sendrow_calls;
-        mid_flush_calls     += other.mid_flush_calls;
-        string_calls        += other.string_calls;
-        fixed_calls         += other.fixed_calls;
-        rebind_calls        += other.rebind_calls;
-        bind_calls          += other.bind_calls;
+#define PYGIM_BCP_MERGE_PROFILER_FIELD(name, type, merge_policy) \
+        PYGIM_BCP_APPLY_##merge_policy(*this, other, name);
+        PYGIM_BCP_PROFILER_FIELDS(PYGIM_BCP_MERGE_PROFILER_FIELD)
+#undef PYGIM_BCP_MERGE_PROFILER_FIELD
         return *this;
     }
 };
+
+#undef PYGIM_BCP_PROFILER_FIELDS
+#undef PYGIM_BCP_APPLY_max
+#undef PYGIM_BCP_APPLY_sum
 
 /// RAII scope timer: accumulates elapsed time into a target double on destruction.
 struct ProfileScope {

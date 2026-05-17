@@ -34,6 +34,7 @@ Concise, actionable guidance for AI agents contributing to this repo. Focus on t
 
 ## 3. Developer Workflows
 - Environment: Project typically uses a conda env named `py312` (activate first: `conda activate py312`). Always confirm `python -V` matches supported versions before building extensions.
+- C++ standard: Base standard is C++23 across supported platforms; treat C++20 facilities as part of that baseline, not as the project ceiling.
 - Install (editable dev): `pip install -e .[dev]` from repo root (pyproject uses setuptools + setuptools_scm).
 - Run tests (Python + doctests): `pytest` (configured to include `src/` for doctest collection). CI expectations: short tracebacks (`--tb=short`), doctest continues on failure.
 - Coverage (manual): Either CLI `pygim show-test-coverage` or `coverage run -m pytest && coverage report -m` (mirrors `_cli_app.py`).
@@ -68,7 +69,7 @@ Concise, actionable guidance for AI agents contributing to this repo. Focus on t
 - Persistence Dual Pool Pattern: `ConnectionPool` for shared operations (save, metadata), `LoadConnectionPool` for dedicated parallel load workers. They serve different purposes — don't merge.
 
 ### C++ Performance Philosophy
-- Standard: Target C++20 features by default (concepts, `std::variant`, ranges, designated initializers where sensible) — prefer zero-overhead abstractions.
+- Standard: Target C++23 by default; use the strongest C++23 facility that materially improves clarity, safety, or performance, with C++20 facilities treated as baseline tools within that standard.
 - Hot paths: Minimize Python<->C++ boundary crossings; batch work in C++ when possible rather than per-element round trips.
 - Allocation: Avoid transient heap allocations in tight loops (favor reserve + reuse, small local structs, `std::string_view` when safe).
 - Branching: Reduce unpredictable branches in iteration utilities (e.g., `each` broadcast) — hoist invariant checks outside loops.

@@ -1,4 +1,4 @@
 [extension]
 module = "_fetch_benchmark"
-sources = ["persistence/adapter/bench_bindings.cpp"]
+sources = ["tools/bench_bindings.cpp"]
 deps = ["odbc"]

@@ -22,7 +22,6 @@
 
 #include <arrow/type.h>
 
-#include <chrono>
 #include <cstdint>
 #include <memory>
 #include <string>
@@ -37,6 +36,13 @@ static_assert(sizeof(SQLLEN) == 8 && std::is_signed_v<SQLLEN>,
               "SQLLEN must be 64-bit signed for zero-copy indicator passing");
 
 namespace pygim::strategy::mssql {
+
+/// Phase enum for single-threaded load timing.
+enum class SingleLoadPhase { prepare, describe, fetch, build, COUNT };
+constexpr std::string_view phase_name(SingleLoadPhase p) {
+    constexpr std::string_view names[] = {"prepare", "describe", "fetch", "build"};
+    return names[static_cast<std::size_t>(p)];
+}
 
 /// MssqlLoadImpl — Block-cursor load strategy for SQL Server.
 ///
@@ -66,9 +72,8 @@ struct MssqlLoadImpl {
                                     MssqlLoadCache& load_cache,
                                     int64_t block_size = kDefaultBlockSize,
                                     int packet_size = kDefaultPacketSize) {
-        using clock = std::chrono::steady_clock;
+        QuickTimerT<SingleLoadPhase> timer("load", nullptr, false, false);
         core::LoadMetrics metrics;
-        const auto t_total = clock::now();
 
         PYGIM_LOG_FMT("[MssqlLoadImpl] execute(sql=\"%.*s\", workers=%d)\n",
                       static_cast<int>(sql.size()), sql.data(), load_workers);
@@ -98,7 +103,7 @@ struct MssqlLoadImpl {
 
         // ── 2. Prepare + execute ────────────────────────────────
         {
-            const auto t0 = clock::now();
+            timer.start_sub_timer(SingleLoadPhase::prepare, false);
 
             SQLRETURN ret = SQLPrepare(
                 stmt, const_cast<SQLCHAR*>(
@@ -110,17 +115,17 @@ struct MssqlLoadImpl {
             odbc::raise_if_error(ret, SQL_HANDLE_STMT, stmt, "SQLExecute");
 
             metrics.prepare_seconds =
-                std::chrono::duration<double>(clock::now() - t0).count();
+                timer.stop_sub_timer(SingleLoadPhase::prepare, false);
         }
 
         // ── 3. Describe result columns → schema ────────────────
         SchemaInfo schema_info;
         {
-            const auto t0 = clock::now();
+            timer.start_sub_timer(SingleLoadPhase::describe, false);
             schema_info = describe_columns(stmt);
             metrics.columns = static_cast<int64_t>(schema_info.col_info.size());
             metrics.describe_seconds =
-                std::chrono::duration<double>(clock::now() - t0).count();
+                timer.stop_sub_timer(SingleLoadPhase::describe, false);
         }
 
         // ── 4. Set up builder + fetch buffers + dispatch ──────
@@ -154,10 +159,9 @@ struct MssqlLoadImpl {
             // -- fetch block --
             SQLRETURN ret;
             {
-                const auto t0 = clock::now();
+                timer.start_sub_timer(SingleLoadPhase::fetch, false);
                 ret = SQLFetch(stmt);
-                metrics.fetch_seconds +=
-                    std::chrono::duration<double>(clock::now() - t0).count();
+                timer.stop_sub_timer(SingleLoadPhase::fetch, false);
             }
 
             if (ret == SQL_NO_DATA) break;
@@ -167,7 +171,7 @@ struct MssqlLoadImpl {
                 static_cast<int64_t>(buffers.rows_fetched);
 
             // -- append to Arrow builder --
-            const auto t_build = clock::now();
+            timer.start_sub_timer(SingleLoadPhase::build, false);
 
             for (std::size_t c = 0; c < ncols; ++c) {
                 auto& col = buffers.columns[c];
@@ -186,8 +190,7 @@ struct MssqlLoadImpl {
                 cd.fn(builder, c, col, nrows, valid_ptr);
             }
 
-            metrics.build_seconds +=
-                std::chrono::duration<double>(clock::now() - t_build).count();
+            timer.stop_sub_timer(SingleLoadPhase::build, false);
             metrics.fetched_rows += nrows;
             metrics.fetched_blocks++;
         }
@@ -195,8 +198,9 @@ struct MssqlLoadImpl {
         // ── 8. Finalize ────────────────────────────────────────
         auto table = builder.finish();
         metrics.workers_used = 1;
-        metrics.total_seconds =
-            std::chrono::duration<double>(clock::now() - t_total).count();
+        metrics.fetch_seconds = timer.sub_timer_seconds(SingleLoadPhase::fetch);
+        metrics.build_seconds = timer.sub_timer_seconds(SingleLoadPhase::build);
+        metrics.total_seconds = timer.total_seconds();
 
         PYGIM_LOG_FMT("[MssqlLoadImpl] done: %lld rows, %lld blocks, "
                       "%.3fs total (prep=%.3f desc=%.3f fetch=%.3f "

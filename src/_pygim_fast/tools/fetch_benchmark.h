@@ -1,14 +1,14 @@
-// persistence/strategy/mssql/fetch_benchmark.h
+// tools/fetch_benchmark.h
 // Temporary benchmark — measures raw SQLFetch throughput at various block sizes.
 // Strips all Arrow/conversion overhead to find the ODBC download floor.
 
 #pragma once
 
-#include "backend.h"
-#include "fetch_buffer.h"
-#include "odbc_error.h"
-#include "sql_type_map.h"
-#include "stmt_handle.h"
+#include "../persistence/strategy/mssql/backend.h"
+#include "../persistence/strategy/mssql/fetch_buffer.h"
+#include "../persistence/strategy/mssql/odbc_error.h"
+#include "../persistence/strategy/mssql/sql_type_map.h"
+#include "../persistence/strategy/mssql/stmt_handle.h"
 
 #include <chrono>
 #include <cstdint>

@@ -42,6 +42,7 @@ Removed
 
 Added
 ~~~~~
+- Tests: Add a live MSSQL persistence round-trip test that auto-skips unless ``STRESS_CONN`` is reachable or the local Docker SQL Server on ``localhost:1433`` is available.
 - Initial CHANGELOG with retroactive notes for registry enhancement work.
 - Registry: Decorator-based registration via ``@registry.register(key, override=False)``.
 - Registry: ``registered_keys()`` introspection method for current logical ids.

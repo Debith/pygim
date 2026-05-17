@@ -9,7 +9,6 @@
 #include "../sql_helpers.h"
 
 #include <algorithm>
-#include <chrono>
 #include <exception>
 #include <memory>
 #include <numeric>
@@ -20,8 +19,46 @@
 
 #include <arrow/table.h>
 #include <arrow/table_builder.h>
+#include "../../../../utils/quick_timer.h"
 
 namespace pygim::strategy::mssql::bcp {
+
+// ── Phase enums for BCP timing ──────────────────────────────────────────────
+
+/// Phases for single-connection bulk insert.
+enum class BcpPhase { row_loop, flush, COUNT };
+constexpr std::string_view phase_name(BcpPhase p) {
+    constexpr std::string_view names[] = {"row_loop", "flush"};
+    return names[static_cast<std::size_t>(p)];
+}
+
+/// Phases for parallel BCP worker timing.
+enum class BcpWorkerPhase { row_loop, flush, COUNT };
+constexpr std::string_view phase_name(BcpWorkerPhase p) {
+    constexpr std::string_view names[] = {"row_loop", "flush"};
+    return names[static_cast<std::size_t>(p)];
+}
+
+/// Phases for parallel BCP orchestrator timing.
+enum class BcpParallelPhase { connect, COUNT };
+constexpr std::string_view phase_name(BcpParallelPhase p) {
+    constexpr std::string_view names[] = {"connect"};
+    return names[static_cast<std::size_t>(p)];
+}
+
+#define PYGIM_BCP_APPLY_sum(lhs, rhs, field) ((lhs).field += (rhs).field)
+#define PYGIM_BCP_APPLY_max(lhs, rhs, field) ((lhs).field = std::max((lhs).field, (rhs).field))
+#define PYGIM_BCP_APPLY_skip(lhs, rhs, field) ((void)0)
+
+#define PYGIM_BCP_METRICS_FIELDS(X) \
+    X(total_seconds, double, sum, skip) \
+    X(connect_seconds, double, sum, skip) \
+    X(bind_seconds, double, sum, sum) \
+    X(row_loop_seconds, double, sum, max) \
+    X(batch_flush_seconds, double, sum, max) \
+    X(processed_rows, int64_t, sum, sum) \
+    X(sent_rows, int64_t, sum, sum) \
+    X(record_batches, int64_t, sum, sum)
 
 // ── BcpMetrics ──────────────────────────────────────────────────────────────
 
@@ -30,26 +67,23 @@ namespace pygim::strategy::mssql::bcp {
 /// For parallel inserts, `row_loop_seconds` and `batch_flush_seconds` are
 /// max-across-workers (wall-clock), while row/batch counts are summed.
 struct BcpMetrics {
-    double  total_seconds{0};         ///< End-to-end wall time.
-    double  connect_seconds{0};       ///< Connection pool establishment time.
-    double  bind_seconds{0};          ///< Column binding (accumulated across batches).
-    double  row_loop_seconds{0};      ///< Row loop including bind within process_batch.
-    double  batch_flush_seconds{0};   ///< Final bcp_batch + bcp_done flush.
-    int64_t processed_rows{0};        ///< Rows read from Arrow RecordBatches.
-    int64_t sent_rows{0};             ///< Rows successfully sent via bcp_sendrow.
-    int64_t record_batches{0};        ///< Number of Arrow RecordBatches processed.
+    // total_seconds: end-to-end wall time.
+    // connect_seconds: connection pool establishment time.
+    // bind_seconds: column binding accumulated across batches.
+    // row_loop_seconds: row loop including bind within process_batch.
+    // batch_flush_seconds: final bcp_batch + bcp_done flush.
+    // processed_rows / sent_rows / record_batches: worker counts.
+#define PYGIM_BCP_DECLARE_METRICS_FIELD(name, type, add_policy, parallel_policy) type name{0};
+    PYGIM_BCP_METRICS_FIELDS(PYGIM_BCP_DECLARE_METRICS_FIELD)
+#undef PYGIM_BCP_DECLARE_METRICS_FIELD
     BcpProfiler profiler{};           ///< Detailed per-section breakdown (only populated when PYGIM_BCP_PROFILING defined).
 
     /// Element-wise accumulation (all fields summed).
     BcpMetrics& operator+=(const BcpMetrics& rhs) noexcept {
-        total_seconds       += rhs.total_seconds;
-        connect_seconds     += rhs.connect_seconds;
-        bind_seconds        += rhs.bind_seconds;
-        row_loop_seconds    += rhs.row_loop_seconds;
-        batch_flush_seconds += rhs.batch_flush_seconds;
-        processed_rows      += rhs.processed_rows;
-        sent_rows           += rhs.sent_rows;
-        record_batches      += rhs.record_batches;
+#define PYGIM_BCP_ADD_METRICS_FIELD(name, type, add_policy, parallel_policy) \
+        PYGIM_BCP_APPLY_##add_policy(*this, rhs, name);
+        PYGIM_BCP_METRICS_FIELDS(PYGIM_BCP_ADD_METRICS_FIELD)
+#undef PYGIM_BCP_ADD_METRICS_FIELD
         return *this;
     }
 
@@ -61,16 +95,69 @@ struct BcpMetrics {
     /// Merge a parallel worker's metrics: max for wall-clock timings, sum for counts.
     /// connect_seconds and total_seconds are left untouched (set by the orchestrator).
     BcpMetrics& merge_parallel(const BcpMetrics& worker) noexcept {
-        bind_seconds        += worker.bind_seconds;
-        row_loop_seconds     = std::max(row_loop_seconds, worker.row_loop_seconds);
-        batch_flush_seconds  = std::max(batch_flush_seconds, worker.batch_flush_seconds);
-        processed_rows      += worker.processed_rows;
-        sent_rows           += worker.sent_rows;
-        record_batches      += worker.record_batches;
+#define PYGIM_BCP_MERGE_METRICS_FIELD(name, type, add_policy, parallel_policy) \
+        PYGIM_BCP_APPLY_##parallel_policy(*this, worker, name);
+        PYGIM_BCP_METRICS_FIELDS(PYGIM_BCP_MERGE_METRICS_FIELD)
+#undef PYGIM_BCP_MERGE_METRICS_FIELD
         profiler.merge_parallel(worker.profiler);
         return *this;
     }
 };
+
+#undef PYGIM_BCP_METRICS_FIELDS
+#undef PYGIM_BCP_APPLY_skip
+#undef PYGIM_BCP_APPLY_max
+#undef PYGIM_BCP_APPLY_sum
+
+/// Shared worker result type used by parallel orchestration.
+struct ParallelWorkerResult {
+    BcpMetrics         metrics{};
+    std::exception_ptr error{};
+};
+
+/// Build metrics for single-connection insert path.
+inline BcpMetrics make_single_metrics(const pygim::QuickTimerT<BcpPhase>& timer,
+                                      const BcpContext& ctx,
+                                      const BcpProfiler& profiler) {
+    const auto timing = timer.snapshot();
+    BcpMetrics metrics;
+    metrics.profiler = profiler;
+    metrics.row_loop_seconds = timing.sub_timer_seconds(BcpPhase::row_loop);
+    metrics.batch_flush_seconds = timing.sub_timer_seconds(BcpPhase::flush);
+    metrics.processed_rows = ctx.processed_rows;
+    metrics.sent_rows = ctx.sent_rows;
+    metrics.record_batches = ctx.record_batches;
+    metrics.total_seconds = timing.total_seconds;
+    return metrics;
+}
+
+/// Build metrics for a parallel worker path.
+inline BcpMetrics make_worker_metrics(const pygim::QuickTimerT<BcpWorkerPhase>& timer,
+                                      const BcpContext& ctx,
+                                      const BcpProfiler& profiler) {
+    const auto timing = timer.snapshot();
+    BcpMetrics metrics;
+    metrics.profiler = profiler;
+    metrics.row_loop_seconds = timing.sub_timer_seconds(BcpWorkerPhase::row_loop);
+    metrics.batch_flush_seconds = timing.sub_timer_seconds(BcpWorkerPhase::flush);
+    metrics.processed_rows = ctx.processed_rows;
+    metrics.sent_rows = ctx.sent_rows;
+    metrics.record_batches = ctx.record_batches;
+    metrics.total_seconds = timing.total_seconds;
+    return metrics;
+}
+
+/// Build final metrics for parallel orchestrator path.
+inline BcpMetrics make_parallel_metrics(const pygim::QuickTimerT<BcpParallelPhase>& timer,
+                                        const std::vector<ParallelWorkerResult>& results) {
+    const auto timing = timer.snapshot();
+    BcpMetrics merged{};
+    merged.connect_seconds = timing.sub_timer_seconds(BcpParallelPhase::connect);
+    for (const auto& result : results)
+        merged.merge_parallel(result.metrics);
+    merged.total_seconds = timing.total_seconds;
+    return merged;
+}
 
 // ── RAII BcpSessionGuard ────────────────────────────────────────────────────
 
@@ -295,8 +382,7 @@ inline void finalize_bcp(BcpContext& ctx) {
     int64_t batch_size,
     const std::string& table_hint)
 {
-    using clock = std::chrono::steady_clock;
-    const auto t_start = clock::now();
+    pygim::QuickTimerT<BcpPhase> timer("bcp_insert", nullptr, false, false);
 
     if (!table_data || table_data->num_rows() == 0)
         throw std::runtime_error("Arrow BCP received zero rows from payload");
@@ -315,7 +401,6 @@ inline void finalize_bcp(BcpContext& ctx) {
     ctx.rows_until_flush = ctx.batch_size;
 
     BatchBindingState binding_state;
-    BcpMetrics metrics;
     BCP_PROF_DECL(prof);
 
     auto reader = std::make_shared<arrow::TableBatchReader>(*table_data);
@@ -329,29 +414,21 @@ inline void finalize_bcp(BcpContext& ctx) {
         }
         if (!batch) break;
 
-        auto t0 = clock::now();
+        timer.start_sub_timer(BcpPhase::row_loop, false);
         process_batch(ctx, batch, binding_state, prof);
-        auto t1 = clock::now();
-
-        metrics.row_loop_seconds += std::chrono::duration<double>(t1 - t0).count();
+        timer.stop_sub_timer(BcpPhase::row_loop, false);
     }
 
-    auto t_flush_start = clock::now();
+    timer.start_sub_timer(BcpPhase::flush, false);
     session_guard.dismiss();
     {
         BCP_PROF_SCOPE(prof, final_flush);
         finalize_bcp(ctx);
     }
-    auto t_flush_end = clock::now();
+    timer.stop_sub_timer(BcpPhase::flush, false);
 
     BCP_PROF_DUMP(prof, 0);
-    metrics.profiler           = prof;
-    metrics.batch_flush_seconds = std::chrono::duration<double>(t_flush_end - t_flush_start).count();
-    metrics.processed_rows = ctx.processed_rows;
-    metrics.sent_rows      = ctx.sent_rows;
-    metrics.record_batches = ctx.record_batches;
-    metrics.total_seconds  = std::chrono::duration<double>(clock::now() - t_start).count();
-    return metrics;
+    return make_single_metrics(timer, ctx, prof);
 }
 
 // ── bulk_insert_parallel (multi-worker) ─────────────────────────────────────
@@ -379,8 +456,7 @@ inline void finalize_bcp(BcpContext& ctx) {
     const std::string& table_hint,
     int num_workers)
 {
-    using clock = std::chrono::steady_clock;
-    const auto t_start = clock::now();
+    pygim::QuickTimerT<BcpParallelPhase> timer("bcp_parallel", nullptr, false, false);
 
     if (!table_data || table_data->num_rows() == 0)
         throw std::runtime_error("Arrow BCP received zero rows from payload");
@@ -415,20 +491,16 @@ inline void finalize_bcp(BcpContext& ctx) {
     }
 
     // 4. Create connection pool (parallel establishment)
-    auto t_connect_start = clock::now();
+    timer.start_sub_timer(BcpParallelPhase::connect, false);
     BcpConnectionPool pool(conn_str, actual_workers);
-    auto t_connect_end = clock::now();
+    timer.stop_sub_timer(BcpParallelPhase::connect, false);
 
     const auto& api = ensure_bcp_api();
     auto qualified = sql::qualify_table(table);
     const int64_t effective_batch = batch_size > 0 ? batch_size : 100000LL;
 
     // 5. Spawn worker threads — each gets its own Table slice
-    struct WorkerResult {
-        BcpMetrics         metrics{};
-        std::exception_ptr error{};
-    };
-    std::vector<WorkerResult> results(static_cast<size_t>(actual_workers));
+    std::vector<ParallelWorkerResult> results(static_cast<size_t>(actual_workers));
     std::vector<std::thread>  threads;
     threads.reserve(static_cast<size_t>(actual_workers));
 
@@ -439,7 +511,7 @@ inline void finalize_bcp(BcpContext& ctx) {
             auto& my_slice = slices[static_cast<size_t>(w)];
 
             try {
-                const auto wt_start = clock::now();
+                pygim::QuickTimerT<BcpWorkerPhase> wtimer("bcp_worker", nullptr, false, false);
                 BCP_PROF_DECL(prof);
 
                 {
@@ -469,27 +541,21 @@ inline void finalize_bcp(BcpContext& ctx) {
                     }
                     if (!batch) break;
 
-                    auto t0 = clock::now();
+                    wtimer.start_sub_timer(BcpWorkerPhase::row_loop, false);
                     process_batch(ctx, batch, state, prof);
-                    auto t1 = clock::now();
-                    res.metrics.row_loop_seconds += std::chrono::duration<double>(t1 - t0).count();
+                    wtimer.stop_sub_timer(BcpWorkerPhase::row_loop, false);
                 }
 
-                auto t_flush_start = clock::now();
+                wtimer.start_sub_timer(BcpWorkerPhase::flush, false);
                 guard.dismiss();
                 {
                     BCP_PROF_SCOPE(prof, final_flush);
                     finalize_bcp(ctx);
                 }
-                auto t_flush_end = clock::now();
+                wtimer.stop_sub_timer(BcpWorkerPhase::flush, false);
 
                 BCP_PROF_DUMP(prof, w);
-                res.metrics.profiler              = prof;
-                res.metrics.batch_flush_seconds   = std::chrono::duration<double>(t_flush_end - t_flush_start).count();
-                res.metrics.processed_rows        = ctx.processed_rows;
-                res.metrics.sent_rows             = ctx.sent_rows;
-                res.metrics.record_batches        = ctx.record_batches;
-                res.metrics.total_seconds         = std::chrono::duration<double>(clock::now() - wt_start).count();
+                res.metrics = make_worker_metrics(wtimer, ctx, prof);
             } catch (...) {
                 res.error = std::current_exception();
             }
@@ -518,12 +584,7 @@ inline void finalize_bcp(BcpContext& ctx) {
     }
 
     // 8. Merge metrics
-    BcpMetrics merged{};
-    merged.connect_seconds = std::chrono::duration<double>(t_connect_end - t_connect_start).count();
-    for (int w = 0; w < actual_workers; ++w)
-        merged.merge_parallel(results[static_cast<size_t>(w)].metrics);
-    merged.total_seconds = std::chrono::duration<double>(clock::now() - t_start).count();
-    return merged;
+    return make_parallel_metrics(timer, results);
 }
 
 } // namespace pygim::strategy::mssql::bcp

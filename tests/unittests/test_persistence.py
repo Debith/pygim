@@ -1,4 +1,7 @@
+import os
 import re
+import uuid
+
 import pytest
 
 _persistence_test = pytest.importorskip(
@@ -41,6 +44,29 @@ def dialect():
 REPR_RE = re.compile(
     r"^DataStore\(backend=mssql, format=(polars|pandas), transforms=\d+/\d+\)$"
 )
+
+
+def _default_integration_conn_str():
+    password = os.getenv("MSSQL_SA_PASSWORD", "NewP@ssw0rd#2025")
+    return (
+        "Driver={ODBC Driver 18 for SQL Server};Server=localhost,1433;"
+        f"Database=tempdb;UID=sa;PWD={password};"
+        "Encrypt=yes;TrustServerCertificate=yes;"
+    )
+
+
+def _integration_conn_str(pyodbc):
+    conn_str = os.getenv("STRESS_CONN", "").strip() or _default_integration_conn_str()
+    try:
+        conn = pyodbc.connect(conn_str, timeout=2)
+    except pyodbc.Error as exc:
+        pytest.skip(
+            "Live MSSQL integration unavailable; set STRESS_CONN or run the "
+            f"local Docker SQL Server on localhost:1433 ({exc})"
+        )
+    else:
+        conn.close()
+    return conn_str
 
 
 def test_construction(repo, fmt):
@@ -270,6 +296,52 @@ def test_acquire_datastore_save_load(fmt):
 def test_acquire_datastore_invalid_format():
     with pytest.raises(ValueError, match="Unknown format"):
         acquire_datastore("conn", format="arrow")
+
+
+def test_acquire_datastore_live_round_trip():
+    pyodbc = pytest.importorskip("pyodbc")
+    pl = pytest.importorskip("polars")
+
+    conn_str = _integration_conn_str(pyodbc)
+    table_name = f"pygim_persist_{uuid.uuid4().hex[:8]}"
+    qualified_table = f"dbo.{table_name}"
+    df = pl.DataFrame(
+        {
+            "id": pl.Series([1, 2, 3], dtype=pl.Int32),
+            "val_i32": pl.Series([10, 20, 30], dtype=pl.Int32),
+            "val_i64": pl.Series([10_000_000_001, 10_000_000_002, 10_000_000_003], dtype=pl.Int64),
+            "val_f64": pl.Series([1.25, 2.5, 3.75], dtype=pl.Float64),
+            "val_str": ["first", "second", "third"],
+        }
+    )
+    store = acquire_datastore(conn_str, format="polars", batch_size=1_000, bcp_workers=1)
+    conn = pyodbc.connect(conn_str, timeout=30)
+    conn.autocommit = True
+
+    try:
+        conn.execute(
+            f"CREATE TABLE {qualified_table} ("
+            "id INT NOT NULL PRIMARY KEY, "
+            "val_i32 INT NOT NULL, "
+            "val_i64 BIGINT NOT NULL, "
+            "val_f64 FLOAT NOT NULL, "
+            "val_str NVARCHAR(100) NOT NULL)"
+        )
+
+        store.save(df, qualified_table)
+
+        expected_rows = df.sort("id").to_dicts()
+        loaded_table = store.load(qualified_table, load_workers=1).select(df.columns).sort("id")
+        loaded_sql = store.load(
+            f"SELECT id, val_i32, val_i64, val_f64, val_str FROM {qualified_table} ORDER BY id",
+            load_workers=1,
+        ).select(df.columns)
+
+        assert loaded_table.to_dicts() == expected_rows
+        assert loaded_sql.to_dicts() == expected_rows
+    finally:
+        conn.execute(f"DROP TABLE IF EXISTS {qualified_table}")
+        conn.close()
 
 
 # NOTE: save() returns a dict with metrics (processed_rows, total_seconds, etc.)

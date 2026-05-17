@@ -23,7 +23,6 @@
 #include <arrow/table.h>
 #include <arrow/result.h>
 
-#include <chrono>
 #include <cstdint>
 #include <format>
 #include <string>
@@ -129,6 +128,13 @@ inline std::vector<std::string> generate_worker_queries(
 
 // SchemaInfo and describe_columns() are in schema_describe.h
 
+/// Phase enums for QuickTimerT enum mode (zero bounds checking).
+enum class WorkerPhase { prepare, fetch, build, COUNT };
+constexpr std::string_view phase_name(WorkerPhase p) {
+    constexpr std::string_view names[] = {"prepare", "fetch", "build"};
+    return names[static_cast<std::size_t>(p)];
+}
+
 /// Single worker fetch loop. Reuses shared schema info.
 /// Returns WorkerResult with table and metrics.
 inline void run_worker(OdbcConnection& conn,
@@ -136,14 +142,14 @@ inline void run_worker(OdbcConnection& conn,
                        SchemaInfo const& schema_info,
                        int64_t block_size,
                        WorkerResult& out) {
-    using clock = std::chrono::steady_clock;
+    QuickTimerT<WorkerPhase> timer("worker", nullptr, false, false);
     auto& metrics = out.metrics;
     try {
         StmtHandle stmt(conn.dbc());
 
         // Prepare + Execute
+        timer.start_sub_timer(WorkerPhase::prepare, false);
         {
-            const auto t0 = clock::now();
             SQLRETURN ret = SQLPrepare(
                 stmt, const_cast<SQLCHAR*>(
                           reinterpret_cast<const SQLCHAR*>(sql.data())),
@@ -152,8 +158,8 @@ inline void run_worker(OdbcConnection& conn,
 
             ret = SQLExecute(stmt);
             odbc::raise_if_error(ret, SQL_HANDLE_STMT, stmt, "worker: SQLExecute");
-            metrics.prepare_seconds = std::chrono::duration<double>(clock::now() - t0).count();
         }
+        metrics.prepare_seconds = timer.stop_sub_timer(WorkerPhase::prepare, false);
 
         // Setup builder + buffers + dispatch using shared schema
         core::ArrowBuilder builder(schema_info.schema);
@@ -178,25 +184,21 @@ inline void run_worker(OdbcConnection& conn,
         // Bind columns
         buffers.bind(stmt);
 
-        // Fetch loop
+        // Fetch loop — enum-mode timer: direct phase indexing, zero bounds checks
         const std::size_t ncols = schema_info.col_info.size();
         std::vector<uint8_t> valid;
 
         while (true) {
-            SQLRETURN ret;
-            {
-                const auto t0 = clock::now();
-                ret = SQLFetch(stmt);
-                metrics.fetch_seconds +=
-                    std::chrono::duration<double>(clock::now() - t0).count();
-            }
+            timer.start_sub_timer(WorkerPhase::fetch, false);
+            SQLRETURN ret = SQLFetch(stmt);
+            timer.stop_sub_timer(WorkerPhase::fetch, false);
 
             if (ret == SQL_NO_DATA) break;
             odbc::raise_if_error(ret, SQL_HANDLE_STMT, stmt, "worker: SQLFetch");
 
             const int64_t nrows = static_cast<int64_t>(buffers.rows_fetched);
 
-            const auto t_build = clock::now();
+            timer.start_sub_timer(WorkerPhase::build, false);
             for (std::size_t c = 0; c < ncols; ++c) {
                 auto& col = buffers.columns[c];
                 const auto& cd = dispatch[c];
@@ -210,13 +212,14 @@ inline void run_worker(OdbcConnection& conn,
 
                 cd.fn(builder, c, col, nrows, valid_ptr);
             }
+            timer.stop_sub_timer(WorkerPhase::build, false);
 
-            metrics.build_seconds +=
-                std::chrono::duration<double>(clock::now() - t_build).count();
             metrics.fetched_rows += nrows;
             metrics.fetched_blocks++;
         }
 
+        metrics.fetch_seconds = timer.sub_timer_seconds(WorkerPhase::fetch);
+        metrics.build_seconds = timer.sub_timer_seconds(WorkerPhase::build);
         out.table = builder.finish();
         metrics.columns = static_cast<int64_t>(ncols);
 
@@ -226,6 +229,13 @@ inline void run_worker(OdbcConnection& conn,
 }
 
 } // namespace detail
+
+/// Phase enum for parallel load orchestration timer.
+enum class LoadPhase { describe, connect, concat, COUNT };
+constexpr std::string_view phase_name(LoadPhase p) {
+    constexpr std::string_view names[] = {"describe", "connect", "concat"};
+    return names[static_cast<std::size_t>(p)];
+}
 
 /// Execute a parallel range-partitioned load.
 ///
@@ -245,9 +255,8 @@ inline core::LoadResult execute_parallel(
     int64_t block_size,
     MssqlLoadCache& load_cache,
     int packet_size = 16384) {
-    using clock = std::chrono::steady_clock;
+    QuickTimerT<LoadPhase> timer("parallel_load", nullptr, false, false);
     core::LoadMetrics metrics;
-    const auto t_total = clock::now();
 
     PYGIM_LOG_FMT("[parallel_load] starting: table=%.*s, partition=%.*s, workers=%d\n",
                   static_cast<int>(table_name.size()), table_name.data(),
@@ -293,7 +302,7 @@ inline core::LoadResult execute_parallel(
     //    MSSQL ODBC supports SQLDescribeCol after SQLPrepare — no execute needed.
     SchemaInfo schema_info;
     {
-        const auto t0 = clock::now();
+        timer.start_sub_timer(LoadPhase::describe, false);
         StmtHandle stmt(conn.dbc());
         SQLRETURN ret = SQLPrepare(
             stmt, const_cast<SQLCHAR*>(
@@ -301,15 +310,15 @@ inline core::LoadResult execute_parallel(
             static_cast<SQLINTEGER>(queries[0].size()));
         odbc::raise_if_error(ret, SQL_HANDLE_STMT, stmt, "parallel_load: SQLPrepare schema");
         schema_info = describe_columns(stmt);
-        metrics.describe_seconds = std::chrono::duration<double>(clock::now() - t0).count();
+        metrics.describe_seconds = timer.stop_sub_timer(LoadPhase::describe, false);
         metrics.columns = static_cast<int64_t>(schema_info.col_info.size());
     }
 
     // 4. Establish N-1 worker connections (cached)
     auto run_workers = [&](MssqlLoadCache& cache) -> std::vector<detail::WorkerResult> {
-        const auto t_connect = clock::now();
+        timer.start_sub_timer(LoadPhase::connect, false);
         auto* extra_pool = cache.ensure_pool(conn.conn_str(), load_workers - 1, packet_size);
-        metrics.connect_seconds = std::chrono::duration<double>(clock::now() - t_connect).count();
+        metrics.connect_seconds = timer.stop_sub_timer(LoadPhase::connect, false);
         PYGIM_LOG_FMT("[parallel_load] %d extra connections in %.3fs\n",
                       load_workers - 1, metrics.connect_seconds);
 
@@ -374,7 +383,7 @@ inline core::LoadResult execute_parallel(
     }
 
     // 6. Concatenate tables
-    const auto t_concat = clock::now();
+    timer.start_sub_timer(LoadPhase::concat, false);
     std::vector<std::shared_ptr<arrow::Table>> tables;
     tables.reserve(static_cast<std::size_t>(load_workers));
     for (auto& r : results) {
@@ -398,7 +407,7 @@ inline core::LoadResult execute_parallel(
         }
         combined = std::move(*concat_result);
     }
-    metrics.concat_seconds = std::chrono::duration<double>(clock::now() - t_concat).count();
+    metrics.concat_seconds = timer.stop_sub_timer(LoadPhase::concat, false);
 
     // 7. Aggregate metrics
     for (auto const& r : results) {
@@ -409,7 +418,7 @@ inline core::LoadResult execute_parallel(
         metrics.fetched_blocks += r.metrics.fetched_blocks;
     }
     metrics.workers_used = load_workers;
-    metrics.total_seconds = std::chrono::duration<double>(clock::now() - t_total).count();
+    metrics.total_seconds = timer.total_seconds();
 
     PYGIM_LOG_FMT("[parallel_load] done: %lld rows, %d workers, %.3fs total "
                   "(connect=%.3f fetch=%.3f build=%.3f concat=%.3f)\n",

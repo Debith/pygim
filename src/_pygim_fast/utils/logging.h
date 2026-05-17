@@ -149,7 +149,7 @@ inline void log_fmt(const char* fmt, ...) {
 // Variable name is always pygim_timer_ so PYGIM_TIMED_SUB can reference it.
 #define PYGIM_TIMED_SCOPE(name)                                                 \
     ::pygim::QuickTimer pygim_timer_((name), stderr,                            \
-                                     /*auto_print=*/true,                       \
+                                     /*print_on_end=*/true,                     \
                                      /*print_on_start=*/false)
 
 // Start a sub-timer phase on the enclosing PYGIM_TIMED_SCOPE timer.
