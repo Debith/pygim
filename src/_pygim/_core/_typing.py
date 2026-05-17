@@ -5,8 +5,6 @@ More types to support type annotation.
 
 from abc import abstractmethod
 from pathlib import Path
-import typing as t
-import typing_extensions as te
 from typing_extensions import TypeAlias, runtime_checkable, Protocol
 from typing import Union, Optional, Iterable, Tuple, Dict, Callable, Text, Type, Any
 
@@ -23,7 +21,8 @@ __all__ = [
     "AnyCallable",
 ]
 
-__all__ += t.__all__ + te.__all__
+# Intentionally NOT re-exporting typing/typing_extensions __all__;
+# only the symbols defined in this module are part of our public surface.
 
 
 @runtime_checkable
