@@ -9,59 +9,72 @@ __all__ = ["PathSet", "Registry", "Factory", "create_df"]
 
 # Import C++ extension modules explicitly
 try:  # normal pybind11 extension import
-	from . import _persistence as _persist_mod  # type: ignore
-	DataStore = _persist_mod.DataStore  # type: ignore[attr-defined]
-	acquire_datastore = _persist_mod.acquire_datastore  # type: ignore[attr-defined]
-	__all__ += ["DataStore", "acquire_datastore"]
-except (ImportError, ModuleNotFoundError):  # pragma: no cover - if compiled extension missing
-	pass
+    from . import _persistence as _persist_mod  # type: ignore
+
+    DataStore = _persist_mod.DataStore  # type: ignore[attr-defined]
+    acquire_datastore = _persist_mod.acquire_datastore  # type: ignore[attr-defined]
+    __all__ += ["DataStore", "acquire_datastore"]
+except (
+    ImportError,
+    ModuleNotFoundError,
+):  # pragma: no cover - if compiled extension missing
+    pass
 
 
-def create_df(schema: dict, rows: int = 100_000, *, seed: int = 42,
-              null_fraction: float = 0.0, format: str = "polars"):
-	"""Generate a test DataFrame with the given schema.
+def create_df(
+    schema: dict,
+    rows: int = 100_000,
+    *,
+    seed: int = 42,
+    null_fraction: float = 0.0,
+    format: str = "polars",
+):
+    """Generate a test DataFrame with the given schema.
 
-	Uses a fast C++ backend with Arrow array builders — typically
-	50–100× faster than equivalent pure-Python generation.
+    Uses a fast C++ backend with Arrow array builders — typically
+    50–100× faster than equivalent pure-Python generation.
 
-	Parameters
-	----------
-	schema : dict[str, str]
-	    Column definitions as ``{name: type_string}``.
-	    Supported types: int8, int16, int32, int64, uint8–uint64, bool,
-	    float32, float64, string, date, time, timestamp, duration, binary, uuid,
-	    serial (sequential 1, 2, 3, … for PK columns).
-	    Also accepts SQL aliases: tinyint, smallint, bigint, bit, real, double,
-	    nvarchar, varchar, datetime, datetime2, varbinary, uniqueidentifier.
-	rows : int
-	    Number of rows (default: 100,000).
-	seed : int
-	    Deterministic PRNG seed (default: 42).
-	null_fraction : float
-	    Fraction of NULLs per column in [0.0, 1.0] (default: 0.0).
-	format : str
-	    Output format: ``"polars"`` (default), ``"arrow"`` (PyArrow Table).
-	    Use ``"arrow"`` to preserve Arrow-native types like ``fixed_size_binary``
-	    that Polars may convert to variable-length equivalents.
+    Parameters
+    ----------
+    schema : dict[str, str]
+        Column definitions as ``{name: type_string}``.
+        Supported types: int8, int16, int32, int64, uint8–uint64, bool,
+        float32, float64, string, date, time, timestamp, duration, binary, uuid,
+        serial (sequential 1, 2, 3, … for PK columns).
+        Also accepts SQL aliases: tinyint, smallint, bigint, bit, real, double,
+        nvarchar, varchar, datetime, datetime2, varbinary, uniqueidentifier.
+    rows : int
+        Number of rows (default: 100,000).
+    seed : int
+        Deterministic PRNG seed (default: 42).
+    null_fraction : float
+        Fraction of NULLs per column in [0.0, 1.0] (default: 0.0).
+    format : str
+        Output format: ``"polars"`` (default), ``"arrow"`` (PyArrow Table).
+        Use ``"arrow"`` to preserve Arrow-native types like ``fixed_size_binary``
+        that Polars may convert to variable-length equivalents.
 
-	Returns
-	-------
-	polars.DataFrame or pyarrow.Table
-	    Polars DataFrame by default, PyArrow Table when ``format="arrow"``.
+    Returns
+    -------
+    polars.DataFrame or pyarrow.Table
+        Polars DataFrame by default, PyArrow Table when ``format="arrow"``.
 
-	Examples
-	--------
-	>>> import pygim
-	>>> df = pygim.create_df({"id": "int32", "name": "string"}, rows=10)  # doctest: +SKIP
-	"""
-	from pygim.datagen import generate as _generate  # C++ extension
-	exporter = _generate(schema, rows, seed, null_fraction)
-	import pyarrow as pa
-	table = pa.RecordBatchReader.from_stream(exporter).read_all()
-	if format == "arrow":
-		return table
-	try:
-		import polars as pl
-		return pl.from_arrow(table)
-	except ImportError:
-		return table
+    Examples
+    --------
+    >>> import pygim
+    >>> df = pygim.create_df({"id": "int32", "name": "string"}, rows=10)  # doctest: +SKIP
+    """
+    from pygim.datagen import generate as _generate  # C++ extension
+
+    exporter = _generate(schema, rows, seed, null_fraction)
+    import pyarrow as pa
+
+    table = pa.RecordBatchReader.from_stream(exporter).read_all()
+    if format == "arrow":
+        return table
+    try:
+        import polars as pl
+
+        return pl.from_arrow(table)
+    except ImportError:
+        return table

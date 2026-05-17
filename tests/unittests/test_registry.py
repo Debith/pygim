@@ -96,6 +96,7 @@ def test_missing_key_raises(registry):
 def test_key_tuple_len_must_be_2(registry):
     def f():
         return 1
+
     with pytest.raises(TypeError):
         registry.register(("id.only",), f)
 
@@ -103,6 +104,7 @@ def test_key_tuple_len_must_be_2(registry):
 def test_key_name_must_be_str_or_none(registry):
     def f():
         return 1
+
     with pytest.raises(TypeError):
         registry.register(("id.only", 123), f)
 
@@ -146,7 +148,9 @@ def test_hooks_invocation(registry):
     assert events["post"] in (0, 1)
 
 
-REPR_RE = re.compile(r"^Registry\(policy=(qualname|identity), hooks=(True|False), size=\d+\)$")
+REPR_RE = re.compile(
+    r"^Registry\(policy=(qualname|identity), hooks=(True|False), size=\d+\)$"
+)
 
 
 def test_repr(registry):
@@ -156,6 +160,7 @@ def test_repr(registry):
 
 # ───────────────────────── Identity Policy Tests ───────────────────────────
 
+
 @pytest.fixture(params=[False, True], ids=["id_no_hooks", "id_hooks"])
 def identity_registry(request):
     return Registry(hooks=request.param, policy=KeyPolicyKind.identity)
@@ -164,6 +169,7 @@ def identity_registry(request):
 def test_identity_basic(identity_registry):
     class C:  # object type used for identity key
         pass
+
     obj = C()
     identity_registry.register(obj, lambda: 7)
     assert obj in identity_registry
@@ -178,6 +184,7 @@ def test_identity_rejects_string(identity_registry):
 def test_identity_override_missing(identity_registry):
     def f():
         return 1
+
     with pytest.raises(RuntimeError):
         identity_registry.register(f, f, override=True)  # cannot override missing
 
@@ -185,8 +192,10 @@ def test_identity_override_missing(identity_registry):
 def test_identity_duplicate_without_override(identity_registry):
     def f():
         return 1
+
     def g():
         return 2
+
     identity_registry.register(f, f)
     with pytest.raises(RuntimeError):
         identity_registry.register(f, g)
@@ -198,7 +207,10 @@ def test_post_hook_invocation(registry):
     # Only meaningful if hooks enabled; otherwise post should be a no-op.
     events = {"post": 0}
     registry.on_post(lambda *a: events.__setitem__("post", events["post"] + 1))
-    def f(): return 3
+
+    def f():
+        return 3
+
     registry.register("f", f)
     registry.post("f", None)
     if "hooks" in repr(registry) and "hooks=True" in repr(registry):
@@ -211,7 +223,10 @@ def test_qualname_string_id_duplicate(registry):
     # Register using string id directly (qualname policy only). For identity policy fixture we don't run this test.
     if "policy=identity" in repr(registry):
         pytest.skip("Not applicable to identity policy")
-    def f(): return 1
+
+    def f():
+        return 1
+
     # Build a synthetic id
     id_str = f.__module__ + "." + f.__qualname__
     registry.register(id_str, f)
@@ -223,15 +238,21 @@ def test_qualname_string_id_duplicate(registry):
 
 def test_registered_keys_and_find_id():
     r = Registry(hooks=False, policy=KeyPolicyKind.qualname)
-    def f(): return 1
+
+    def f():
+        return 1
+
     # Register using the function object so stored id is module.qualname
     r.register(f, f)
     fid = f.__module__ + "." + f.__qualname__
     assert r.find_id(fid) is f
     # missing returns None
-    assert r.find_id(fid+"_missing") is None
+    assert r.find_id(fid + "_missing") is None
+
     # Also test explicit custom string id path
-    def g(): return 2
+    def g():
+        return 2
+
     r.register("custom.id", g)
     assert r.find_id("custom.id") is g
 
@@ -255,22 +276,28 @@ def test_find_id_wrong_policy(identity_registry):
 def test_capacity_reserve():
     # Not directly observable; ensure constructing with capacity still works.
     r = Registry(hooks=False, policy=KeyPolicyKind.qualname, capacity=128)
-    def f(): return 1
+
+    def f():
+        return 1
+
     r.register("f", f)
     assert "f" in r
 
 
 def test_hooks_disabled_noop_callbacks():
     r = Registry(hooks=False)
-    counters = {"reg":0, "pre":0, "post":0}
-    r.on_register(lambda *a: counters.__setitem__("reg", counters["reg"]+1))
-    r.on_pre(lambda *a: counters.__setitem__("pre", counters["pre"]+1))
-    r.on_post(lambda *a: counters.__setitem__("post", counters["post"]+1))
-    def f(): return 1
+    counters = {"reg": 0, "pre": 0, "post": 0}
+    r.on_register(lambda *a: counters.__setitem__("reg", counters["reg"] + 1))
+    r.on_pre(lambda *a: counters.__setitem__("pre", counters["pre"] + 1))
+    r.on_post(lambda *a: counters.__setitem__("post", counters["post"] + 1))
+
+    def f():
+        return 1
+
     r.register("f", f)
     _ = r["f"]
     r.post("f", None)
-    assert counters == {"reg":0, "pre":0, "post":0}
+    assert counters == {"reg": 0, "pre": 0, "post": 0}
 
 
 if __name__ == "__main__":

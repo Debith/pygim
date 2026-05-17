@@ -5,8 +5,6 @@ More types to support type annotation.
 
 from abc import abstractmethod
 from pathlib import Path
-import typing as t
-import typing_extensions as te
 from typing_extensions import TypeAlias, runtime_checkable, Protocol
 from typing import Union, Optional, Iterable, Tuple, Dict, Callable, Text, Type, Any
 

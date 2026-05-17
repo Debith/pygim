@@ -1,7 +1,6 @@
 # -*- coding: utf-8 -*-
 """Tests PathSet."""
 
-from pathlib import Path
 import pytest
 
 from pygim.pathset import PathSet

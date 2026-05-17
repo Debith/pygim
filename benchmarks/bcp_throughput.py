@@ -20,6 +20,7 @@ Modes:
   write – BCP insert only
   load  – SELECT read only (table must already contain data)
 """
+
 from __future__ import annotations
 
 import json
@@ -33,13 +34,16 @@ from datetime import datetime, timezone
 from decimal import Decimal
 
 import click
+import pygim
 
 print(f"PID: {os.getpid()}")
 
 # ── Dependency helpers ───────────────────────────────────────────────────────
 
+
 def _require(mod: str):
     import importlib
+
     try:
         return importlib.import_module(mod)
     except ModuleNotFoundError:
@@ -58,36 +62,60 @@ def default_connection_string() -> str:
 
 # ── Dataset schemas (for pygim.create_df C++ data generator) ─────────────────
 
-import pygim
-
 _SCHEMA_SIMPLE = {
-    "id": "serial", "val_i32": "int32", "val_i64": "int64",
-    "val_f64": "float64", "val_str": "string",
-    "val_date": "date", "val_ts": "timestamp",
+    "id": "serial",
+    "val_i32": "int32",
+    "val_i64": "int64",
+    "val_f64": "float64",
+    "val_str": "string",
+    "val_date": "date",
+    "val_ts": "timestamp",
 }
 
 _SCHEMA_MIXED = {
-    "id": "serial", "val_i32": "int32", "val_i64": "int64",
-    "val_f64": "float64", "val_dec": "float64",
-    "val_str": "string", "val_text": "string",
-    "val_date": "date", "val_ts": "timestamp",
+    "id": "serial",
+    "val_i32": "int32",
+    "val_i64": "int64",
+    "val_f64": "float64",
+    "val_dec": "float64",
+    "val_str": "string",
+    "val_text": "string",
+    "val_date": "date",
+    "val_ts": "timestamp",
 }
 
 _SCHEMA_COMPLEX = {
-    "id": "serial", "col_int": "int32", "col_bigint": "int64",
-    "col_bit": "bool", "col_decimal": "float64", "col_float": "float64",
-    "col_nvarchar": "string", "col_nchar": "string",
-    "col_date": "date", "col_datetime2": "timestamp", "col_uuid": "uuid",
+    "id": "serial",
+    "col_int": "int32",
+    "col_bigint": "int64",
+    "col_bit": "bool",
+    "col_decimal": "float64",
+    "col_float": "float64",
+    "col_nvarchar": "string",
+    "col_nchar": "string",
+    "col_date": "date",
+    "col_datetime2": "timestamp",
+    "col_uuid": "uuid",
 }
 
 _SCHEMA_EXHAUSTIVE = {
     "id": "serial",
-    "col_int8": "int8", "col_int16": "int16", "col_int32": "int32",
-    "col_int64": "int64", "col_uint8": "uint8", "col_uint16": "uint16",
-    "col_uint32": "uint32", "col_uint64": "uint64",
-    "col_bool": "bool", "col_float32": "float32", "col_float64": "float64",
-    "col_date": "date", "col_time": "time", "col_datetime2": "timestamp",
-    "col_duration_us": "duration", "col_nvarchar": "string",
+    "col_int8": "int8",
+    "col_int16": "int16",
+    "col_int32": "int32",
+    "col_int64": "int64",
+    "col_uint8": "uint8",
+    "col_uint16": "uint16",
+    "col_uint32": "uint32",
+    "col_uint64": "uint64",
+    "col_bool": "bool",
+    "col_float32": "float32",
+    "col_float64": "float64",
+    "col_date": "date",
+    "col_time": "time",
+    "col_datetime2": "timestamp",
+    "col_duration_us": "duration",
+    "col_nvarchar": "string",
     "col_binary": "binary",
 }
 
@@ -199,6 +227,7 @@ PROFILE_ORDER = ["simple", "mixed", "complex", "exhaustive", "timeseries"]
 
 # ── SQL helpers ──────────────────────────────────────────────────────────────
 
+
 def ensure_table(conn_str: str, ddl: str, pyodbc) -> None:
     cn = pyodbc.connect(conn_str, timeout=30)
     cn.autocommit = True
@@ -215,9 +244,10 @@ def truncate_table(conn_str: str, table: str, pyodbc) -> None:
 
 # ── Payload estimation ───────────────────────────────────────────────────────
 
+
 def estimate_size_bytes(frame) -> int:
     # PyArrow Table: .nbytes
-    nbytes = getattr(frame, 'nbytes', None)
+    nbytes = getattr(frame, "nbytes", None)
     if nbytes is not None:
         return max(int(nbytes), 0)
     for attr in ("estimated_size", "estimated_size_bytes"):
@@ -232,6 +262,7 @@ def estimate_size_bytes(frame) -> int:
 
 # ── Benchmark runners ────────────────────────────────────────────────────────
 
+
 def run_write(
     conn_str: str,
     table: str,
@@ -245,11 +276,14 @@ def run_write(
     """Insert *df* via BCP and return timing metrics."""
     from pygim.persistence import acquire_datastore
 
-    store = acquire_datastore(conn_str, format="polars",
-                              batch_size=batch_size,
-                              bcp_workers=bcp_workers,
-                              block_size=block_size,
-                              packet_size=packet_size)
+    store = acquire_datastore(
+        conn_str,
+        format="polars",
+        batch_size=batch_size,
+        bcp_workers=bcp_workers,
+        block_size=block_size,
+        packet_size=packet_size,
+    )
 
     payload_bytes = estimate_size_bytes(df)
     nrows = len(df)
@@ -261,15 +295,15 @@ def run_write(
     mb_s = (payload_bytes / 1_048_576) / elapsed if elapsed > 0 else 0.0
 
     return {
-        "profile":       profile_name,
-        "direction":     "write",
-        "rows":          nrows,
-        "elapsed_s":     elapsed,
+        "profile": profile_name,
+        "direction": "write",
+        "rows": nrows,
+        "elapsed_s": elapsed,
         "payload_bytes": payload_bytes,
-        "mb_s":          mb_s,
-        "rows_s":        nrows / elapsed if elapsed > 0 else 0.0,
-        "bcp_workers":   bcp_workers,
-        "bcp_metrics":   metrics,
+        "mb_s": mb_s,
+        "rows_s": nrows / elapsed if elapsed > 0 else 0.0,
+        "bcp_workers": bcp_workers,
+        "bcp_metrics": metrics,
     }
 
 
@@ -284,9 +318,9 @@ def run_load(
     """Load all rows from *table* via DataStore.load() (Arrow → Polars)."""
     from pygim.persistence import acquire_datastore
 
-    store = acquire_datastore(conn_str, format="polars",
-                              block_size=block_size,
-                              packet_size=packet_size)
+    store = acquire_datastore(
+        conn_str, format="polars", block_size=block_size, packet_size=packet_size
+    )
 
     t0 = time.perf_counter()
     df = store.load(table, load_workers=load_workers)
@@ -300,21 +334,23 @@ def run_load(
     mb_s = (payload_bytes / 1_048_576) / elapsed if elapsed > 0 else 0.0
 
     return {
-        "profile":       profile_name,
-        "direction":     "load",
-        "rows":          nrows,
-        "elapsed_s":     elapsed,
+        "profile": profile_name,
+        "direction": "load",
+        "rows": nrows,
+        "elapsed_s": elapsed,
         "payload_bytes": payload_bytes,
-        "mb_s":          mb_s,
-        "rows_s":        nrows / elapsed if elapsed > 0 else 0.0,
-        "load_workers":  load_workers,
+        "mb_s": mb_s,
+        "rows_s": nrows / elapsed if elapsed > 0 else 0.0,
+        "load_workers": load_workers,
     }
 
 
 # ── Round-trip verification ───────────────────────────────────────────────────
 
+
 def _polars_row_to_pydict(df, idx: int) -> dict:
     import pyarrow as pa
+
     if isinstance(df, pa.Table):
         return {name: df.column(name)[idx].as_py() for name in df.column_names}
     return {col: df[col][idx] for col in df.columns}
@@ -335,9 +371,11 @@ def _values_match(source, actual, col_name: str, *, float_tol: float = 1e-6) -> 
 
     # timedelta (duration) → BIGINT microseconds
     if isinstance(source, _dt.timedelta):
-        src_us = (source.days * 86_400_000_000
-                  + source.seconds * 1_000_000
-                  + source.microseconds)
+        src_us = (
+            source.days * 86_400_000_000
+            + source.seconds * 1_000_000
+            + source.microseconds
+        )
         if isinstance(actual, int):
             return src_us == actual
         if isinstance(actual, _dt.timedelta):
@@ -372,7 +410,9 @@ def _values_match(source, actual, col_name: str, *, float_tol: float = 1e-6) -> 
     if isinstance(actual, Decimal):
         try:
             tol = max(float_tol, 5e-5)
-            return abs(float(source) - float(actual)) <= tol * max(abs(float(source)), 1.0)
+            return abs(float(source) - float(actual)) <= tol * max(
+                abs(float(source)), 1.0
+            )
         except (TypeError, ValueError):
             return str(source) == str(actual)
 
@@ -395,7 +435,9 @@ def _values_match(source, actual, col_name: str, *, float_tol: float = 1e-6) -> 
         return abs((source - actual).total_seconds()) < 0.001
 
     # bytes / binary
-    if isinstance(source, (bytes, bytearray)) and isinstance(actual, (bytes, bytearray)):
+    if isinstance(source, (bytes, bytearray)) and isinstance(
+        actual, (bytes, bytearray)
+    ):
         return bytes(source) == bytes(actual)
 
     # bytes (fixed_size_binary UUID) vs string UUID from pyodbc
@@ -404,6 +446,7 @@ def _values_match(source, actual, col_name: str, *, float_tol: float = 1e-6) -> 
         if len(source) == 16:
             try:
                 import uuid as _uuid
+
                 return source == _uuid.UUID(actual).bytes_le
             except (ValueError, AttributeError):
                 pass
@@ -440,7 +483,12 @@ def verify_round_trip(
     cursor.execute(f"SELECT TOP 0 * FROM {table}")
     db_cols = [d[0] for d in cursor.description]
     import pyarrow as pa
-    src_cols = list(source_df.column_names) if isinstance(source_df, pa.Table) else list(source_df.columns)
+
+    src_cols = (
+        list(source_df.column_names)
+        if isinstance(source_df, pa.Table)
+        else list(source_df.columns)
+    )
     cols_ok = db_cols == src_cols
 
     # If no id column, skip per-row verification (unordered data)
@@ -449,21 +497,22 @@ def verify_round_trip(
         cursor.close()
         cn.close()
         return {
-            "passed":           passed,
-            "row_count_ok":     count_ok,
-            "src_rows":         src_count,
-            "db_rows":          db_count,
-            "cols_ok":          cols_ok,
-            "src_cols":         src_cols,
-            "db_cols":          db_cols,
-            "rows_checked":     0,
-            "mismatches":       [],
+            "passed": passed,
+            "row_count_ok": count_ok,
+            "src_rows": src_count,
+            "db_rows": db_count,
+            "cols_ok": cols_ok,
+            "src_cols": src_cols,
+            "db_cols": db_cols,
+            "rows_checked": 0,
+            "mismatches": [],
             "total_mismatches": 0,
         }
 
     # 3. Sample row comparison
-    sample_ids = sorted(random.sample(
-        range(1, src_count + 1), min(sample_size, src_count)))
+    sample_ids = sorted(
+        random.sample(range(1, src_count + 1), min(sample_size, src_count))
+    )
     id_list = ",".join(str(i) for i in sample_ids)
     cursor.execute(f"SELECT * FROM {table} WHERE id IN ({id_list}) ORDER BY id")
     db_rows = cursor.fetchall()
@@ -484,28 +533,34 @@ def verify_round_trip(
             src_val = src_row.get(col)
             db_val = db_row[ci]
             if not _values_match(src_val, db_val, col):
-                mismatches.append({
-                    "id": row_id, "column": col,
-                    "source": repr(src_val), "source_type": type(src_val).__name__,
-                    "actual": repr(db_val), "actual_type": type(db_val).__name__,
-                })
+                mismatches.append(
+                    {
+                        "id": row_id,
+                        "column": col,
+                        "source": repr(src_val),
+                        "source_type": type(src_val).__name__,
+                        "actual": repr(db_val),
+                        "actual_type": type(db_val).__name__,
+                    }
+                )
 
     passed = count_ok and cols_ok and len(mismatches) == 0
     return {
-        "passed":           passed,
-        "row_count_ok":     count_ok,
-        "src_rows":         src_count,
-        "db_rows":          db_count,
-        "cols_ok":          cols_ok,
-        "src_cols":         src_cols,
-        "db_cols":          db_cols,
-        "rows_checked":     rows_checked,
-        "mismatches":       mismatches[:20],
+        "passed": passed,
+        "row_count_ok": count_ok,
+        "src_rows": src_count,
+        "db_rows": db_count,
+        "cols_ok": cols_ok,
+        "src_cols": src_cols,
+        "db_cols": db_cols,
+        "rows_checked": rows_checked,
+        "mismatches": mismatches[:20],
         "total_mismatches": len(mismatches),
     }
 
 
 # ── Reporting ────────────────────────────────────────────────────────────────
+
 
 def print_write_result(r: dict) -> None:
     payload_mb = r["payload_bytes"] / 1_048_576
@@ -556,8 +611,9 @@ def print_verify_result(v: dict, profile: str) -> None:
 
     if not v["passed"]:
         if not v["row_count_ok"]:
-            click.echo(f"           Row count: source={v['src_rows']:,}  "
-                       f"db={v['db_rows']:,}")
+            click.echo(
+                f"           Row count: source={v['src_rows']:,}  db={v['db_rows']:,}"
+            )
         if not v["cols_ok"]:
             click.echo(f"           Columns: source={v['src_cols']}")
             click.echo(f"                    db    ={v['db_cols']}")
@@ -582,20 +638,28 @@ def print_comparison_table(results: list[dict]) -> None:
         payload_mb = r["payload_bytes"] / 1_048_576
         direction = r.get("direction", "write")
         workers = r.get("bcp_workers", r.get("load_workers", 0))
-        rows.append([
-            r["profile"],
-            direction,
-            workers,
-            f"{r['rows']:,}",
-            f"{r['elapsed_s']:.2f}s",
-            f"{r['rows_s']:,.0f}",
-            f"{r['mb_s']:.2f}",
-            f"{payload_mb:.1f}",
-        ])
+        rows.append(
+            [
+                r["profile"],
+                direction,
+                workers,
+                f"{r['rows']:,}",
+                f"{r['elapsed_s']:.2f}s",
+                f"{r['rows_s']:,.0f}",
+                f"{r['mb_s']:.2f}",
+                f"{payload_mb:.1f}",
+            ]
+        )
 
     headers = [
-        "Profile", "Dir", "Workers", "Rows",
-        "Elapsed", "rows/s", "MB/s", "Payload MB",
+        "Profile",
+        "Dir",
+        "Workers",
+        "Rows",
+        "Elapsed",
+        "rows/s",
+        "MB/s",
+        "Payload MB",
     ]
     click.echo()
     click.echo(tabulate(rows, headers=headers, tablefmt="github"))
@@ -625,6 +689,7 @@ def print_comparison_table(results: list[dict]) -> None:
 
 # ── Regression gate ──────────────────────────────────────────────────────────
 
+
 def _system_info() -> dict:
     return {
         "os": platform.system(),
@@ -636,9 +701,16 @@ def _system_info() -> dict:
     }
 
 
-def save_baseline(results: list[dict], rows: int, workers: int,
-                   path: str, *, batch_size: int = 100_000,
-                   block_size: int = 4096, packet_size: int = 16384) -> None:
+def save_baseline(
+    results: list[dict],
+    rows: int,
+    workers: int,
+    path: str,
+    *,
+    batch_size: int = 100_000,
+    block_size: int = 4096,
+    packet_size: int = 16384,
+) -> None:
     by_key: dict[str, dict] = {}
     for r in results:
         direction = r.get("direction", "write")
@@ -658,9 +730,13 @@ def save_baseline(results: list[dict], rows: int, workers: int,
     baseline = {
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "system": _system_info(),
-        "config": {"rows": rows, "workers": workers,
-                   "batch_size": batch_size, "block_size": block_size,
-                   "packet_size": packet_size},
+        "config": {
+            "rows": rows,
+            "workers": workers,
+            "batch_size": batch_size,
+            "block_size": block_size,
+            "packet_size": packet_size,
+        },
         "results": by_key,
     }
     with open(path, "w") as f:
@@ -681,11 +757,10 @@ def check_regression(
     base_ts = baseline.get("timestamp", "?")
 
     click.echo(f"\n{'=' * 72}")
-    click.echo(f"Regression check against baseline")
+    click.echo("Regression check against baseline")
     click.echo(f"  Baseline: {baseline_path}")
     click.echo(f"  Created:  {base_ts}")
-    click.echo(f"  Machine:  {base_sys.get('node', '?')} "
-               f"({base_sys.get('os', '?')})")
+    click.echo(f"  Machine:  {base_sys.get('node', '?')} ({base_sys.get('os', '?')})")
     click.echo(f"  Threshold: {threshold_pct:.0f}%")
     click.echo(f"{'=' * 72}")
 
@@ -734,59 +809,145 @@ def check_regression(
 
 # ── CLI ──────────────────────────────────────────────────────────────────────
 
+
 @click.command()
-@click.option("--conn", default=None,
-              help="ODBC connection string (default: STRESS_CONN env or local dev)")
-@click.option("--rows", default=1_000_000, type=int, show_default=True,
-              help="Rows to insert per run")
-@click.option("--dataset",
-              type=click.Choice(PROFILE_ORDER + ["all"], case_sensitive=False),
-              default="simple", show_default=True,
-              help="Dataset profile to test")
-@click.option("--mode",
-              type=click.Choice(["write", "load", "both"], case_sensitive=False),
-              default="both", show_default=True,
-              help="Benchmark mode")
-@click.option("--format", "fmt",
-              type=click.Choice(["polars", "pandas"], case_sensitive=False),
-              default="polars", show_default=True,
-              help="Output data format")
-@click.option("--workers", default=0, type=int, show_default=True,
-              help="Parallel BCP / load connections (0 = single)")
-@click.option("--no-verify", is_flag=True,
-              help="Skip round-trip verification in 'both' mode")
-@click.option("--verify-sample", default=200, type=int, show_default=True,
-              help="Rows to spot-check during verification")
-@click.option("--batch-size", default=100_000, type=int, show_default=True,
-              help="BCP batch size (rows per bcp_batch call)")
-@click.option("--block-size", default=8192, type=int, show_default=True,
-              help="ODBC fetch block size (rows per SQLFetch call)")
-@click.option("--packet-size", default=16384, type=int, show_default=True,
-              help="TDS packet size in bytes (network buffer)")
-@click.option("--no-truncate", is_flag=True,
-              help="Skip TRUNCATE before each write run")
-@click.option("--warmup", is_flag=True,
-              help="Run one discarded warm-up pass per profile before timing")
-@click.option("--iterations", "iterations", default=1, type=int, show_default=True,
-              help="Iterations per profile; report best (use 3 for stable results)")
-@click.option("--save-baseline", "baseline_out", type=click.Path(), default=None,
-              help="Save results as JSON baseline file")
-@click.option("--check-regression", "baseline_in", type=click.Path(exists=True),
-              default=None,
-              help="Compare against saved baseline; exit 1 on regression")
-@click.option("--regression-threshold", default=15.0, type=float,
-              show_default=True, help="Max throughput drop % before failing")
-@click.option("--recreate-tables", is_flag=True,
-              help="Drop/recreate tables and shrink DB before benchmarking")
+@click.option(
+    "--conn",
+    default=None,
+    help="ODBC connection string (default: STRESS_CONN env or local dev)",
+)
+@click.option(
+    "--rows",
+    default=1_000_000,
+    type=int,
+    show_default=True,
+    help="Rows to insert per run",
+)
+@click.option(
+    "--dataset",
+    type=click.Choice(PROFILE_ORDER + ["all"], case_sensitive=False),
+    default="simple",
+    show_default=True,
+    help="Dataset profile to test",
+)
+@click.option(
+    "--mode",
+    type=click.Choice(["write", "load", "both"], case_sensitive=False),
+    default="both",
+    show_default=True,
+    help="Benchmark mode",
+)
+@click.option(
+    "--format",
+    "fmt",
+    type=click.Choice(["polars", "pandas"], case_sensitive=False),
+    default="polars",
+    show_default=True,
+    help="Output data format",
+)
+@click.option(
+    "--workers",
+    default=0,
+    type=int,
+    show_default=True,
+    help="Parallel BCP / load connections (0 = single)",
+)
+@click.option(
+    "--no-verify", is_flag=True, help="Skip round-trip verification in 'both' mode"
+)
+@click.option(
+    "--verify-sample",
+    default=200,
+    type=int,
+    show_default=True,
+    help="Rows to spot-check during verification",
+)
+@click.option(
+    "--batch-size",
+    default=100_000,
+    type=int,
+    show_default=True,
+    help="BCP batch size (rows per bcp_batch call)",
+)
+@click.option(
+    "--block-size",
+    default=8192,
+    type=int,
+    show_default=True,
+    help="ODBC fetch block size (rows per SQLFetch call)",
+)
+@click.option(
+    "--packet-size",
+    default=16384,
+    type=int,
+    show_default=True,
+    help="TDS packet size in bytes (network buffer)",
+)
+@click.option("--no-truncate", is_flag=True, help="Skip TRUNCATE before each write run")
+@click.option(
+    "--warmup",
+    is_flag=True,
+    help="Run one discarded warm-up pass per profile before timing",
+)
+@click.option(
+    "--iterations",
+    "iterations",
+    default=1,
+    type=int,
+    show_default=True,
+    help="Iterations per profile; report best (use 3 for stable results)",
+)
+@click.option(
+    "--save-baseline",
+    "baseline_out",
+    type=click.Path(),
+    default=None,
+    help="Save results as JSON baseline file",
+)
+@click.option(
+    "--check-regression",
+    "baseline_in",
+    type=click.Path(exists=True),
+    default=None,
+    help="Compare against saved baseline; exit 1 on regression",
+)
+@click.option(
+    "--regression-threshold",
+    default=15.0,
+    type=float,
+    show_default=True,
+    help="Max throughput drop % before failing",
+)
+@click.option(
+    "--recreate-tables",
+    is_flag=True,
+    help="Drop/recreate tables and shrink DB before benchmarking",
+)
 def bench(
-    conn, rows, dataset, mode, fmt, workers,
-    no_verify, verify_sample, batch_size, block_size, packet_size, no_truncate, warmup, iterations,
-    baseline_out, baseline_in, regression_threshold, recreate_tables,
+    conn,
+    rows,
+    dataset,
+    mode,
+    fmt,
+    workers,
+    no_verify,
+    verify_sample,
+    batch_size,
+    block_size,
+    packet_size,
+    no_truncate,
+    warmup,
+    iterations,
+    baseline_out,
+    baseline_in,
+    regression_threshold,
+    recreate_tables,
 ):
     """BCP throughput benchmark — target architecture (placeholder)."""
-    conn_str = conn or os.getenv("STRESS_CONN", "").strip() or default_connection_string()
+    conn_str = (
+        conn or os.getenv("STRESS_CONN", "").strip() or default_connection_string()
+    )
 
-    pl = _require("polars")
     pyodbc = _require("pyodbc")
 
     profiles = PROFILE_ORDER if dataset == "all" else [dataset]
@@ -812,8 +973,9 @@ def bench(
     if mode in ("write", "both"):
         for pname in profiles:
             profile = PROFILES[pname]
-            click.echo(f"Generating {rows:,} rows for [{pname}] "
-                       f"({profile['columns']} cols) …")
+            click.echo(
+                f"Generating {rows:,} rows for [{pname}] ({profile['columns']} cols) …"
+            )
             t0 = time.perf_counter()
             df = pygim.create_df(profile["schema"], rows=rows, format="arrow")
             gen_s = time.perf_counter() - t0
@@ -849,10 +1011,16 @@ def bench(
                 if not no_truncate:
                     truncate_table(conn_str, table, pyodbc)
                 click.echo(f"Warm-up [{pname}] …")
-                run_write(conn_str, table, df, pname, workers,
-                          batch_size=batch_size,
-                          block_size=block_size,
-                          packet_size=packet_size)
+                run_write(
+                    conn_str,
+                    table,
+                    df,
+                    pname,
+                    workers,
+                    batch_size=batch_size,
+                    block_size=block_size,
+                    packet_size=packet_size,
+                )
                 _settle_server()
 
             # Multi-iteration: keep median result (robust against I/O outliers)
@@ -864,13 +1032,22 @@ def bench(
                 if pi > 0 or it > 0:
                     _settle_server()
 
-                label = f"Writing [{pname}]" if iterations == 1 \
-                    else f"Writing [{pname}] (iter {it+1}/{iterations})"
+                label = (
+                    f"Writing [{pname}]"
+                    if iterations == 1
+                    else f"Writing [{pname}] (iter {it + 1}/{iterations})"
+                )
                 click.echo(f"{label} …")
-                r = run_write(conn_str, table, df, pname, workers,
-                              batch_size=batch_size,
-                              block_size=block_size,
-                              packet_size=packet_size)
+                r = run_write(
+                    conn_str,
+                    table,
+                    df,
+                    pname,
+                    workers,
+                    batch_size=batch_size,
+                    block_size=block_size,
+                    packet_size=packet_size,
+                )
                 print_write_result(r)
                 run_results.append(r)
 
@@ -879,14 +1056,20 @@ def bench(
             best = run_results[len(run_results) // 2]
 
             if iterations > 1:
-                click.echo(f"  → median: {best['mb_s']:.2f} MB/s"
-                           f"  (range: {run_results[0]['mb_s']:.2f}"
-                           f" – {run_results[-1]['mb_s']:.2f})")
+                click.echo(
+                    f"  → median: {best['mb_s']:.2f} MB/s"
+                    f"  (range: {run_results[0]['mb_s']:.2f}"
+                    f" – {run_results[-1]['mb_s']:.2f})"
+                )
             all_results.append(best)
 
             if do_verify:
                 v = verify_round_trip(
-                    conn_str, table, df, pname, pyodbc,
+                    conn_str,
+                    table,
+                    df,
+                    pname,
+                    pyodbc,
                     sample_size=verify_sample,
                 )
                 verify_results.append(v)
@@ -898,8 +1081,14 @@ def bench(
         for pname in profiles:
             table = PROFILES[pname]["table"]
             click.echo(f"Loading [{pname}] …")
-            r = run_load(conn_str, table, pname, workers,
-                         block_size=block_size, packet_size=packet_size)
+            r = run_load(
+                conn_str,
+                table,
+                pname,
+                workers,
+                block_size=block_size,
+                packet_size=packet_size,
+            )
             all_results.append(r)
             print_load_result(r)
 
@@ -909,13 +1098,17 @@ def bench(
         total_mm = sum(v["total_mismatches"] for v in verify_results)
         click.echo()
         if all_passed:
-            click.echo(f"Round-trip verification: ALL PASSED  "
-                       f"({len(verify_results)} run(s), 0 mismatches)")
+            click.echo(
+                f"Round-trip verification: ALL PASSED  "
+                f"({len(verify_results)} run(s), 0 mismatches)"
+            )
         else:
             failed = sum(1 for v in verify_results if not v["passed"])
-            click.echo(f"Round-trip verification: {failed} FAILED / "
-                       f"{len(verify_results)} run(s), "
-                       f"{total_mm} total mismatches")
+            click.echo(
+                f"Round-trip verification: {failed} FAILED / "
+                f"{len(verify_results)} run(s), "
+                f"{total_mm} total mismatches"
+            )
 
     # ── Summary table ────────────────────────────────────────────────────
     if len(all_results) > 1:
@@ -923,13 +1116,18 @@ def bench(
 
     # ── Regression gate ──────────────────────────────────────────────────
     if baseline_out:
-        save_baseline(all_results, rows, workers, baseline_out,
-                      batch_size=batch_size, block_size=block_size,
-                      packet_size=packet_size)
+        save_baseline(
+            all_results,
+            rows,
+            workers,
+            baseline_out,
+            batch_size=batch_size,
+            block_size=block_size,
+            packet_size=packet_size,
+        )
 
     if baseline_in:
-        ok = check_regression(
-            all_results, baseline_in, regression_threshold)
+        ok = check_regression(all_results, baseline_in, regression_threshold)
         if not ok:
             sys.exit(1)
 

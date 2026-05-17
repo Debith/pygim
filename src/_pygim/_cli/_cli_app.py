@@ -72,7 +72,7 @@ class GimmicksCliApp:
     def show_support(self):
         rows = []
         try:
-            repo_mod = import_module("pygim._persistence")
+            _ = import_module("pygim._persistence")
             rows.append(("persistence extension", True))
             rows.append(("odbc", True))
             rows.append(("arrow (c++)", True))

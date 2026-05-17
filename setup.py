@@ -44,14 +44,15 @@ else:
 
 # ── Build environment ──────────────────────────────────────────────────────
 
-conda_prefix = os.environ.get('CONDA_PREFIX') or os.environ.get('PREFIX')
-if not conda_prefix and hasattr(sys, 'prefix'):
+conda_prefix = os.environ.get("CONDA_PREFIX") or os.environ.get("PREFIX")
+if not conda_prefix and hasattr(sys, "prefix"):
     conda_prefix = sys.prefix
 
 
 # ── Dependency presets ─────────────────────────────────────────────────────
 # Each ext.*.toml can list deps from this table.  Any dep not listed here
 # is silently ignored (forward-compatible with future presets like "pg").
+
 
 def _base_kwargs():
     return {
@@ -66,8 +67,10 @@ def _dep_available(dep_name):
         # ODBC extensions link against 'odbc' (unixODBC) which doesn't exist on
         # Windows — the Windows equivalent is 'odbc32'.  Skip until the build
         # configuration handles this platform difference.
-        print("[setup.py] Skipping odbc extensions: not supported on Windows "
-              "(library name incompatibility: 'odbc' vs 'odbc32').")
+        print(
+            "[setup.py] Skipping odbc extensions: not supported on Windows "
+            "(library name incompatibility: 'odbc' vs 'odbc32')."
+        )
         return False
     if dep_name == "arrow" and sys.platform == "win32":
         # pyarrow pip package on Windows ships DLLs but not the import
@@ -75,6 +78,7 @@ def _dep_available(dep_name):
         # Arrow C++ is installed separately (e.g. via conda).
         try:
             import pyarrow as _pa
+
             for d in _pa.get_library_dirs():
                 if (Path(d) / "arrow.lib").exists():
                     return True
@@ -84,15 +88,17 @@ def _dep_available(dep_name):
             lib = Path(f"{conda_prefix}/Library/lib")
             if (lib / "arrow.lib").exists():
                 return True
-        print("[setup.py] Skipping arrow extensions on Windows: "
-              "Arrow C++ import libraries (.lib) not found.")
+        print(
+            "[setup.py] Skipping arrow extensions on Windows: "
+            "Arrow C++ import libraries (.lib) not found."
+        )
         return False
     return True  # All other deps must be present; build fails fast if not.
 
 
 _DEP_CONFIGURATORS = {
     "arrow": lambda kw: _apply_arrow(kw),
-    "odbc":  lambda kw: _apply_odbc(kw),
+    "odbc": lambda kw: _apply_odbc(kw),
 }
 
 
@@ -104,8 +110,14 @@ def _ensure_arrow_symlinks(libdir):
     ``-larrow``.  Create them if missing; silently skip on permission errors.
     """
     p = Path(libdir)
-    for name in ("arrow", "parquet", "arrow_python",
-                 "arrow_acero", "arrow_dataset", "arrow_compute"):
+    for name in (
+        "arrow",
+        "parquet",
+        "arrow_python",
+        "arrow_acero",
+        "arrow_dataset",
+        "arrow_compute",
+    ):
         if sys.platform == "darwin":
             target = p / f"lib{name}.dylib"
             candidates = sorted(p.glob(f"lib{name}.*.dylib"))
@@ -124,6 +136,7 @@ def _apply_arrow(kw):
     # pyarrow (declared in [build-system] requires) bundles Arrow C++ headers
     # and shared libraries — works cross-platform without any system packages.
     import pyarrow as _pa
+
     kw.setdefault("include_dirs", []).append(_pa.get_include())
     for libdir in _pa.get_library_dirs():
         kw.setdefault("library_dirs", []).append(libdir)
@@ -137,14 +150,14 @@ def _apply_arrow(kw):
     # (Linux) resolves correctly to pyarrow's library directory.
     if sys.platform == "darwin":
         kw.setdefault("extra_link_args", []).append(
-            "-Wl,-rpath,@loader_path/../pyarrow")
+            "-Wl,-rpath,@loader_path/../pyarrow"
+        )
     elif sys.platform.startswith("linux"):
-        kw.setdefault("extra_link_args", []).append(
-            "-Wl,-rpath,$ORIGIN/../pyarrow")
+        kw.setdefault("extra_link_args", []).append("-Wl,-rpath,$ORIGIN/../pyarrow")
     # Also honour conda / system installations (e.g. dev envs with conda-forge Arrow).
     if conda_prefix:
         inc = "Library/include" if sys.platform == "win32" else "include"
-        lib = "Library/lib"     if sys.platform == "win32" else "lib"
+        lib = "Library/lib" if sys.platform == "win32" else "lib"
         kw.setdefault("include_dirs", []).append(f"{conda_prefix}/{inc}")
         kw.setdefault("library_dirs", []).append(f"{conda_prefix}/{lib}")
 
@@ -160,8 +173,7 @@ def _apply_odbc(kw):
         lib_files = list(mssql_odbc_lib.glob("libmsodbcsql-*.so*"))
         if lib_files:
             kw.setdefault("libraries", []).append(f":{lib_files[0].name}")
-            kw.setdefault("extra_link_args", []).append(
-                f"-Wl,-rpath,{mssql_odbc_lib}")
+            kw.setdefault("extra_link_args", []).append(f"-Wl,-rpath,{mssql_odbc_lib}")
     # unixODBC headers and library installed via Homebrew (macOS).
     for brew_prefix in [Path("/opt/homebrew"), Path("/usr/local")]:
         brew_inc = brew_prefix / "include"

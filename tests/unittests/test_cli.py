@@ -1,8 +1,6 @@
 # -*- coding: utf-8 -*-
 """Tests for the CLI application."""
 
-from pathlib import Path
-import pytest
 from _pygim._cli._cli_app import GimmicksCliApp
 
 
@@ -14,8 +12,14 @@ class TestCleanUp:
         monkeypatch.chdir(temp_dir)
         app = GimmicksCliApp()
         # --yes skips interactive prompt, --quiet suppresses output
-        app.clean_up(yes=True, build_dirs=False, pycache_dirs=True,
-                     compiled_files=False, quiet=True, all=False)
+        app.clean_up(
+            yes=True,
+            build_dirs=False,
+            pycache_dirs=True,
+            compiled_files=False,
+            quiet=True,
+            all=False,
+        )
 
     def test_clean_up_finds_pycache(self, temp_dir, monkeypatch):
         """clean_up with pycache_dirs=True should delete __pycache__ dirs."""
@@ -25,8 +29,14 @@ class TestCleanUp:
         (pycache / "foo.pyc").touch()
 
         app = GimmicksCliApp()
-        app.clean_up(yes=True, build_dirs=False, pycache_dirs=True,
-                     compiled_files=False, quiet=True, all=False)
+        app.clean_up(
+            yes=True,
+            build_dirs=False,
+            pycache_dirs=True,
+            compiled_files=False,
+            quiet=True,
+            all=False,
+        )
         assert not pycache.exists(), "__pycache__ should have been removed"
 
     def test_clean_up_all_flag(self, temp_dir, monkeypatch):
@@ -38,8 +48,14 @@ class TestCleanUp:
         pycache.mkdir()
 
         app = GimmicksCliApp()
-        app.clean_up(yes=True, build_dirs=False, pycache_dirs=False,
-                     compiled_files=False, quiet=True, all=True)
+        app.clean_up(
+            yes=True,
+            build_dirs=False,
+            pycache_dirs=False,
+            compiled_files=False,
+            quiet=True,
+            all=True,
+        )
         assert not build.exists(), "build/ should have been removed"
         assert not pycache.exists(), "__pycache__ should have been removed"
 

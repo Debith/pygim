@@ -196,8 +196,12 @@ def test_bcp_workers_accepted(bcp_workers):
 
 def test_all_new_params_combined():
     r = LocalDataStore(
-        "conn", format="polars", pool_size=2,
-        batch_size=50_000, table_hint="NOLOCK", bcp_workers=4,
+        "conn",
+        format="polars",
+        pool_size=2,
+        batch_size=50_000,
+        table_hint="NOLOCK",
+        bcp_workers=4,
     )
     assert REPR_RE.match(repr(r))
 
@@ -206,8 +210,11 @@ def test_all_new_params_combined():
 def test_acquire_datastore_new_params(fmt):
     """Production acquire_datastore accepts new constructor params."""
     store = acquire_datastore(
-        "conn", format=fmt, batch_size=10_000,
-        table_hint="TABLOCK", bcp_workers=2,
+        "conn",
+        format=fmt,
+        batch_size=10_000,
+        table_hint="TABLOCK",
+        bcp_workers=2,
     )
     assert store.format.name == fmt
 
@@ -309,12 +316,16 @@ def test_acquire_datastore_live_round_trip():
         {
             "id": pl.Series([1, 2, 3], dtype=pl.Int32),
             "val_i32": pl.Series([10, 20, 30], dtype=pl.Int32),
-            "val_i64": pl.Series([10_000_000_001, 10_000_000_002, 10_000_000_003], dtype=pl.Int64),
+            "val_i64": pl.Series(
+                [10_000_000_001, 10_000_000_002, 10_000_000_003], dtype=pl.Int64
+            ),
             "val_f64": pl.Series([1.25, 2.5, 3.75], dtype=pl.Float64),
             "val_str": ["first", "second", "third"],
         }
     )
-    store = acquire_datastore(conn_str, format="polars", batch_size=1_000, bcp_workers=1)
+    store = acquire_datastore(
+        conn_str, format="polars", batch_size=1_000, bcp_workers=1
+    )
     conn = pyodbc.connect(conn_str, timeout=30)
     conn.autocommit = True
 
@@ -331,7 +342,9 @@ def test_acquire_datastore_live_round_trip():
         store.save(df, qualified_table)
 
         expected_rows = df.sort("id").to_dicts()
-        loaded_table = store.load(qualified_table, load_workers=1).select(df.columns).sort("id")
+        loaded_table = (
+            store.load(qualified_table, load_workers=1).select(df.columns).sort("id")
+        )
         loaded_sql = store.load(
             f"SELECT id, val_i32, val_i64, val_f64, val_str FROM {qualified_table} ORDER BY id",
             load_workers=1,
@@ -372,6 +385,7 @@ def test_format_from_both_modules():
 def test_datastore_satisfies_repository_protocol():
     """DataStore structurally satisfies the Repository protocol from interfaces.py."""
     from pygim.core.protocols import Repository as RepositoryProtocol
+
     store = LocalDataStore("test_conn", format="polars", pool_size=1)
     assert isinstance(store, RepositoryProtocol), (
         "DataStore must satisfy the Repository protocol (load + save)"

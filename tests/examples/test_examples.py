@@ -4,9 +4,10 @@ import pytest
 
 ROOT = Path(__file__).parents[2]
 
-EXAMPLES = list(ROOT.joinpath('docs/examples').rglob('*.py'))
+EXAMPLES = list(ROOT.joinpath("docs/examples").rglob("*.py"))
 assert EXAMPLES
 EXAMPLES = list(reversed(sorted(EXAMPLES)))
+
 
 @pytest.mark.parametrize("module_path", EXAMPLES)
 def test_examples(module_path):
@@ -17,4 +18,5 @@ def test_examples(module_path):
 
 if __name__ == "__main__":
     from pygim.core.testing import run_tests
+
     run_tests(__file__)

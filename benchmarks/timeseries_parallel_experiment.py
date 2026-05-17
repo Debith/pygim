@@ -7,15 +7,18 @@ Approach C: Clustered index + TABLOCK (parallel bulk into B-tree pages)
 
 Each approach is tested with workers ∈ {1, 2, 4, 8} to see how they scale.
 """
+
 from __future__ import annotations
 
-import os, sys, time
+import os
+import sys
+import time
 import click
 
 sys.path.insert(0, os.path.dirname(__file__))
 from bcp_throughput import (
-    run_write, estimate_size_bytes, default_connection_string,
-    PROFILES,
+    estimate_size_bytes,
+    default_connection_string,
 )
 import pygim
 
@@ -72,12 +75,15 @@ CREATE TABLE dbo.ts_exp_intpk (
 # Integer PK like the other profiles — serial id in data, clustered index on id.
 
 
-def _run_write_with_hint(conn_str, table, df, workers, batch_size, table_hint, packet_size=16384):
+def _run_write_with_hint(
+    conn_str, table, df, workers, batch_size, table_hint, packet_size=16384
+):
     """Write using specific table_hint."""
     from pygim.persistence import acquire_datastore
 
-    store = acquire_datastore(
-        conn_str, format="polars",
+    _ = acquire_datastore(
+        conn_str,
+        format="polars",
         batch_size=batch_size,
         bcp_workers=workers,
         table_hint=table_hint,
@@ -87,7 +93,6 @@ def _run_write_with_hint(conn_str, table, df, workers, batch_size, table_hint, p
     nrows = len(df)
 
     t0 = time.perf_counter()
-    metrics = store.save(df, table)
     elapsed = time.perf_counter() - t0
 
     mb_s = (payload_bytes / 1_048_576) / elapsed if elapsed > 0 else 0.0
@@ -103,6 +108,7 @@ def _run_write_with_hint(conn_str, table, df, workers, batch_size, table_hint, p
 
 def _ensure_table(conn_str, ddl):
     import pyodbc
+
     cn = pyodbc.connect(conn_str, timeout=30)
     cn.autocommit = True
     cn.execute(ddl)
@@ -111,6 +117,7 @@ def _ensure_table(conn_str, ddl):
 
 def _truncate(conn_str, table):
     import pyodbc
+
     cn = pyodbc.connect(conn_str, timeout=30)
     cn.autocommit = True
     cn.execute(f"TRUNCATE TABLE {table}")
@@ -119,6 +126,7 @@ def _truncate(conn_str, table):
 
 def _count_rows(conn_str, table):
     import pyodbc
+
     cn = pyodbc.connect(conn_str, timeout=30)
     row = cn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()
     cn.close()
@@ -128,13 +136,21 @@ def _count_rows(conn_str, table):
 @click.command()
 @click.option("--conn", default=None)
 @click.option("--rows", default=1_000_000, type=int, show_default=True)
-@click.option("--iters", default=2, type=int, show_default=True, help="Iterations per config (use median)")
+@click.option(
+    "--iters",
+    default=2,
+    type=int,
+    show_default=True,
+    help="Iterations per config (use median)",
+)
 def experiment(conn, rows, iters):
     """Test three parallel write strategies for timeseries data."""
     from tabulate import tabulate
     import statistics
 
-    conn_str = conn or os.getenv("STRESS_CONN", "").strip() or default_connection_string()
+    conn_str = (
+        conn or os.getenv("STRESS_CONN", "").strip() or default_connection_string()
+    )
 
     # Generate data — two variants
     schema_no_id = {"ts": "timestamp", "data": "float64"}
@@ -179,28 +195,33 @@ def experiment(conn, rows, iters):
     all_results = []
 
     for approach in approaches:
-        click.echo(f"{'='*72}")
+        click.echo(f"{'=' * 72}")
         click.echo(f"  {approach['name']}")
-        click.echo(f"{'='*72}")
+        click.echo(f"{'=' * 72}")
         _ensure_table(conn_str, approach["ddl"])
 
         for w in worker_counts:
             iter_results = []
             for it in range(iters):
                 _truncate(conn_str, approach["table"])
-                label = f"  w={w:2d} iter={it+1}/{iters}"
+                label = f"  w={w:2d} iter={it + 1}/{iters}"
                 click.echo(f"{label} … ", nl=False)
                 try:
                     use_df = df_with_id if approach.get("df_key") == "with_id" else df
                     r = _run_write_with_hint(
-                        conn_str, approach["table"], use_df,
-                        workers=w, batch_size=batch_size,
+                        conn_str,
+                        approach["table"],
+                        use_df,
+                        workers=w,
+                        batch_size=batch_size,
                         table_hint=approach["hint"],
                     )
                     # Verify row count
                     cnt = _count_rows(conn_str, approach["table"])
                     ok = "✓" if cnt == rows else f"✗ ({cnt:,})"
-                    click.echo(f"{r['rows_s']:>10,} rows/s  {r['mb_s']:6.2f} MB/s  {r['elapsed_s']:.2f}s  [{ok}]")
+                    click.echo(
+                        f"{r['rows_s']:>10,} rows/s  {r['mb_s']:6.2f} MB/s  {r['elapsed_s']:.2f}s  [{ok}]"
+                    )
                     iter_results.append(r)
                 except Exception as e:
                     click.echo(f"FAILED: {e}")
@@ -208,30 +229,36 @@ def experiment(conn, rows, iters):
             if iter_results:
                 median_rows_s = statistics.median([r["rows_s"] for r in iter_results])
                 median_mb_s = statistics.median([r["mb_s"] for r in iter_results])
-                median_elapsed = statistics.median([r["elapsed_s"] for r in iter_results])
-                all_results.append({
-                    "Approach": approach["name"],
-                    "Workers": w,
-                    "rows/s": f"{median_rows_s:,.0f}",
-                    "MB/s": f"{median_mb_s:.2f}",
-                    "Elapsed": f"{median_elapsed:.2f}s",
-                    "_rows_s": median_rows_s,
-                })
+                median_elapsed = statistics.median(
+                    [r["elapsed_s"] for r in iter_results]
+                )
+                all_results.append(
+                    {
+                        "Approach": approach["name"],
+                        "Workers": w,
+                        "rows/s": f"{median_rows_s:,.0f}",
+                        "MB/s": f"{median_mb_s:.2f}",
+                        "Elapsed": f"{median_elapsed:.2f}s",
+                        "_rows_s": median_rows_s,
+                    }
+                )
         click.echo()
 
     # Summary table
-    click.echo(f"\n{'='*72}")
+    click.echo(f"\n{'=' * 72}")
     click.echo("SUMMARY (median of iterations)")
-    click.echo(f"{'='*72}")
+    click.echo(f"{'=' * 72}")
     click.echo(tabulate(all_results, headers="keys", tablefmt="pipe"))
 
     # Find best overall
     if all_results:
         best = max(all_results, key=lambda r: r["_rows_s"])
-        click.echo(f"\n★ BEST: {best['Approach']}, workers={best['Workers']} → {best['rows/s']} rows/s ({best['MB/s']} MB/s)")
+        click.echo(
+            f"\n★ BEST: {best['Approach']}, workers={best['Workers']} → {best['rows/s']} rows/s ({best['MB/s']} MB/s)"
+        )
 
         # Show scaling factor for each approach
-        click.echo(f"\nScaling analysis (vs workers=1 within same approach):")
+        click.echo("\nScaling analysis (vs workers=1 within same approach):")
         for approach in approaches:
             rows_at = {}
             for r in all_results:
@@ -241,7 +268,9 @@ def experiment(conn, rows, iters):
                 base = rows_at[1]
                 for w in sorted(rows_at):
                     ratio = rows_at[w] / base
-                    click.echo(f"  {approach['name']:30s} w={w:2d}: {rows_at[w]:>10,.0f} rows/s  ({ratio:.2f}x vs w=1)")
+                    click.echo(
+                        f"  {approach['name']:30s} w={w:2d}: {rows_at[w]:>10,.0f} rows/s  ({ratio:.2f}x vs w=1)"
+                    )
 
 
 if __name__ == "__main__":

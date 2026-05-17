@@ -19,36 +19,36 @@ DATA_UNIT_FACTORS = {
     "kib": 1024,
     "kibibyte": 1024,
     "kibibytes": 1024,
-    "mb": 1024 ** 2,
-    "megabyte": 1024 ** 2,
-    "megabytes": 1024 ** 2,
-    "mib": 1024 ** 2,
-    "mebibyte": 1024 ** 2,
-    "mebibytes": 1024 ** 2,
-    "gb": 1024 ** 3,
-    "gigabyte": 1024 ** 3,
-    "gigabytes": 1024 ** 3,
-    "gib": 1024 ** 3,
-    "gibibyte": 1024 ** 3,
-    "gibibytes": 1024 ** 3,
-    "tb": 1024 ** 4,
-    "terabyte": 1024 ** 4,
-    "terabytes": 1024 ** 4,
-    "pb": 1024 ** 5,
-    "petabyte": 1024 ** 5,
-    "petabytes": 1024 ** 5,
+    "mb": 1024**2,
+    "megabyte": 1024**2,
+    "megabytes": 1024**2,
+    "mib": 1024**2,
+    "mebibyte": 1024**2,
+    "mebibytes": 1024**2,
+    "gb": 1024**3,
+    "gigabyte": 1024**3,
+    "gigabytes": 1024**3,
+    "gib": 1024**3,
+    "gibibyte": 1024**3,
+    "gibibytes": 1024**3,
+    "tb": 1024**4,
+    "terabyte": 1024**4,
+    "terabytes": 1024**4,
+    "pb": 1024**5,
+    "petabyte": 1024**5,
+    "petabytes": 1024**5,
     "kbit": 1024 / 8,
     "kilobit": 1024 / 8,
     "kilobits": 1024 / 8,
-    "mbit": (1024 ** 2) / 8,
-    "megabit": (1024 ** 2) / 8,
-    "megabits": (1024 ** 2) / 8,
-    "gbit": (1024 ** 3) / 8,
-    "gigabit": (1024 ** 3) / 8,
-    "gigabits": (1024 ** 3) / 8,
-    "tbit": (1024 ** 4) / 8,
-    "terabit": (1024 ** 4) / 8,
-    "terabits": (1024 ** 4) / 8,
+    "mbit": (1024**2) / 8,
+    "megabit": (1024**2) / 8,
+    "megabits": (1024**2) / 8,
+    "gbit": (1024**3) / 8,
+    "gigabit": (1024**3) / 8,
+    "gigabits": (1024**3) / 8,
+    "tbit": (1024**4) / 8,
+    "terabit": (1024**4) / 8,
+    "terabits": (1024**4) / 8,
 }
 
 TIME_UNIT_FACTORS = {
@@ -79,7 +79,9 @@ TIME_UNIT_FACTORS = {
 }
 
 
-def _reference_calculate_rate(quantity, quantity_unit, duration, duration_unit, precision=2):
+def _reference_calculate_rate(
+    quantity, quantity_unit, duration, duration_unit, precision=2
+):
     q_factor = DATA_UNIT_FACTORS[quantity_unit.lower()]
     t_factor = TIME_UNIT_FACTORS[duration_unit.lower()]
     bytes_total = quantity * q_factor
@@ -124,9 +126,16 @@ RATE_CASES = [
 
 
 @pytest.mark.parametrize("quantity, quantity_unit, duration, duration_unit", RATE_CASES)
-def test_calculate_rate_matches_reference(quantity, quantity_unit, duration, duration_unit):
-    expected = _reference_calculate_rate(quantity, quantity_unit, duration, duration_unit)
-    assert utils.calculate_rate(quantity, quantity_unit, duration, duration_unit) == expected
+def test_calculate_rate_matches_reference(
+    quantity, quantity_unit, duration, duration_unit
+):
+    expected = _reference_calculate_rate(
+        quantity, quantity_unit, duration, duration_unit
+    )
+    assert (
+        utils.calculate_rate(quantity, quantity_unit, duration, duration_unit)
+        == expected
+    )
 
 
 def test_calculate_rate_supports_precision_override():

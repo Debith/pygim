@@ -58,9 +58,11 @@ __all__ = [
 #  Core DDD Protocols
 # ---------------------------------------------------------------------------
 
+
 @runtime_checkable
 class Service(Protocol):
     """Marker protocol for services (domain, application, infrastructure)."""
+
     ...
 
 
@@ -118,6 +120,7 @@ class ValueObject(Protocol):
 #  Repository Protocols
 # ---------------------------------------------------------------------------
 
+
 @runtime_checkable
 class LoadRepository(Protocol):
     """A repository that can load/retrieve data.
@@ -171,6 +174,7 @@ class Repository(LoadRepository, SaveRepository, Protocol):
 #  Domain Events
 # ---------------------------------------------------------------------------
 
+
 @runtime_checkable
 class DomainEvent(Protocol):
     """A discrete event that domain experts care about.
@@ -194,6 +198,7 @@ class DomainEvent(Protocol):
 # ---------------------------------------------------------------------------
 #  Factories & Builders
 # ---------------------------------------------------------------------------
+
 
 @runtime_checkable
 class Factory(Protocol):
@@ -230,6 +235,7 @@ class Builder(Protocol):
 # ---------------------------------------------------------------------------
 #  Tactical Patterns
 # ---------------------------------------------------------------------------
+
 
 @runtime_checkable
 class Specification(Protocol):

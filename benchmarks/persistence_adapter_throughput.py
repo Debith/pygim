@@ -8,6 +8,7 @@ independent of actual DB I/O. Uses placeholder backend.
 Usage:
     python benchmarks/persistence_adapter_throughput.py [--iterations N] [--warmup W]
 """
+
 from __future__ import annotations
 
 import time
@@ -62,7 +63,9 @@ def _run_scenario(
     elapsed_ns = _bench(fn, iterations)
     total_ms = elapsed_ns / 1_000_000
     per_call_us = elapsed_ns / iterations / 1_000
-    calls_per_sec = iterations / (elapsed_ns / 1_000_000_000) if elapsed_ns > 0 else float("inf")
+    calls_per_sec = (
+        iterations / (elapsed_ns / 1_000_000_000) if elapsed_ns > 0 else float("inf")
+    )
 
     return {
         "operation": label,
@@ -89,16 +92,35 @@ def _print_results(results: list[dict]) -> None:
 
 
 @click.command()
-@click.option("--iterations", "-n", default=10_000, show_default=True, help="Number of measured iterations.")
-@click.option("--warmup", "-w", default=100, show_default=True, help="Warmup iterations before measurement.")
+@click.option(
+    "--iterations",
+    "-n",
+    default=10_000,
+    show_default=True,
+    help="Number of measured iterations.",
+)
+@click.option(
+    "--warmup",
+    "-w",
+    default=100,
+    show_default=True,
+    help="Warmup iterations before measurement.",
+)
 def main(iterations: int, warmup: int) -> None:
     """Benchmark persistence adapter overhead (placeholder backend)."""
-    click.echo(f"Persistence adapter throughput benchmark")
+    click.echo("Persistence adapter throughput benchmark")
     click.echo(f"  iterations={iterations:,}  warmup={warmup:,}")
     click.echo()
 
     dummy_df = pl.DataFrame({"id": [1, 2, 3], "name": ["a", "b", "c"]})
-    query = Query().select("id").select("name").from_table("bench_table").where("id > 0").limit(100)
+    query = (
+        Query()
+        .select("id")
+        .select("name")
+        .from_table("bench_table")
+        .where("id > 0")
+        .limit(100)
+    )
     results: list[dict] = []
 
     # Pool size must cover all calls: each failed connect() exhausts one slot.
@@ -109,18 +131,33 @@ def main(iterations: int, warmup: int) -> None:
     # ── No transforms ────────────────────────────────────────────────────
     repo = DataStore(_BENCH_CONN, format="polars", pool_size=pool_budget)
 
-    results.append(_run_scenario(
-        "save (no transforms)", lambda: _try_save(repo, dummy_df),
-        iterations, warmup, 0,
-    ))
-    results.append(_run_scenario(
-        "load string (no transforms)", lambda: _try_load(repo, "bench_table"),
-        iterations, warmup, 0,
-    ))
-    results.append(_run_scenario(
-        "load Query (no transforms)", lambda: _try_load(repo, query),
-        iterations, warmup, 0,
-    ))
+    results.append(
+        _run_scenario(
+            "save (no transforms)",
+            lambda: _try_save(repo, dummy_df),
+            iterations,
+            warmup,
+            0,
+        )
+    )
+    results.append(
+        _run_scenario(
+            "load string (no transforms)",
+            lambda: _try_load(repo, "bench_table"),
+            iterations,
+            warmup,
+            0,
+        )
+    )
+    results.append(
+        _run_scenario(
+            "load Query (no transforms)",
+            lambda: _try_load(repo, query),
+            iterations,
+            warmup,
+            0,
+        )
+    )
 
     # ── With transforms ──────────────────────────────────────────────────
     for n in (1, 5, 10):
@@ -129,11 +166,15 @@ def main(iterations: int, warmup: int) -> None:
             repo_t.add_pre_transform(_noop)
             repo_t.add_post_transform(_noop)
 
-        results.append(_run_scenario(
-            f"save ({n} pre + {n} post transforms)",
-            lambda r=repo_t: _try_save(r, dummy_df),
-            iterations, warmup, n * 2,
-        ))
+        results.append(
+            _run_scenario(
+                f"save ({n} pre + {n} post transforms)",
+                lambda r=repo_t: _try_save(r, dummy_df),
+                iterations,
+                warmup,
+                n * 2,
+            )
+        )
 
     _print_results(results)
 
