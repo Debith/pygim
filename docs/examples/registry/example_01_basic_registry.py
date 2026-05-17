@@ -7,15 +7,18 @@ This example shows:
 - Using override semantics (raises on duplicate unless override=True)
 - Introspecting registered keys
 """
+
 from pygim.registry import Registry, KeyPolicyKind
 
 # Create a registry (default policy=qualname, hooks disabled)
 reg = Registry(hooks=False, policy=KeyPolicyKind.qualname)
 
+
 # 1. Register a function by string id
 # (For qualname policy the id can be any string; collisions are treated as duplicates.)
 def add(a, b):
     return a + b
+
 
 reg.register("math.add", add)
 assert "math.add" in reg
@@ -24,8 +27,10 @@ assert reg["math.add"](2, 3) == 5
 # 2. Register by passing the function object itself (id becomes module.qualname)
 #    This is convenient when you don't want to handcraft a string id.
 
+
 def mul(a, b):
     return a * b
+
 
 reg.register(mul, mul)
 qual_id = mul.__module__ + "." + mul.__qualname__

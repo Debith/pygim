@@ -64,6 +64,65 @@ This library is divided into multiple different smaller packages.
 
   * pygim: This is the main project that contains the CLI and all the examples.
 
+Persistence (Experimental)
+--------------------------
+
+An experimental high-performance persistence layer (DDD-style DataStore) now exists as a C++ extension:
+
+* Strategies: pluggable objects with ``fetch(key)->data|None`` and ``save(key,value)``.
+* Optional transformer pipeline (pre-save / post-load) when enabled at construction.
+* Optional factory callable to turn raw data into rich entities.
+* Native MSSQL strategy (ODBC) with pybind-free core/adapter architecture.
+* Fluent ``Query`` for lightweight SQL assembly without manual string concatenation.
+* Arrow IPC utilities for zero-copy hand-off between Polars and C++ pipelines.
+
+Example (read):
+
+.. code-block:: python
+
+        from pygim import persistence
+
+        store = persistence.acquire_datastore("Driver={ODBC Driver 18 for SQL Server};Server=localhost;...")
+
+        df = store.load("users")
+        print(df)
+
+Write (upsert) example: ``docs/examples/persistence/mssql_write_example.py``.
+
+Architecture Diagram:
+
+See PlantUML: ``docs/design/persistence_class_diagram.puml`` for component relationships.
+
+.. note:: The MSSQL native strategy uses a pybind-free core/adapter split. ODBC headers must be available at build time for native SQL Server support.
+
+Query Security & Dialect Notes
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Passing a built ``Query`` object directly to ``DataStore.load(query)``
+will bind parameters using ODBC. The builder renders
+queries via ``MssqlDialect``, emitting ``TOP n`` for SQL Server.
+
+Native Arrow Persist Path
+~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Bulk DataFrame persistence is handled inside native bindings via
+``DataStore.save(...)``. The strategy prefers Arrow C Data
+Interface (``__arrow_c_stream__``) and falls back to IPC serialization only
+when needed.
+
+.. code-block:: python
+
+    from pygim import persistence
+
+    conn = "Driver={ODBC Driver 18 for SQL Server};Server=localhost;..."
+    store = persistence.acquire_datastore(conn)
+    df = generate_polars_dataset(n=100_000)
+
+    metrics = store.save(df, "stress_data")
+    print(metrics)
+
+
+
 Changelog
 =========
 
