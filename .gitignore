@@ -180,4 +180,7 @@ cython_debug/
 instructions/
 
 # Private files
+
+# Benchmark baselines (machine-specific)
+benchmarks/baseline*.json
 __*__/

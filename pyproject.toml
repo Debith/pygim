@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools", "wheel", "toml", "pybind11", "setuptools_scm[toml]>=8"]
+requires = ["setuptools", "wheel", "toml", "pybind11", "setuptools_scm[toml]>=8", "pyarrow>=15"]
 build-backend = "setuptools.build_meta"
 backend-path = []
 
@@ -12,17 +12,23 @@ classifiers = [
   "Intended Audience :: Developers",
   "Programming Language :: Python",
   "Programming Language :: Python :: 3",
-  "Programming Language :: Python :: 3.8",
   "Programming Language :: Python :: 3.9",
   "Programming Language :: Python :: 3.10",
   "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12",
   "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: 3.14",
   "Topic :: Software Development :: Libraries :: Python Modules",
   "Topic :: Software Development :: Quality Assurance",
   "Typing :: Typed",
 ]
-dependencies = []
+dependencies = [
+  "click>=8",
+  "pyarrow>=15",
+  "polars>=0.20",
+  "tabulate>=0.9",
+  "typing_extensions>=4.0",
+]
 
 [project.urls]
 homepage = "https://github.com/Debith/pygim"
@@ -39,7 +45,9 @@ dev = [
   'mypy',
   'coverage',
   'coverage[toml]',
+  'pandas',
   'pybind11',
+  'pyodbc',
   'ruff',
 ]
 
@@ -48,6 +56,11 @@ test = [
   'pytest-xdist',
   'coverage',
   'coverage[toml]',
+  'pyodbc',
+]
+
+pandas = [
+  'pandas',
 ]
 
 [project.scripts]

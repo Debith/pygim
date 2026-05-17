@@ -1,0 +1,123 @@
+@startuml persistence_abstract_architecture
+!theme plain
+skinparam backgroundColor #FEFEFE
+skinparam componentStyle rectangle
+skinparam defaultFontName Consolas
+skinparam defaultFontSize 11
+skinparam shadowing false
+skinparam roundCorner 8
+skinparam packageStyle frame
+skinparam noteFontSize 10
+skinparam arrowThickness 1.5
+
+title Persistence Module — Layer Architecture
+
+' ────────────────────────── Python Layer ──────────────────────────
+package "Python API" as PY #E8F5E9 {
+    component "pygim.persistence" as py_repo <<module>> {
+        component "acquire_datastore()" as acquire
+        component "DataStore (re-export)" as py_cls
+        component "Format enum (re-export)" as py_fmt
+    }
+    note right of py_repo
+      Thin re-exports only.
+      No logic — pure glue.
+    end note
+}
+
+' ────────────────────────── Adapter Layer ──────────────────────────
+package "Adapter Layer  (pybind11 boundary)" as AD #E3F2FD {
+    component "RepositoryAdapter<Backend>" as adapter {
+        component "save(py::object)" as ad_save
+        component "load(source)" as ad_load
+        component "pre/post transforms" as hooks
+    }
+    component "arrow_import.h" as imp <<PyCapsule / to_arrow()>>
+    component "arrow_export.h" as exp <<unique_ptr RAII + C Data Interface>>
+    component "Format (Polars|Pandas)" as fmt
+
+    adapter -[hidden]down- imp
+}
+
+' ────────────────────────── Core Layer ──────────────────────────
+package "Core Layer  (C++ only, GIL-free)" as CORE #FFF3E0 {
+    component "Repository<Backend>" as repo {
+        component "save(Arrow Table)" as c_save
+        component "load(Query|string)" as c_load
+    }
+    component "ConnectionPool<Backend>" as pool
+    component "ConnectionHandle (RAII)" as handle
+    component "Query + build_sql()" as query
+    component "BackendPolicy concept" as concept
+    component "LoadResult (Table + Metrics)" as lr
+    component "ArrowBuilder" as builder
+
+    pool --> handle : checkout()
+    repo --> pool : shared_ptr
+}
+
+' ────────────────────────── MSSQL Strategy ──────────────────────────
+package "MSSQL Strategy" as MSSQL #FCE4EC {
+    component "MssqlBackend" as backend
+    component "MssqlSaveImpl" as save_impl
+    component "MssqlLoadImpl" as load_impl
+    component "MssqlDialect" as dialect
+    component "MssqlLoadCache" as cache
+
+    package "BCP Pipeline" as BCP #F3E5F5 {
+        component "bcp_pipeline.h" as pipeline
+        component "bcp_bind / dispatch" as bind
+        component "bcp_helpers (row ops)" as helpers
+        component "BcpConnectionPool" as bcp_pool
+        component "bcp_profiler" as profiler
+        component "bcp_rebind_dispatch" as rebind
+    }
+
+    package "Load Pipeline" as LOAD #E8EAF6 {
+        component "parallel_load.h" as pload
+        component "schema_describe.h" as schema
+        component "fetch_buffer.h" as fbuf
+        component "load_dispatch.h" as ldispatch
+        component "pk_detect.h" as pk
+        component "LoadConnectionPool" as lpool
+    }
+
+    backend ..> save_impl
+    backend ..> load_impl
+    backend ..> dialect
+    backend ..> cache
+    save_impl --> pipeline
+    load_impl --> pload
+    load_impl --> schema
+    load_impl --> fbuf
+    pload --> lpool
+    pload --> cache : ensure_pool()
+}
+
+' ────────────────────────── Relationships ──────────────────────────
+py_repo -down-> adapter : re-exports bindings
+ad_save -down-> imp : py::object → Arrow Table
+ad_load -down-> exp : Arrow Table → DataFrame
+adapter -down-> repo : owns (direct)
+repo -down-> save_impl : Backend::SaveImpl::execute()
+repo -down-> load_impl : Backend::LoadImpl::execute()
+backend .left.> concept : satisfies
+
+' ────────────────────────── Data Boundary ──────────────────────────
+note as N1
+  **Arrow is the data boundary**
+  Above adapter: py::object (DataFrame)
+  Below adapter: shared_ptr<arrow::Table>
+  No py::object crosses into Core or Strategy.
+end note
+N1 .. imp
+N1 .. exp
+
+note as N2
+  **Core is ODBC-free**
+  ArrowBuilder uses portable temporal structs.
+  Layout verified via static_assert in strategy.
+end note
+N2 .. builder
+
+@enduml

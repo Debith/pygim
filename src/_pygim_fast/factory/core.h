@@ -93,7 +93,7 @@ public:
      * \throws std::runtime_error If key is unknown.
      * \note Exists so call sites can separate "lookup" from "invoke" where needed.
      */
-    Creator get_creator(const Key& name) const {
+    [[nodiscard]] Creator get_creator(const Key& name) const {
         if (auto* creator = m_registry.try_get_const(name)) {
             return *creator;
         }
@@ -110,7 +110,7 @@ public:
      * \note Exists to keep invocation policy decoupled from storage and validation policy.
      */
     template<class InvokeFn>
-    Product create(const Key& name, InvokeFn&& invoke) const {
+    [[nodiscard]] Product create(const Key& name, InvokeFn&& invoke) const {
         Creator creator = get_creator(name);
         Product product = std::forward<InvokeFn>(invoke)(creator);
         if (!m_validator(product)) {
@@ -124,7 +124,7 @@ public:
      * \return Vector of keys currently registered.
      * \note Exists for introspection, debugging, and test validation.
      */
-    std::vector<Key> registered_names() const {
+    [[nodiscard]] std::vector<Key> registered_names() const {
         return m_registry.keys();
     }
 

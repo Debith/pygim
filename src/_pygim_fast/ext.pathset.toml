@@ -1,0 +1,3 @@
+[extension]
+module = "pathset"
+sources = ["pathset/bindings.cpp"]

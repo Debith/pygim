@@ -1,0 +1,3 @@
+[extension]
+module = "factory"
+sources = ["factory/bindings.cpp"]

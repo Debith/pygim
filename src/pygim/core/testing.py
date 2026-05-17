@@ -67,7 +67,7 @@ def run_tests(test_file, module_name=None, pytest_args=None, *, coverage: bool =
     coverage : `bool`, optional
         Runs the coverage. (the default is True, which runs the coverage).
     """
-    pytest_args = [str(test_file), "--tb=short"] or pytest_args
+    pytest_args = pytest_args or [str(test_file), "--tb=short"]
 
     if not coverage or not module_name:
         pytest.main(pytest_args)

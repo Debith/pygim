@@ -1,0 +1,163 @@
+@startuml persistence_load_sequence
+!theme plain
+skinparam backgroundColor #FEFEFE
+skinparam defaultFontName Consolas
+skinparam defaultFontSize 10
+skinparam shadowing false
+skinparam sequenceArrowThickness 1.5
+skinparam sequenceParticipantBorderColor #555
+skinparam sequenceLifeLineBorderColor #999
+skinparam sequenceGroupHeaderFontSize 11
+
+title Load Path — Full Sequence (Python → ODBC → Arrow)
+
+actor "Python" as PY
+participant "RepositoryAdapter\n<MssqlBackend>" as AD #E3F2FD
+participant "export_table()" as EXP #E3F2FD
+participant "Repository\n<MssqlBackend>" as REPO #FFF3E0
+participant "ConnectionPool" as POOL #FFF3E0
+participant "MssqlLoadImpl" as LOAD #FCE4EC
+participant "pk_detect" as PK #FCE4EC
+participant "execute_parallel()" as PAR #E8EAF6
+participant "MssqlLoadCache" as CACHE #E8EAF6
+participant "LoadConnectionPool" as LPOOL #E8EAF6
+participant "ArrowBuilder" as AB #FFF3E0
+
+== WITH GIL ==
+
+PY -> AD : load(source, load_workers, partition_column)
+activate AD
+
+AD -> AD : run pre_transforms
+
+== GIL RELEASED (py::gil_scoped_release) ==
+
+AD -> REPO : load(source, load_workers, partition_column)
+activate REPO
+
+REPO -> REPO : Resolve source:\n• contains space → raw SQL\n• else → Query → build_sql(dialect)
+
+REPO -> POOL : checkout()
+activate POOL
+POOL --> REPO : ConnectionHandle
+deactivate POOL
+
+REPO -> LOAD : execute(conn, sql, workers,\npartition_col, table_name,\nload_cache, block_size, packet_size)
+activate LOAD
+
+alt load_workers > 1 AND table_name non-empty
+
+    alt partition_column empty
+        LOAD -> PK : detect_partition_column(dbc, table)
+        activate PK
+        PK -> PK : SQLPrimaryKeys() → PK columns
+        PK -> PK : SQLColumns() → check integer type
+        PK --> LOAD : partition_col (or "")
+        deactivate PK
+    end
+
+    alt partition found
+
+        LOAD -> PAR : execute_parallel(conn, table,\npartition_col, workers,\nblock_size, load_cache, packet_size)
+        activate PAR
+
+        PAR -> PAR : query_min_max(conn, table, col)\nSELECT MIN(pk), MAX(pk)
+
+        PAR -> PAR : Adjust workers if range < N
+        PAR -> PAR : generate_worker_queries()\n[range-partitioned WHERE clauses]
+
+        PAR -> PAR : describe_columns(stmt)\n→ SchemaInfo (shared)
+
+        PAR -> CACHE : ensure_pool(conn_str, N-1, packet_size)
+        activate CACHE
+        alt cache hit
+            CACHE --> PAR : reuse LoadConnectionPool*
+        else cache miss
+            CACHE -> LPOOL ** : new LoadConnectionPool(conn_str, N-1)
+            CACHE --> PAR : LoadConnectionPool*
+        end
+        deactivate CACHE
+
+        par N workers (std::jthread)
+            note over PAR, AB
+                Worker 0: primary connection
+                Workers 1..N-1: LoadConnectionPool
+            end note
+            PAR -> AB : StmtHandle → SQLPrepare\n→ SQLExecute\n→ FetchBufferSet::allocate\n→ build_column_dispatch\n→ buffers.bind(stmt)
+            loop block cursor fetch
+                AB -> AB : SQLFetch(block)\n→ indicators_to_valid_bytes\n→ dispatch[c].fn(builder, col,\n   buf, nrows, valid)
+            end
+            AB --> PAR : builder.finish() → Table
+        end
+
+        alt stale connection (08S01, 08001, HY000)
+            PAR -> CACHE : clear()
+            PAR -> PAR : retry once (fresh pool)
+        end
+
+        PAR -> PAR : ConcatenateTables(worker_tables)
+        PAR -> PAR : Aggregate metrics
+        PAR --> LOAD : LoadResult
+        deactivate PAR
+
+    else no integer PK → single-threaded fallback
+    end
+
+else single-threaded path
+end
+
+group Single-Threaded Load (default or fallback)
+
+    LOAD -> LOAD : StmtHandle(dbc)
+    LOAD -> LOAD : SQLPrepare(sql) + SQLExecute()
+    LOAD -> LOAD : describe_columns(stmt) → SchemaInfo
+
+    LOAD -> AB : ArrowBuilder(schema)
+    activate AB
+    LOAD -> LOAD : FetchBufferSet::allocate(col_info, block_size)
+    LOAD -> LOAD : build_column_dispatch(schema, nullable)
+    LOAD -> LOAD : SQLSetStmtAttr(ROW_ARRAY_SIZE = block_size)
+    LOAD -> LOAD : buffers.bind(stmt)
+
+    loop until SQL_NO_DATA
+        LOAD -> LOAD : SQLFetch() → rows_fetched
+
+        loop for each column
+            LOAD -> LOAD : indicators_to_valid_bytes()\n[branchless: cmp + setne]
+            LOAD -> AB : dispatch[c].fn(builder, col,\nbuf, nrows, valid_ptr)
+        end
+    end
+
+    AB -> AB : finish()
+    AB --> LOAD : shared_ptr<arrow::Table>
+    deactivate AB
+end
+
+LOAD --> REPO : LoadResult{table, metrics}
+deactivate LOAD
+
+note over REPO : ConnectionHandle ~dtor\nauto-returns to pool
+
+REPO --> AD : LoadResult
+deactivate REPO
+
+== GIL REACQUIRED (scope exit) ==
+
+AD -> EXP : export_table(table, use_polars)
+activate EXP
+EXP -> EXP : TableBatchReader\n→ ExportRecordBatchReader\n→ unique_ptr<ArrowArrayStream> (RAII)
+EXP -> EXP : PyArrow._import_from_c(addr)\n→ reader.read_all()
+alt Polars
+    EXP -> EXP : polars.from_arrow(table)
+else Pandas
+    EXP -> EXP : table.to_pandas()
+end
+EXP --> AD : py::object (DataFrame)
+deactivate EXP
+
+AD -> AD : run post_transforms
+
+AD --> PY : DataFrame
+deactivate AD
+
+@enduml

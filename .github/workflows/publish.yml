@@ -22,11 +22,7 @@ jobs:
       - name: Install test dependencies
         run: |
           python -m pip install --upgrade pip
-          if [[ "$RUNNER_OS" == "macOS" ]]; then
-            MACOSX_DEPLOYMENT_TARGET=10.15 python -m pip install .[test] -f .
-          else
-            python -m pip install .[test] -f .
-          fi
+          python -m pip install .[test] -f .
 
       - name: Remove source files
         run: rm -rf src/
@@ -52,15 +48,19 @@ jobs:
       - name: Install cibuildwheel
         run: |
           python -m pip install --upgrade pip
-          python -m pip install cibuildwheel==2.20.0
+          python -m pip install cibuildwheel
 
       - name: Build wheels
         run: python -m cibuildwheel --output-dir wheelhouse
         env:
-          CIBW_BUILD: "cp38-* cp39-* cp310-* cp311-* cp312-* cp313-*"
+          CIBW_BUILD: "cp39-* cp310-* cp311-* cp312-* cp313-* cp314-*"
           CIBW_SKIP: "pp* *_musllinux_*"
-          CIBW_ARCHS_MACOS: ${{ matrix.os == 'macos-latest' && 'universal2' || '' }}
-          CIBW_ENVIRONMENT_MACOS: MACOSX_DEPLOYMENT_TARGET=10.15
+          CIBW_ARCHS_LINUX: "x86_64"
+          CIBW_ARCHS_MACOS: "arm64"
+          CIBW_ARCHS_WINDOWS: "AMD64"
+          CIBW_ENVIRONMENT_MACOS: MACOSX_DEPLOYMENT_TARGET=13.3
+          CIBW_TEST_COMMAND: >-
+            python -c "import pygim.registry; import pygim.factory; import pygim.each; import pygim.pathset; print('smoke test OK')"
 
       - name: Upload wheel artifacts
         uses: actions/upload-artifact@v4

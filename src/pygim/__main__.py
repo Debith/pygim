@@ -9,12 +9,12 @@ from _pygim._cli._cli_app import GimmicksCliApp, flag_opt
 
 @click.group()
 def cli():
-    """\b
+    r"""\b
      ___        ___ _
-    | _ \_  _  / __(_)_ __
+    | _ \_  _  / __(_)\_ __
     |  _/ || || (_ | | '  \ \b
     |_|  \_, / \___|_|_|_|_|
-          |_/Python Gimmicks
+        |_/Python Gimmicks
 
     """
 
@@ -37,15 +37,21 @@ def show_test_coverage(**kwargs):
     GimmicksCliApp().show_test_coverage(**kwargs)
 
 
+@cli.command()
+def show_support():
+    """Display compiled feature support matrix."""
+    GimmicksCliApp().show_support()
+
+
 @click.command()
 @click.argument("text", type=str, nargs=1)
 def cli_oo(text):
-    """\b
+    r"""\b
      ___        ___ _
-    | _ \_  _  / __(_)_ __
+    | _ \_  _  / __(_)\_ __
     |  _/ || || (_ | | '  \ \b
     |_|  \_, / \___|_|_|_|_|
-          |_/ AI powered Python Gimmicks
+        |_/ AI powered Python Gimmicks
 
     """
     GimmicksCliApp().ai(text)

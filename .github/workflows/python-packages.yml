@@ -5,7 +5,7 @@ name: Python package
 
 on:
   push:
-    branches: [ "main", "dev" ]
+    branches: [ "main", "dev", "core/**", "copilot/**" ]
   pull_request:
     branches: [ "main", "dev" ]
 
@@ -17,7 +17,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [macos-latest, ubuntu-latest, windows-latest]
-        python-version: ["3.8", "3.9", "3.10", "3.11", "3.12", "3.13"]
+        python-version: ["3.9", "3.10", "3.11", "3.12", "3.13", "3.14"]
 
     steps:
     - uses: actions/checkout@v3
@@ -26,10 +26,27 @@ jobs:
       with:
         python-version: ${{ matrix.python-version }}
 
+    - name: Install MSSQL ODBC Driver 18 (Linux)
+      if: matrix.os == 'ubuntu-latest'
+      run: |
+        curl -sSL https://packages.microsoft.com/keys/microsoft.asc \
+          | sudo tee /etc/apt/trusted.gpg.d/microsoft.asc
+        DISTRO="$(lsb_release -rs)"
+        curl -sSL "https://packages.microsoft.com/config/ubuntu/${DISTRO}/prod.list" \
+          | sudo tee /etc/apt/sources.list.d/mssql-release.list
+        sudo apt-get update
+        sudo ACCEPT_EULA=Y apt-get install -y msodbcsql18 unixodbc-dev
+
+    - name: Install MSSQL ODBC Driver 18 (macOS)
+      if: matrix.os == 'macos-latest'
+      run: |
+        brew tap microsoft/mssql-release https://github.com/microsoft/homebrew-mssql-release
+        HOMEBREW_ACCEPT_EULA=Y brew install msodbcsql18 unixodbc
+
     - name: Install dependencies (Linux & MacOS)
       if: matrix.os != 'windows-latest'
       run: |
-        export MACOSX_DEPLOYMENT_TARGET=10.15
+        export MACOSX_DEPLOYMENT_TARGET=13.3
         python -m pip install --upgrade pip
         python -m pip install .[test] -f .
 

@@ -39,7 +39,7 @@ def type_error_msg(obj_or_type, expected_type):
         type_names = expected_type.__name__
 
     if isinstance(obj_or_type, type):
-        return f"Expected to get type `{type_names}`, got `{obj_or_type.__name__}]`"
+        return f"Expected to get type `{type_names}`, got `{obj_or_type.__name__}`"
     else:
         return f"Expected to get type `{type_names}`, got `{repr(obj_or_type)} [{type(obj_or_type).__name__}]`"
 
