@@ -58,6 +58,10 @@ Added
 - Benchmark: Consolidated ``benchmarks/bcp_throughput.py`` into a multi-profile benchmark with simple (7 cols), mixed (9 cols), and complex (11 cols) dataset profiles. Supports ``--dataset all`` for side-by-side comparison and ``--compare-strategies`` for row_major vs column_major matrix runs.
 - Benchmark: Regression gate — ``--save-baseline FILE`` and ``--check-regression FILE`` in ``benchmarks/bcp_throughput.py``. Saves/compares per-profile MB/s against a JSON baseline. ``--regression-threshold PCT`` (default 15%) controls sensitivity. Exits 1 on failure for CI integration.
 - Persistence/MSSQL BCP: Parallel BCP with ``bcp_workers=N`` parameter on ``persist_dataframe()``. Creates N independent ODBC connections, partitions Arrow RecordBatches by row count, and runs worker threads in parallel. ``bcp_workers=0`` (default) uses single-connection. Falls back to single-connection when batch count < workers.
+
+Docs
+~~~~
+- Agent runtime design: Replace raw core ``timeout_ms``/``deadline_ns`` integer fields with strong ``Duration``/``Deadline`` value types and document custom C++ literals such as ``15_ms`` and ``100_ns``.
 - Persistence/MSSQL BCP: ``BcpConnectionPool`` (``bcp_connection_pool.h``) — RAII pool of M pre-connected ODBC handles with BCP enabled. Exception-safe constructor with rollback. Used per parallel persist call.
 - Benchmark: ``--workers N`` CLI argument in ``benchmarks/bcp_throughput.py`` for parallel BCP benchmarking.
 - Tests: ``test_datastore_satisfies_repository_protocol`` verifying ``DataStore`` satisfies the ``Repository`` protocol via ``isinstance``.

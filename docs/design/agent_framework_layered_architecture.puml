@@ -1,0 +1,129 @@
+@startuml agent_framework_layered_architecture
+!theme plain
+skinparam backgroundColor #FEFEFE
+skinparam componentStyle rectangle
+skinparam defaultFontName Consolas
+skinparam defaultFontSize 11
+skinparam shadowing false
+skinparam roundCorner 8
+skinparam packageStyle frame
+skinparam noteFontSize 10
+skinparam arrowThickness 1.5
+
+title Agent Runtime - Layer Architecture
+
+package "Python API" as PY #E8F5E9 {
+    component "pygim.ai.runtime" as PYMOD <<module>> {
+        component "RuntimeConfig" as PYCFG
+        component "AgentRuntime" as PYRT
+        component "register_agent()" as PYREG
+        component "request() / publish()" as PYSEND
+    }
+
+    component "_pygim._core.agent_protocols" as PYPROTO <<protocols>>
+
+    note right of PYMOD
+      Thin public Python layer only.
+      Keep the public surface under
+      pygim.ai.runtime.
+    end note
+}
+
+package "Adapter Layer (pybind11 boundary)" as AD #E3F2FD {
+    component "AgentSystemAdapter" as ADAPTER {
+        component "AgentContext / ToolContext" as CTX
+        component "JsonOrBytesCodec" as CODEC
+        component "PyAgentWorker" as WORKER
+        component "PyToolBridge" as TBRIDGE
+        component "ThreadPoolToolExecutor" as TEXEC
+        component "DiagnosticsQueue / Worker" as DIAG
+        component "InboundEventBusAdapter slot" as INBUS
+        component "OutboundEventBusAdapter slot" as OUTBUS
+    }
+}
+
+package "Core Layer (C++23, pybind-free)" as CORE #FFF3E0 {
+    component "MediatorCore" as MED {
+        component "route_directed()" as RDIR
+        component "route_broadcast()" as RBROAD
+        component "track_reply()" as RREP
+        component "advance_timeouts()" as RTIME
+    }
+
+    component "Envelope / EncodedPayload" as ENV
+    component "BoundedQueue<Envelope>" as BQ
+    component "AgentSlot" as SLOT
+    component "ReplyTracker" as TRACKER
+}
+
+package "Event Bus Core (C++23, pybind-free)" as BUSCORE #F3E5F5 {
+    component "InboundEventBusCore\n<FetchStrategy, DeserializationStrategy,\n EnableFetchHooks, EnableDeserializationHooks>" as INCORE
+    component "OutboundEventBusCore\n<SerializationStrategy, PublishStrategy,\n EnableSerializationHooks, EnablePublishHooks>" as OUTCORE
+    component "TransportMessage / PublishReceipt" as BUSTYPES
+}
+
+package "Optional Phase 2 Transport Strategies" as EDGE #FCE4EC {
+    component "ZeroMqFetchStrategy" as ZMQFETCH
+    component "ZeroMqPublishStrategy" as ZMQPUB
+}
+
+PYCFG -down-> ADAPTER : constructor settings
+PYMOD -down-> ADAPTER : thin bindings
+PYPROTO -down-> ADAPTER : handler + bus protocols
+ADAPTER -down-> CODEC : encode / decode payload
+ADAPTER -down-> MED : submit / register
+ADAPTER -down-> DIAG : best-effort hooks
+ADAPTER -right-> INBUS : owns optional inbound bus
+ADAPTER -right-> OUTBUS : owns optional outbound bus
+INBUS -down-> INCORE : fetch + deserialize
+OUTBUS -down-> OUTCORE : serialize + publish
+INCORE -down-> ENV : yields Envelope
+OUTCORE -down-> ENV : consumes Envelope
+INCORE -right-> BUSTYPES : fetch returns transport bytes
+OUTCORE -right-> BUSTYPES : publish returns receipt
+MED -down-> ENV : routes metadata + bytes
+MED -down-> BQ : ingress / mailbox / tool queue
+MED -down-> SLOT : agent registry
+MED -down-> TRACKER : request / tool reply correlation
+ZMQFETCH -up-> INCORE : phase 2 fetch example
+ZMQPUB -up-> OUTCORE : phase 2 publish example
+
+note as N1
+  In-process mediator is the v1 product,
+  not a fallback.
+  Routing semantics stay custom and fixed.
+end note
+N1 .. MED
+
+note as N2
+  No py::object below the adapter.
+  Core sees Envelope metadata, EncodedPayload,
+  TransportMessage, and bytes only.
+end note
+N2 .. ENV
+
+note as N3
+  Hooks are observational only.
+  Route, drop, timeout, fetch, deserialize,
+  serialize, and publish events go through
+  best-effort diagnostics paths.
+end note
+N3 .. DIAG
+
+note as N4
+  Inbound and outbound buses stay separate.
+  Do not collapse them into EventBus<Direction>.
+  Adapter-owned loops keep transport waits off
+  MediatorCore.
+end note
+N4 .. INBUS
+
+note as N5
+  ZeroMQ remains a phase 2 transport strategy
+  example only.
+  Directed remote delivery comes first.
+  Distributed broadcast comes later.
+end note
+N5 .. ZMQPUB
+
+@enduml

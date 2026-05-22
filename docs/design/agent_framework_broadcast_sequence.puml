@@ -1,0 +1,90 @@
+@startuml agent_framework_broadcast_sequence
+!theme plain
+skinparam backgroundColor #FEFEFE
+skinparam defaultFontName Consolas
+skinparam defaultFontSize 10
+skinparam shadowing false
+skinparam sequenceArrowThickness 1.5
+skinparam sequenceParticipantBorderColor #555
+skinparam sequenceLifeLineBorderColor #999
+skinparam sequenceGroupHeaderFontSize 11
+
+title Broadcast Delivery - Mediator-Computed Fanout
+
+actor "Publisher handler" as PUB
+participant "AgentContext[publisher]" as CTXP #E3F2FD
+participant "AgentSystemAdapter" as AD #E3F2FD
+participant "JsonOrBytesCodec" as CODEC #E3F2FD
+participant "MediatorCore" as MED #FFF3E0
+participant "AgentSlot[planner]" as SLOT1 #FFF3E0
+participant "AgentSlot[writer]" as SLOT2 #FFF3E0
+participant "AgentSlot[auditor]" as SLOT3 #FFF3E0
+participant "PyAgentWorker[planner]" as W1 #E3F2FD
+participant "PyAgentWorker[auditor]" as W3 #E3F2FD
+actor "Planner handler" as P1
+actor "Auditor handler" as P3
+
+note over PUB,CTXP
+  publish() returns BroadcastResult(delivered_count, dropped_count).
+  Broadcast is per-recipient best effort, not atomic.
+end note
+
+PUB -> CTXP : publish("task.created", event)
+CTXP -> AD : submit_broadcast(...)
+AD -> CODEC : encode(event)
+CODEC --> AD : EncodedPayload
+AD -> MED : submit(Envelope{kind=Broadcast,topic=task.created})
+activate MED
+MED -> MED : resolve exact-match subscribers(topic)
+note right of MED
+  Exact-match subscriptions only in v1.
+  No wildcards.
+end note
+
+MED -> SLOT1 : enqueue(copy #1)
+SLOT1 --> MED : accepted
+
+MED -> SLOT2 : enqueue(copy #2)
+alt SLOT2 accepts
+    SLOT2 --> MED : accepted
+else SLOT2 saturated under RejectNew
+    SLOT2 --> MED : MailboxFull
+    MED -> MED : dropped_count += 1
+    note right of MED
+      Saturated recipients are skipped.
+      Fanout continues for remaining recipients.
+    end note
+end
+
+MED -> SLOT3 : enqueue(copy #3)
+SLOT3 --> MED : accepted
+MED --> AD : BroadcastResult{delivered=2,dropped=1}
+deactivate MED
+AD --> CTXP : BroadcastResult
+CTXP --> PUB : BroadcastResult
+
+W1 -> SLOT1 : pop()
+SLOT1 --> W1 : Envelope
+W1 -> CODEC : decode(payload)
+CODEC --> W1 : decoded event
+W1 --> P1 : handler(ctx, event)
+
+W3 -> SLOT3 : pop()
+SLOT3 --> W3 : Envelope
+W3 -> CODEC : decode(payload)
+CODEC --> W3 : decoded event
+W3 --> P3 : handler(ctx, event)
+
+note over MED
+  Broadcast is mediator-computed fanout to subscribers only.
+  Order is defined per recipient in mediator enqueue order.
+  There is no global total order across recipients.
+end note
+
+note over MED
+  v1 broadcast uses RejectNew semantics only.
+  DropOldest is discouraged and not used for broadcast
+  because it obscures what each recipient observed.
+end note
+
+@enduml

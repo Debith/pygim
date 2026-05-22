@@ -1,0 +1,108 @@
+@startuml agent_framework_directed_sequence
+!theme plain
+skinparam backgroundColor #FEFEFE
+skinparam defaultFontName Consolas
+skinparam defaultFontSize 10
+skinparam shadowing false
+skinparam sequenceArrowThickness 1.5
+skinparam sequenceParticipantBorderColor #555
+skinparam sequenceLifeLineBorderColor #999
+skinparam sequenceGroupHeaderFontSize 11
+
+title Directed Request - Exact One-Recipient Routing
+
+actor "Agent A handler" as A
+participant "AgentContext[A]" as ACTXA #E3F2FD
+participant "AgentSystemAdapter" as AD #E3F2FD
+participant "JsonOrBytesCodec" as CODEC #E3F2FD
+participant "MediatorCore" as MED #FFF3E0
+participant "ReplyTracker" as RT #FFF3E0
+participant "AgentSlot[B]" as SLOTB #FFF3E0
+participant "PyAgentWorker[B]" as WB #E3F2FD
+participant "AgentContext[B]" as ACTXB #E3F2FD
+actor "Agent B handler" as B
+
+note over A,ACTXA
+  v1 request() is synchronous from the handler's perspective
+  and may block the calling agent worker.
+  Self-request is forbidden and rejected.
+  Cross-agent blocking is allowed only for acyclic flows.
+  v1 does not solve general reentrancy.
+end note
+
+A -> ACTXA : request("agent-b", payload, timeout_ms)
+ACTXA -> AD : submit_request(...)
+AD -> CODEC : encode(payload)
+CODEC --> AD : EncodedPayload
+AD -> MED : submit(Envelope{kind=Request,to=agent-b})
+activate MED
+MED -> MED : resolve recipient
+MED -> MED : reserve message_id + deadline
+
+alt recipient exists
+    MED -> SLOTB : enqueue(envelope)
+    alt mailbox accepted
+        SLOTB --> MED : accepted
+        MED -> RT : register_waiter(message_id, agent-a, deadline)
+        MED --> AD : request admitted
+        deactivate MED
+
+        WB -> SLOTB : pop()
+        SLOTB --> WB : Envelope
+        WB -> CODEC : decode(payload)
+        CODEC --> WB : decoded request
+        WB -> B : handler(ctx, event)
+        note over WB,B
+          Non-None return becomes the implicit reply.
+          Use ctx.reply(None) for an explicit None reply.
+          First admitted reply wins.
+        end note
+        activate B
+        B -> ACTXB : reply(result)
+        ACTXB -> AD : submit_reply(correlation_id=message_id)
+        AD -> CODEC : encode(result)
+        CODEC --> AD : EncodedPayload
+        AD -> MED : submit(Envelope{kind=Reply,to=agent-a})
+        activate MED
+        MED -> RT : complete(correlation_id, reply)
+        RT --> MED : waiter found
+        MED --> AD : reply envelope
+        deactivate MED
+        AD -> CODEC : decode_reply(reply.payload)
+        CODEC --> AD : ReplyOutcome
+        alt success reply
+            AD --> ACTXA : result
+            ACTXA --> A : result
+        else error reply
+            AD --> ACTXA : raise RouteError
+            ACTXA --> A : RouteError
+        end
+        deactivate B
+    else mailbox full
+        SLOTB --> MED : MailboxFull
+        MED --> AD : MailboxFull
+        deactivate MED
+        AD --> ACTXA : raise admission error
+        ACTXA --> A : MailboxFull
+    end
+else unknown recipient
+    MED --> AD : RouteError
+    deactivate MED
+    AD --> ACTXA : raise admission error
+    ACTXA --> A : RouteError
+end
+
+note over RT
+  Waiters are created only after mailbox admission succeeds.
+  Admission failure is immediate and never becomes a timeout.
+  Direct request timeout uses the same ReplyTracker expiry
+  and late-reply drop contract as tool invocation.
+end note
+
+note over MED
+  Directed delivery means exact one-recipient routing.
+  The mediator either enqueues one mailbox or returns
+  a route failure. There is no implicit fanout.
+end note
+
+@enduml

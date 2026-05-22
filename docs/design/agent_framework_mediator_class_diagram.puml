@@ -1,0 +1,171 @@
+@startuml agent_framework_mediator_class_diagram
+!theme plain
+skinparam backgroundColor #FEFEFE
+skinparam defaultFontName Consolas
+skinparam defaultFontSize 10
+skinparam shadowing false
+skinparam classAttributeIconSize 0
+skinparam classFontStyle bold
+skinparam arrowThickness 1.2
+
+title Agent Runtime - MediatorCore Class Diagram
+
+package "pygim::agent_runtime::core" as p_core #FFF3E0 {
+
+    class "MessageId" as MessageId <<value>> {
+        + hi : uint64_t
+        + lo : uint64_t
+    }
+
+    class "Duration" as Duration <<value>> {
+        + count_ns : int64_t
+    }
+
+    class "Deadline" as Deadline <<value>> {
+        + tick_ns : int64_t
+    }
+
+    note right of Duration
+      Custom literals `_ns`, `_us`, `_ms`, and `_s`
+      all produce Duration.
+      `15_ms + 100_ns` stays strongly typed.
+    end note
+
+    enum DeliveryKind {
+        Directed
+        Broadcast
+        Request
+        Reply
+        ToolRequest
+        ToolReply
+        Diagnostic
+    }
+
+    class "EncodedPayload" as EncodedPayload <<struct>> {
+        + codec_name : string
+        + content_type : string
+        + bytes : shared_buffer
+        + size_bytes : size_t
+    }
+
+    class "ToolDescriptor" as ToolDescriptor <<struct>> {
+        + name : string
+        + timeout : Duration
+        + schema_id : string
+        + flags : uint32_t
+    }
+
+    class "Envelope" as Envelope <<struct>> {
+        + message_id : MessageId
+        + correlation_id : optional<MessageId>
+        + sender : string
+        + recipient : optional<string>
+        + topic : optional<string>
+        + kind : DeliveryKind
+        + payload : EncodedPayload
+        + tool : optional<ToolDescriptor>
+        + deadline : optional<Deadline>
+    }
+
+    class "BoundedQueue<T>" as BoundedQueue <<template>> {
+        - m_capacity : size_t
+        - m_closed : bool
+        --
+        + try_enqueue(T) : expected<void, QueueError>
+        + try_dequeue(stop_token) : optional<T>
+        + close() : void
+    }
+
+    class "AgentSlot" as AgentSlot {
+        - m_agent_id : string
+        - m_mailbox : BoundedQueue<Envelope>
+        - m_subscriptions : flat_hash_set<string>
+        - m_allowed_tools : flat_hash_set<string>
+        --
+        + accepts_topic(string_view) : bool
+        + allows_tool(string_view) : bool
+    }
+
+        note right of AgentSlot
+            One slot per registered agent.
+            Mailbox is a bounded cross-thread queue
+            between the mediator router thread and
+            the agent's own execution thread.
+            Both threads are internal to the C++
+            runtime; the Python handler API does
+            not see them.
+        end note
+
+    class "ReplyTracker" as ReplyTracker {
+        - m_waiters : flat_hash_map<MessageId, PendingReply>
+        - m_deadlines : min_heap<DeadlineEntry>
+        --
+        + register_waiter(id, source, deadline) : expected<void, ReplyError>
+        + complete(id, Envelope) : expected<bool, ReplyError>
+                + next_deadline() : optional<Deadline>
+                + expire_ready(now) : vector<MessageId>
+    }
+
+    note right of ReplyTracker
+      Waiters are created only after successful
+      mailbox or tool-queue admission.
+            Router wake timing is driven by next_deadline().
+    end note
+
+    package "Router Thread (jthread)" as router_thread <<Frame>> #FFE0B2 {
+        class "MediatorCore<EnableHooks>" as MediatorCore <<template>> {
+            - m_ingress : BoundedQueue<Envelope>
+            - m_agent_slots : flat_hash_map<string, AgentSlot>
+            - m_reply_tracker : ReplyTracker
+            - m_router : jthread
+            --
+            + submit(Envelope) : expected<void, RouteError>
+            + start() : void
+            + install_agent_slot(AgentSlot, override_existing) : expected<void, RegistrationError>
+            + install_tool(ToolDescriptor, override_existing) : expected<void, RegistrationError>
+            + shutdown() : void
+            --
+            - route_once(stop_token) : expected<void, RouteError>
+        }
+    }
+
+    note right of MediatorCore
+      Owns its own router thread (std::jthread).
+      Semantic center of the runtime: ingress,
+      routing, reply tracking, broadcast fanout,
+      and tool admission.
+      Routes into per-agent mailboxes rather than
+      invoking agent handlers directly.
+      submit() is the only thread-safe entry point
+      callers cross from outside the router thread.
+    end note
+
+    Envelope *-- MessageId
+    ToolDescriptor *-- Duration : timeout
+    Envelope o-- Deadline : deadline
+    Envelope *-- EncodedPayload
+    Envelope o-- ToolDescriptor
+    Envelope --> DeliveryKind
+
+    AgentSlot *-- BoundedQueue : mailbox\n<<cross-thread handoff>>
+    MediatorCore *-- BoundedQueue : ingress\n<<cross-thread handoff>>
+    MediatorCore *-- ReplyTracker
+    MediatorCore o-- AgentSlot : agent_id -> slot
+
+    MediatorCore ..> Envelope : routes
+    ReplyTracker ..> Envelope : completes from reply
+}
+
+note as N_threads #E1F5FE
+  Thread boundaries (internal to the C++ runtime):
+  * Caller threads -> MediatorCore via ingress queue (submit)
+  * MediatorCore router thread -> agent execution
+    via per-agent mailbox queues
+  * MediatorCore router thread -> tool executor
+    via tool queue (not shown here)
+  All cross-thread traffic is bounded-queue handoff.
+  None of these threads are visible to the Python
+  handler API.
+end note
+
+@enduml

@@ -1,0 +1,195 @@
+@startuml agent_framework_variation_diagram
+!theme plain
+skinparam backgroundColor #FEFEFE
+skinparam defaultFontName Consolas
+skinparam defaultFontSize 10
+skinparam shadowing false
+skinparam classAttributeIconSize 0
+skinparam classFontStyle bold
+skinparam packageFontStyle italic
+skinparam stereotypeFontSize 9
+skinparam arrowThickness 1.2
+
+title Agent Runtime - Strategy and Policy Variation
+
+package "Template Surface" as SURF #E3F2FD {
+    class "AgentSystemAdapter<CodecStrategy, ToolExecutionStrategy, InboundBusAdapter, OutboundBusAdapter, EnableHooks>" as ASA <<template>> {
+        + close() : void
+    + register_agent(..., api_strategy=null, override_existing=false) : void
+        + register_tool(..., override_existing=false) : void
+        + submit(Envelope) : void
+        --
+        + ctor(...)
+    }
+
+    class "MediatorCore<EnableHooks>" as MED <<template>> {
+        + route_once(...) : expected<void, RouteError>
+        + expire_timeouts(...) : void
+    }
+
+    class "InboundEventBusAdapter<FetchStrategy, DeserializationStrategy, EnableFetchHooks, EnableDeserializationHooks>" as IBA <<template>>
+    class "OutboundEventBusAdapter<SerializationStrategy, PublishStrategy, EnableSerializationHooks, EnablePublishHooks>" as OBA <<template>>
+    class "InboundEventBusCore<FetchStrategy, DeserializationStrategy, EnableFetchHooks, EnableDeserializationHooks>" as IBC <<template>>
+    class "OutboundEventBusCore<SerializationStrategy, PublishStrategy, EnableSerializationHooks, EnablePublishHooks>" as OBC <<template>>
+
+    class "EnableHooks" as Hooks <<bool policy>>
+    class "EnableFetchHooks" as FetchHooks <<bool policy>>
+    class "EnableDeserializationHooks" as DeserHooks <<bool policy>>
+    class "EnableSerializationHooks" as SerHooks <<bool policy>>
+    class "EnablePublishHooks" as PubHooks <<bool policy>>
+}
+
+  package "Runtime-Bound Per-Agent Seams" as RUNTIME #E8F5E9 {
+    class "PyAgentWorker" as PyAgentWorker {
+      + run_loop(...) : void
+    }
+
+    interface "AgentApiStrategy" as AgentApiStrategy {
+      + invoke(handler, ctx, event) : py::object
+    }
+
+    class "OpenAIAgentApiStrategy" as OpenAIAgentApiStrategy
+    class "HttpAgentApiStrategy" as HttpAgentApiStrategy
+  }
+
+package "Strategy Interfaces" as IFACE #FFF3E0 {
+    interface "CodecStrategy" as CodecStrategy {
+        + encode(py::object) : EncodedPayload
+        + decode(EncodedPayload) : py::object
+    }
+
+    interface "ToolExecutionStrategy" as ToolExecutionStrategy {
+        + submit_tool(Envelope) : expected<void, ToolError>
+    }
+
+    interface "InboundFetchStrategy" as InboundFetchStrategy {
+        + fetch(stop_token) : expected<optional<TransportMessage>, BusError>
+    }
+
+    interface "InboundDeserializationStrategy" as InboundDeserializationStrategy {
+        + deserialize(TransportMessage) : expected<Envelope, BusError>
+    }
+
+    interface "OutboundSerializationStrategy" as OutboundSerializationStrategy {
+        + serialize(Envelope) : expected<TransportMessage, BusError>
+    }
+
+    interface "OutboundPublishStrategy" as OutboundPublishStrategy {
+        + publish(TransportMessage) : expected<PublishReceipt, BusError>
+    }
+}
+
+package "Hook Bundles" as HB #F3E5F5 {
+    class "NoHooks" as NoHooks
+    class "NoStageHooks" as NoStageHooks
+    class "FetchHooksBundle" as FetchHooksBundle
+    class "DeserializationHooksBundle" as DeserializationHooksBundle
+    class "SerializationHooksBundle" as SerializationHooksBundle
+    class "PublishHooksBundle" as PublishHooksBundle
+}
+
+package "Default and Optional Strategies" as IMPL #FCE4EC {
+    class "JsonOrBytesCodec" as JsonOrBytesCodec
+    class "ThreadPoolToolExecutor" as ThreadPoolToolExecutor
+    class "ZeroMqFetchStrategy" as ZeroMqFetchStrategy
+    class "ZeroMqPublishStrategy" as ZeroMqPublishStrategy
+}
+
+ASA *--> MED : owns
+ASA ..> CodecStrategy : template arg
+ASA ..> ToolExecutionStrategy : template arg
+ASA ..> IBA : collaborator type
+ASA ..> OBA : collaborator type
+ASA ..> Hooks : template arg
+ASA ..> AgentApiStrategy : runtime registration arg
+ASA ..> PyAgentWorker : spawns
+MED ..> Hooks : template arg
+MED ..> NoHooks : when EnableHooks=false
+
+IBA *--> IBC : owns
+OBA *--> OBC : owns
+PyAgentWorker o--> AgentApiStrategy : optional per-agent
+
+IBC ..> InboundFetchStrategy : template arg
+IBC ..> InboundDeserializationStrategy : template arg
+IBC ..> FetchHooks : template arg
+IBC ..> DeserHooks : template arg
+IBC ..> FetchHooksBundle : when EnableFetchHooks=true
+IBC ..> DeserializationHooksBundle : when EnableDeserializationHooks=true
+IBC ..> NoStageHooks : when stage bool=false
+
+OBC ..> OutboundSerializationStrategy : template arg
+OBC ..> OutboundPublishStrategy : template arg
+OBC ..> SerHooks : template arg
+OBC ..> PubHooks : template arg
+OBC ..> SerializationHooksBundle : when EnableSerializationHooks=true
+OBC ..> PublishHooksBundle : when EnablePublishHooks=true
+OBC ..> NoStageHooks : when stage bool=false
+
+JsonOrBytesCodec ..|> CodecStrategy
+ThreadPoolToolExecutor ..|> ToolExecutionStrategy
+OpenAIAgentApiStrategy ..|> AgentApiStrategy
+HttpAgentApiStrategy ..|> AgentApiStrategy
+ZeroMqFetchStrategy ..|> InboundFetchStrategy
+ZeroMqPublishStrategy ..|> OutboundPublishStrategy
+
+note right of Hooks
+  Hooks are observational only in v1.
+  If enabled, hook events go to a best-effort
+  diagnostics worker and may be dropped on
+  diagnostics overload.
+end note
+
+note as N1
+  Keep routing semantics custom and fixed.
+  MediatorCore is not transport-parametric.
+  Registration is adapter-owned control-plane work.
+  Runtime enters Running eagerly on construction.
+  v1 fixes every queue to RejectNew.
+  There is no public lazy start in v1.
+end note
+N1 .. MED
+
+note as N2
+  v1 defaults:
+  - JsonOrBytesCodec
+  - ThreadPoolToolExecutor
+  - no inbound or outbound transport strategies configured
+  Reject NNG, Nanomsg, and Boost.Asio as defaults.
+end note
+N2 .. IMPL
+
+note as N3
+  Inbound and outbound event buses stay separate.
+  Do not collapse them into EventBus<Direction>.
+  Stage-local bools select HooksBundle versus
+  NoStageHooks independently per stage.
+end note
+N3 .. IBC
+
+note as N4
+  ZeroMqFetchStrategy and ZeroMqPublishStrategy are
+  phase 2 only and still conceptual.
+  A future optional module could take a shape like
+  ext.agent_runtime_zmq.toml only after explicit
+  build gating and feature-loading exist.
+end note
+N4 .. ZeroMqPublishStrategy
+
+note as N5
+  Directed remote delivery comes first.
+  Distributed broadcast waits for remote
+  subscription ownership and control-plane rules.
+end note
+N5 .. ZeroMqPublishStrategy
+
+note as N6
+  AgentApiStrategy is a runtime-bound per-agent seam.
+  It is not a template arg on AgentSystemAdapter because
+  one runtime may host heterogeneous providers at once.
+  handler(ctx, event) remains the normalized call shape.
+  Hook and stage-local compile-time branching stay unchanged.
+end note
+N6 .. AgentApiStrategy
+
+@enduml

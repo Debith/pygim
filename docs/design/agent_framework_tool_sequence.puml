@@ -1,0 +1,123 @@
+@startuml agent_framework_tool_sequence
+!theme plain
+skinparam backgroundColor #FEFEFE
+skinparam defaultFontName Consolas
+skinparam defaultFontSize 10
+skinparam shadowing false
+skinparam sequenceArrowThickness 1.5
+skinparam sequenceParticipantBorderColor #555
+skinparam sequenceLifeLineBorderColor #999
+skinparam sequenceGroupHeaderFontSize 11
+
+title Tool Invocation - Mediator and Tool Executor
+
+actor "Agent handler" as A
+participant "AgentContext[A]" as ACTX #E3F2FD
+participant "AgentSystemAdapter" as AD #E3F2FD
+participant "JsonOrBytesCodec" as CODEC #E3F2FD
+participant "MediatorCore" as MED #FFF3E0
+participant "AgentSlot[A]" as SLOTA #FFF3E0
+participant "ReplyTracker" as RT #FFF3E0
+participant "ToolQueue" as TQ #F3E5F5
+participant "ThreadPoolToolExecutor" as EXEC #E3F2FD
+participant "PyToolBridge" as BRIDGE #E3F2FD
+participant "Python tool callable" as TOOL
+
+note over A,ACTX
+  v1 call_tool() is synchronous from the handler perspective
+  and may block the calling agent worker.
+  Blocking flows must stay acyclic.
+  Effective timeout = call override if provided,
+  else ToolDescriptor.timeout, else 30_s.
+  v1 does not solve general reentrancy.
+end note
+
+A -> ACTX : call_tool("search", args, timeout_ms)
+ACTX -> AD : submit_tool_request(...)
+AD -> CODEC : encode(args)
+CODEC --> AD : EncodedPayload
+AD -> MED : submit(Envelope{kind=ToolRequest,tool=search})
+activate MED
+MED -> SLOTA : allows_tool("search")?
+
+alt allowlisted
+    SLOTA --> MED : yes
+    MED -> MED : reserve message_id + deadline
+    MED -> TQ : enqueue(tool_request)
+    alt tool queue accepted
+        TQ --> MED : accepted
+        MED -> RT : register_waiter(message_id, agent-a, deadline)
+        MED --> AD : tool request admitted
+        deactivate MED
+
+        TQ -> EXEC : dequeue
+        alt tool completes before timeout
+            EXEC -> BRIDGE : invoke(tool_request)
+            activate BRIDGE
+            BRIDGE -> CODEC : decode(payload)
+            CODEC --> BRIDGE : decoded args
+            BRIDGE -> TOOL : call(ctx, args)
+            activate TOOL
+            TOOL --> BRIDGE : result
+            deactivate TOOL
+            BRIDGE -> CODEC : encode(result)
+            CODEC --> BRIDGE : EncodedPayload
+            BRIDGE -> AD : submit_tool_reply(correlation_id=message_id)
+            deactivate BRIDGE
+            AD -> MED : submit(ToolReply{correlation_id=message_id})
+
+            activate MED
+            MED -> RT : complete(correlation_id, tool_reply)
+            RT --> MED : waiter found
+            MED --> AD : reply envelope
+            deactivate MED
+            AD -> CODEC : decode_reply(reply.payload)
+            CODEC --> AD : ReplyOutcome
+            alt success reply
+                AD --> ACTX : result
+                ACTX --> A : result
+            else error reply
+                AD --> ACTX : raise ToolInvocationError
+                ACTX --> A : ToolInvocationError
+            end
+        else timeout reached first
+            activate MED
+            MED -> RT : timed wake + expire_ready(now)
+            RT --> MED : expired(message_id)
+            MED --> AD : TimeoutError
+            deactivate MED
+            AD --> ACTX : timeout
+            ACTX --> A : timeout
+            note over EXEC,BRIDGE
+              Python tool timeouts are soft while tools stay in-process.
+              Strong cancellation requires subprocess-backed tools.
+            end note
+            BRIDGE --> MED : late ToolReply
+            MED -> MED : drop late reply and emit diagnostic
+        end
+    else tool queue full
+        TQ --> MED : ToolInvocationError
+        MED --> AD : ToolInvocationError
+        deactivate MED
+        AD --> ACTX : raise admission error
+        ACTX --> A : ToolInvocationError
+    end
+else not allowlisted
+    SLOTA --> MED : no
+    MED --> AD : ToolInvocationError
+    deactivate MED
+    AD --> ACTX : raise allowlist error
+    ACTX --> A : ToolInvocationError
+end
+
+note over RT
+  Waiters are created only after tool-queue admission succeeds.
+  Allowlist or queue admission failure is immediate and never a timeout.
+end note
+
+note over MED,EXEC
+  Tool execution uses a separate bounded worker pool.
+  Python tools do not block mediator routing.
+end note
+
+@enduml

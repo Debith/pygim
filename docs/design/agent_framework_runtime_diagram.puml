@@ -1,0 +1,161 @@
+@startuml agent_framework_runtime_diagram
+!theme plain
+skinparam backgroundColor #FEFEFE
+skinparam componentStyle rectangle
+skinparam defaultFontName Consolas
+skinparam defaultFontSize 10
+skinparam shadowing false
+skinparam roundCorner 8
+skinparam packageStyle frame
+skinparam noteFontSize 10
+skinparam arrowThickness 1.5
+
+title Agent Runtime - Threads and Queues
+
+package "Adapter Boundary" as ADP #E3F2FD {
+    component "AgentSystemAdapter" as ADA
+    component "DiagnosticsQueue" as DQ <<bounded queue>>
+    component "DiagnosticsWorker\n(best effort)" as DW
+}
+
+package "Ingress" as ING #E3F2FD {
+    component "Python API calls" as APICALL
+    component "IngressQueue<Envelope>" as INQ <<bounded queue>>
+}
+
+package "Router Thread" as ROUTER #FFF3E0 {
+    component "MediatorCore\n(std::jthread)" as MED
+    component "ReplyTracker\n(next_deadline query)" as RT
+}
+
+package "Agent Mailboxes" as MAIL #FFF3E0 {
+    component "Mailbox[A]" as MQA <<bounded queue>>
+    component "Mailbox[B]" as MQB <<bounded queue>>
+    component "Mailbox[C]" as MQC <<bounded queue>>
+}
+
+package "Agent Workers" as WORK #E8F5E9 {
+    component "PyAgentWorker[A]\n1 thread" as WA
+    component "PyAgentWorker[B]\n1 thread" as WB
+    component "PyAgentWorker[C]\n1 thread" as WC
+}
+
+package "Tool Execution" as TOOL #F3E5F5 {
+    component "ToolQueue<Envelope>" as TQ <<bounded queue>>
+    component "ToolWorker[1..N]\nstd::jthread pool" as TW
+    component "PyToolBridge" as TB
+}
+
+package "Optional Phase 2 Inbound Event Bus" as INBUS #FCE4EC {
+    component "ZeroMqFetchStrategy\n(blocking poll / recv)" as ZMQFETCH
+    component "InboundFetchLoop\n(std::jthread)" as IFETCH
+  component "DeserializeStage\n(TransportMessage -> Envelope)" as IDESER
+    component "InboundEventBusAdapter" as IBA
+}
+
+package "Optional Phase 2 Outbound Event Bus" as OUTBUS #F3E5F5 {
+    component "OutboundBusQueue<Envelope>" as OBQ <<bounded queue>>
+    component "OutboundPublishLoop\n(std::jthread)" as OPUB
+  component "SerializeStage\n(Envelope -> TransportMessage)" as OSER
+    component "OutboundEventBusAdapter" as OBA
+    component "ZeroMqPublishStrategy\n(non-blocking send)" as ZMQPUB
+}
+
+APICALL --> ADA
+ADA --> INQ : encode + submit
+ZMQFETCH --> IFETCH : fetch
+IFETCH --> IDESER : TransportMessage
+IDESER --> IBA : Envelope
+IBA --> INQ : submit to ingress
+IBA --> DQ : transport overload / hook diagnostics
+
+INQ --> MED : timed dequeue / wake
+MED --> RT : next_deadline()\nexpire_ready(now)
+MED --> MQA : directed or fanout copy
+MED --> MQB : directed or fanout copy
+MED --> MQC : directed or fanout copy
+MED --> TQ : tool requests only
+MED --> DQ : try_enqueue diagnostics
+
+DQ --> DW : drain best-effort
+
+MQA --> WA : dequeue
+MQB --> WB : dequeue
+MQC --> WC : dequeue
+
+WA --> ADA : replies / new requests
+WB --> ADA : replies / new requests
+WC --> ADA : replies / new requests
+ADA --> INQ : encode + submit
+
+TQ --> TW : dequeue
+TW --> TB : invoke Python tools
+TB --> ADA : ToolReply / diagnostics
+
+ADA --> OBQ : enqueue outbound Envelope
+OBQ --> OPUB : dequeue
+OPUB --> OSER : Envelope
+OSER --> OBA : TransportMessage
+OBA --> ZMQPUB : publish
+OBA --> DQ : transport overload / hook diagnostics
+
+note as N1
+  One mediator router thread in v1.
+  One worker thread per agent in v1.
+  Tool execution uses a separate bounded pool.
+end note
+N1 .. MED
+
+note as N2
+  Queue correctness comes before lock-free optimization.
+  All v1 queues are bounded and use RejectNew.
+  DropOldest remains out of scope for now.
+end note
+N2 .. INQ
+
+note as N3
+  The router thread performs a timed wait using
+  the nearest pending deadline from ReplyTracker.
+  Idle ingress does not stall timeout expiry.
+  A small deadline heap is the obvious shape.
+end note
+N3 .. RT
+
+note as N4
+  Hooks and runtime diagnostics are best-effort.
+  They are enqueued off the hot path and handled
+  by a diagnostics worker.
+  Diagnostics overload may drop notifications.
+end note
+N4 .. DQ
+
+note as N5
+  Inbound and outbound event buses own their own
+  polling and publish loops.
+  Inbound fetch and deserialization submit
+  directly to ingress in v1.
+  Transport waits never block MediatorCore.
+  ZeroMQ is phase 2 only and still conceptual.
+end note
+N5 .. IBA
+
+note as N6
+  Phase 2 egress and backpressure stay explicit:
+  ingress capacity is the inbound refusal boundary,
+  outbound keeps its own bounded queue before publish.
+  Only remote directed or request-reply-like traffic
+  is eligible in the first cut.
+  Local and remote delivery are mutually exclusive.
+  Broadcast stays local until a later control plane exists.
+end note
+N6 .. ZMQPUB
+
+note as N7
+  close() rejects new ingress and registration first,
+  closes queues to wake blocked loops, completes
+  unresolved waiters with ShuttingDownError, and then joins
+  runtime threads before Closed.
+end note
+N7 .. ADA
+
+@enduml

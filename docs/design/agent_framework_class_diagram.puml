@@ -1,0 +1,521 @@
+@startuml agent_framework_class_diagram
+!theme plain
+skinparam backgroundColor #FEFEFE
+skinparam defaultFontName Consolas
+skinparam defaultFontSize 10
+skinparam shadowing false
+skinparam classAttributeIconSize 0
+skinparam classFontStyle bold
+skinparam packageFontStyle italic
+skinparam stereotypeFontSize 9
+skinparam arrowThickness 1.2
+
+title Agent Runtime - Detailed Class Diagram
+
+package "pygim::agent_runtime::core" as p_core #FFF3E0 {
+
+    class "MessageId" as MessageId <<value>> {
+        + hi : uint64_t
+        + lo : uint64_t
+    }
+
+    class "Duration" as Duration <<value>> {
+        + count_ns : int64_t
+    }
+
+    class "Deadline" as Deadline <<value>> {
+        + tick_ns : int64_t
+    }
+
+    note right of Duration
+      Custom literals `_ns`, `_us`, `_ms`, and `_s`
+      all produce Duration.
+      `15_ms + 100_ns` stays strongly typed.
+    end note
+
+    enum DeliveryKind {
+        Directed
+        Broadcast
+        Request
+        Reply
+        ToolRequest
+        ToolReply
+        Diagnostic
+    }
+
+    class "EncodedPayload" as EncodedPayload <<struct>> {
+        + codec_name : string
+        + content_type : string
+        + bytes : shared_buffer
+        + size_bytes : size_t
+    }
+
+    class "ToolDescriptor" as ToolDescriptor <<struct>> {
+        + name : string
+        + timeout : Duration
+        + schema_id : string
+        + flags : uint32_t
+    }
+
+    note right of ToolDescriptor
+          Registered timeout is the default.
+          Python call_tool(timeout_ms=...) overrides it
+          at the adapter edge and is converted to Duration.
+          Envelope.deadline stores the resolved deadline.
+    end note
+
+    class "Envelope" as Envelope <<struct>> {
+        + message_id : MessageId
+        + correlation_id : optional<MessageId>
+        + sender : string
+        + recipient : optional<string>
+        + topic : optional<string>
+        + kind : DeliveryKind
+        + payload : EncodedPayload
+        + tool : optional<ToolDescriptor>
+        + deadline : optional<Deadline>
+    }
+
+    class "BoundedQueue<T>" as BoundedQueue <<template>> {
+        - m_capacity : size_t
+        - m_closed : bool
+        --
+        + try_enqueue(T) : expected<void, QueueError>
+        + try_dequeue(stop_token) : optional<T>
+        + close() : void
+    }
+
+    class "AgentSlot" as AgentSlot {
+        - m_agent_id : string
+        - m_mailbox : BoundedQueue<Envelope>
+        - m_subscriptions : flat_hash_set<string>
+        - m_allowed_tools : flat_hash_set<string>
+        --
+        + accepts_topic(string_view) : bool
+        + allows_tool(string_view) : bool
+    }
+
+    class "ReplyTracker" as ReplyTracker {
+        - m_waiters : flat_hash_map<MessageId, PendingReply>
+        - m_deadlines : min_heap<DeadlineEntry>
+        --
+        + register_waiter(id, source, deadline) : expected<void, ReplyError>
+        + complete(id, Envelope) : expected<bool, ReplyError>
+                + next_deadline() : optional<Deadline>
+                + expire_ready(now) : vector<MessageId>
+    }
+
+    note right of ReplyTracker
+            Router timed wait uses next_deadline().
+      Waiters are created only after mailbox or
+      tool-queue admission succeeds.
+    end note
+
+    class "MediatorCore<EnableHooks>" as MediatorCore <<template>> {
+        - m_ingress : BoundedQueue<Envelope>
+        - m_agent_slots : flat_hash_map<string, AgentSlot>
+        - m_reply_tracker : ReplyTracker
+        --
+        + submit(Envelope) : expected<void, RouteError>
+        + route_once(stop_token) : expected<void, RouteError>
+        + install_agent_slot(AgentSlot, override_existing) : expected<void, RegistrationError>
+        + install_tool(ToolDescriptor, override_existing) : expected<void, RegistrationError>
+        + shutdown() : void
+    }
+
+    note right of MediatorCore
+      EnableHooks is observational only in v1.
+      Hook work is emitted best-effort and must
+      not block routing or queue admission.
+    end note
+
+    Envelope *-- MessageId
+    ToolDescriptor *-- Duration : timeout
+    Envelope o-- Deadline : deadline
+    Envelope *-- EncodedPayload
+    Envelope o-- ToolDescriptor
+    Envelope --> DeliveryKind
+    AgentSlot *-- BoundedQueue : mailbox
+    MediatorCore *-- BoundedQueue : ingress
+    MediatorCore *-- ReplyTracker
+    MediatorCore o-- AgentSlot : agent_id -> slot
+}
+
+package "pygim::agent_runtime::event_bus::core" as p_bus_core #F3E5F5 {
+
+    class "TransportMessage" as TransportMessage <<struct>> {
+        + route_key : string
+        + headers : flat_hash_map<string, string>
+        + bytes : shared_buffer
+        + size_bytes : size_t
+    }
+
+    class "PublishReceipt" as PublishReceipt <<struct>> {
+        + backend_id : string
+        + accepted : bool
+        + metadata : flat_hash_map<string, string>
+    }
+
+    class "InboundEventBusCore<FetchStrategy, DeserializationStrategy, EnableFetchHooks, EnableDeserializationHooks>" as InboundEventBusCore <<template>> {
+        - m_fetch : FetchStrategy
+        - m_deserialize : DeserializationStrategy
+        --
+        + poll_once(stop_token) : expected<optional<Envelope>, BusError>
+    }
+
+    note right of InboundEventBusCore
+      Owns fetch plus deserialization only.
+      Returns Envelope or none.
+      Does not know agent handlers or
+      mediator routing rules.
+    end note
+
+    class "OutboundEventBusCore<SerializationStrategy, PublishStrategy, EnableSerializationHooks, EnablePublishHooks>" as OutboundEventBusCore <<template>> {
+        - m_serialize : SerializationStrategy
+        - m_publish : PublishStrategy
+        --
+        + publish(Envelope) : expected<PublishReceipt, BusError>
+    }
+
+    note right of OutboundEventBusCore
+      Owns serialization plus publish only.
+      Takes Envelope input and returns a
+      transport-level receipt.
+      Does not know Python payload codecs
+      or agent delivery semantics.
+    end note
+
+    InboundEventBusCore ..> TransportMessage : fetches
+    InboundEventBusCore ..> Envelope : yields
+    OutboundEventBusCore ..> Envelope : consumes
+    OutboundEventBusCore ..> TransportMessage : emits
+    OutboundEventBusCore ..> PublishReceipt : returns
+}
+
+package "pygim::agent_runtime::adapter" as p_adapter #E3F2FD {
+
+    class "BroadcastResult" as BroadcastResult <<struct>> {
+        + delivered_count : size_t
+        + dropped_count : size_t
+    }
+
+    class "RuntimeConfig" as RuntimeConfig <<struct>> {
+        + ingress_capacity : size_t
+        + default_mailbox_capacity : size_t
+        + tool_queue_capacity : size_t
+        + diagnostics_queue_capacity : size_t
+        + outbound_bus_queue_capacity : size_t
+    }
+
+    note right of RuntimeConfig
+      Single v1 configuration surface.
+            Only outbound_bus_queue_capacity is
+            transport-specific in the first cut.
+            Inbound submits directly to ingress.
+      Per-agent mailbox override and per-tool queue
+      override stay out of scope.
+    end note
+
+    class "EventMessage" as EventMessage <<struct>> {
+        + sender : string
+        + recipient : optional<string>
+        + topic : optional<string>
+        + kind : DeliveryKind
+        + payload : py::object
+    }
+
+    note right of EventMessage
+      Canonical handler input for all agent callbacks.
+      Directed, request, and broadcast delivery all
+      arrive as EventMessage with decoded payload in
+      event.payload.
+    end note
+
+    class "ReplyOutcome" as ReplyOutcome <<struct>> {
+        + ok : bool
+        + value : py::object
+        + error_code : optional<string>
+        + error_message : optional<string>
+        + source : string
+        + retryable : bool
+    }
+
+    note right of ReplyOutcome
+      Adapter decodes reply envelopes into ReplyOutcome
+      before deciding between Python return and
+      raised exception.
+    end note
+
+    class "ToolContext" as ToolContext {
+        + caller_id : string_view
+        + request_id : MessageId
+        + deadline : Deadline
+    }
+
+    class "AgentContext" as AgentContext {
+        + send(to, payload) : void
+        + request(to, payload, timeout_ms) : py::object
+        + publish(topic, payload) : BroadcastResult
+        + call_tool(name, payload, timeout_ms) : py::object
+        + reply(payload) : void
+    }
+
+    note right of AgentContext
+      All agent handlers use handler(ctx, event).
+      request() and call_tool() are synchronous
+      from the handler perspective and may block
+      the agent worker.
+      Self-request is forbidden.
+      Cross-agent blocking is allowed only for
+      acyclic flows in v1.
+      For Request events, a non-None return
+      becomes the implicit reply.
+      reply() is valid only for Request events. Use reply(None)
+      for an explicit None payload.
+      Handler may emit only one reply.
+      Active tool override is allowed only when
+      no queued or in-flight ToolRequest exists.
+      No tool queue migration occurs in v1.
+    end note
+
+    class "JsonOrBytesCodec" as JsonOrBytesCodec <<strategy>> {
+        + encode(py::object) : EncodedPayload
+        + decode(EncodedPayload) : py::object
+    }
+
+    class "ToolRegistryEntry" as ToolRegistryEntry <<struct>> {
+        + descriptor : ToolDescriptor
+        + callable : py::function
+        + queued_requests : uint32_t
+        + in_flight_requests : uint32_t
+    }
+
+    class "PyToolBridge" as PyToolBridge {
+        - m_tools : unordered_map<string, ToolRegistryEntry>
+        --
+        + invoke(ToolDescriptor, ToolContext, EncodedPayload) : Envelope
+    }
+
+    note right of PyToolBridge
+      Control-plane override checks queued_requests == 0
+      and in_flight_requests == 0 before swapping a tool.
+      Descriptor and callable cut over together.
+    end note
+
+    class "ThreadPoolToolExecutor" as ThreadPoolToolExecutor <<strategy>> {
+        - m_queue : BoundedQueue<Envelope>
+        - m_workers : vector<jthread>
+        --
+        + submit_tool(Envelope) : expected<void, ToolError>
+        + shutdown() : void
+    }
+
+    class "DiagnosticsDispatcher<EnableHooks>" as DiagnosticsDispatcher <<template>> {
+        - m_queue : BoundedQueue<DiagnosticEvent>
+        - m_thread : jthread
+        --
+        + try_publish(DiagnosticEvent) : void
+        + shutdown() : void
+    }
+
+    note right of DiagnosticsDispatcher
+      Hook callbacks run best-effort off the
+      mediator hot path.
+      Diagnostics overload may drop notifications
+      with counters.
+    end note
+
+    class "PyAgentWorker" as PyAgentWorker {
+        - m_handler : py::function
+                - m_api_strategy : shared_ptr<AgentApiStrategy>
+        - m_thread : jthread
+        --
+        + run_loop(stop_token) : void
+    }
+
+        note right of PyAgentWorker
+            handler(ctx, event) remains the normalized
+            runtime call shape. If m_api_strategy is set,
+            PyAgentWorker calls AgentApiStrategy.invoke(handler, ctx, event)
+            behind that boundary.
+            Different workers may bind different API
+            strategies simultaneously.
+        end note
+
+    class "AgentSystemAdapter<CodecStrategy, ToolExecutionStrategy, InboundBusAdapter, OutboundBusAdapter, EnableHooks>" as AgentSystemAdapter <<template>> {
+        - m_runtime : MediatorCore<EnableHooks>
+        - m_codec : CodecStrategy
+        - m_tool_exec : ToolExecutionStrategy
+        - m_inbound_bus : InboundBusAdapter
+        - m_outbound_bus : OutboundBusAdapter
+        - m_diag : DiagnosticsDispatcher<EnableHooks>
+        - m_control_mutex : mutex
+        --
+        + register_agent(name, handler, subscriptions, allowed_tools, api_strategy, override_existing) : void
+        + register_tool(name, handler, timeout_ms, override_existing) : void
+        + send(to, payload) : void
+        + request(to, payload, timeout_ms) : py::object
+        + publish(topic, payload) : BroadcastResult
+        + close() : void
+    }
+
+    note right of ThreadPoolToolExecutor
+      Separate tool pool keeps Python tools
+      off the mediator router thread.
+    end note
+
+    EventMessage ..> JsonOrBytesCodec : decode()
+    PyAgentWorker --> AgentContext
+    PyToolBridge --> ToolContext
+    ThreadPoolToolExecutor --> PyToolBridge
+    AgentSystemAdapter *-down-> MediatorCore : owns
+    AgentSystemAdapter *-- DiagnosticsDispatcher : owns
+    AgentSystemAdapter o-- RuntimeConfig : constructed from
+    RuntimeConfig ..> MediatorCore : ingress_capacity
+    RuntimeConfig ..> AgentSlot : default_mailbox_capacity
+    RuntimeConfig ..> ThreadPoolToolExecutor : tool_queue_capacity
+    RuntimeConfig ..> DiagnosticsDispatcher : diagnostics_queue_capacity
+    AgentSystemAdapter ..> JsonOrBytesCodec
+    AgentSystemAdapter ..> ThreadPoolToolExecutor
+    AgentSystemAdapter ..> AgentApiStrategy : register_agent(..., api_strategy)
+    AgentSystemAdapter ..> PyAgentWorker : spawns
+    AgentContext --> BroadcastResult
+}
+
+package "pygim::agent_runtime::adapter::strategy" as p_agent_strategy #E8F5E9 {
+
+    interface "AgentApiStrategy" as AgentApiStrategy {
+        + invoke(handler, ctx, event) : py::object
+    }
+
+    class "OpenAIAgentApiStrategy" as OpenAIAgentApiStrategy <<strategy>> {
+        + invoke(handler, ctx, event) : py::object
+    }
+
+    class "HttpAgentApiStrategy" as HttpAgentApiStrategy <<strategy>> {
+        + invoke(handler, ctx, event) : py::object
+    }
+
+    note bottom of p_agent_strategy
+      Per-agent adapter seam only.
+      Provider-specific API integration stays behind
+      the worker boundary and never reaches MediatorCore.
+      Different agents may bind different strategies
+      in the same runtime.
+    end note
+}
+
+package "pygim::agent_runtime::event_bus::adapter" as p_bus_adapter #E1F5FE {
+
+    class "InboundEventBusAdapter<FetchStrategy, DeserializationStrategy, EnableFetchHooks, EnableDeserializationHooks>" as InboundEventBusAdapter <<template>> {
+        - m_core : InboundEventBusCore<FetchStrategy, DeserializationStrategy, EnableFetchHooks, EnableDeserializationHooks>
+        - m_thread : jthread
+        --
+        + run_loop(stop_token) : void
+        + shutdown() : void
+    }
+
+    class "OutboundEventBusAdapter<SerializationStrategy, PublishStrategy, EnableSerializationHooks, EnablePublishHooks>" as OutboundEventBusAdapter <<template>> {
+        - m_core : OutboundEventBusCore<SerializationStrategy, PublishStrategy, EnableSerializationHooks, EnablePublishHooks>
+        - m_queue : BoundedQueue<Envelope>
+        - m_thread : jthread
+        --
+        + try_submit(Envelope) : expected<void, BusError>
+        + run_loop(stop_token) : void
+        + shutdown() : void
+    }
+
+    note right of InboundEventBusAdapter
+      Adapter-owned polling loop and Python hook bridge.
+            Submits directly to ingress in v1.
+            No adapter-local inbound queue exists.
+      Transport waits stay off the mediator thread.
+            Diagnostics go through DiagnosticsDispatcher.
+    end note
+
+    note right of OutboundEventBusAdapter
+      Adapter-owned publish queue and loop.
+      Transport waits stay off the mediator thread.
+      Hooks remain observational only.
+            Diagnostics go through DiagnosticsDispatcher.
+    end note
+
+    InboundEventBusAdapter *-down-> InboundEventBusCore : owns
+    OutboundEventBusAdapter *-down-> OutboundEventBusCore : owns
+        InboundEventBusAdapter ..> MediatorCore : submits Envelope via ingress
+        InboundEventBusAdapter ..> DiagnosticsDispatcher : emits bus diagnostics
+        OutboundEventBusAdapter ..> DiagnosticsDispatcher : emits bus diagnostics
+}
+
+package "pygim::agent_runtime::event_bus::strategy" as p_bus_strategy #FFF8E1 {
+
+    interface "InboundFetchStrategy" as InboundFetchStrategy {
+        + fetch(stop_token) : expected<optional<TransportMessage>, BusError>
+    }
+
+    interface "InboundDeserializationStrategy" as InboundDeserializationStrategy {
+        + deserialize(TransportMessage) : expected<Envelope, BusError>
+    }
+
+    interface "OutboundSerializationStrategy" as OutboundSerializationStrategy {
+        + serialize(Envelope) : expected<TransportMessage, BusError>
+    }
+
+    interface "OutboundPublishStrategy" as OutboundPublishStrategy {
+        + publish(TransportMessage) : expected<PublishReceipt, BusError>
+    }
+}
+
+package "pygim::agent_runtime::event_bus::strategy::zeromq" as p_zmq #FCE4EC {
+
+    class "ZeroMqFetchStrategy" as ZeroMqFetchStrategy <<strategy>> {
+        + fetch(stop_token) : expected<optional<TransportMessage>, BusError>
+    }
+
+    class "ZeroMqPublishStrategy" as ZeroMqPublishStrategy <<strategy>> {
+        + publish(TransportMessage) : expected<PublishReceipt, BusError>
+    }
+
+    note right of ZeroMqPublishStrategy
+      Phase 2 only and still conceptual.
+      Adapter-owned transport strategies only.
+      Use local bounded queues or non-blocking
+      send / recv with required HWM.
+      EAGAIN maps to diagnostics, not mediator blocking.
+      Directed remote delivery comes first.
+    end note
+}
+
+AgentSystemAdapter o--> InboundEventBusAdapter : owns optional inbound bus
+AgentSystemAdapter o--> OutboundEventBusAdapter : owns optional outbound bus
+PyAgentWorker o--> AgentApiStrategy : optional per-agent
+RuntimeConfig ..> OutboundEventBusAdapter : outbound_bus_queue_capacity
+
+InboundEventBusCore ..> InboundFetchStrategy
+InboundEventBusCore ..> InboundDeserializationStrategy
+OutboundEventBusCore ..> OutboundSerializationStrategy
+OutboundEventBusCore ..> OutboundPublishStrategy
+OpenAIAgentApiStrategy ..|> AgentApiStrategy
+HttpAgentApiStrategy ..|> AgentApiStrategy
+ZeroMqFetchStrategy ..|> InboundFetchStrategy
+ZeroMqPublishStrategy ..|> OutboundPublishStrategy
+
+note bottom of AgentSystemAdapter
+  MediatorCore remains transport-agnostic.
+  Registration is adapter-owned control-plane work.
+    Per-agent AgentApiStrategy is runtime-bound,
+    not a global template seam.
+  Active override is allowed only when the target
+  mailbox is empty and no handler is in flight.
+  No mailbox migration occurs in v1.
+  Inbound and outbound event buses are adapter-level
+  collaborators and must stay separate.
+end note
+
+note bottom of p_bus_strategy
+  CodecStrategy is py::object <-> EncodedPayload.
+  Event bus serialization is Envelope <-> TransportMessage.
+  Do not merge these seams.
+end note
+
+@enduml
