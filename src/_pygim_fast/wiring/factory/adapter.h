@@ -7,6 +7,7 @@
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 
+#include "../common/adapter_validation.h"
 #include "core.h"
 
 namespace pygim {
@@ -36,7 +37,7 @@ struct PyObjectValidator {
         if (!interface) {
             return true;
         }
-        return py::isinstance(obj, *interface);
+        return wiring::detail::is_instance_of(obj, *interface);
     }
 };
 

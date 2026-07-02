@@ -67,10 +67,10 @@ src/pygim/
 
 ### Build Configuration
 
-| TOML file                  | Module name         | Sources                                  | Purpose       |
-|----------------------------|---------------------|------------------------------------------|---------------|
-| `ext.persistence.toml`      | `_persistence`      | `persistence/adapter/bindings.cpp`        | Production    |
-| `ext.persistence_test.toml` | `_persistence_test`  | `persistence/adapter/test_bindings.cpp`   | Test-only     |
+| TOML file                         | Module name         | Sources                    | Purpose       |
+|-----------------------------------|---------------------|----------------------------|---------------|
+| `persistence/ext.persistence.toml`      | `_persistence`      | `adapter/bindings.cpp`      | Production    |
+| `persistence/ext.persistence_test.toml` | `_persistence_test`  | `adapter/test_bindings.cpp` | Test-only     |
 
 ---
 
@@ -643,7 +643,7 @@ using NewDbRepo = adapter::RepositoryAdapter<NewDbBackend>;
 3. Dialect struct satisfies `DialectPolicy` concept
 4. Set `using LoadCache = NullLoadCache` unless persistent caching is needed
 5. Add `static_assert(BackendPolicy<NewBackend>)` in bindings
-6. Add `ext.<name>.toml` build configuration
+6. Add colocated `ext.<name>.toml` build configuration with sources relative to that TOML file
 7. Add `test_bindings.cpp` with `py::module_local()` for test isolation
 8. No changes to `core/` required (if concepts are sufficient)
 9. Add unit tests parametrized by backend (extend existing test matrix)

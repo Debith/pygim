@@ -14,17 +14,20 @@ Concise, actionable guidance for AI agents contributing to this repo. Focus on t
 **No Duplication**: Avoid leaving duplicated content (docs, diagrams, or code). If new files supersede old ones, update references and remove or slim the originals to prevent drift.
 
 ## 1. Big Picture
-- Purpose: Provide lightweight, high-performance Python utilities (registry/factory, path/file helpers, broadcast iteration helpers, DDD-style interfaces, CLI tooling).
+- Purpose: Provide lightweight, high-performance Python utilities (wiring primitives like registry/factory/ioc, path/file helpers, broadcast iteration helpers, DDD-style interfaces, CLI tooling).
 - Dual-layer layout:
-  - `src/pygim/` public Python API + compiled extension modules (`registry`, `factory`, `each`, `pathset`, `utils`).
+  - `src/pygim/` public Python API + compiled extension modules (`registry`, `factory`, `ioc`, `each`, `pathset`, `utils`).
   - `src/_pygim/` internal Python support (`_core` exceptions/typing, `_cli` app) + C++ sources in `src/_pygim_fast/` bound via pybind11.
-- C++ templates wrap generic patterns (registry key policies, factories, path discovery, broadcasting each/proxy) and are exposed as minimal Python-facing classes. Python layer adds ergonomics & CLI.
+- C++ templates wrap generic patterns (wiring primitives like registry/factory/ioc, path discovery, broadcasting each/proxy) and are exposed as minimal Python-facing classes. Python layer adds ergonomics & CLI.
 
 ## 2. Key Components & Patterns
 | Area | Files / Notes | Pattern Guidance |
 |------|---------------|------------------|
-| Registry | `_pygim_fast/registry.[h|cpp]`, public `pygim/registry*.so` | Policy-based (qualname vs identity). Keys accepted as object or `(object_or_id, name)`; qualname policy also accepts bare string id. Optional hooks (`on_register`, `on_pre`, `on_post`) compiled out when disabled. Features: single-probe override (`override=True` requires existing key), decorator form `@registry.register(key, override=False)`, introspection `registered_keys()`, fast id lookup `find_id(obj)` (qualname policy), optional capacity pre-reservation in ctor, explicit `post(key, value)` trigger, informative `__repr__` (policy, hooks, size). Keep key construction & hook execution in C++; only add ergonomic sugar in Python. |
-| Factory | `_pygim_fast/factory.h` | Wraps internal `RegistryT<StringKeyPolicy,...>`. Enforces optional interface via runtime `isinstance`. Override rules: `override=True` requires existing entry; duplicate without override raises. Mirror this rule in added Python helpers. |
+| Wiring | `_pygim_fast/wiring/{registry,factory,ioc}/`, public `pygim.{registry,factory,ioc}` | Internal umbrella for registration, creation, and dependency wiring primitives. Keep public module names stable while grouping the internals under `wiring/`. Each module follows `core.h` + `adapter.h` + `bindings.cpp`; keep policy/state semantics in core and Python object parsing/call invocation in adapter. |
+| Wiring Common | `_pygim_fast/wiring/common/` | Shared pybind adapter support for wiring modules. Use `adapter_validation.h` for generic callable and Python protocol/interface checks; keep module-specific rules (e.g., IoC autowire class-provider validation) in the owning adapter. |
+| Registry | `_pygim_fast/wiring/registry/`, public `pygim/registry*.so` | Policy-based (qualname vs identity). Keys accepted as object or `(object_or_id, name)`; qualname policy also accepts bare string id. Optional hooks (`on_register`, `on_pre`, `on_post`) compiled out when disabled. Features: single-probe override (`override=True` requires existing key), decorator form `@registry.register(key, override=False)`, introspection `registered_keys()`, fast id lookup `find_id(obj)` (qualname policy), optional capacity pre-reservation in ctor, explicit `post(key, value)` trigger, informative `__repr__` (policy, hooks, size). Keep key construction & hook execution in C++; only add ergonomic sugar in Python. |
+| Factory | `_pygim_fast/wiring/factory/` | Wraps internal `RegistryCore<StringKey,...>`. Enforces optional interface via runtime `isinstance`. Override rules: `override=True` requires existing entry; duplicate without override raises. Mirror this rule in added Python helpers. |
+| IoC | `_pygim_fast/wiring/ioc/` | Container keyed by Python interface identity plus optional name. Lifecycle is `transient` or `singleton`; overriding a registration must invalidate cached singleton state. Resolved instances must satisfy `isinstance(instance, interface)` after provider construction and decorator application. Supports opt-in autowiring for class providers via constructor type hints; missing typed dependencies may fall back to Python default values. Keep provider storage, override rules, and lifecycle caching in core; keep Python key parsing, callability validation, provider/decorator invocation, and autowiring introspection in adapter. |
 | Each / Proxy | `_pygim_fast/each.h` | Broadcast attribute/method over iterable. Caches method name between getattr & call. Avoid adding stateful Python wrappers that break this lifecycle. |
 | PathSet | `_pygim_fast/pathset.[h|cpp]` | Immutable-ish set semantics around filesystem traversal + pattern matching. Prefer delegating heavy filtering to C++ extension; only compose filters in Python. |
 | DDD Interfaces | `_pygim/_core/interfaces.py` | ``@runtime_checkable`` Protocols (Entity, Repository, Service, etc.). ``DataStore`` satisfies ``Repository`` protocol structurally. Do NOT inject domain logic; only use for type/structural contracts. |
@@ -39,7 +42,8 @@ Concise, actionable guidance for AI agents contributing to this repo. Focus on t
 - Run tests (Python + doctests): `pytest` (configured to include `src/` for doctest collection). CI expectations: short tracebacks (`--tb=short`), doctest continues on failure.
 - Coverage (manual): Either CLI `pygim show-test-coverage` or `coverage run -m pytest && coverage report -m` (mirrors `_cli_app.py`).
 - Build wheel: standard `python -m build` (no custom backend aside from setuptools). C++ extensions rely on pybind11 (declared in build-system + dev extras).
-- Adding a new C++ extension: place sources under `src/_pygim_fast/`, follow existing binding style (`PYBIND11_MODULE(name, m) { ... }`), ensure module file name (target) matches import path `pygim.<name>` by updating build configuration if necessary (setup derives from setuptools discovery).
+- Build TOML parsing: `setup.py` only reads TOML, so use stdlib `tomllib` on Python 3.11+ with `tomli` fallback for older supported builders. Do not use the heavier `toml` package unless TOML writing or comment-preserving round-trips are actually needed.
+- Adding a new C++ extension: place sources under `src/_pygim_fast/`, follow existing binding style (`PYBIND11_MODULE(name, m) { ... }`), and wire it through a colocated `ext.<name>.toml` whose `sources` entries are relative to that TOML file. Wiring modules live under `src/_pygim_fast/wiring/<name>/` with `core.h`, `adapter.h`, `bindings.cpp`, and `ext.<name>.toml`; ensure the module target still matches import path `pygim.<name>`.
   - Registry constructor parameters (current): `policy: str`, `hooks: bool`, optional `capacity: int` (use to reserve underlying map when bulk-registering to avoid rehash).
 - Persistence extension build: requires `arrow-cpp >= 15` and MS ODBC Driver 18 (`msodbcsql18`). Install via conda: `conda install -c conda-forge 'arrow-cpp>=15' pyarrow unixodbc`. Compile-time `static_assert` in `bcp_types.h` fails with actionable message if Arrow version is too old.
 
@@ -55,6 +59,10 @@ Concise, actionable guidance for AI agents contributing to this repo. Focus on t
 - Registry Repr Contract: `Registry(policy=<qualname|identity>, hooks=<True|False>, size=<n>)`. Maintain fields & ordering when extending; add new fields only if broadly useful.
 - DataStore Repr Contract: `DataStore(backend=<name>, format=<format>, transforms=<n>/<n>)`. Maintain fields & ordering when extending; add new fields only if broadly useful.
 - Factory Override Semantics: `override=True` must fail if original does NOT exist (inverse of many libraries). Preserve this invariant.
+- IoC Key Form: Preserve `(interface, name|None)` tuple lookups and bare-interface lookup. Keep interface identity in C++ key policy and Python tuple parsing in the adapter.
+- IoC Lifecycle Semantics: Support only `transient` and `singleton`. Overriding an existing singleton registration must clear cached instance state.
+- IoC Validation Semantics: Validate the final resolved object against the registered interface/protocol after decorators run, not just the raw provider result.
+- IoC Autowiring Semantics: Keep autowiring opt-in (`autowire=True`) and limited to class providers. Resolve constructor dependencies from Python type hints; if a typed dependency is missing and the parameter has a Python default, preserve the default instead of failing.
 - Broadcast Proxy: After a method broadcast call, internal cached method name is cleared; Python wrappers must not hold cross-call state that assumes persistence.
 - PathSet Filtering: Pattern matching uses custom `match_pattern` supporting `*`, `?`, and special cases `*` and `*.*`; replicate logic via C++ instead of re-implementing in Python for consistency.
 - Coverage Helper: Re-import (`reload`) is required; don't restructure to module-level side effects that break idempotent reload during coverage.
@@ -81,9 +89,10 @@ Concise, actionable guidance for AI agents contributing to this repo. Focus on t
 - New CLI command: add method to `GimmicksCliApp`, then decorate a function in `pygim/__main__.py` with `@cli.command()` invoking that method.
 - Extend registry with new hook type: add storage + `add_on_<name>` + `run_<name>` in `Hooks` struct (both enabled/disabled specializations), then expose binder method in `registry.cpp`.
 - Add Python convenience around Factory: write a thin wrapper that calls underlying extension methods; do not replicate registry logic in Python.
+- Add wiring module internals: put new registry/factory/ioc work under `src/_pygim_fast/wiring/<name>/`, keep core template-heavy and pybind-free when possible, and limit adapter code to Python-facing parsing/invocation.
 - Extend registry introspection: mirror existing pattern—add C++ method on wrapper, bind with docstring, then write minimal test exercising both hook states & policies.
 - Add registry deletion (future): will require policy-consistent key resolution + hook decision (likely new `on_remove`); update tests for size & registered_keys invariants.
-- Add new database backend: create `strategy/<name>/` directory with `backend.h` (satisfying `BackendPolicy`), `dialect.h`, `save_impl.h`, `load_impl.h`. Add `static_assert` in new `bindings.cpp` or colocate with existing. Extend `ext.persistence.toml` sources.
+- Add new database backend: create `strategy/<name>/` directory with `backend.h` (satisfying `BackendPolicy`), `dialect.h`, `save_impl.h`, `load_impl.h`. Add `static_assert` in new `bindings.cpp` or colocate with existing. Extend `persistence/ext.persistence.toml` sources.
 - Extend save/load pipeline: modify `SaveImpl`/`LoadImpl` in the strategy directory; core `Repository<Backend>` forwards to these via associated types.
 - Add persistence transform hooks: call `add_pre_transform(fn)` / `add_post_transform(fn)` on the adapter — hooks run WITH GIL at the Python boundary.
 
@@ -91,7 +100,7 @@ Concise, actionable guidance for AI agents contributing to this repo. Focus on t
 - Put unit tests under `tests/unittests/` with `test_*.py` prefix. Use runtime behavior validations (e.g., ensure override semantics) not structural introspection of C++ templates.
 - For C++ exposed functionality, favor black-box tests importing compiled modules from `pygim` package.
 - Registry Tests Matrix: Always parametrize over (policy × hooks). Cover: register/get, duplicate rejection, override success/failure (missing key), decorator path, hook invocation counts (when enabled), introspection (registered_keys, find_id), representation, and negative id forms (string for identity policy).
-- Persistence Tests: `ext.persistence_test.toml` builds a test-only pybind11 module (`_persistence_test`) with `py::module_local()` to avoid type conflicts. Parametrize by backend when multiple backends exist. Tests requiring a live database use `test_persistence.py`; C++ unit tests via `test_bindings.cpp`.
+- Persistence Tests: `persistence/ext.persistence_test.toml` builds a test-only pybind11 module (`_persistence_test`) with `py::module_local()` to avoid type conflicts. Parametrize by backend when multiple backends exist. Tests requiring a live database use `test_persistence.py`; C++ unit tests via `test_bindings.cpp`.
 
 ## 7. Safe Changes Checklist (pre-commit mentally)
 - Imports: public modules import from `pygim.*`, internals from `_pygim.*`.

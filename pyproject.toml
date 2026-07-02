@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools", "wheel", "toml", "pybind11", "setuptools_scm[toml]>=8", "pyarrow>=15"]
+requires = ["setuptools", "wheel", "tomli; python_version < '3.11'", "pybind11", "setuptools_scm[toml]>=8", "pyarrow>=15"]
 build-backend = "setuptools.build_meta"
 backend-path = []
 

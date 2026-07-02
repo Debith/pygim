@@ -275,7 +275,7 @@ public:
 
 private:
     std::unordered_map<key_type, value_type, Hash, Eq> m_map;
-    [[no_unique_address]] HooksPolicy m_hooks;
+    HooksPolicy m_hooks;
 };
 
 } // namespace pygim::core

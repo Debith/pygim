@@ -1,0 +1,187 @@
+@startuml wiring_ioc_class_diagram
+!theme plain
+skinparam backgroundColor #FEFEFE
+skinparam defaultFontName Consolas
+skinparam defaultFontSize 10
+skinparam shadowing false
+skinparam classAttributeIconSize 0
+skinparam classFontStyle bold
+skinparam packageFontStyle italic
+skinparam stereotypeFontSize 9
+skinparam arrowThickness 1.2
+skinparam noteBorderColor #777777
+
+title Wiring IoC - Class Diagram
+
+package "pygim::wiring::detail (common/adapter_validation.h)" as SHARED #F3E5F5 {
+    class "adapter validation helpers" as Helpers <<free functions>> #E1BEE7 {
+        + ensure_callable(obj, label) : void
+        + ensure_callables(objects, label) : void
+        + is_instance_of(instance, interface) : bool
+        + ensure_instance_matches_interface(instance, interface) : void
+    }
+
+    note top of Helpers #F3E5F5
+      Shared pybind adapter checks for wiring modules.
+      Keeps callable and Python protocol validation out of pybind-free core.
+      IoC still owns IoC-only checks such as autowire=True requiring a class.
+    end note
+}
+
+package "pygim.ioc binding (bindings.cpp)" as BIND #E8F5E9 {
+    class "PYBIND11_MODULE(ioc)" as Module <<module>> #C8E6C9 {
+        + ServiceDescriptor
+        + Container
+        --
+        + register(..., autowire=False, override=False)
+        + resolve(key)
+        + describe(key)
+        + registered_keys()
+    }
+
+    note top of Module #E8F5E9
+      Pybind11 exposes the native API as pygim.ioc.
+      register() supports direct registration and decorator form.
+      The binding does not own lifecycle logic; it forwards to Container.
+    end note
+}
+
+package "pygim adapter (adapter.h)" as ADAPTER #E3F2FD {
+    class InterfaceKeyPolicy #BBDEFB {
+        + make_from_python(interface, name) : key_type
+    }
+
+    class "InterfaceKeyPolicy::key_type" as KeyType #D6EAF8 {
+        + ptr : PyObject*
+        + name : optional<string>
+    }
+
+    class "InterfaceKeyPolicy::Hash" as KeyHash #D6EAF8 {
+        + operator()(key) : size_t
+    }
+
+    class "InterfaceKeyPolicy::Eq" as KeyEq #D6EAF8 {
+        + operator()(lhs, rhs) : bool
+    }
+
+    class Container #BBDEFB {
+      - m_core : CoreType
+      --
+      + register_service(interface, provider, name,
+      .. lifecycle, decorators, autowire, override) : void
+      + resolve(key) : py::object
+      + contains(key) : bool
+      + registered_keys() : py::list
+      + describe(key) : DescriptorType
+      + repr() : string
+      --
+      - invoke_provider(descriptor) : py::object
+      - invoke_autowired_class_provider(provider) : py::object
+      - make_key(key) : InterfaceKeyPolicy::key_type
+    }
+
+    note right of Container #E3F2FD
+      Python-aware adapter around ContainerCore.
+      Owns key parsing, lifecycle parsing, decorator invocation,
+      opt-in constructor autowiring, and IoC-specific validation.
+      Delegates generic callable/protocol checks to shared wiring helpers.
+    end note
+
+    note top of InterfaceKeyPolicy #E3F2FD
+      Key policy preserves Python interface identity.
+      Optional name disambiguates multiple providers for the same interface.
+    end note
+
+    note top of KeyType #E3F2FD
+      Stores a borrowed PyObject* plus optional name.
+      The pointer is used as identity; tuple keys are normalized before lookup.
+    end note
+
+    note top of KeyHash #E3F2FD
+      Combines interface pointer hash with optional name hash.
+      This keeps named and unnamed registrations in the same index map.
+    end note
+
+    note top of KeyEq #E3F2FD
+      Equality requires both the same interface object identity
+      and the same optional registration name.
+    end note
+
+}
+
+package "pygim::core (core.h)" as CORE #FFF3E0 {
+    enum Lifecycle #FFE0B2 {
+        Transient
+        Singleton
+    }
+
+    class "ServiceDescriptor<Interface,\nProvider, Decorator>" as Descriptor <<template>> #FFE0B2 {
+        + interface : Interface
+        + provider : Provider
+        + lifecycle : Lifecycle
+        + name : optional<string>
+        + decorators : vector<Decorator>
+        + autowire : bool
+    }
+
+    class "ContainerCore<Key,\nDescriptor, Instance, Hash, Eq>" as Core <<template>> #FFE0B2 {
+        - m_registry : vector<Descriptor>
+        - m_index_map : unordered_map<Key, size_t, Hash, Eq>
+        - m_singletons : unordered_map<size_t, Instance>
+        --
+        + reserve(capacity) : void
+        + register_or_override(key, descriptor, override) : void
+        + contains(key) : bool
+        + try_descriptor(key) : const Descriptor*
+        + resolve(key, invoke_provider, apply_decorators) : Instance
+        + keys() : vector<Key>
+        + size() : size_t
+    }
+
+    note top of Lifecycle #FFF3E0
+      Core lifecycle enum is intentionally tiny.
+      transient builds each resolve; singleton caches by descriptor index.
+    end note
+
+    note top of Descriptor #FFF3E0
+      Immutable-by-convention registration record.
+      In this module Interface, Provider, and Decorator are all py::object,
+      but the core template stays generic and pybind-free.
+    end note
+
+    note bottom of Core #FFF3E0
+      Generic registry and lifecycle engine.
+      It stores descriptors, maps keys to descriptor indexes,
+      invalidates singleton cache on override, and delegates Python calls
+      through adapter-provided invoker/decorator callbacks.
+    end note
+}
+
+Module --> Container : binds
+Module --> Descriptor : binds as ServiceDescriptor
+
+Container *-down-> Core : owns m_core
+Container --> InterfaceKeyPolicy : build keys
+Container --up-> Helpers : validate Python boundary
+Container ..> Descriptor : DescriptorType
+
+InterfaceKeyPolicy *-- KeyType
+InterfaceKeyPolicy ..> KeyHash
+InterfaceKeyPolicy ..> KeyEq
+
+Core *-up- "0..*" Descriptor : m_registry
+Core *-up- "0..*" KeyType : m_index_map keys
+Core ..> KeyHash : hash policy
+Core ..> KeyEq : equality policy
+Descriptor --up-> Lifecycle
+
+legend right
+|= Color |= Layer |= Responsibility |
+|<#E8F5E9> Green | Binding | Public pybind11 module surface |
+|<#E3F2FD> Blue | Adapter | Python object parsing, validation, callbacks, autowiring |
+|<#FFF3E0> Orange | Core | Generic lifecycle, registry, index, singleton cache |
+|<#F3E5F5> Purple | Shared wiring support | Reusable pybind adapter validation helpers |
+|<#FFFDE7> Arrow convention | Relationships | Inheritance/realization should point upward from child to parent; usage arrows may route in any direction |
+endlegend
+
+@enduml

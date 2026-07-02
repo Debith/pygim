@@ -209,132 +209,126 @@ public:
             m_var = hooks ? std::variant<R_QN_No, R_QN_Yes, R_ID_No, R_ID_Yes>(R_ID_Yes{})
                           : std::variant<R_QN_No, R_QN_Yes, R_ID_No, R_ID_Yes>(R_ID_No{});
         }
-
         if (capacity) {
-            std::visit([&](auto& registry) { registry.reserve(capacity); }, m_var);
+            std::visit([&](auto& reg) { reg.reserve(capacity); }, m_var);
         }
     }
 
-    /**
-     * \brief Return entry count.
-     * \return Number of registered key/value pairs.
-     */
-    size_t size() const {
-        return std::visit([](const auto& registry) { return registry.size(); }, m_var);
-    }
-
-    /**
-     * \brief Lookup value by key.
-     * \param[in] key Python-facing key object or tuple form.
-     * \return Stored Python object.
-     * \throws std::runtime_error If key is missing.
-     * \note Exists as backing implementation for Python `__getitem__`.
-     */
-    py::object get(py::object key) {
-        return std::visit(
-            [&](auto& registry) -> py::object {
-                auto concrete_key = make_key<std::decay_t<decltype(registry)>>(key);
-                if (auto* value = registry.try_get(concrete_key)) {
-                    return *value;
-                }
-                throw std::runtime_error("Key not found in Registry");
-            },
-            m_var);
-    }
-
-    /**
-     * \brief Check key presence under active policy.
-     * \param[in] key Python-facing key.
-     * \return `true` when found; otherwise `false`.
-     */
-    bool contains(py::object key) const {
-        return std::visit(
-            [&](const auto& registry) -> bool {
-                auto concrete_key = make_key<std::decay_t<decltype(registry)>>(key);
-                return registry.contains(concrete_key);
-            },
-            m_var);
-    }
-
-    /**
-     * \brief Register or override value for key using strict semantics.
-     * \param[in] key Python-facing key.
-     * \param[in] value Value to store.
-     * \param[in] override_existing `false` forbids duplicates; `true` requires existing key.
-     * \return void.
-     * \throws std::runtime_error On invalid override state.
-     * \note Exists to enforce deterministic semantics expected by Python API/tests.
-     */
     void register_or_override(py::object key, py::object value, bool override_existing) {
         std::visit(
-            [&](auto& registry) {
-                auto concrete_key = make_key<std::decay_t<decltype(registry)>>(key);
-                registry.register_or_override(concrete_key, std::move(value), override_existing);
+            [&](auto& reg) {
+                using R = std::decay_t<decltype(reg)>;
+                reg.register_or_override(make_key<R>(key), std::move(value), override_existing);
             },
             m_var);
     }
 
-    /**
-     * \brief Build stable representation string.
-     * \return Representation in `Registry(policy=..., hooks=..., size=...)` format.
-     * \note Exists for debugging and representation-contract tests.
-     */
-    std::string repr() const {
-        std::string policy_str = (m_policy == KeyPolicyKind::Qualname) ? "qualname" : "identity";
-        return "Registry(policy=" + policy_str + ", hooks=" + (m_hooks ? "True" : "False") + ", size=" + std::to_string(size()) + ")";
+    [[nodiscard]] py::object get(py::object key) {
+        return std::visit(
+            [&](auto& reg) -> py::object {
+                using R = std::decay_t<decltype(reg)>;
+                if (auto* found = reg.try_get(make_key<R>(key))) {
+                    return *found;
+                }
+                throw std::runtime_error("Unknown registry key");
+            },
+            m_var);
     }
 
-    /**
-     * \brief Export currently registered keys.
-     * \return Python list of `(id_or_object, name)` tuples.
-     * \note Exists to support introspection and test assertions.
-     */
-    py::list registered_keys() const {
-        py::list out;
+    [[nodiscard]] std::size_t size() const noexcept {
+        return std::visit([](const auto& reg) { return reg.size(); }, m_var);
+    }
+
+    [[nodiscard]] bool contains(py::object key) const {
+        return std::visit(
+            [&](const auto& reg) {
+                using R = std::decay_t<decltype(reg)>;
+                return reg.contains(make_key<R>(key));
+            },
+            m_var);
+    }
+
+    void post(py::object key, py::object value) {
         std::visit(
-            [&](const auto& registry) {
-                for (const auto& key : registry.keys()) {
-                    out.append(detail::to_py_tuple(key));
+            [&](auto& reg) {
+                using R = std::decay_t<decltype(reg)>;
+                reg.post(make_key<R>(key), value);
+            },
+            m_var);
+    }
+
+    void on_register(std::function<void(py::object, py::object)> fn) {
+        std::visit(
+            [&](auto& reg) {
+                reg.add_on_register([fn = std::move(fn)](const auto& key, const auto& value) {
+                    fn(detail::to_py_tuple(key), value);
+                });
+            },
+            m_var);
+    }
+
+    void on_pre(std::function<void(py::object, py::object)> fn) {
+        std::visit(
+            [&](auto& reg) {
+                reg.add_on_pre([fn = std::move(fn)](const auto& key, auto& value) {
+                    fn(detail::to_py_tuple(key), value);
+                });
+            },
+            m_var);
+    }
+
+    void on_post(std::function<void(py::object, py::object)> fn) {
+        std::visit(
+            [&](auto& reg) {
+                reg.add_on_post([fn = std::move(fn)](const auto& key, const py::object& payload) {
+                    fn(detail::to_py_tuple(key), payload);
+                });
+            },
+            m_var);
+    }
+
+    [[nodiscard]] py::list registered_keys() const {
+        py::list result;
+        std::visit(
+            [&](const auto& reg) {
+                for (const auto& key : reg.keys()) {
+                    result.append(detail::to_py_tuple(key));
                 }
             },
             m_var);
-        return out;
+        return result;
     }
 
-    /**
-     * \brief Fast lookup by string id for qualname policy.
-     * \param[in] id String identifier.
-     * \param[in] name Optional variant name.
-     * \return Stored object or `None` when not found.
-     * \throws std::runtime_error If active policy is not qualname.
-     * \note Exists to avoid tuple/object key conversion overhead for id lookups.
-     */
-    py::object find_id(const std::string& id, const py::object& name = py::none()) {
+    [[nodiscard]] py::object find_id(py::object id, py::object name = py::none()) const {
         if (m_policy != KeyPolicyKind::Qualname) {
-            throw std::runtime_error("find_id only valid for qualname policy");
+            throw std::runtime_error("find_id is only available for qualname policy");
+        }
+        if (!py::isinstance<py::str>(id)) {
+            return py::none();
         }
 
+        std::string id_value = id.cast<std::string>();
         std::string variant_name;
         if (!name.is_none()) {
-            variant_name = py::cast<std::string>(name);
+            if (!py::isinstance<py::str>(name)) {
+                throw py::type_error("name must be str or None");
+            }
+            variant_name = name.cast<std::string>();
         }
 
+        QualnameKeyPolicy::key_type key = QualnameKeyPolicy::make_from_id(id_value, variant_name);
         return std::visit(
-            [&](auto& registry) -> py::object {
-                using R = std::decay_t<decltype(registry)>;
-                using key_type = typename R::key_type;
-
-                if constexpr (std::is_same_v<key_type, QualnameKeyPolicy::key_type>) {
-                    key_type direct{id, variant_name};
-                    if (auto* value = registry.try_get(direct)) {
-                        return *value;
+            [&](const auto& reg) -> py::object {
+                using R = std::decay_t<decltype(reg)>;
+                if constexpr (std::is_same_v<typename R::key_type, QualnameKeyPolicy::key_type>) {
+                    if (auto* found = reg.try_get_const(key)) {
+                        return *found;
                     }
-                    if (variant_name.empty()) {
-                        return py::none();
-                    }
-                    key_type fallback{id, std::string{}};
-                    if (auto* value = registry.try_get(fallback)) {
-                        return *value;
+                    if (!variant_name.empty()) {
+                        auto fallback_key = QualnameKeyPolicy::make_from_id(id_value, "");
+                        if (auto* fallback = reg.try_get_const(fallback_key)) {
+                            return *fallback;
+                        }
                     }
                 }
                 return py::none();
@@ -342,62 +336,10 @@ public:
             m_var);
     }
 
-    /**
-     * \brief Trigger post hooks for key with payload.
-     * \param[in] key Python-facing key.
-     * \param[in] value Payload forwarded to post hooks.
-     * \return void.
-     * \note Exists to allow explicit post events from adapter callers.
-     */
-    void post(py::object key, const py::object& value) {
-        std::visit(
-            [&](auto& registry) {
-                auto concrete_key = make_key<std::decay_t<decltype(registry)>>(key);
-                registry.post(concrete_key, value);
-            },
-            m_var);
-    }
-
-    /**
-     * \brief Register callback for register-phase events.
-     * \param[in] callback Python callable receiving `(key_tuple, value)`.
-     * \return void.
-     * \note Exists to expose hook extension points through Python API.
-     */
-    void on_register(py::function callback) {
-        std::visit(
-            [&](auto& registry) {
-                registry.add_on_register([callback](const auto& key, const auto& value) { callback(detail::to_py_tuple(key), value); });
-            },
-            m_var);
-    }
-
-    /**
-     * \brief Register callback for pre-access events.
-     * \param[in] callback Python callable receiving `(key_tuple, value)`.
-     * \return void.
-     * \note Exists for Python-side instrumentation and lazy mutation hooks.
-     */
-    void on_pre(py::function callback) {
-        std::visit(
-            [&](auto& registry) {
-                registry.add_on_pre([callback](const auto& key, auto& value) { callback(detail::to_py_tuple(key), value); });
-            },
-            m_var);
-    }
-
-    /**
-     * \brief Register callback for post events.
-     * \param[in] callback Python callable receiving `(key_tuple, payload)`.
-     * \return void.
-     * \note Exists to expose explicit post-event notifications.
-     */
-    void on_post(py::function callback) {
-        std::visit(
-            [&](auto& registry) {
-                registry.add_on_post([callback](const auto& key, const py::object& value) { callback(detail::to_py_tuple(key), value); });
-            },
-            m_var);
+    [[nodiscard]] std::string repr() const {
+        return "Registry(policy=" + std::string(m_policy == KeyPolicyKind::Qualname ? "qualname" : "identity") +
+               ", hooks=" + std::string(m_hooks ? "True" : "False") +
+               ", size=" + std::to_string(size()) + ")";
     }
 };
 

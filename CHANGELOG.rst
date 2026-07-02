@@ -13,6 +13,12 @@ Unreleased
 ----------
 Changed
 ~~~~~~~
+- Wiring: Group internal registry, factory, and IoC native modules under ``src/_pygim_fast/wiring/`` while keeping public module names stable (``pygim.registry``, ``pygim.factory``, ``pygim.ioc``).
+- Wiring: Factor shared pybind adapter validation helpers into ``src/_pygim_fast/wiring/common/`` for reuse across wiring modules.
+- Build: Move native extension ``ext.*.toml`` manifests next to their corresponding module sources and resolve manifest ``sources`` relative to each TOML file.
+- Build: Prefer stdlib ``tomllib`` for setup metadata parsing, with the ``tomli`` backport only for Python < 3.11 builders.
+- IoC: Validate resolved instances against the registered interface/protocol after provider construction and decorator application.
+- IoC: Add opt-in constructor autowiring for class providers using Python type hints; unresolved typed parameters fall back to default values when present.
 - Build: Upgrade base C++ standard from C++20 to C++23 for all platforms (GCC, Clang, MSVC).
 - Build: Set ``MACOSX_DEPLOYMENT_TARGET`` default to 13.3 in ``setup.py`` (required for ``std::format`` and ``std::to_chars`` with floating-point).
 - CI: Update ``MACOSX_DEPLOYMENT_TARGET`` from 10.15 to 13.3 in ``python-packages.yml``.
@@ -42,6 +48,9 @@ Removed
 
 Added
 ~~~~~
+- IoC: Add ``pygim.ioc.Container`` with transient/singleton lifecycles, named registrations, decorator application, and strict override semantics implemented with the same core/adapter/bindings pattern as registry and factory.
+- Examples: Add runnable IoC container example under ``docs/examples/ioc/``.
+- Examples: Add runnable IoC autowiring example under ``docs/examples/ioc/``.
 - Tests: Add a live MSSQL persistence round-trip test that auto-skips unless ``STRESS_CONN`` is reachable or the local Docker SQL Server on ``localhost:1433`` is available.
 - Initial CHANGELOG with retroactive notes for registry enhancement work.
 - Registry: Decorator-based registration via ``@registry.register(key, override=False)``.
@@ -50,7 +59,7 @@ Added
 - Registry: Optional ``capacity`` constructor arg for upfront map reservation.
 - Registry: Explicit ``post(key, value)`` trigger to manually invoke post hooks.
 - Examples: Two runnable registry examples under ``docs/examples/registry/`` (basic & hooks).
-- Added dedicated implementation folders for factory and registry under ``src/_pygim_fast/{factory,registry}/``.
+- Added dedicated implementation folders for wiring modules under ``src/_pygim_fast/wiring/{registry,factory,ioc}/``.
 - Added PlantUML architecture reference ``docs/design/core_adapter_bindings_convention.puml`` for core/adapter/bindings layering.
 - CI: Add release workflow that builds wheels via ``cibuildwheel`` and publishes tagged releases to PyPI.
 - CI: Auto-tag main whenever the ``dev`` branch is merged, driven by PR labels ``release:major``/``release:minor``/default patch.
