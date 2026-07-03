@@ -151,7 +151,11 @@ public:
 
     // --------------------------- descriptor hooks ----------------------- //
     void set_name(const py::object &owner, const std::string &name) {
-        if (!py::isinstance<py::iterable>(owner)) {
+        // The owner's *instances* must be iterable, i.e. the class defines
+        // __iter__. The class object itself is iterable only when its
+        // metaclass is, so isinstance<py::iterable>(owner) would reject
+        // every ordinary class.
+        if (!py::hasattr(owner, "__iter__")) {
             throw py::type_error("`each` can only be placed on iterable classes");
         }
         m_name = name;

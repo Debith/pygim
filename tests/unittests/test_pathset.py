@@ -49,6 +49,25 @@ def test_cloning(temp_files):
     assert id(temp_files) != id(cloned)
 
 
+def test_extension_filter_selects_matching_files(temp_files):
+    from pygim.pathset import ext
+
+    filtered = (PathSet(temp_files) & ext(".rst")).eval()
+
+    assert len(filtered) == 2
+    assert all(p.suffix == ".rst" for p in filtered)
+
+
+def test_addition_unions_both_operands(temp_files):
+    left = PathSet(temp_files[:1])
+    right = PathSet(temp_files[1:])
+
+    combined = left + right
+
+    assert len(combined) == 3
+    assert len(left) == 1 and len(right) == 2  # operands untouched
+
+
 def test_modification_after_cloning(temp_dir, temp_files):
     temp_files = PathSet(temp_files)
     cloned = temp_files.clone()

@@ -123,6 +123,29 @@ def test_call_after_method_access(iterable):
         assert getattr(e, "multiply") is None
 
 
+def test_each_as_descriptor(dummy_list):
+    class Fleet:
+        each = each()
+
+        def __init__(self, items):
+            self._items = items
+
+        def __iter__(self):
+            return iter(self._items)
+
+    fleet = Fleet(dummy_list)
+
+    assert fleet.each.value == [0, 1, 2, 3, 4]
+    assert fleet.each.multiply(3) == [0, 3, 6, 9, 12]
+
+
+def test_each_descriptor_rejects_class_without_iter():
+    with pytest.raises(TypeError):
+
+        class NotIterable:
+            each = each()
+
+
 if __name__ == "__main__":
     from pygim.core.testing import run_tests
 

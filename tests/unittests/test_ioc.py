@@ -562,11 +562,55 @@ def test_service_descriptor_construction_and_lifecycle_property():
     assert descriptor.name == "primary"
     assert descriptor.autowire is False
 
-    descriptor.lifecycle = "transient"
-    assert descriptor.lifecycle == "transient"
 
-    with pytest.raises(RuntimeError):
-        descriptor.lifecycle = "scoped"
+def test_service_descriptor_is_read_only():
+    from pygim.ioc import ServiceDescriptor
+
+    class IService:
+        pass
+
+    class Service(IService):
+        pass
+
+    descriptor = ServiceDescriptor(IService, Service)
+
+    with pytest.raises(AttributeError):
+        descriptor.lifecycle = "singleton"
+    with pytest.raises(AttributeError):
+        descriptor.provider = Service
+
+
+def test_describe_returns_read_only_snapshot(container):
+    class IService:
+        pass
+
+    class Service(IService):
+        pass
+
+    container.register(IService, Service, lifecycle="singleton")
+    descriptor = container.describe(IService)
+
+    with pytest.raises(AttributeError):
+        descriptor.lifecycle = "transient"
+
+    assert container.describe(IService).lifecycle == "singleton"
+
+
+def test_register_rejects_non_class_interface(container):
+    with pytest.raises(TypeError, match="interface must be a class"):
+        container.register(42, lambda: 42)
+
+    with pytest.raises(TypeError, match="interface must be a class"):
+        container.register(None, lambda: None)
+
+
+def test_autowire_uninspectable_class_raises(container):
+    # `super` is a class but inspect.signature() cannot produce a signature
+    # for it, which exercises the "uninspectable provider" branch.
+    container.register(super, super, autowire=True)
+
+    with pytest.raises(RuntimeError, match="inspectable class provider"):
+        container.resolve(super)
 
 
 if __name__ == "__main__":

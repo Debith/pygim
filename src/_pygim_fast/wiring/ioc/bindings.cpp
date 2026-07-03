@@ -9,7 +9,8 @@ PYBIND11_MODULE(ioc, m) {
 
     m.doc() = "IoC container for provider registration and resolution.";
 
-    py::class_<Descriptor>(m, "ServiceDescriptor")
+    py::class_<Descriptor>(m, "ServiceDescriptor",
+        "Read-only snapshot of a registration; mutating it does not affect the container.")
         .def(py::init([](py::object interface,
                          py::object provider,
                          std::string lifecycle,
@@ -30,21 +31,23 @@ PYBIND11_MODULE(ioc, m) {
              py::arg("name") = py::none(),
              py::arg("decorators") = std::vector<py::object>{},
              py::arg("autowire") = false)
-        .def_readwrite("interface", &Descriptor::interface)
-        .def_readwrite("provider", &Descriptor::provider)
-        .def_property(
+        .def_readonly("interface", &Descriptor::interface)
+        .def_readonly("provider", &Descriptor::provider)
+        .def_property_readonly(
             "lifecycle",
             [](const Descriptor& descriptor) {
                 return std::string(pygim::core::lifecycle_to_string(descriptor.lifecycle));
-            },
-            [](Descriptor& descriptor, const std::string& lifecycle) {
-                descriptor.lifecycle = pygim::core::parse_lifecycle(lifecycle);
             })
-        .def_readwrite("name", &Descriptor::name)
-        .def_readwrite("decorators", &Descriptor::decorators)
-        .def_readwrite("autowire", &Descriptor::autowire);
+        .def_readonly("name", &Descriptor::name)
+        .def_readonly("decorators", &Descriptor::decorators)
+        .def_readonly("autowire", &Descriptor::autowire);
 
-    py::class_<pygim::Container>(m, "Container")
+    py::class_<pygim::Container>(m, "Container",
+        "IoC container mapping interfaces to providers.\n\n"
+        "Thread safety: consistency relies on the GIL. If a provider releases\n"
+        "the GIL (e.g. blocking I/O in __init__), two threads racing on the\n"
+        "same not-yet-cached singleton can each construct an instance; guard\n"
+        "concurrent first-resolves externally when providers may block.")
         .def(py::init<std::size_t>(), py::arg("capacity") = 0)
         .def("register",
              [](py::object self,
@@ -89,7 +92,8 @@ PYBIND11_MODULE(ioc, m) {
              "Register a provider directly or use as a decorator.\n\n"
              "Supports optional name, transient/singleton lifecycle, decorator call chain, opt-in class autowiring, and strict override semantics.")
         .def("resolve", &pygim::Container::resolve, py::arg("key"))
-        .def("describe", &pygim::Container::describe, py::arg("key"))
+        .def("describe", &pygim::Container::describe, py::arg("key"),
+             "Return a read-only ServiceDescriptor snapshot of the registration for `key`.")
         .def("registered_keys", &pygim::Container::registered_keys)
         .def("__getitem__", &pygim::Container::operator[])
         .def("__contains__", &pygim::Container::contains)

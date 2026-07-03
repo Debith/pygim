@@ -106,6 +106,9 @@ public:
         std::vector<py::object> decorators = {},
         bool autowire = false,
         bool override_existing = false) {
+        if (!py::isinstance<py::type>(interface)) {
+            throw py::type_error("interface must be a class or protocol");
+        }
         wiring::detail::ensure_callable(provider, "provider");
         wiring::detail::ensure_callables(decorators, "decorator");
         detail::ensure_autowire_provider(provider, autowire);

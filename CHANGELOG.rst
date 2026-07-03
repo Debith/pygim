@@ -22,6 +22,9 @@ Changed
 - IoC: Move autowiring policy, lifecycle parsing, and the decorator/validation sequence from the pybind adapter into the pybind-free core. The adapter now only introspects constructors into neutral ``ParamSpec`` records and executes the plan produced by ``core::plan_autowiring`` (itself ``constexpr`` and verified with compile-time ``static_assert`` tests).
 - IoC: Cache constructor introspection per registration (shared ``AutowireSlot``); autowired resolves no longer re-run ``inspect.signature``/``get_type_hints`` each time. Provider availability is still re-evaluated per resolve, so dependencies registered later are picked up.
 - IoC: Registration and resolution errors now name the offending key, e.g. ``No provider for key [key: Repository, name='cached']``; nested resolves append their frames so the message reads as the resolution chain.
+- IoC: ``register()`` validates at registration time that the interface is a class or protocol (previously a bad interface only failed at resolve, inside ``isinstance``).
+- IoC: ``ServiceDescriptor`` is now an explicitly read-only snapshot; ``describe()`` returns a copy, so the previous writable fields silently discarded mutations.
+- IoC: Document thread-safety expectations on ``Container`` (GIL-based consistency; concurrent first-resolves of a singleton whose provider releases the GIL can race).
 - Build: Upgrade base C++ standard from C++20 to C++23 for all platforms (GCC, Clang, MSVC).
 - Build: Set ``MACOSX_DEPLOYMENT_TARGET`` default to 13.3 in ``setup.py`` (required for ``std::format`` and ``std::to_chars`` with floating-point).
 - CI: Update ``MACOSX_DEPLOYMENT_TARGET`` from 10.15 to 13.3 in ``python-packages.yml``.
@@ -35,6 +38,10 @@ Changed
 
 Fixed
 ~~~~~
+- PathSet: Fix interpreter crash when filtering: ``ext()`` captured a dangling ``string_view`` and ``Query`` held a non-owning pointer to a source ``PathSet`` that Python could garbage-collect before evaluation. The filter now owns its extension string and the ``&``/``|`` bindings keep the source alive (``py::keep_alive``).
+- PathSet: Fix ``__add__`` discarding the left operand; ``a + b`` now returns the union of both path sets.
+- Each: Fix the descriptor form (``each = each()``) rejecting every ordinary class; ``__set_name__`` checked whether the class *object* was iterable instead of whether it defines ``__iter__`` for its instances.
+- Registry: Restore ``[[no_unique_address]]`` on the hooks policy member, dropped incidentally during the wiring move.
 - IoC: Fix interpreter crash (use-after-free) when a provider or decorator registered new services during ``resolve()``; the registry vector could reallocate under a live descriptor reference. ``resolve()`` now works on a descriptor copy, and a generation guard prevents caching a singleton for a registration overridden mid-resolve.
 - IoC: Fix interpreter crash (stack overflow) on circular autowired dependencies; resolution now tracks an in-progress stack and raises ``RuntimeError: Circular dependency detected`` with the key chain.
 - IoC: Fix dangling container reference held by the decorator form of ``register()``; the returned decorator now keeps the container alive and remains reusable (decorators are no longer moved-from on first use).
