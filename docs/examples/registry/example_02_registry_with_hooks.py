@@ -1,31 +1,49 @@
-"""Advanced registry example with hooks enabled.
+# type: ignore
+"""Registry hooks: observing registration and lookup events.
 
-Demonstrates:
-- Hooks: on_register, on_pre, on_post
-- Decorator registration form
-- Override semantics via decorator
-- Post hook triggering
-- Using capacity pre-reservation and registered_keys introspection
-- Direct id lookups with find_id
+Hooks let you attach observers to a registry without wrapping it: audit
+logging, metrics, lazy warm-up, or cache invalidation can react to events
+while registration and lookup call sites stay untouched.
+
+Three hook points exist:
+
+- ``on_register`` -- fires when an entry is added (or overridden)
+- ``on_pre``      -- fires on each lookup, before the value is returned
+- ``on_post``     -- fired explicitly via ``post(key, obj)``, e.g. after the
+  caller has finished constructing or configuring the looked-up object
+
+Hook support is chosen at construction time (``hooks=True``); a registry
+built without hooks compiles them out entirely and pays nothing for them.
+
+This example demonstrates:
+- Subscribing to all three hook points
+- Decorator-form registration with and without override
+- Manually triggering post hooks
+- Capacity pre-reservation for bulk registration
 """
 
 from pygim.registry import Registry, KeyPolicyKind
 
-# Create registry with hooks enabled and capacity pre-reserved
-reg = Registry(hooks=True, policy=KeyPolicyKind.qualname, capacity=16)
+# ----------------------------------------------------------------------------
+# 1. Create a registry with hooks and pre-reserved capacity
+# ----------------------------------------------------------------------------
+#              ┌─ capacity: reserve space for this many entries upfront,
+#              │  avoiding rehashes while bulk-registering
+#              ▼
+reg = Registry(capacity=16, hooks=True, policy=KeyPolicyKind.qualname)
 
-# Event counters for demonstration
-counters = {"register": 0, "pre": 0, "post": 0}
+# The observers below just record events; real code might log or invalidate.
+events = {"register": [], "pre": [], "post": []}
 
-# Hook subscriptions
-reg.on_register(
-    lambda key, value: counters.__setitem__("register", counters["register"] + 1)
-)
-reg.on_pre(lambda key, value: counters.__setitem__("pre", counters["pre"] + 1))
-reg.on_post(lambda key, obj: counters.__setitem__("post", counters["post"] + 1))
+reg.on_register(lambda key, value: events["register"].append(key))
+reg.on_pre(lambda key, value: events["pre"].append(key))
+reg.on_post(lambda key, obj: events["post"].append(key))
 
 
-# Decorator form (no override)
+# ----------------------------------------------------------------------------
+# 2. Decorator-form registration
+# ----------------------------------------------------------------------------
+# register() doubles as a decorator...
 @reg.register("task.process")
 def process(x: int) -> int:
     return x + 1
@@ -33,52 +51,57 @@ def process(x: int) -> int:
 
 assert reg["task.process"](3) == 4
 
-# Duplicate via decorator should fail without override
+# ...with the same strict duplicate semantics as the direct form.
 try:
 
     @reg.register("task.process")
-    def process_conflict(x: int) -> int:  # pragma: no cover - expected not to run
+    def process_conflict(x: int) -> int:
         return x
+
 except RuntimeError:
     pass
 else:
     raise AssertionError("Expected duplicate decorator registration to raise")
 
 
-# Override via decorator
+# Overriding through the decorator form works too.
 @reg.register("task.process", override=True)
-def process_new(x: int) -> int:
+def process_v2(x: int) -> int:
     return x + 2
 
 
 assert reg["task.process"](3) == 5
 
 
-# Direct function object registration (variant name empty)
 @reg.register("task.square")
 def square(x: int) -> int:
     return x * x
 
 
-# Trigger lookups (fires pre hooks)
+# ----------------------------------------------------------------------------
+# 3. Watching the hooks fire
+# ----------------------------------------------------------------------------
+# Successful registrations so far: process, process_v2 (override), square.
+# The rejected duplicate never fired on_register.
+assert len(events["register"]) == 3
+
+# Every lookup fires on_pre once: two lookups happened in section 2, and the
+# two below bring the total to four. (find_id, by contrast, does not fire it.)
 assert reg["task.square"](5) == 25
 assert reg["task.process"](10) == 12
+assert len(events["pre"]) == 4
 
-# Trigger post hook manually
+# Post hooks are explicit: the registry cannot know when the caller is
+# "done" with a value, so you announce that moment yourself.
 reg.post("task.process", None)
 reg.post("task.square", None)
+assert len(events["post"]) == 2
 
-# Introspection
-keys = reg.registered_keys()
-assert any(k[0] == "task.process" for k in keys)
-assert any(k[0] == "task.square" for k in keys)
-
-# find_id fast lookup
+# ----------------------------------------------------------------------------
+# 4. Introspection works as usual alongside hooks
+# ----------------------------------------------------------------------------
+keys = [key[0] for key in reg.registered_keys()]
+assert "task.process" in keys and "task.square" in keys
 assert reg.find_id("task.process") is reg["task.process"]
 
-# Verify counters: at least 2 registrations (process/process_new and square)
-assert counters["register"] >= 2
-assert counters["pre"] >= 2  # two lookups above
-assert counters["post"] >= 2  # two manual post calls
-
-print("Hooks registry example OK:", reg, counters)
+print("Hooks registry example OK:", reg, {k: len(v) for k, v in events.items()})

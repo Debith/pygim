@@ -51,6 +51,11 @@ Added
 - IoC: Add ``pygim.ioc.Container`` with transient/singleton lifecycles, named registrations, decorator application, and strict override semantics implemented with the same core/adapter/bindings pattern as registry and factory.
 - Examples: Add runnable IoC container example under ``docs/examples/ioc/``.
 - Examples: Add runnable IoC autowiring example under ``docs/examples/ioc/``.
+- Examples: Add runnable IoC test-override example under ``docs/examples/ioc/`` showing fake substitution and singleton cache invalidation.
+- Examples: Add runnable Factory examples under ``docs/examples/factory/`` (basic named creators, interface enforcement).
+- Examples: Add runnable ``each`` broadcasting example under ``docs/examples/each/``.
+- Examples: Add runnable ``PathSet`` example under ``docs/examples/pathset/``.
+- Examples: Add ``docs/examples/README.md`` index; rewrite all examples in a narrative, self-verifying teaching style.
 - Tests: Add a live MSSQL persistence round-trip test that auto-skips unless ``STRESS_CONN`` is reachable or the local Docker SQL Server on ``localhost:1433`` is available.
 - Initial CHANGELOG with retroactive notes for registry enhancement work.
 - Registry: Decorator-based registration via ``@registry.register(key, override=False)``.
