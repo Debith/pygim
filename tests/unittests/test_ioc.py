@@ -410,15 +410,20 @@ def test_autowire_unresolvable_hint_raises(container):
 
 
 def test_autowire_dependency_registered_later_is_injected(container):
+    # The default is a sentinel rather than None: on Python <= 3.10,
+    # get_type_hints() rewrites `dep: Dep = None` as Optional[Dep] (implicit
+    # Optional), which would never match the identity-keyed registration.
+    unset = object()
+
     class Dep:
         pass
 
     class Service:
-        def __init__(self, dep: Dep = None):
+        def __init__(self, dep: Dep = unset):
             self.dep = dep
 
     container.register(Service, Service, autowire=True)
-    assert container.resolve(Service).dep is None  # default fallback
+    assert container.resolve(Service).dep is unset  # default fallback
 
     container.register(Dep, Dep)
     assert isinstance(container.resolve(Service).dep, Dep)  # now injected

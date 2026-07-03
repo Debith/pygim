@@ -522,6 +522,9 @@ def test_autowire_optional_annotation_falls_back_to_default(container):
     so the union never matches the registered class; with a default present
     the parameter falls back to it. Documents current behavior -- if union
     unwrapping is ever added, this test should be revisited consciously.
+    Note: on Python <= 3.10, get_type_hints() also rewrites `x: X = None`
+    into Optional[X] (implicit Optional), so such parameters behave this
+    way there even without an explicit Optional annotation.
     """
     from typing import Optional
 

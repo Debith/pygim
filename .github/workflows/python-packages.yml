@@ -39,6 +39,10 @@ jobs:
 
     - name: Install MSSQL ODBC Driver 18 (macOS)
       if: matrix.os == 'macos-latest'
+      # Best-effort: the Microsoft tap periodically breaks on new runner
+      # images. Persistence tests auto-skip when the driver is missing, so
+      # a failed install should not mask the rest of the test suite.
+      continue-on-error: true
       run: |
         brew tap microsoft/mssql-release https://github.com/microsoft/homebrew-mssql-release
         HOMEBREW_ACCEPT_EULA=Y brew install msodbcsql18 unixodbc

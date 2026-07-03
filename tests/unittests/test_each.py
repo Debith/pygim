@@ -153,9 +153,11 @@ def test_each_descriptor_rejects_class_without_iter():
 
     The early __set_name__ check is the guard rail that makes descriptor
     misuse a definition-time error (where the mistake is visible) rather
-    than a confusing attribute error at first access.
+    than a confusing attribute error at first access. Python < 3.12 wraps
+    exceptions raised in __set_name__ in a RuntimeError; 3.12+ propagates
+    the TypeError unchanged, so both are accepted here.
     """
-    with pytest.raises(TypeError):
+    with pytest.raises((TypeError, RuntimeError)):
 
         class NotIterable:
             each = each()
