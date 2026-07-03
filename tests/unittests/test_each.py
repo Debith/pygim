@@ -126,6 +126,13 @@ def test_call_after_method_access(iterable):
 
 
 def test_each_as_descriptor(dummy_list):
+    """The descriptor form (each = each() in a class body) broadcasts per instance.
+
+    Guards the fix for __set_name__ testing whether the class *object* was
+    iterable -- which no ordinary class is -- instead of whether it defines
+    __iter__ for its instances. Attribute and method broadcasts through the
+    descriptor must behave exactly like the each(iterable) factory form.
+    """
     class Fleet:
         each = each()
 
@@ -142,6 +149,12 @@ def test_each_as_descriptor(dummy_list):
 
 
 def test_each_descriptor_rejects_class_without_iter():
+    """Placing the descriptor on a class without __iter__ fails at class creation.
+
+    The early __set_name__ check is the guard rail that makes descriptor
+    misuse a definition-time error (where the mistake is visible) rather
+    than a confusing attribute error at first access.
+    """
     with pytest.raises(TypeError):
 
         class NotIterable:
@@ -149,6 +162,12 @@ def test_each_descriptor_rejects_class_without_iter():
 
 
 def test_each_broadcast_over_builtin_iterables():
+    """Broadcasting works over arbitrary iterables of builtin types.
+
+    Nothing in the proxy may assume user-defined classes or list inputs:
+    tuples of str and a range of ints must broadcast method calls just the
+    same, with results collected in iteration order.
+    """
     assert each(("a", "bb")).upper() == ["A", "BB"]
     assert each(range(3)).bit_length() == [0, 1, 2]
 
