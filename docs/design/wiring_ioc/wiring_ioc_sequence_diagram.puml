@@ -97,7 +97,7 @@ activate POLICY
 POLICY --> C : key_type
 deactivate POLICY
 
-C -> CORE : resolve(key, invoke_provider, apply_decorators)
+C -> CORE : resolve(key, invoke_provider,\napply_decorator, validate_instance)
 activate CORE
 CORE -> CORE : lookup key in m_index_map
 
@@ -105,8 +105,15 @@ alt key missing
     CORE --> C : error: No provider for key
 else lifecycle is singleton and cached
     CORE --> C : cached py::object instance
+else key already on resolution stack
+    CORE --> C : error: Circular dependency detected
 else construct instance
-    CORE -> DESC : read descriptor
+    CORE -> CORE : push key on resolution stack
+    CORE -> DESC : copy descriptor
+    note right of CORE
+      resolve works on a descriptor copy: providers run arbitrary
+      Python that may re-enter register() and reallocate the registry.
+    end note
 
     CORE -> C : invoke_provider(descriptor)
     activate C
@@ -116,22 +123,21 @@ else construct instance
         PROVIDER --> C : py::object instance
         deactivate PROVIDER
     else descriptor.autowire == true
-        C -> C : read constructor signature\nresolve constructor type hints
+        C -> C : introspect_constructor(provider)\nParamSpecs cached in descriptor autowire_slot
+        C -> CORE : plan_autowiring(specs, contains)
+        note right of C
+          Pure core policy decides per parameter: inject, keep the
+          Python default, or fail (missing annotation, missing
+          provider, positional-only).
+        end note
+        CORE --> C : planned injections
 
-        loop each constructor parameter
-            alt parameter has annotation and registered dependency
-                C -> C : resolve(annotation)
-                note right of C
-                  Recursive resolve uses the same key policy,
-                  lifecycle cache, decorators, and validation path.
-                end note
-            else annotation missing and no default
-                C --> CORE : error: type annotation required
-            else dependency missing and no default
-                C --> CORE : error: provider missing for dependency
-            else default available
-                C -> C : keep Python default value
-            end
+        loop each planned injection
+            C -> C : resolve(annotation)
+            note right of C
+              Recursive resolve uses the same key policy,
+              lifecycle cache, decorators, and validation path.
+            end note
         end
 
         C -> PROVIDER : provider(**resolved_kwargs)
@@ -142,21 +148,26 @@ else construct instance
     C --> CORE : py::object instance
     deactivate C
 
-    CORE -> C : apply_decorators(decorators, instance, interface)
-    activate C
-    loop decorators in registration order
+    loop decorators in registration order (sequence owned by CORE)
+        CORE -> C : apply_decorator(decorator, instance)
+        activate C
         C -> DECORATOR : decorator(instance)
         activate DECORATOR
         DECORATOR --> C : decorated instance
         deactivate DECORATOR
+        C --> CORE : decorated instance
+        deactivate C
     end
+    CORE -> C : validate_instance(instance, interface)
+    activate C
     C -> HELP : ensure_instance_matches_interface(instance, interface)
-    C --> CORE : validated py::object instance
+    C --> CORE : ok
     deactivate C
 
-    alt lifecycle is singleton
+    alt lifecycle is singleton and registration unchanged (generation guard)
         CORE -> CORE : m_singletons[index] = instance
     end
+    CORE -> CORE : pop resolution stack
 
     CORE --> C : resolved instance
 end

@@ -75,16 +75,20 @@ package "pygim adapter (adapter.h)" as ADAPTER #E3F2FD {
       + describe(key) : DescriptorType
       + repr() : string
       --
+      - resolve_key(key) : py::object
       - invoke_provider(descriptor) : py::object
-      - invoke_autowired_class_provider(provider) : py::object
+      - invoke_autowired(descriptor) : py::object
+      - introspect_constructor(provider) : shared_ptr<const ParamSpecs>
       - make_key(key) : InterfaceKeyPolicy::key_type
+      - key_suffix(key) : string
     }
 
     note right of Container #E3F2FD
       Python-aware adapter around ContainerCore.
-      Owns key parsing, lifecycle parsing, decorator invocation,
-      opt-in constructor autowiring, and IoC-specific validation.
-      Delegates generic callable/protocol checks to shared wiring helpers.
+      Owns key parsing, constructor introspection (ParamSpec extraction),
+      provider/decorator invocation, and IoC-specific validation.
+      Wiring decisions come from core::plan_autowiring; resolve errors
+      are enriched with the resolved key before reaching Python.
     end note
 
     note top of InterfaceKeyPolicy #E3F2FD
@@ -115,6 +119,24 @@ package "pygim::core (core.h)" as CORE #FFF3E0 {
         Singleton
     }
 
+    enum ParamKind #FFE0B2 {
+        PositionalOrKeyword
+        KeywordOnly
+        PositionalOnly
+        Variadic
+    }
+
+    class "ParamSpec<Key>" as ParamSpec <<template>> #FFE0B2 {
+        + name : string
+        + kind : ParamKind
+        + annotation : optional<Key>
+        + has_default : bool
+    }
+
+    class "plan_autowiring(params, contains)" as Plan <<constexpr free function>> #FFE0B2 {
+        + vector<PlannedInjection<Key>>
+    }
+
     class "ServiceDescriptor<Interface,\nProvider, Decorator>" as Descriptor <<template>> #FFE0B2 {
         + interface : Interface
         + provider : Provider
@@ -122,18 +144,21 @@ package "pygim::core (core.h)" as CORE #FFF3E0 {
         + name : optional<string>
         + decorators : vector<Decorator>
         + autowire : bool
+        + autowire_slot : shared_ptr<AutowireSlot>
     }
 
     class "ContainerCore<Key,\nDescriptor, Instance, Hash, Eq>" as Core <<template>> #FFE0B2 {
         - m_registry : vector<Descriptor>
+        - m_generations : vector<uint64_t>
         - m_index_map : unordered_map<Key, size_t, Hash, Eq>
         - m_singletons : unordered_map<size_t, Instance>
+        - m_resolution_stack : vector<size_t>
         --
         + reserve(capacity) : void
         + register_or_override(key, descriptor, override) : void
         + contains(key) : bool
         + try_descriptor(key) : const Descriptor*
-        + resolve(key, invoke_provider, apply_decorators) : Instance
+        + resolve(key, invoke_provider,\n.. apply_decorator, validate_instance) : Instance
         + keys() : vector<Key>
         + size() : size_t
     }
@@ -141,6 +166,13 @@ package "pygim::core (core.h)" as CORE #FFF3E0 {
     note top of Lifecycle #FFF3E0
       Core lifecycle enum is intentionally tiny.
       transient builds each resolve; singleton caches by descriptor index.
+      parse_lifecycle()/lifecycle_to_string() are constexpr siblings.
+    end note
+
+    note top of Plan #FFF3E0
+      Pure, pybind-free autowiring policy: inject, fall back to the
+      parameter default, or fail. constexpr -- unit-tested at compile
+      time via static_assert (core.h policy_tests).
     end note
 
     note top of Descriptor #FFF3E0
@@ -151,9 +183,11 @@ package "pygim::core (core.h)" as CORE #FFF3E0 {
 
     note bottom of Core #FFF3E0
       Generic registry and lifecycle engine.
-      It stores descriptors, maps keys to descriptor indexes,
-      invalidates singleton cache on override, and delegates Python calls
-      through adapter-provided invoker/decorator callbacks.
+      It stores descriptors, maps keys to descriptor indexes, and
+      invalidates singleton cache on override. resolve() owns the
+      provider -> decorators -> validate sequence, detects dependency
+      cycles via a resolution stack, and works on a descriptor copy so
+      re-entrant registrations cannot invalidate it mid-resolve.
     end note
 }
 
@@ -169,17 +203,22 @@ InterfaceKeyPolicy *-- KeyType
 InterfaceKeyPolicy ..> KeyHash
 InterfaceKeyPolicy ..> KeyEq
 
+Container ..> Plan : autowiring decisions
+Plan ..> ParamSpec : consumes
+ParamSpec --> ParamKind
+
 Core *-up- "0..*" Descriptor : m_registry
 Core *-up- "0..*" KeyType : m_index_map keys
 Core ..> KeyHash : hash policy
 Core ..> KeyEq : equality policy
 Descriptor --up-> Lifecycle
+Descriptor ..> ParamSpec : autowire_slot cache
 
 legend right
 |= Color |= Layer |= Responsibility |
 |<#E8F5E9> Green | Binding | Public pybind11 module surface |
 |<#E3F2FD> Blue | Adapter | Python object parsing, validation, callbacks, autowiring |
-|<#FFF3E0> Orange | Core | Generic lifecycle, registry, index, singleton cache |
+|<#FFF3E0> Orange | Core | Generic lifecycle, registry, singleton cache, autowiring policy, cycle detection |
 |<#F3E5F5> Purple | Shared wiring support | Reusable pybind adapter validation helpers |
 |<#FFFDE7> Arrow convention | Relationships | Inheritance/realization should point upward from child to parent; usage arrows may route in any direction |
 endlegend

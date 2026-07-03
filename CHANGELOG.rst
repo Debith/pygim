@@ -19,6 +19,9 @@ Changed
 - Build: Prefer stdlib ``tomllib`` for setup metadata parsing, with the ``tomli`` backport only for Python < 3.11 builders.
 - IoC: Validate resolved instances against the registered interface/protocol after provider construction and decorator application.
 - IoC: Add opt-in constructor autowiring for class providers using Python type hints; unresolved typed parameters fall back to default values when present.
+- IoC: Move autowiring policy, lifecycle parsing, and the decorator/validation sequence from the pybind adapter into the pybind-free core. The adapter now only introspects constructors into neutral ``ParamSpec`` records and executes the plan produced by ``core::plan_autowiring`` (itself ``constexpr`` and verified with compile-time ``static_assert`` tests).
+- IoC: Cache constructor introspection per registration (shared ``AutowireSlot``); autowired resolves no longer re-run ``inspect.signature``/``get_type_hints`` each time. Provider availability is still re-evaluated per resolve, so dependencies registered later are picked up.
+- IoC: Registration and resolution errors now name the offending key, e.g. ``No provider for key [key: Repository, name='cached']``; nested resolves append their frames so the message reads as the resolution chain.
 - Build: Upgrade base C++ standard from C++20 to C++23 for all platforms (GCC, Clang, MSVC).
 - Build: Set ``MACOSX_DEPLOYMENT_TARGET`` default to 13.3 in ``setup.py`` (required for ``std::format`` and ``std::to_chars`` with floating-point).
 - CI: Update ``MACOSX_DEPLOYMENT_TARGET`` from 10.15 to 13.3 in ``python-packages.yml``.
@@ -32,6 +35,9 @@ Changed
 
 Fixed
 ~~~~~
+- IoC: Fix interpreter crash (use-after-free) when a provider or decorator registered new services during ``resolve()``; the registry vector could reallocate under a live descriptor reference. ``resolve()`` now works on a descriptor copy, and a generation guard prevents caching a singleton for a registration overridden mid-resolve.
+- IoC: Fix interpreter crash (stack overflow) on circular autowired dependencies; resolution now tracks an in-progress stack and raises ``RuntimeError: Circular dependency detected`` with the key chain.
+- IoC: Fix dangling container reference held by the decorator form of ``register()``; the returned decorator now keeps the container alive and remains reusable (decorators are no longer moved-from on first use).
 - Fix macOS compilation failure caused by ``std::format`` with floating-point requiring ``std::to_chars`` (unavailable below macOS 13.3).
 - Fix Windows (MSVC) compilation failure: replace GCC-only ``__builtin_unreachable()`` with C++23 ``std::unreachable()`` in ``datagen/core.h``.
 - Fix ``_cli_app.py`` ``NameError``: ``PathSet`` was used but never imported. Rewrite ``clean_up()`` to use ``pathlib.Path.rglob()`` and ``shutil.rmtree()`` (old PathSet API removed).

@@ -19,7 +19,7 @@ PYBIND11_MODULE(ioc, m) {
                  return Descriptor{
                      std::move(interface),
                      std::move(provider),
-                     pygim::parse_lifecycle(lifecycle),
+                     pygim::core::parse_lifecycle(lifecycle),
                      pygim::normalize_name(name),
                      std::move(decorators),
                      autowire};
@@ -35,10 +35,10 @@ PYBIND11_MODULE(ioc, m) {
         .def_property(
             "lifecycle",
             [](const Descriptor& descriptor) {
-                return pygim::lifecycle_to_string(descriptor.lifecycle);
+                return std::string(pygim::core::lifecycle_to_string(descriptor.lifecycle));
             },
             [](Descriptor& descriptor, const std::string& lifecycle) {
-                descriptor.lifecycle = pygim::parse_lifecycle(lifecycle);
+                descriptor.lifecycle = pygim::core::parse_lifecycle(lifecycle);
             })
         .def_readwrite("name", &Descriptor::name)
         .def_readwrite("decorators", &Descriptor::decorators)
@@ -47,7 +47,7 @@ PYBIND11_MODULE(ioc, m) {
     py::class_<pygim::Container>(m, "Container")
         .def(py::init<std::size_t>(), py::arg("capacity") = 0)
         .def("register",
-             [](pygim::Container& container,
+             [](py::object self,
                 py::object interface,
                 py::object provider_or_none,
                 py::object name,
@@ -55,16 +55,21 @@ PYBIND11_MODULE(ioc, m) {
                 std::vector<py::object> decorators,
                 bool autowire,
                 bool override_existing) -> py::object {
+                 auto& container = self.cast<pygim::Container&>();
                  if (provider_or_none.is_none()) {
+                     // Capture `self` (not a raw C++ reference) so the
+                     // returned decorator keeps the container alive, and copy
+                     // `decorators` per call so the decorator stays reusable.
                      py::cpp_function decorator(
-                         [&container,
-                          interface = py::object(interface),
-                          name = py::object(name),
+                         [self = std::move(self),
+                          interface = std::move(interface),
+                          name = std::move(name),
                           lifecycle = std::move(lifecycle),
                           decorators = std::move(decorators),
                           autowire,
-                          override_existing](py::object provider) mutable {
-                             container.register_service(interface, provider, name, lifecycle, std::move(decorators), autowire, override_existing);
+                          override_existing](py::object provider) {
+                             auto& bound = self.cast<pygim::Container&>();
+                             bound.register_service(interface, provider, name, lifecycle, decorators, autowire, override_existing);
                              return provider;
                          });
                      return py::object(std::move(decorator));
