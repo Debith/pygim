@@ -68,16 +68,13 @@ public:
      */
     py::object getattr(const std::string &name) {
         std::vector<py::object> collected;
-        const py::object attr_err_cls =
-            py::module_::import("builtins").attr("AttributeError");
 
         for (const py::handle &item : m_iterable) {
             if (!py::hasattr(item, name.c_str())) {
                 std::ostringstream msg;
                 msg << '\'' << py::str(py::type::of(item)).cast<std::string>()
                     << "' object has no attribute '" << name << '\'';
-                collected.emplace_back(attr_err_cls(msg.str()));
-                continue;
+                throw py::attribute_error(msg.str());
             }
 
             py::object attr = item.attr(name.c_str());

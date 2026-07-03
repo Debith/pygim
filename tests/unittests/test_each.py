@@ -62,10 +62,12 @@ def test_method_call(each_instance, method_name, args, kwargs, expected):
 
 def test_missing_attribute(each_instance):
     """
-    Test that accessing a missing attribute returns a list of AttributeError instances.
+    Test that accessing an attribute missing from any element raises
+    AttributeError immediately (documented Proxy contract), instead of
+    smuggling exception instances into the result list.
     """
-    result = getattr(each_instance, "nonexistent")
-    assert all(isinstance(e, AttributeError) for e in result)
+    with pytest.raises(AttributeError, match="nonexistent"):
+        getattr(each_instance, "nonexistent")
 
 
 @pytest.mark.parametrize(
@@ -144,6 +146,11 @@ def test_each_descriptor_rejects_class_without_iter():
 
         class NotIterable:
             each = each()
+
+
+def test_each_broadcast_over_builtin_iterables():
+    assert each(("a", "bb")).upper() == ["A", "BB"]
+    assert each(range(3)).bit_length() == [0, 1, 2]
 
 
 if __name__ == "__main__":

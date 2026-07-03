@@ -40,6 +40,7 @@ Fixed
 ~~~~~
 - PathSet: Fix interpreter crash when filtering: ``ext()`` captured a dangling ``string_view`` and ``Query`` held a non-owning pointer to a source ``PathSet`` that Python could garbage-collect before evaluation. The filter now owns its extension string and the ``&``/``|`` bindings keep the source alive (``py::keep_alive``).
 - PathSet: Fix ``__add__`` discarding the left operand; ``a + b`` now returns the union of both path sets.
+- Each: Accessing an attribute missing from any element now raises ``AttributeError`` immediately, per the Proxy's documented contract; previously the exception *instances* were silently collected into the result list.
 - Each: Fix the descriptor form (``each = each()``) rejecting every ordinary class; ``__set_name__`` checked whether the class *object* was iterable instead of whether it defines ``__iter__`` for its instances.
 - Registry: Restore ``[[no_unique_address]]`` on the hooks policy member, dropped incidentally during the wiring move.
 - IoC: Fix interpreter crash (use-after-free) when a provider or decorator registered new services during ``resolve()``; the registry vector could reallocate under a live descriptor reference. ``resolve()`` now works on a descriptor copy, and a generation guard prevents caching a singleton for a registration overridden mid-resolve.

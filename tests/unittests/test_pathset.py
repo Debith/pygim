@@ -68,6 +68,42 @@ def test_addition_unions_both_operands(temp_files):
     assert len(left) == 1 and len(right) == 2  # operands untouched
 
 
+def test_query_survives_source_collection(temp_files):
+    import gc
+
+    from pygim.pathset import ext
+
+    query = PathSet(temp_files) & ext(".rst")  # temporary source PathSet
+    gc.collect()  # the query must keep the source alive
+
+    assert len(query.eval()) == 2
+
+
+def test_chained_query_filters(temp_files):
+    from pygim.pathset import ext
+
+    query = (PathSet(temp_files) & ext(".rst")) | ext(".txt")
+    gc_probe = query.eval()
+
+    assert len(gc_probe) == 3
+
+
+def test_filter_algebra(temp_files):
+    from pygim.pathset import ext
+
+    only_txt = (PathSet(temp_files) & ~ext(".rst")).eval()
+    assert [p.suffix for p in only_txt] == [".txt"]
+
+    nothing = (PathSet(temp_files) & (ext(".rst") & ext(".txt"))).eval()
+    assert len(nothing) == 0
+
+
+def test_filter_on_empty_pathset():
+    from pygim.pathset import ext
+
+    assert len((PathSet([]) & ext(".txt")).eval()) == 0
+
+
 def test_modification_after_cloning(temp_dir, temp_files):
     temp_files = PathSet(temp_files)
     cloned = temp_files.clone()
