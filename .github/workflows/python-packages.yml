@@ -20,9 +20,9 @@ jobs:
         python-version: ["3.9", "3.10", "3.11", "3.12", "3.13", "3.14"]
 
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
     - name: Set up Python ${{ matrix.python-version }}
-      uses: actions/setup-python@v3
+      uses: actions/setup-python@v5
       with:
         python-version: ${{ matrix.python-version }}
 
@@ -39,8 +39,15 @@ jobs:
 
     - name: Install MSSQL ODBC Driver 18 (macOS)
       if: matrix.os == 'macos-latest'
+      # Best-effort: the Microsoft tap periodically breaks on new runner
+      # images. Persistence tests auto-skip when the driver is missing, so
+      # a failed install should not mask the rest of the test suite.
+      continue-on-error: true
       run: |
         brew tap microsoft/mssql-release https://github.com/microsoft/homebrew-mssql-release
+        # Newer Homebrew refuses formulae from untrusted third-party taps in
+        # non-interactive runs; older brews do not have the command yet.
+        brew trust microsoft/mssql-release || true
         HOMEBREW_ACCEPT_EULA=Y brew install msodbcsql18 unixodbc
 
     - name: Install dependencies (Linux & MacOS)

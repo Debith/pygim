@@ -13,6 +13,18 @@ Unreleased
 ----------
 Changed
 ~~~~~~~
+- Wiring: Group internal registry, factory, and IoC native modules under ``src/_pygim_fast/wiring/`` while keeping public module names stable (``pygim.registry``, ``pygim.factory``, ``pygim.ioc``).
+- Wiring: Factor shared pybind adapter validation helpers into ``src/_pygim_fast/wiring/common/`` for reuse across wiring modules.
+- Build: Move native extension ``ext.*.toml`` manifests next to their corresponding module sources and resolve manifest ``sources`` relative to each TOML file.
+- Build: Prefer stdlib ``tomllib`` for setup metadata parsing, with the ``tomli`` backport only for Python < 3.11 builders.
+- IoC: Validate resolved instances against the registered interface/protocol after provider construction and decorator application.
+- IoC: Add opt-in constructor autowiring for class providers using Python type hints; unresolved typed parameters fall back to default values when present.
+- IoC: Move autowiring policy, lifecycle parsing, and the decorator/validation sequence from the pybind adapter into the pybind-free core. The adapter now only introspects constructors into neutral ``ParamSpec`` records and executes the plan produced by ``core::plan_autowiring`` (itself ``constexpr`` and verified with compile-time ``static_assert`` tests).
+- IoC: Cache constructor introspection per registration (shared ``AutowireSlot``); autowired resolves no longer re-run ``inspect.signature``/``get_type_hints`` each time. Provider availability is still re-evaluated per resolve, so dependencies registered later are picked up.
+- IoC: Registration and resolution errors now name the offending key, e.g. ``No provider for key [key: Repository, name='cached']``; nested resolves append their frames so the message reads as the resolution chain.
+- IoC: ``register()`` validates at registration time that the interface is a class or protocol (previously a bad interface only failed at resolve, inside ``isinstance``).
+- IoC: ``ServiceDescriptor`` is now an explicitly read-only snapshot; ``describe()`` returns a copy, so the previous writable fields silently discarded mutations.
+- IoC: Document thread-safety expectations on ``Container`` (GIL-based consistency; concurrent first-resolves of a singleton whose provider releases the GIL can race).
 - Build: Upgrade base C++ standard from C++20 to C++23 for all platforms (GCC, Clang, MSVC).
 - Build: Set ``MACOSX_DEPLOYMENT_TARGET`` default to 13.3 in ``setup.py`` (required for ``std::format`` and ``std::to_chars`` with floating-point).
 - CI: Update ``MACOSX_DEPLOYMENT_TARGET`` from 10.15 to 13.3 in ``python-packages.yml``.
@@ -26,6 +38,14 @@ Changed
 
 Fixed
 ~~~~~
+- PathSet: Fix interpreter crash when filtering: ``ext()`` captured a dangling ``string_view`` and ``Query`` held a non-owning pointer to a source ``PathSet`` that Python could garbage-collect before evaluation. The filter now owns its extension string and the ``&``/``|`` bindings keep the source alive (``py::keep_alive``).
+- PathSet: Fix ``__add__`` discarding the left operand; ``a + b`` now returns the union of both path sets.
+- Each: Accessing an attribute missing from any element now raises ``AttributeError`` immediately, per the Proxy's documented contract; previously the exception *instances* were silently collected into the result list.
+- Each: Fix the descriptor form (``each = each()``) rejecting every ordinary class; ``__set_name__`` checked whether the class *object* was iterable instead of whether it defines ``__iter__`` for its instances.
+- Registry: Restore ``[[no_unique_address]]`` on the hooks policy member, dropped incidentally during the wiring move.
+- IoC: Fix interpreter crash (use-after-free) when a provider or decorator registered new services during ``resolve()``; the registry vector could reallocate under a live descriptor reference. ``resolve()`` now works on a descriptor copy, and a generation guard prevents caching a singleton for a registration overridden mid-resolve.
+- IoC: Fix interpreter crash (stack overflow) on circular autowired dependencies; resolution now tracks an in-progress stack and raises ``RuntimeError: Circular dependency detected`` with the key chain.
+- IoC: Fix dangling container reference held by the decorator form of ``register()``; the returned decorator now keeps the container alive and remains reusable (decorators are no longer moved-from on first use).
 - Fix macOS compilation failure caused by ``std::format`` with floating-point requiring ``std::to_chars`` (unavailable below macOS 13.3).
 - Fix Windows (MSVC) compilation failure: replace GCC-only ``__builtin_unreachable()`` with C++23 ``std::unreachable()`` in ``datagen/core.h``.
 - Fix ``_cli_app.py`` ``NameError``: ``PathSet`` was used but never imported. Rewrite ``clean_up()`` to use ``pathlib.Path.rglob()`` and ``shutil.rmtree()`` (old PathSet API removed).
@@ -42,6 +62,14 @@ Removed
 
 Added
 ~~~~~
+- IoC: Add ``pygim.ioc.Container`` with transient/singleton lifecycles, named registrations, decorator application, and strict override semantics implemented with the same core/adapter/bindings pattern as registry and factory.
+- Examples: Add runnable IoC container example under ``docs/examples/ioc/``.
+- Examples: Add runnable IoC autowiring example under ``docs/examples/ioc/``.
+- Examples: Add runnable IoC test-override example under ``docs/examples/ioc/`` showing fake substitution and singleton cache invalidation.
+- Examples: Add runnable Factory examples under ``docs/examples/factory/`` (basic named creators, interface enforcement).
+- Examples: Add runnable ``each`` broadcasting example under ``docs/examples/each/``.
+- Examples: Add runnable ``PathSet`` example under ``docs/examples/pathset/``.
+- Examples: Add ``docs/examples/README.md`` index; rewrite all examples in a narrative, self-verifying teaching style.
 - Tests: Add a live MSSQL persistence round-trip test that auto-skips unless ``STRESS_CONN`` is reachable or the local Docker SQL Server on ``localhost:1433`` is available.
 - Initial CHANGELOG with retroactive notes for registry enhancement work.
 - Registry: Decorator-based registration via ``@registry.register(key, override=False)``.
@@ -50,7 +78,7 @@ Added
 - Registry: Optional ``capacity`` constructor arg for upfront map reservation.
 - Registry: Explicit ``post(key, value)`` trigger to manually invoke post hooks.
 - Examples: Two runnable registry examples under ``docs/examples/registry/`` (basic & hooks).
-- Added dedicated implementation folders for factory and registry under ``src/_pygim_fast/{factory,registry}/``.
+- Added dedicated implementation folders for wiring modules under ``src/_pygim_fast/wiring/{registry,factory,ioc}/``.
 - Added PlantUML architecture reference ``docs/design/core_adapter_bindings_convention.puml`` for core/adapter/bindings layering.
 - CI: Add release workflow that builds wheels via ``cibuildwheel`` and publishes tagged releases to PyPI.
 - CI: Auto-tag main whenever the ``dev`` branch is merged, driven by PR labels ``release:major``/``release:minor``/default patch.

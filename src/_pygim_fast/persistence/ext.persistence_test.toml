@@ -1,4 +1,4 @@
 [extension]
 module = "_persistence_test"
-sources = ["persistence/adapter/test_bindings.cpp"]
+sources = ["adapter/test_bindings.cpp"]
 deps = ["odbc"]

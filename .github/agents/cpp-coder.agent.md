@@ -91,11 +91,11 @@ When writing new code or modifying existing code, **prefer these modern features
 ## Build & Extension System
 
 - Build trigger: `pip install -e .` (setuptools + pybind11)
-- Extension discovery: `ext.<name>.toml` files declare `module`, `sources`, `deps`
+- Extension discovery: colocated `ext.<name>.toml` files declare `module`, `sources`, `deps`; `sources` entries are relative to the TOML file
 - Dependency presets: `arrow` (pyarrow includes + libs), `odbc` (unixODBC)
 - New extension checklist:
   1. Create source files under `src/_pygim_fast/<name>/`
-  2. Create `ext.<name>.toml` with `module = "pygim.<name>"`
+  2. Create colocated `ext.<name>.toml` with `module = "<name>"`
   3. Rebuild and verify import
 
 ## Output Format

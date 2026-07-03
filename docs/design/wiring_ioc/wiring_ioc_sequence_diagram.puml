@@ -1,0 +1,189 @@
+@startuml wiring_ioc_sequence_diagram
+!theme plain
+skinparam backgroundColor #FEFEFE
+skinparam defaultFontName Consolas
+skinparam defaultFontSize 10
+skinparam shadowing false
+skinparam sequenceArrowThickness 1.5
+skinparam sequenceParticipantBorderColor #555555
+skinparam sequenceLifeLineBorderColor #999999
+skinparam sequenceGroupHeaderFontSize 11
+
+title Wiring IoC - Registration and Resolution Sequence
+
+actor "Python caller" as PY
+participant "PYBIND11_MODULE(ioc)" as MOD #E8F5E9
+participant "Container" as C #E3F2FD
+participant "InterfaceKeyPolicy" as POLICY #E3F2FD
+participant "shared validation helpers" as HELP #F3E5F5
+participant "ContainerCore" as CORE #FFF3E0
+participant "ServiceDescriptor" as DESC #FFE0B2
+participant "py::object provider" as PROVIDER #F3E5F5
+participant "py::object decorator" as DECORATOR #F3E5F5
+participant "py::object instance" as INSTANCE #F3E5F5
+
+== Container construction ==
+
+PY -> MOD : Container(capacity=0)
+activate MOD
+MOD -> C ** : Container(capacity)
+activate C
+C -> CORE ** : ContainerCore(capacity)
+activate CORE
+CORE -> CORE : reserve(capacity)
+CORE --> C : ready
+deactivate CORE
+C --> MOD : native Container
+deactivate C
+MOD --> PY : pygim.ioc.Container
+deactivate MOD
+
+== Registration ==
+
+PY -> MOD : register(interface, provider, name,\nlifecycle, decorators, autowire, override)
+activate MOD
+
+alt provider is None - decorator form
+    MOD --> PY : registration decorator
+    PY -> MOD : decorator(provider)
+end
+
+MOD -> C : register_service(interface, provider,\nname, lifecycle, decorators, autowire, override)
+activate C
+C -> HELP : ensure_callable(provider, "provider")
+C -> HELP : ensure_callables(decorators, "decorator")
+C -> C : ensure_autowire_provider(provider, autowire)
+C -> C : normalize_name(name)
+C -> POLICY : make_from_python(interface, normalized_name)
+activate POLICY
+POLICY --> C : key_type{PyObject*, optional name}
+deactivate POLICY
+C -> C : parse_lifecycle(lifecycle)
+C -> DESC ** : DescriptorType{interface, provider,\nlifecycle, name, decorators, autowire}
+C -> CORE : register_or_override(key, descriptor, override)
+activate CORE
+
+alt key exists and override=False
+    CORE --> C : error: duplicate service registration
+else key missing and override=True
+    CORE --> C : error: override requires existing service
+else key exists and override=True
+    CORE -> CORE : replace descriptor in m_registry[index]
+    CORE -> CORE : erase m_singletons[index]
+else new key
+    CORE -> CORE : m_registry.emplace_back(descriptor)
+    CORE -> CORE : m_index_map.emplace(key, index)
+end
+
+CORE --> C : registered
+deactivate CORE
+C --> MOD : provider
+deactivate C
+MOD --> PY : provider or decorator result
+deactivate MOD
+
+== Resolution ==
+
+PY -> MOD : resolve(key) / container[key]
+activate MOD
+MOD -> C : resolve(key)
+activate C
+C -> C : make_key(key)
+alt tuple key
+    C -> C : require (interface, name|None)
+end
+C -> POLICY : make_from_python(interface, normalized_name)
+activate POLICY
+POLICY --> C : key_type
+deactivate POLICY
+
+C -> CORE : resolve(key, invoke_provider,\napply_decorator, validate_instance)
+activate CORE
+CORE -> CORE : lookup key in m_index_map
+
+alt key missing
+    CORE --> C : error: No provider for key
+else lifecycle is singleton and cached
+    CORE --> C : cached py::object instance
+else key already on resolution stack
+    CORE --> C : error: Circular dependency detected
+else construct instance
+    CORE -> CORE : push key on resolution stack
+    CORE -> DESC : copy descriptor
+    note right of CORE
+      resolve works on a descriptor copy: providers run arbitrary
+      Python that may re-enter register() and reallocate the registry.
+    end note
+
+    CORE -> C : invoke_provider(descriptor)
+    activate C
+    alt descriptor.autowire == false
+        C -> PROVIDER : provider()
+        activate PROVIDER
+        PROVIDER --> C : py::object instance
+        deactivate PROVIDER
+    else descriptor.autowire == true
+        C -> C : introspect_constructor(provider)\nParamSpecs cached in descriptor autowire_slot
+        C -> CORE : plan_autowiring(specs, contains)
+        note right of C
+          Pure core policy decides per parameter: inject, keep the
+          Python default, or fail (missing annotation, missing
+          provider, positional-only).
+        end note
+        CORE --> C : planned injections
+
+        loop each planned injection
+            C -> C : resolve(annotation)
+            note right of C
+              Recursive resolve uses the same key policy,
+              lifecycle cache, decorators, and validation path.
+            end note
+        end
+
+        C -> PROVIDER : provider(**resolved_kwargs)
+        activate PROVIDER
+        PROVIDER --> C : py::object instance
+        deactivate PROVIDER
+    end
+    C --> CORE : py::object instance
+    deactivate C
+
+    loop decorators in registration order (sequence owned by CORE)
+        CORE -> C : apply_decorator(decorator, instance)
+        activate C
+        C -> DECORATOR : decorator(instance)
+        activate DECORATOR
+        DECORATOR --> C : decorated instance
+        deactivate DECORATOR
+        C --> CORE : decorated instance
+        deactivate C
+    end
+    CORE -> C : validate_instance(instance, interface)
+    activate C
+    C -> HELP : ensure_instance_matches_interface(instance, interface)
+    C --> CORE : ok
+    deactivate C
+
+    alt lifecycle is singleton and registration unchanged (generation guard)
+        CORE -> CORE : m_singletons[index] = instance
+    end
+    CORE -> CORE : pop resolution stack
+
+    CORE --> C : resolved instance
+end
+
+C --> MOD : py::object instance
+deactivate CORE
+deactivate C
+MOD --> PY : instance
+deactivate MOD
+
+legend right
+|= Color |= Object source |
+|<#E8F5E9> Green | pybind11 binding surface |
+|<#E3F2FD> Blue | Python-aware C++ adapter |
+|<#FFF3E0> Orange | pybind-free core lifecycle engine |
+|<#F3E5F5> Purple | Shared validation helpers and Python runtime callables |
+endlegend
+
+@enduml

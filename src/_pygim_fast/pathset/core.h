@@ -77,7 +77,9 @@ struct Filter
 /* small helpers ("ext", "size_gt", …) */
 inline Filter ext(std::string_view x)
 {
-    return { [x](const entry& e){ return e.path().extension() == x; } };
+    // Capture an owning string: the view's backing buffer (a temporary
+    // Python-converted std::string) is gone by the time the filter runs.
+    return { [ext = std::string(x)](const entry& e){ return e.path().extension() == ext; } };
 }
 
 
@@ -154,7 +156,7 @@ public:
     bool operator==(const PathSet& other) const = default;
 
     PathSet operator+(const PathSet& other) const {
-        PathSet result;
+        PathSet result(*this);
         result.m_paths.insert(other.m_paths.begin(), other.m_paths.end());
         return result;
     }

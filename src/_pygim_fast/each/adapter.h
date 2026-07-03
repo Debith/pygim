@@ -68,16 +68,13 @@ public:
      */
     py::object getattr(const std::string &name) {
         std::vector<py::object> collected;
-        const py::object attr_err_cls =
-            py::module_::import("builtins").attr("AttributeError");
 
         for (const py::handle &item : m_iterable) {
             if (!py::hasattr(item, name.c_str())) {
                 std::ostringstream msg;
                 msg << '\'' << py::str(py::type::of(item)).cast<std::string>()
                     << "' object has no attribute '" << name << '\'';
-                collected.emplace_back(attr_err_cls(msg.str()));
-                continue;
+                throw py::attribute_error(msg.str());
             }
 
             py::object attr = item.attr(name.c_str());
@@ -151,7 +148,11 @@ public:
 
     // --------------------------- descriptor hooks ----------------------- //
     void set_name(const py::object &owner, const std::string &name) {
-        if (!py::isinstance<py::iterable>(owner)) {
+        // The owner's *instances* must be iterable, i.e. the class defines
+        // __iter__. The class object itself is iterable only when its
+        // metaclass is, so isinstance<py::iterable>(owner) would reject
+        // every ordinary class.
+        if (!py::hasattr(owner, "__iter__")) {
             throw py::type_error("`each` can only be placed on iterable classes");
         }
         m_name = name;

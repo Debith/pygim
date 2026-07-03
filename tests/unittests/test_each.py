@@ -62,10 +62,12 @@ def test_method_call(each_instance, method_name, args, kwargs, expected):
 
 def test_missing_attribute(each_instance):
     """
-    Test that accessing a missing attribute returns a list of AttributeError instances.
+    Test that accessing an attribute missing from any element raises
+    AttributeError immediately (documented Proxy contract), instead of
+    smuggling exception instances into the result list.
     """
-    result = getattr(each_instance, "nonexistent")
-    assert all(isinstance(e, AttributeError) for e in result)
+    with pytest.raises(AttributeError, match="nonexistent"):
+        getattr(each_instance, "nonexistent")
 
 
 @pytest.mark.parametrize(
@@ -121,6 +123,55 @@ def test_call_after_method_access(iterable):
         assert result == [item.multiply(3) for item in iterable]
     else:
         assert getattr(e, "multiply") is None
+
+
+def test_each_as_descriptor(dummy_list):
+    """The descriptor form (each = each() in a class body) broadcasts per instance.
+
+    Guards the fix for __set_name__ testing whether the class *object* was
+    iterable -- which no ordinary class is -- instead of whether it defines
+    __iter__ for its instances. Attribute and method broadcasts through the
+    descriptor must behave exactly like the each(iterable) factory form.
+    """
+    class Fleet:
+        each = each()
+
+        def __init__(self, items):
+            self._items = items
+
+        def __iter__(self):
+            return iter(self._items)
+
+    fleet = Fleet(dummy_list)
+
+    assert fleet.each.value == [0, 1, 2, 3, 4]
+    assert fleet.each.multiply(3) == [0, 3, 6, 9, 12]
+
+
+def test_each_descriptor_rejects_class_without_iter():
+    """Placing the descriptor on a class without __iter__ fails at class creation.
+
+    The early __set_name__ check is the guard rail that makes descriptor
+    misuse a definition-time error (where the mistake is visible) rather
+    than a confusing attribute error at first access. Python < 3.12 wraps
+    exceptions raised in __set_name__ in a RuntimeError; 3.12+ propagates
+    the TypeError unchanged, so both are accepted here.
+    """
+    with pytest.raises((TypeError, RuntimeError)):
+
+        class NotIterable:
+            each = each()
+
+
+def test_each_broadcast_over_builtin_iterables():
+    """Broadcasting works over arbitrary iterables of builtin types.
+
+    Nothing in the proxy may assume user-defined classes or list inputs:
+    tuples of str and a range of ints must broadcast method calls just the
+    same, with results collected in iteration order.
+    """
+    assert each(("a", "bb")).upper() == ["A", "BB"]
+    assert each(range(3)).bit_length() == [0, 1, 2]
 
 
 if __name__ == "__main__":

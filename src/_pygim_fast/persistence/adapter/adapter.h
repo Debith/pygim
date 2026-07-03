@@ -1,8 +1,8 @@
 // persistence/adapter/adapter.h
 // RepositoryAdapter<Backend> — pybind11 boundary adapter for Repository<Backend>.
 //
-// Follows the established core/adapter pattern (cf. registry/adapter.h,
-// factory/adapter.h). Single class bound in bindings.cpp. Owns core
+// Follows the established core/adapter pattern (cf. wiring/registry/adapter.h,
+// wiring/factory/adapter.h). Single class bound in bindings.cpp. Owns core
 // Repository directly — ONE hop, no intermediaries.
 //
 // Format (Polars/Pandas) is a runtime enum member, not a template parameter.

@@ -1,0 +1,3 @@
+[extension]
+module = "ioc"
+sources = ["bindings.cpp"]

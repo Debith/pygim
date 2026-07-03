@@ -1,4 +1,4 @@
 [extension]
 module = "_persistence"
-sources = ["persistence/adapter/bindings.cpp"]
+sources = ["adapter/bindings.cpp"]
 deps = ["odbc"]

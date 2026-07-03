@@ -8,13 +8,20 @@ from setuptools_scm import get_version
 # Available at setup time due to pyproject.toml
 from pybind11.setup_helpers import Pybind11Extension
 from setuptools import setup, find_namespace_packages
-import toml
+
+# We only read TOML build metadata. Prefer the stdlib parser on Python 3.11+;
+# supported older builders use the compatible read-only backport instead of the
+# heavier third-party `toml` package, whose encoder/comment variants add no value here.
+try:
+    import tomllib
+except ModuleNotFoundError:  # pragma: no cover - Python < 3.11 build fallback
+    import tomli as tomllib
 
 scm_version = get_version(root=".", relative_to=__file__)
 ROOT = Path(__file__).parent
 sys.path.append(str(ROOT / "src"))
 
-pyproject = toml.loads(Path("pyproject.toml").read_text())
+pyproject = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))
 ext_modules = []
 base_macros = [("VERSION_INFO", repr(scm_version))]
 
@@ -72,6 +79,25 @@ def _dep_available(dep_name):
             "(library name incompatibility: 'odbc' vs 'odbc32')."
         )
         return False
+    if dep_name == "odbc":
+        # unixODBC headers must exist somewhere the compiler will look;
+        # otherwise the persistence extensions cannot build and must be
+        # skipped (their tests auto-skip without the driver anyway).
+        include_candidates = [
+            Path("/usr/include"),
+            Path("/usr/local/include"),
+            Path("/opt/homebrew/include"),
+            Path(sys.prefix) / "include",
+        ]
+        if conda_prefix:
+            include_candidates.append(Path(conda_prefix) / "include")
+        if not any((inc / "sql.h").exists() for inc in include_candidates):
+            print(
+                "[setup.py] Skipping odbc extensions: unixODBC headers "
+                "(sql.h) not found in any known include directory."
+            )
+            return False
+        return True
     if dep_name == "arrow" and sys.platform == "win32":
         # pyarrow pip package on Windows ships DLLs but not the import
         # libraries (.lib) that MSVC needs at link time.  Skip unless
@@ -188,14 +214,14 @@ def _apply_odbc(kw):
 # Each ext.<name>.toml declares:
 #   [extension]
 #   module   = "pygim_module_name"      # required
-#   sources  = ["path/to/file.cpp"]     # optional; default: "<name>.cpp"
+#   sources  = ["path/to/file.cpp"]     # optional; relative to ext.<name>.toml
 #   deps     = ["arrow", "odbc"]        # optional; default: []
 
 FAST_ROOT = Path("src/_pygim_fast")
 ext_modules = []
 
-for ext_toml in sorted(FAST_ROOT.glob("ext.*.toml")):
-    ext_cfg = toml.loads(ext_toml.read_text())["extension"]
+for ext_toml in sorted(FAST_ROOT.rglob("ext.*.toml")):
+    ext_cfg = tomllib.loads(ext_toml.read_text(encoding="utf-8"))["extension"]
     module_name = f"pygim.{ext_cfg['module']}"
 
     # Skip extensions whose system dependencies are not installed.
@@ -205,12 +231,12 @@ for ext_toml in sorted(FAST_ROOT.glob("ext.*.toml")):
         print(f"[setup.py] Skipping {module_name}: missing system deps {missing}")
         continue
 
-    # Resolve sources relative to FAST_ROOT
+    # Resolve sources relative to the colocated manifest.
     ext_stem = ext_toml.stem.split(".", 1)[1]  # "ext.factory" → "factory"
     if "sources" in ext_cfg:
-        sources = [str(FAST_ROOT / s) for s in ext_cfg["sources"]]
+        sources = [str(ext_toml.parent / s) for s in ext_cfg["sources"]]
     else:
-        sources = [str(FAST_ROOT / f"{ext_stem}.cpp")]
+        sources = [str(ext_toml.parent / f"{ext_stem}.cpp")]
 
     # Build kwargs from dep presets
     kwargs = _base_kwargs()

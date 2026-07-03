@@ -1,3 +1,0 @@
-[extension]
-module = "each"
-sources = ["each/bindings.cpp"]

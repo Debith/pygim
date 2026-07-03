@@ -4,8 +4,9 @@
 from pygim.pathset import PathSet
 from pygim.registry import Registry
 from pygim.factory import Factory
+from pygim.ioc import Container
 
-__all__ = ["PathSet", "Registry", "Factory", "create_df"]
+__all__ = ["PathSet", "Registry", "Factory", "Container", "create_df"]
 
 # Import C++ extension modules explicitly
 try:  # normal pybind11 extension import
