@@ -1,3 +1,0 @@
-[extension]
-module = "registry"
-sources = ["registry/bindings.cpp"]

@@ -49,6 +49,99 @@ def test_cloning(temp_files):
     assert id(temp_files) != id(cloned)
 
 
+def test_extension_filter_selects_matching_files(temp_files):
+    """The ext() filter selects exactly the paths with a matching suffix.
+
+    This is the basic contract of the lazy query pipeline (PathSet & Filter
+    -> Query -> eval). It also guards the fix for ext() capturing a dangling
+    string_view, which used to crash the interpreter on evaluation.
+    """
+    from pygim.pathset import ext
+
+    filtered = (PathSet(temp_files) & ext(".rst")).eval()
+
+    assert len(filtered) == 2
+    assert all(p.suffix == ".rst" for p in filtered)
+
+
+def test_addition_unions_both_operands(temp_files):
+    """PathSet addition returns the union and mutates neither operand.
+
+    Guards the fix for operator+ silently discarding the left-hand side
+    (a + b used to return only b's paths). Both inputs must keep their
+    original contents afterwards, since + is a value operation, not +=.
+    """
+    left = PathSet(temp_files[:1])
+    right = PathSet(temp_files[1:])
+
+    combined = left + right
+
+    assert len(combined) == 3
+    assert len(left) == 1 and len(right) == 2  # operands untouched
+
+
+def test_query_survives_source_collection(temp_files):
+    """A Query keeps its source PathSet alive across garbage collection.
+
+    Query stores a non-owning pointer to the source; the binding pins the
+    source's lifetime to the query via py::keep_alive. Building the query
+    from a temporary and forcing gc before eval() reproduces the exact
+    pattern that used to dereference freed memory and segfault.
+    """
+    import gc
+
+    from pygim.pathset import ext
+
+    query = PathSet(temp_files) & ext(".rst")  # temporary source PathSet
+    gc.collect()  # the query must keep the source alive
+
+    assert len(query.eval()) == 2
+
+
+def test_chained_query_filters(temp_files):
+    """Chained queries (query | filter) extend the predicate and stay alive.
+
+    Each chaining step creates a new Query sharing the original source
+    pointer, so keep_alive must hold transitively through the chain. The
+    or-combination must also evaluate correctly: .rst or .txt covers all
+    three fixture files.
+    """
+    from pygim.pathset import ext
+
+    query = (PathSet(temp_files) & ext(".rst")) | ext(".txt")
+
+    assert len(query.eval()) == 3
+
+
+def test_filter_algebra(temp_files):
+    """Filter combinators (~, &) compose into meaningful predicates.
+
+    Negation must select the complement (everything not .rst), and a
+    conjunction of mutually exclusive extensions must select nothing.
+    This exercises the Filter boolean-algebra operators independently of
+    query chaining.
+    """
+    from pygim.pathset import ext
+
+    only_txt = (PathSet(temp_files) & ~ext(".rst")).eval()
+    assert [p.suffix for p in only_txt] == [".txt"]
+
+    nothing = (PathSet(temp_files) & (ext(".rst") & ext(".txt"))).eval()
+    assert len(nothing) == 0
+
+
+def test_filter_on_empty_pathset():
+    """Filtering an empty PathSet yields an empty PathSet, not an error.
+
+    The degenerate source is the cheapest way to catch iteration or
+    initialization assumptions in Query::eval() that only hold when at
+    least one path is present.
+    """
+    from pygim.pathset import ext
+
+    assert len((PathSet([]) & ext(".txt")).eval()) == 0
+
+
 def test_modification_after_cloning(temp_dir, temp_files):
     temp_files = PathSet(temp_files)
     cloned = temp_files.clone()

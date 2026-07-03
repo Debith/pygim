@@ -39,12 +39,14 @@ PYBIND11_MODULE(pathset, m)
              return py::make_iterator(ps.begin(), ps.end(), py::return_value_policy::reference_internal);
          }, py::keep_alive<0,1>())
         // heterogeneous operators: PathSet  &/|  Filter  → Query
+        // Query holds a non-owning pointer to the source PathSet, so the
+        // returned Query must keep the PathSet Python object alive.
         .def("__and__",
              [](const PathSet& s, const Filter& f) { return s & f; },
-             py::is_operator())
+             py::is_operator(), py::keep_alive<0, 1>())
         .def("__or__",
              [](const PathSet& s, const Filter& f) { return s | f; },
-             py::is_operator())
+             py::is_operator(), py::keep_alive<0, 1>())
         .def("__add__", &PathSet::operator+)
         // removal operators: PathSet -= PathSet and PathSet -= str
         .def(py::self -= py::self)
@@ -65,8 +67,10 @@ PYBIND11_MODULE(pathset, m)
 
     /* ----------------  Query<PathSet> ---------- */
     py::class_<QueryPS>(m, "Query")
-        .def("__and__", [](const QueryPS& q, const Filter& f) { return q & f; }, py::is_operator())
-        .def("__or__",  [](const QueryPS& q, const Filter& f) { return q | f; }, py::is_operator())
+        // Chained queries share the source pointer: keep the parent query
+        // (and transitively the source PathSet) alive.
+        .def("__and__", [](const QueryPS& q, const Filter& f) { return q & f; }, py::is_operator(), py::keep_alive<0, 1>())
+        .def("__or__",  [](const QueryPS& q, const Filter& f) { return q | f; }, py::is_operator(), py::keep_alive<0, 1>())
         .def("eval", &QueryPS::eval, "Materialise the filtered paths as a new PathSet")
         // iterating in Python triggers a lazy eval under the hood
         .def("__iter__", [](const QueryPS& q) {
