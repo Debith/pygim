@@ -79,6 +79,25 @@ def _dep_available(dep_name):
             "(library name incompatibility: 'odbc' vs 'odbc32')."
         )
         return False
+    if dep_name == "odbc":
+        # unixODBC headers must exist somewhere the compiler will look;
+        # otherwise the persistence extensions cannot build and must be
+        # skipped (their tests auto-skip without the driver anyway).
+        include_candidates = [
+            Path("/usr/include"),
+            Path("/usr/local/include"),
+            Path("/opt/homebrew/include"),
+            Path(sys.prefix) / "include",
+        ]
+        if conda_prefix:
+            include_candidates.append(Path(conda_prefix) / "include")
+        if not any((inc / "sql.h").exists() for inc in include_candidates):
+            print(
+                "[setup.py] Skipping odbc extensions: unixODBC headers "
+                "(sql.h) not found in any known include directory."
+            )
+            return False
+        return True
     if dep_name == "arrow" and sys.platform == "win32":
         # pyarrow pip package on Windows ships DLLs but not the import
         # libraries (.lib) that MSVC needs at link time.  Skip unless
