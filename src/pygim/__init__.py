@@ -20,6 +20,16 @@ except (
 ):  # pragma: no cover - if compiled extension missing
     pass
 
+try:  # requires numpy at runtime, which is not a pygim dependency
+    from pygim.rng import Rng  # type: ignore
+
+    __all__ += ["Rng"]
+except (
+    ImportError,
+    ModuleNotFoundError,
+):  # pragma: no cover - if compiled extension or numpy missing
+    pass
+
 
 def create_df(
     schema: dict,

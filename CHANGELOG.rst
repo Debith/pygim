@@ -42,6 +42,8 @@ Removed
 
 Added
 ~~~~~
+- RNG: New ``pygim.rng`` extension (experimental) — ``Rng`` generates NumPy arrays of uniform float64/uint64 at ~3–4x the throughput of NumPy's fastest bit generator (SFC64) single-threaded (machine-dependent; AVX2 desktop reference), and up to DRAM bandwidth with block-parallel threads. Instances are internally locked (concurrent Python-thread calls are safe but serialize); ``random()``/``uint64()`` return 64-byte-aligned arrays. Engine: 16 interleaved xoshiro256++ streams evaluated via AVX2 (4 groups x 4 lanes, runtime-dispatched with scalar fallback), SplitMix64 counter-based O(1) stream derivation, non-temporal stores for beyond-LLC fills. Output is a pure function of the seed: bit-identical across SIMD/scalar paths, thread counts, and call-size splits; float64 uses NumPy's exact 53-bit mapping ``(x >> 11) * 2**-53``. Reference vectors (rand_xoshiro) verified at compile time via ``static_assert`` and at test time against an independent pure-Python oracle. First NumPy-facing (``py::array_t``) extension in the repo; requires numpy at runtime only.
+- Benchmark: ``benchmarks/rng_throughput.py`` comparing ``pygim.rng`` against NumPy PCG64/SFC64/Philox with GB/s and speedup reporting.
 - Tests: Add a live MSSQL persistence round-trip test that auto-skips unless ``STRESS_CONN`` is reachable or the local Docker SQL Server on ``localhost:1433`` is available.
 - Initial CHANGELOG with retroactive notes for registry enhancement work.
 - Registry: Decorator-based registration via ``@registry.register(key, override=False)``.
