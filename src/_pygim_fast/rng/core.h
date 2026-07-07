@@ -508,11 +508,20 @@ private:
             if (nthreads <= 1 || full_blocks < 2) {
                 run_blocks(first_block, first_block + full_blocks, base);
             } else {
-                // jthread joins on destruction: if a spawn throws mid-loop
-                // (std::system_error under thread exhaustion), unwinding
-                // joins the already-started workers instead of calling
-                // std::terminate as ~thread would.
-                std::vector<std::jthread> workers;
+                // RAII joiner: if a spawn throws mid-loop (std::system_error
+                // under thread exhaustion), unwinding joins the started
+                // workers instead of calling std::terminate as ~thread
+                // would. (std::jthread would do this, but Apple Clang's
+                // libc++ does not ship it.)
+                std::vector<std::thread> workers;
+                struct Joiner {
+                    std::vector<std::thread>& threads;
+                    ~Joiner() {
+                        for (auto& t : threads) {
+                            if (t.joinable()) t.join();
+                        }
+                    }
+                } joiner{workers};
                 workers.reserve(nthreads);
                 const std::size_t per = full_blocks / nthreads;
                 const std::size_t rem = full_blocks % nthreads;
