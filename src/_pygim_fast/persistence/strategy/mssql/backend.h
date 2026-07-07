@@ -15,6 +15,14 @@
 #include <format>
 #include <string>
 #include <string_view>
+#include <vector>
+
+// Entra ID / Managed Identity access-token pre-connect attribute
+// (msodbcsql.h: SQL_COPT_SS_BASE + 56). Defined here because the build only
+// requires unixODBC headers, not the driver-specific msodbcsql.h.
+#ifndef SQL_COPT_SS_ACCESS_TOKEN
+#define SQL_COPT_SS_ACCESS_TOKEN 1256
+#endif
 
 namespace pygim::strategy::mssql {
 
@@ -51,6 +59,11 @@ struct OdbcConnection {
     SQLHDBC     m_dbc{SQL_NULL_HDBC};
     std::string m_conn_str;
     bool        m_connected{false};
+    // Packed ACCESSTOKEN struct. Microsoft: "The ACCESSTOKEN must remain
+    // allocated for as long as the connection handle is allocated", so the
+    // buffer lives here, matching the DBC's lifetime. (Vector moves keep the
+    // heap buffer address stable, so moving OdbcConnection is safe.)
+    std::vector<unsigned char> m_access_token;
 
     OdbcConnection() = default;
     ~OdbcConnection() noexcept { close(); }
@@ -59,7 +72,8 @@ struct OdbcConnection {
     OdbcConnection(OdbcConnection&& other) noexcept
         : m_env(other.m_env), m_dbc(other.m_dbc),
           m_conn_str(std::move(other.m_conn_str)),
-          m_connected(other.m_connected) {
+          m_connected(other.m_connected),
+          m_access_token(std::move(other.m_access_token)) {
         other.m_env = SQL_NULL_HENV;
         other.m_dbc = SQL_NULL_HDBC;
         other.m_connected = false;
@@ -71,6 +85,7 @@ struct OdbcConnection {
             m_dbc = other.m_dbc;
             m_conn_str = std::move(other.m_conn_str);
             m_connected = other.m_connected;
+            m_access_token = std::move(other.m_access_token);
             other.m_env = SQL_NULL_HENV;
             other.m_dbc = SQL_NULL_HDBC;
             other.m_connected = false;
@@ -81,8 +96,17 @@ struct OdbcConnection {
     OdbcConnection& operator=(const OdbcConnection&) = delete;
 
     /// Open an ODBC connection with BCP enabled.
-    void open(std::string_view conn_str, int packet_size = kDefaultPacketSize) {
+    ///
+    /// @param access_token  Optional packed ACCESSTOKEN struct (4-byte LE
+    ///     length + UTF-16-LE token bytes) set via SQL_COPT_SS_ACCESS_TOKEN
+    ///     before SQLDriverConnect (Entra ID / Managed Identity auth). Taken
+    ///     by value and stored on the connection: the driver documentation
+    ///     requires the buffer to remain allocated for the lifetime of the
+    ///     connection handle.
+    void open(std::string_view conn_str, int packet_size = kDefaultPacketSize,
+              std::vector<unsigned char> access_token = {}) {
         m_conn_str = ensure_packet_size(conn_str, packet_size);
+        m_access_token = std::move(access_token);
 
         // 1. Allocate environment handle + set ODBC 3.x
         if (SQLAllocHandle(SQL_HANDLE_ENV, SQL_NULL_HANDLE, &m_env) != SQL_SUCCESS)
@@ -111,6 +135,22 @@ struct OdbcConnection {
             m_dbc = SQL_NULL_HDBC;
             m_env = SQL_NULL_HENV;
             throw std::runtime_error("OdbcConnection: failed to enable BCP");
+        }
+
+        // 3b. Access token (MUST be set BEFORE SQLDriverConnect). Points at
+        //     the member buffer, whose lifetime matches the DBC as the
+        //     driver documentation requires.
+        if (!m_access_token.empty()) {
+            SQLRETURN tok_ret = SQLSetConnectAttr(
+                m_dbc, SQL_COPT_SS_ACCESS_TOKEN,
+                m_access_token.data(), SQL_IS_POINTER);
+            if (!SQL_SUCCEEDED(tok_ret)) {
+                SQLFreeHandle(SQL_HANDLE_DBC, m_dbc);
+                SQLFreeHandle(SQL_HANDLE_ENV, m_env);
+                m_dbc = SQL_NULL_HDBC;
+                m_env = SQL_NULL_HENV;
+                throw std::runtime_error("OdbcConnection: failed to set access token");
+            }
         }
 
         // 4. Connect via SQLDriverConnect
@@ -143,6 +183,29 @@ struct OdbcConnection {
             m_env = SQL_NULL_HENV;
         }
         PYGIM_LOG_FMT("[OdbcConnection] close()\n");
+    }
+
+    /// Toggle ODBC autocommit. Off = statements accumulate in a transaction
+    /// the caller finishes with commit()/rollback() (session mode).
+    void set_autocommit(bool on) {
+        SQLRETURN ret = SQLSetConnectAttr(
+            m_dbc, SQL_ATTR_AUTOCOMMIT,
+            reinterpret_cast<SQLPOINTER>(
+                static_cast<std::uintptr_t>(on ? SQL_AUTOCOMMIT_ON : SQL_AUTOCOMMIT_OFF)),
+            SQL_IS_UINTEGER);
+        odbc::raise_if_error(ret, SQL_HANDLE_DBC, m_dbc, "OdbcConnection: set_autocommit");
+    }
+
+    /// Commit the current manual-commit transaction.
+    void commit() {
+        SQLRETURN ret = SQLEndTran(SQL_HANDLE_DBC, m_dbc, SQL_COMMIT);
+        odbc::raise_if_error(ret, SQL_HANDLE_DBC, m_dbc, "OdbcConnection: commit");
+    }
+
+    /// Roll back the current manual-commit transaction.
+    void rollback() {
+        SQLRETURN ret = SQLEndTran(SQL_HANDLE_DBC, m_dbc, SQL_ROLLBACK);
+        odbc::raise_if_error(ret, SQL_HANDLE_DBC, m_dbc, "OdbcConnection: rollback");
     }
 
     /// Accessor: ODBC connection handle (needed by BCP pipeline).
@@ -183,6 +246,16 @@ struct MssqlBackend {
         PYGIM_LOG_FMT("[MssqlBackend] connect()\n");
         Connection conn;
         conn.open(conn_str, packet_size);
+        return conn;
+    }
+
+    /// Connect using an Entra ID / Managed Identity access token
+    /// (pre-packed ACCESSTOKEN struct; see OdbcConnection::open).
+    static Connection connect_with_token(std::string_view conn_str, int packet_size,
+                                         std::vector<unsigned char> access_token) {
+        PYGIM_LOG_FMT("[MssqlBackend] connect_with_token()\n");
+        Connection conn;
+        conn.open(conn_str, packet_size, std::move(access_token));
         return conn;
     }
 

@@ -11,6 +11,18 @@ Changelog
 
 Unreleased
 ----------
+Added
+~~~~~
+- Persistence: Entra ID / Managed Identity authentication via ``acquire_datastore(..., access_token=...)`` (keyword-only). Accepts the raw token as ``str``/``bytes`` or a zero-argument callable invoked per physical connect (short-lived tokens keep working as pooled connections are created); the ``SQL_COPT_SS_ACCESS_TOKEN`` packing is done internally and the packed buffer lives on the connection for its whole lifetime, per driver requirements. Conflicting ``UID``/``PWD``/``Trusted_Connection``/``Authentication`` keywords and pre-packed pyodbc-style tokens are rejected eagerly. Currently requires ``bcp_workers=1``/``load_workers=1``.
+- Persistence: Caller-owned transactions via ``DataStore.session()`` → ``DataStoreSession``. One pooled connection with autocommit off; every ``save``/``load`` through the session shares one transaction finished by ``commit()``/``rollback()``, making multi-table writes atomic (verified on SQL Server 2022: BCP rows, including multi-batch saves, fully participate in the manual-commit transaction; session saves additionally suppress mid-save batch commits). Context-manager form commits on clean exit, rolls back on exception, then closes. Cleanup failures discard the connection instead of repooling it.
+- Persistence: Keyed writes — ``DataStore.save(df, table, mode="upsert"|"insert_missing", keys=[...])`` (keyword-only). BCP-stages into a session-local temp table, then one atomic ``MERGE WITH (HOLDLOCK)`` (upsert) or anti-join ``INSERT`` (insert_missing); metrics gain ``affected_rows``. Duplicate merge-key values in the frame fail fast server-side; NULL or missing key columns fail before any connection; IDENTITY targets are handled via ``IDENTITY_INSERT`` automatically. Composes with sessions.
+- Persistence: ``save()`` on an empty frame is a defined no-op — zero-row metrics, no BCP session, no connection checkout.
+- Persistence: ``ConnectionPool`` gained a pluggable connect function, a discard path for suspect connections, and no longer leaks a pool slot when a connect attempt throws.
+
+Fixed
+~~~~~
+- Persistence/BCP: Dismiss the BCP session guard only after ``finalize_bcp`` — a failing final ``bcp_batch`` previously left the connection with a BCP operation in flight, poisoning it for every later statement (HY010).
+
 Changed
 ~~~~~~~
 - Wiring: Group internal registry, factory, and IoC native modules under ``src/_pygim_fast/wiring/`` while keeping public module names stable (``pygim.registry``, ``pygim.factory``, ``pygim.ioc``).

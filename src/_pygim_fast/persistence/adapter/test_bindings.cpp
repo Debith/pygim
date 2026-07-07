@@ -87,7 +87,18 @@ PYBIND11_MODULE(_persistence_test, m) {
              py::arg("block_size") = 4096,
              py::arg("packet_size") = 16384)
         .def("save", &MssqlRepo::save,
-             py::arg("data"), py::arg("table_name"), py::arg("bcp_workers") = -1)
+             py::arg("data"), py::arg("table_name"), py::arg("bcp_workers") = -1,
+             py::kw_only(),
+             py::arg("mode") = "append",
+             py::arg("keys") = std::vector<std::string>{})
+        .def_static("pack_access_token",
+             [](py::object source) {
+                 auto packed = MssqlRepo::pack_access_token(source);
+                 return py::bytes(reinterpret_cast<const char*>(packed.data()),
+                                  static_cast<py::ssize_t>(packed.size()));
+             },
+             py::arg("source"),
+             "Test hook: SQL_COPT_SS_ACCESS_TOKEN packing (4-byte LE length + UTF-16-LE).")
         .def("load",
              py::overload_cast<std::string_view, int, std::string_view>(&MssqlRepo::load),
              py::arg("source"), py::arg("load_workers") = 1,

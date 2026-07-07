@@ -139,6 +139,68 @@ public:
                                           m_packet_size);
     }
 
+    /// Keyed save (upsert / insert-missing) via pool checkout. Delegates to
+    /// Backend::SaveImpl::execute_keyed; the adapter gates availability with
+    /// a requires-check, so backends without keyed support never instantiate
+    /// this.
+    [[nodiscard]]
+    auto save_keyed(std::shared_ptr<arrow::Table> table_data, std::string_view table_name,
+                    int64_t batch_size, bool update_matched,
+                    const std::vector<std::string>& keys) {
+        auto result = m_pool->checkout();
+        if (!result) {
+            throw std::runtime_error(
+                std::format("Repository: checkout failed: {}", pool_error_name(result.error())));
+        }
+        auto handle = std::move(*result);
+        return Backend::SaveImpl::execute_keyed(handle.get(), std::move(table_data),
+                                                table_name, batch_size, update_matched, keys);
+    }
+
+    /// Keyed save on a caller-held connection (session mode).
+    [[nodiscard]]
+    auto save_keyed_on(typename Backend::Connection& conn,
+                       std::shared_ptr<arrow::Table> table_data, std::string_view table_name,
+                       int64_t batch_size, bool update_matched,
+                       const std::vector<std::string>& keys) {
+        return Backend::SaveImpl::execute_keyed(conn, std::move(table_data), table_name,
+                                                batch_size, update_matched, keys);
+    }
+
+    // ── Session-mode variants: operate on a caller-held connection ──
+    // Used by DataStoreSession so multiple saves/loads share one connection
+    // (and therefore one caller-controlled transaction).
+
+    /// save on an explicit connection; always single-connection BCP.
+    [[nodiscard]]
+    auto save_on(typename Backend::Connection& conn,
+                 std::shared_ptr<arrow::Table> table_data,
+                 std::string_view table_name,
+                 int64_t batch_size,
+                 const std::string& table_hint) {
+        return Backend::SaveImpl::execute(conn, std::move(table_data), table_name,
+                                          batch_size, table_hint, /*bcp_workers=*/1);
+    }
+
+    /// load on an explicit connection; always single-worker.
+    [[nodiscard]]
+    LoadResult load_on(typename Backend::Connection& conn, std::string_view source) {
+        std::string sql;
+        std::string table_name_str;
+        if (source.contains(' ')) {
+            sql = std::string(source);
+        } else {
+            table_name_str = std::string(source);
+            Query q;
+            q.from_table(source);
+            typename Backend::Dialect const dialect{};
+            sql = build_sql(q, dialect);
+        }
+        return Backend::LoadImpl::execute(conn, sql, /*load_workers=*/1,
+                                          /*partition_column=*/"", table_name_str,
+                                          m_load_cache, m_block_size, m_packet_size);
+    }
+
     [[nodiscard]] std::string_view connection_string() const {
         return m_pool->connection_string();
     }

@@ -420,11 +420,14 @@ inline void finalize_bcp(BcpContext& ctx) {
     }
 
     timer.start_sub_timer(BcpPhase::flush, false);
-    session_guard.dismiss();
     {
         BCP_PROF_SCOPE(prof, final_flush);
         finalize_bcp(ctx);
     }
+    // Dismiss AFTER finalize: if finalize_bcp throws before its bcp_done,
+    // the guard's bcp_done still runs, so the connection never returns to
+    // the pool with a BCP operation in flight (HY010 on every later call).
+    session_guard.dismiss();
     timer.stop_sub_timer(BcpPhase::flush, false);
 
     BCP_PROF_DUMP(prof, 0);
@@ -547,11 +550,11 @@ inline void finalize_bcp(BcpContext& ctx) {
                 }
 
                 wtimer.start_sub_timer(BcpWorkerPhase::flush, false);
-                guard.dismiss();
                 {
                     BCP_PROF_SCOPE(prof, final_flush);
                     finalize_bcp(ctx);
                 }
+                guard.dismiss();  // after finalize; see bulk_insert
                 wtimer.stop_sub_timer(BcpWorkerPhase::flush, false);
 
                 BCP_PROF_DUMP(prof, w);

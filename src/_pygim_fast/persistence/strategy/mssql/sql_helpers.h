@@ -26,6 +26,14 @@ namespace pygim::strategy::mssql::sql {
 /// Validates identifiers to prevent SQL injection — callers must route all
 /// user-supplied table names through this function.
 [[nodiscard]] inline std::string qualify_table(const std::string& table) {
+    // Temp tables ("#t" / "##t"): strip the hash prefix, validate the
+    // remainder, return as-is — they live in tempdb, not a user schema.
+    if (!table.empty() && table.front() == '#') {
+        std::string bare = table.substr(table.starts_with("##") ? 2 : 1);
+        if (!is_valid_identifier(bare))
+            throw std::runtime_error("Invalid table identifier: " + table);
+        return table;
+    }
     auto ok = [](const std::string& s) {
         if (is_valid_identifier(s)) return true;
         auto dot = s.find('.');

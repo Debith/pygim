@@ -28,11 +28,13 @@ try:
 
     Format = _ext.Format
     DataStore = _ext.DataStore
+    DataStoreSession = _ext.DataStoreSession
     acquire_datastore = _ext.acquire_datastore
 
     __all__ = [
         "Format",
         "DataStore",
+        "DataStoreSession",
         "acquire_datastore",
     ]
 except ImportError:  # pragma: no cover – extension absent (Arrow/ODBC not installed)

@@ -20,6 +20,8 @@
 #include <pybind11/pybind11.h>
 #include <pybind11/functional.h>
 
+#include <algorithm>
+#include <cctype>
 #include <cstdint>
 #include <format>
 #include <memory>
@@ -56,6 +58,31 @@ constexpr const char* format_name(Format f) {
     std::unreachable();
 }
 
+// ── Save modes ──────────────────────────────────────────────────
+
+/// Write disposition for save(): plain append (BCP insert), keyed upsert
+/// (BCP staging + MERGE), or keyed insert-missing (BCP staging + anti-join).
+enum class SaveMode { Append, Upsert, InsertMissing };
+
+[[nodiscard]] inline SaveMode parse_save_mode(std::string_view mode, bool has_keys) {
+    SaveMode parsed;
+    if (mode == "append") parsed = SaveMode::Append;
+    else if (mode == "upsert") parsed = SaveMode::Upsert;
+    else if (mode == "insert_missing") parsed = SaveMode::InsertMissing;
+    else throw py::value_error("Unknown save mode: '" + std::string(mode) +
+                               "'. Use 'append', 'upsert', or 'insert_missing'.");
+    if (parsed == SaveMode::Append && has_keys) {
+        throw py::value_error("keys are only valid with mode='upsert' or 'insert_missing'");
+    }
+    if (parsed != SaveMode::Append && !has_keys) {
+        throw py::value_error("mode='" + std::string(mode) + "' requires key columns (keys=[...])");
+    }
+    return parsed;
+}
+
+template <core::BackendPolicy Backend>
+class SessionAdapter;
+
 // ── RepositoryAdapter ───────────────────────────────────────────
 
 /// RepositoryAdapter<Backend> — Python-facing repository with format + transforms.
@@ -74,6 +101,7 @@ class RepositoryAdapter {
     int                        m_packet_size;
     std::string                m_table_hint;
     int                        m_bcp_workers;
+    bool                       m_token_auth;
     std::vector<py::function>  m_pre_transforms;
     std::vector<py::function>  m_post_transforms;
 
@@ -84,7 +112,8 @@ public:
                       const std::string& table_hint = "TABLOCK",
                       int bcp_workers = 1,
                       int64_t block_size = 4096,
-                      int packet_size = 16384)
+                      int packet_size = 16384,
+                      bool token_auth = false)
         : m_repo(std::move(pool), block_size, packet_size)
         , m_format(format)
         , m_batch_size(batch_size)
@@ -92,6 +121,7 @@ public:
         , m_packet_size(packet_size)
         , m_table_hint(table_hint)
         , m_bcp_workers(bcp_workers)
+        , m_token_auth(token_auth)
     {
         PYGIM_LOG_FMT("[RepositoryAdapter<%s>] created (format=%s, batch_size=%lld, hint=%s, workers=%d)\n",
                       Backend::name(), format_name(m_format),
@@ -107,12 +137,108 @@ public:
                                     const std::string& table_hint = "TABLOCK",
                                     int bcp_workers = 1,
                                     int64_t block_size = 4096,
-                                    int packet_size = 16384) {
+                                    int packet_size = 16384,
+                                    py::object access_token = py::none()) {
+        typename core::ConnectionPool<Backend>::ConnectFn connect_fn;
+        const bool token_auth = !access_token.is_none();
+        if (token_auth) {
+            if (bcp_workers > 1) {
+                throw py::value_error(
+                    "access_token currently requires bcp_workers=1: parallel "
+                    "workers open extra connections that would bypass token auth");
+            }
+            // Eager sanity checks: a wrong token TYPE or a conflicting auth
+            // keyword should fail at acquire time, not at first checkout.
+            if (!py::isinstance<py::str>(access_token) &&
+                !py::isinstance<py::bytes>(access_token) &&
+                !PyCallable_Check(access_token.ptr())) {
+                throw py::type_error(
+                    "access_token must be str, bytes, or a callable returning str/bytes");
+            }
+            std::string cs_lower(conn_str);
+            std::ranges::transform(cs_lower, cs_lower.begin(),
+                                   [](unsigned char c) { return std::tolower(c); });
+            std::erase(cs_lower, ' ');
+            for (const char* kw : {"uid=", "pwd=", "trusted_connection=", "authentication="}) {
+                if (cs_lower.contains(kw)) {
+                    throw py::value_error(
+                        std::string("access_token conflicts with '") + kw +
+                        "' in conn_str; remove credential/authentication keywords "
+                        "when using token auth");
+                }
+            }
+            // Tokens expire while pooled connections persist, so the token
+            // source (value or callable) is re-evaluated per physical connect.
+            connect_fn = [token_source = access_token](std::string_view cs,
+                                                       int ps) -> typename Backend::Connection {
+                std::vector<unsigned char> packed;
+                {
+                    // The GIL may or may not be held on this path; acquire is
+                    // reentrancy-safe either way.
+                    py::gil_scoped_acquire gil;
+                    packed = pack_access_token(token_source);
+                }
+                if constexpr (requires { Backend::connect_with_token(cs, ps, packed); }) {
+                    return Backend::connect_with_token(cs, ps, packed);
+                } else {
+                    throw std::runtime_error("access_token is not supported by this backend");
+                }
+            };
+        }
         auto pool = std::make_shared<core::ConnectionPool<Backend>>(
-            conn_str, pool_size, packet_size);
+            conn_str, pool_size, packet_size, std::move(connect_fn));
         return RepositoryAdapter(std::move(pool), format,
                                  batch_size, table_hint, bcp_workers,
-                                 block_size, packet_size);
+                                 block_size, packet_size, token_auth);
+    }
+
+    /// Convert a Python token source into the packed ACCESSTOKEN struct
+    /// (4-byte LE byte-length + UTF-16-LE token). Accepts the RAW token as
+    /// str/bytes — packing is done here, unlike pyodbc's attrs_before which
+    /// expects the caller to pack — or a zero-argument callable returning
+    /// str/bytes (invoked per physical connect, so short-lived tokens work).
+    [[nodiscard]] static std::vector<unsigned char> pack_access_token(const py::object& source) {
+        py::object token = source;
+        if (!py::isinstance<py::str>(token) && !py::isinstance<py::bytes>(token)) {
+            if (!PyCallable_Check(token.ptr())) {
+                throw py::type_error(
+                    "access_token must be str, bytes, or a callable returning str/bytes");
+            }
+            token = token();
+        }
+        std::string raw;
+        if (py::isinstance<py::str>(token) || py::isinstance<py::bytes>(token)) {
+            raw = token.cast<std::string>();
+        } else {
+            throw py::type_error("access_token callable must return str or bytes");
+        }
+        if (raw.empty()) {
+            throw py::value_error("access_token must not be empty");
+        }
+        if (raw.find('\0') != std::string::npos) {
+            throw py::value_error(
+                "access_token appears to be pre-packed (pyodbc attrs_before format); "
+                "pass the raw token string instead — pygim performs the packing");
+        }
+        for (unsigned char c : raw) {
+            if (c >= 0x80) {
+                throw py::value_error(
+                    "access_token must be ASCII (pass the raw token; pygim performs "
+                    "the UTF-16 expansion and length prefix itself)");
+            }
+        }
+        std::vector<unsigned char> packed;
+        packed.reserve(4 + raw.size() * 2);
+        const std::uint32_t byte_len = static_cast<std::uint32_t>(raw.size() * 2);
+        packed.push_back(static_cast<unsigned char>(byte_len & 0xFF));
+        packed.push_back(static_cast<unsigned char>((byte_len >> 8) & 0xFF));
+        packed.push_back(static_cast<unsigned char>((byte_len >> 16) & 0xFF));
+        packed.push_back(static_cast<unsigned char>((byte_len >> 24) & 0xFF));
+        for (unsigned char c : raw) {
+            packed.push_back(c);
+            packed.push_back(0);
+        }
+        return packed;
     }
 
     // ── Transform hooks ──────────────────────────────────────
@@ -143,24 +269,139 @@ public:
     /// @return py::dict with timing metrics (total/connect/bind/row_loop/
     ///         batch_flush_seconds) and row counts.
     /// @throws std::runtime_error on zero rows, ODBC errors, or unsupported types.
-    py::dict save(py::object data, std::string_view table_name, int bcp_workers = -1) {
+    py::dict save(py::object data, std::string_view table_name, int bcp_workers = -1,
+                  std::string_view mode = "append", std::vector<std::string> keys = {}) {
+        return save_common(nullptr, std::move(data), table_name, bcp_workers, mode, keys);
+    }
+
+    /// Session-mode save: runs on the caller-held connection (one shared
+    /// transaction), always single-connection BCP.
+    py::dict save_on_connection(typename Backend::Connection& conn, py::object data,
+                                std::string_view table_name,
+                                std::string_view mode, std::vector<std::string> keys) {
+        return save_common(&conn, std::move(data), table_name, /*bcp_workers=*/1, mode, keys);
+    }
+
+private:
+    py::dict save_common(typename Backend::Connection* explicit_conn, py::object data,
+                         std::string_view table_name, int bcp_workers,
+                         std::string_view mode_str, const std::vector<std::string>& keys) {
         PYGIM_TIMED_SCOPE("RepositoryAdapter::save");
+        const SaveMode mode = parse_save_mode(mode_str, !keys.empty());
         run_transforms("pre_save", m_pre_transforms);
 
         // Import Arrow data as Table (GIL held — needed for Python object access)
         auto table_data = import_table(data);
         int workers = (bcp_workers >= 0) ? bcp_workers : m_bcp_workers;
+        if (m_token_auth && workers > 1) {
+            throw py::value_error(
+                "access_token currently requires bcp_workers=1: parallel workers "
+                "open extra connections that would bypass token auth");
+        }
 
-        // BCP pipeline (GIL released — pure C++; reacquired on IIFE return)
-        auto metrics = [&] {
-            py::gil_scoped_release release;
-            return m_repo.save(std::move(table_data), table_name,
-                               m_batch_size, m_table_hint, workers);
-        }();
+        // Keyed-mode frame validation runs BEFORE the empty-frame return and
+        // before any checkout: a typo'd key must fail on empty frames too,
+        // and NULL key values would silently duplicate on every re-run
+        // (NULL never equality-matches in the MERGE ON clause).
+        if (mode != SaveMode::Append) {
+            validate_frame_keys(*table_data, keys);
+        }
+
+        // Empty-frame no-op contract: no BCP session, no connection checkout,
+        // zero-row metrics returned so callers need no is_empty() guard.
+        if (table_data->num_rows() == 0) {
+            py::dict zero = zero_metrics();
+            if (mode != SaveMode::Append) zero["affected_rows"] = 0;
+            run_transforms("post_save", m_post_transforms);
+            return zero;
+        }
+
+        // Session saves suppress mid-save bcp_batch flushes (batch = whole
+        // frame): atomicity then never depends on driver behavior for
+        // batch-commits inside a manual-commit transaction.
+        const int64_t batch_size = explicit_conn != nullptr
+            ? std::max<int64_t>(table_data->num_rows(), 1)
+            : m_batch_size;
+
+        py::dict result;
+        if (mode == SaveMode::Append) {
+            auto metrics = [&] {
+                py::gil_scoped_release release;
+                if (explicit_conn != nullptr) {
+                    return m_repo.save_on(*explicit_conn, std::move(table_data),
+                                          table_name, batch_size, m_table_hint);
+                }
+                return m_repo.save(std::move(table_data), table_name,
+                                   batch_size, m_table_hint, workers);
+            }();
+            result = metrics_to_dict(metrics);
+        } else {
+            // Keyed writes stage over one connection (local temp table
+            // visibility), then apply a single set-based statement.
+            const bool update_matched = (mode == SaveMode::Upsert);
+            if constexpr (requires(typename Backend::Connection& c) {
+                              Backend::SaveImpl::execute_keyed(c, table_data, table_name,
+                                                               batch_size, update_matched, keys);
+                          }) {
+                auto keyed = [&] {
+                    py::gil_scoped_release release;
+                    if (explicit_conn != nullptr) {
+                        return m_repo.save_keyed_on(*explicit_conn, std::move(table_data),
+                                                    table_name, batch_size, update_matched, keys);
+                    }
+                    return m_repo.save_keyed(std::move(table_data), table_name,
+                                             batch_size, update_matched, keys);
+                }();
+                result = metrics_to_dict(keyed.metrics);
+                result["affected_rows"] = keyed.affected_rows;
+            } else {
+                throw std::runtime_error("keyed saves are not supported by this backend");
+            }
+        }
 
         run_transforms("post_save", m_post_transforms);
+        return result;
+    }
 
-        // Convert metrics to Python dict (GIL held)
+    /// Generic pre-checkout key validation on the Arrow frame: membership
+    /// (works on empty frames — the schema is still present) and NULL-free
+    /// key columns. Backend-side validation remains as defense in depth.
+    static void validate_frame_keys(const arrow::Table& table,
+                                    const std::vector<std::string>& keys) {
+        std::string missing, nulled;
+        for (const auto& key : keys) {
+            auto column = table.GetColumnByName(key);
+            if (column == nullptr) {
+                missing += (missing.empty() ? "" : ", ") + key;
+            } else if (column->null_count() > 0) {
+                nulled += (nulled.empty() ? "" : ", ") + key;
+            }
+        }
+        if (!missing.empty()) {
+            throw py::value_error("key column(s) not present in the frame: " + missing);
+        }
+        if (!nulled.empty()) {
+            throw py::value_error(
+                "key column(s) contain NULLs (NULL keys never match and would "
+                "duplicate on every save): " + nulled);
+        }
+    }
+
+    [[nodiscard]] static py::dict zero_metrics() {
+        py::dict result;
+        result["total_seconds"]       = 0.0;
+        result["connect_seconds"]     = 0.0;
+        result["bind_seconds"]        = 0.0;
+        result["row_loop_seconds"]    = 0.0;
+        result["batch_flush_seconds"] = 0.0;
+        result["processed_rows"]      = 0;
+        result["sent_rows"]           = 0;
+        result["record_batches"]      = 0;
+        return result;
+    }
+
+    template <typename Metrics>
+    [[nodiscard]] static py::dict metrics_to_dict(const Metrics& metrics) {
         py::dict result;
         result["total_seconds"]       = metrics.total_seconds;
         result["connect_seconds"]     = metrics.connect_seconds;
@@ -198,11 +439,17 @@ public:
         return result;
     }
 
+public:
     /// Load data from a table name or raw SQL query.
     /// Returns a Polars or Pandas DataFrame (based on format setting).
     py::object load(std::string_view source, int load_workers = 1,
                     std::string_view partition_column = "") {
         PYGIM_TIMED_SCOPE("RepositoryAdapter::load");
+        if (m_token_auth && load_workers > 1) {
+            throw py::value_error(
+                "access_token currently requires load_workers=1: parallel workers "
+                "open extra connections that would bypass token auth");
+        }
         run_transforms("pre_load", m_pre_transforms);
 
         // Release GIL for ODBC operations (pure C++)
@@ -224,6 +471,11 @@ public:
     py::object load(core::Query const& query, int load_workers = 1,
                     std::string_view partition_column = "") {
         PYGIM_TIMED_SCOPE("RepositoryAdapter::load(query)");
+        if (m_token_auth && load_workers > 1) {
+            throw py::value_error(
+                "access_token currently requires load_workers=1: parallel workers "
+                "open extra connections that would bypass token auth");
+        }
         run_transforms("pre_load", m_pre_transforms);
 
         auto result = [&] {
@@ -237,6 +489,27 @@ public:
         run_transforms("post_load", m_post_transforms);
         return df;
     }
+
+    /// Session-mode load: runs on the caller-held connection, single-worker.
+    py::object load_on_connection(typename Backend::Connection& conn, std::string_view source) {
+        PYGIM_TIMED_SCOPE("RepositoryAdapter::load(session)");
+        run_transforms("pre_load", m_pre_transforms);
+
+        auto result = [&] {
+            py::gil_scoped_release release;
+            return m_repo.load_on(conn, source);
+        }();
+
+        auto df = export_table(std::move(result.table),
+                               m_format == Format::Polars);
+
+        run_transforms("post_load", m_post_transforms);
+        return df;
+    }
+
+    /// Open a caller-owned transaction session: one pooled connection,
+    /// autocommit off, explicit commit()/rollback(). See SessionAdapter.
+    [[nodiscard]] std::unique_ptr<SessionAdapter<Backend>> session();
 
     // ── Introspection ────────────────────────────────────────
 
@@ -259,5 +532,126 @@ private:
         }
     }
 };
+
+// ── SessionAdapter ──────────────────────────────────────────────
+
+/// SessionAdapter — caller-owned transaction over one pooled connection.
+///
+/// Holds a checked-out connection with autocommit OFF for its lifetime, so
+/// every save()/load() through the session shares one transaction that the
+/// caller finishes with commit()/rollback(). Multi-table writes become
+/// atomic. close() rolls back anything uncommitted, restores autocommit,
+/// and returns the connection to the pool.
+///
+/// Python-side lifetime: bindings keep the parent DataStore alive for as
+/// long as the session exists (keep_alive), and __exit__ commits on clean
+/// exit / rolls back on exception.
+template <core::BackendPolicy Backend>
+class SessionAdapter {
+    RepositoryAdapter<Backend>&      m_parent;   //!< bindings pin its lifetime
+    core::ConnectionHandle<Backend>  m_handle;   //!< held for the session
+    bool                             m_open{true};
+
+public:
+    SessionAdapter(RepositoryAdapter<Backend>& parent,
+                   core::ConnectionHandle<Backend> handle)
+        : m_parent(parent)
+        , m_handle(std::move(handle)) {
+        if constexpr (requires { m_handle.get().set_autocommit(false); }) {
+            try {
+                m_handle.get().set_autocommit(false);
+            } catch (...) {
+                // The connection's state is unknown; never let a suspect
+                // connection re-enter the pool.
+                m_handle.discard();
+                throw;
+            }
+        } else {
+            throw std::runtime_error("sessions are not supported by this backend");
+        }
+    }
+
+    ~SessionAdapter() {
+        try { close(); } catch (...) {}
+    }
+
+    SessionAdapter(const SessionAdapter&)            = delete;
+    SessionAdapter& operator=(const SessionAdapter&) = delete;
+
+    py::dict save(py::object data, std::string_view table_name,
+                  std::string_view mode = "append", std::vector<std::string> keys = {}) {
+        ensure_open();
+        return m_parent.save_on_connection(m_handle.get(), std::move(data),
+                                           table_name, mode, std::move(keys));
+    }
+
+    py::object load(std::string_view source) {
+        ensure_open();
+        return m_parent.load_on_connection(m_handle.get(), source);
+    }
+
+    /// Commit the current transaction. The session stays usable; the next
+    /// statement implicitly opens a new transaction (autocommit stays off).
+    void commit() {
+        ensure_open();
+        py::gil_scoped_release release;
+        m_handle.get().commit();
+    }
+
+    /// Roll back the current transaction. The session stays usable.
+    void rollback() {
+        ensure_open();
+        py::gil_scoped_release release;
+        m_handle.get().rollback();
+    }
+
+    /// Roll back anything uncommitted, restore autocommit, return the
+    /// connection to the pool. Idempotent; the session is unusable after.
+    /// If either cleanup step fails, the connection's transaction state is
+    /// unknown — pooling it would make later plain saves write into an
+    /// uncommitted transaction (silent data loss) — so it is destroyed and
+    /// its pool slot freed instead.
+    void close() {
+        if (!m_open) return;
+        m_open = false;
+        py::gil_scoped_release release;
+        bool clean = true;
+        try { m_handle.get().rollback(); } catch (...) { clean = false; }
+        try { m_handle.get().set_autocommit(true); } catch (...) { clean = false; }
+        if (clean) {
+            m_handle.release();
+        } else {
+            m_handle.discard();
+        }
+    }
+
+    [[nodiscard]] bool closed() const noexcept { return !m_open; }
+
+    [[nodiscard]] std::string repr() const {
+        return std::format("DataStoreSession(backend={}, {})",
+                           Backend::name(), m_open ? "open" : "closed");
+    }
+
+private:
+    void ensure_open() const {
+        if (!m_open) {
+            throw std::runtime_error("DataStoreSession is closed");
+        }
+    }
+};
+
+template <core::BackendPolicy Backend>
+std::unique_ptr<SessionAdapter<Backend>> RepositoryAdapter<Backend>::session() {
+    // Checkout can connect (network I/O) or wait up to the pool timeout for
+    // a free slot: never do that holding the GIL — a waiting session() would
+    // stall every Python thread, including the one about to free a slot.
+    py::gil_scoped_release release;
+    auto checkout = m_repo.pool()->checkout();
+    if (!checkout) {
+        throw std::runtime_error(std::format(
+            "session: checkout failed: {}", core::pool_error_name(checkout.error())));
+    }
+    return std::make_unique<SessionAdapter<Backend>>(*this, std::move(*checkout));
+}
 
 } // namespace pygim::adapter

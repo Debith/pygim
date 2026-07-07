@@ -1,6 +1,16 @@
 # pygim persistence — repository-oriented improvements
 
-Status: draft · Audience: `pygim` maintainers.
+Status: P0 + 2.6 implemented (branch `core/persistence-repository`) · Audience: `pygim` maintainers.
+
+> **Implementation status (2026-07-07).** Sections 2.1, 2.2, 2.3 and 2.6 are
+> implemented and live-verified against SQL Server 2022. Shipped names differ
+> slightly from the sketches below: `access_token=` (str/bytes/callable — the
+> raw token; pygim performs the `SQL_COPT_SS_ACCESS_TOKEN` packing, unlike
+> pyodbc's `attrs_before`), `DataStore.session()` (no explicit `begin()` —
+> ODBC manual-commit transactions start implicitly; the `connection=`
+> parameter variant was subsumed by sessions), and `mode="upsert" /
+> "insert_missing"` with `keys=[...]`. A generic `attrs_before`-style
+> pre-connect map remains out of scope. Sections 2.4/2.5/2.7–2.12 are open.
 
 This document lists concrete changes the `pygim.persistence` `DataStore` (the
 C++/ODBC extension) would need to serve a **repository / data-access layer** more
