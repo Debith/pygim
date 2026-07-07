@@ -42,6 +42,11 @@ Concise, actionable guidance for AI agents contributing to this repo. Focus on t
 - Adding a new C++ extension: place sources under `src/_pygim_fast/`, follow existing binding style (`PYBIND11_MODULE(name, m) { ... }`), ensure module file name (target) matches import path `pygim.<name>` by updating build configuration if necessary (setup derives from setuptools discovery).
   - Registry constructor parameters (current): `policy: str`, `hooks: bool`, optional `capacity: int` (use to reserve underlying map when bulk-registering to avoid rehash).
 - Persistence extension build: requires `arrow-cpp >= 15` and MS ODBC Driver 18 (`msodbcsql18`). Install via conda: `conda install -c conda-forge 'arrow-cpp>=15' pyarrow unixodbc`. Compile-time `static_assert` in `bcp_types.h` fails with actionable message if Arrow version is too old.
+- **CI verification after every push (required)**: pushing a branch is not done until the GitHub Actions run for that push is green. Local tests are NOT sufficient — the matrix covers 3 OSes × Python 3.9–3.14, and failures routinely appear only there (older-Python semantics, MSVC, macOS runner drift). Check the run and per-job results via the API (no `gh` CLI on dev machines):
+  - `curl -s "https://api.github.com/repos/Debith/pygim/actions/runs?branch=<branch>&per_page=1"` → run id, status, conclusion.
+  - `curl -s "https://api.github.com/repos/Debith/pygim/actions/runs/<id>/jobs?per_page=30"` → per-job conclusions and the failing step names.
+  - Job logs require a token (fine-grained PAT with Actions:read): `curl -sL -H "Authorization: Bearer $GITHUB_TOKEN" .../actions/jobs/<job_id>/logs`.
+  - A run takes ~4–6 minutes; poll until `completed`, then fix failures before moving on. If a failure predates your change (compare against the previous run on the same branch), say so explicitly rather than ignoring it.
 
 ## 4. Conventions & Gotchas
 - Naming: Internal modules prefixed with `_pygim`; exported symbols live under `pygim`. Avoid leaking private `_core` internals into public namespace unless explicitly added to `__all__` in a public module.
