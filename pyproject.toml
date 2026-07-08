@@ -1,5 +1,9 @@
 [build-system]
-requires = ["setuptools", "wheel", "tomli; python_version < '3.11'", "pybind11", "setuptools_scm[toml]>=8", "pyarrow>=15"]
+# pyarrow is pinned to a single major: the Arrow/ODBC extensions link
+# libarrow via an $ORIGIN/../pyarrow rpath and the release wheels exclude
+# libarrow from repair, so the build-time and runtime pyarrow majors must
+# match (design doc 2.12). Keep this pin in lockstep with `dependencies`.
+requires = ["setuptools", "wheel", "tomli; python_version < '3.11'", "pybind11", "setuptools_scm[toml]>=8", "pyarrow>=23,<24"]
 build-backend = "setuptools.build_meta"
 backend-path = []
 
@@ -24,7 +28,9 @@ classifiers = [
 ]
 dependencies = [
   "click>=8",
-  "pyarrow>=15",
+  # ABI-locked to the build-time major (see [build-system].requires): the
+  # persistence/datagen wheels carry a DT_NEEDED on the pyarrow SONAME.
+  "pyarrow>=23,<24",
   "polars>=0.20",
   "tabulate>=0.9",
   "typing_extensions>=4.0",

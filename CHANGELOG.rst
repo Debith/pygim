@@ -13,18 +13,34 @@ Unreleased
 ----------
 Added
 ~~~~~
+- Persistence: Typed error hierarchy under ``GimError`` — ``DataStoreIntegrityError`` (constraint violations; skip/dedup), ``DataStoreTransientError`` (connection loss, deadlock victim, timeouts; retry), ``DataStoreDataError`` (conversion/truncation). Classified from the ODBC SQLSTATE class; exceptions carry ``sqlstate`` and ``native_error`` attributes.
+- Persistence: Pre-save schema validation — every ``save()`` checks the frame against the target's ``sys.columns`` catalog and fails fast with one structured error naming all offending columns (unknown columns, NULLs headed into NOT NULL, required columns missing without defaults, cross-family type mismatches, nonexistent tables). ``DataStore.describe(table)`` exposes the same catalog (name/type/nullability/identity/computed/default per column).
+- Persistence: Parameter-bound loads — ``Query.where("status = ?", ["Approved"])`` (repeated calls AND-combine), ``Query.where_in("id", ids)`` (empty list matches nothing), and ``load(sql, params=[...])`` on stores and sessions. Values bind through ODBC parameters (strings as UTF-16), never string concatenation. ``Query`` is now exported from the production module.
+- Persistence: ``DataStore.truncate(table)`` and ``DataStore.delete(table, where=..., params=...)`` (returns affected rows), also on sessions — an atomic replace is truncate + save inside one session transaction (rollback verified live).
+- Persistence: ``acquire_datastore`` accepts SQLAlchemy-style URLs (``mssql+pyodbc://user:pass@host:port/db?driver=...`` and the ``odbc_connect=`` form) alongside raw ODBC DSNs; translation is internal, no SQLAlchemy dependency.
+- Persistence: Three-part table names (``database.schema.table``) accepted and quoted part-by-part across save/load/keyed writes/maintenance.
+- Persistence: Type stubs — ``pygim/persistence.pyi`` documents the stable API including the ``SaveMetrics`` schema; ``py.typed`` (partial) marker shipped in wheels.
+- Packaging: cibuildwheel now builds the persistence extension into Linux/macOS wheels (unixODBC headers installed in the build image; ``libarrow``/``libparquet`` deliberately NOT vendored — the extension links the user's pyarrow via rpath; ``libodbc`` is vendored, drivers still resolve via the system ``odbcinst.ini``).
+
+Fixed
+~~~~~
+- Persistence/BCP: Fix silent data loss on constraint violations — ``bcp_batch``/``bcp_done`` return rows COMMITTED, and rejected rows (e.g. duplicate keys, error 2627) were silently dropped while ``save()`` reported success. The pipeline now tracks committed counts and raises ``DataStoreIntegrityError`` on any shortfall, on both single-connection and parallel paths.
+- Persistence: Parallel loads (``load_workers > 1``) silently DROPPED the query's WHERE/columns/limit — the range-partitioned path builds its own SQL. Filtered or parameterized queries now fall back to single-worker and honor the predicate; only plain full-table scans partition.
+- Persistence/BCP: Plain ``save()`` (append) bound the frame to table columns by position, so a frame with correct names in the wrong order — or omitting an IDENTITY column — silently wrote values into the wrong columns. Append now validates positional correspondence and fails fast; use ``mode="upsert"``/``"insert_missing"`` (MERGE by name) for partial or reordered frames.
+- Persistence/BCP: A unique index declared ``WITH (IGNORE_DUP_KEY = ON)`` drops duplicate rows by design; the commit-shortfall check now recognizes that case (message 3604) and does not raise for it.
+- Persistence/BCP: Dismiss the BCP session guard only after ``finalize_bcp`` — a failing final ``bcp_batch`` previously left the connection with a BCP operation in flight, poisoning it for every later statement (HY010).
+
+Added
+~~~~~
 - Persistence: Entra ID / Managed Identity authentication via ``acquire_datastore(..., access_token=...)`` (keyword-only). Accepts the raw token as ``str``/``bytes`` or a zero-argument callable invoked per physical connect (short-lived tokens keep working as pooled connections are created); the ``SQL_COPT_SS_ACCESS_TOKEN`` packing is done internally and the packed buffer lives on the connection for its whole lifetime, per driver requirements. Conflicting ``UID``/``PWD``/``Trusted_Connection``/``Authentication`` keywords and pre-packed pyodbc-style tokens are rejected eagerly. Currently requires ``bcp_workers=1``/``load_workers=1``.
 - Persistence: Caller-owned transactions via ``DataStore.session()`` → ``DataStoreSession``. One pooled connection with autocommit off; every ``save``/``load`` through the session shares one transaction finished by ``commit()``/``rollback()``, making multi-table writes atomic (verified on SQL Server 2022: BCP rows, including multi-batch saves, fully participate in the manual-commit transaction; session saves additionally suppress mid-save batch commits). Context-manager form commits on clean exit, rolls back on exception, then closes. Cleanup failures discard the connection instead of repooling it.
 - Persistence: Keyed writes — ``DataStore.save(df, table, mode="upsert"|"insert_missing", keys=[...])`` (keyword-only). BCP-stages into a session-local temp table, then one atomic ``MERGE WITH (HOLDLOCK)`` (upsert) or anti-join ``INSERT`` (insert_missing); metrics gain ``affected_rows``. Duplicate merge-key values in the frame fail fast server-side; NULL or missing key columns fail before any connection; IDENTITY targets are handled via ``IDENTITY_INSERT`` automatically. Composes with sessions.
 - Persistence: ``save()`` on an empty frame is a defined no-op — zero-row metrics, no BCP session, no connection checkout.
 - Persistence: ``ConnectionPool`` gained a pluggable connect function, a discard path for suspect connections, and no longer leaks a pool slot when a connect attempt throws.
 
-Fixed
-~~~~~
-- Persistence/BCP: Dismiss the BCP session guard only after ``finalize_bcp`` — a failing final ``bcp_batch`` previously left the connection with a BCP operation in flight, poisoning it for every later statement (HY010).
-
 Changed
 ~~~~~~~
+- Persistence: ``Query.where()`` now AND-combines with any existing predicate instead of replacing it (repeated calls conjoin); callers that relied on ``where()`` overwriting must build a fresh ``Query``.
 - Wiring: Group internal registry, factory, and IoC native modules under ``src/_pygim_fast/wiring/`` while keeping public module names stable (``pygim.registry``, ``pygim.factory``, ``pygim.ioc``).
 - Wiring: Factor shared pybind adapter validation helpers into ``src/_pygim_fast/wiring/common/`` for reuse across wiring modules.
 - Build: Move native extension ``ext.*.toml`` manifests next to their corresponding module sources and resolve manifest ``sources`` relative to each TOML file.

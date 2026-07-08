@@ -86,7 +86,11 @@ public:
                     std::string_view partition_column = "") {
         typename Backend::Dialect const dialect{};
         auto sql = build_sql(query, dialect);
-        std::string table_name_str(query.table());
+        // Parallel range-partitioning builds its own SQL and would silently
+        // drop predicates/columns/limit/params: only plain full-table scans
+        // may take that path; anything else falls back to single-worker.
+        std::string table_name_str = query.is_plain_table_scan()
+            ? std::string(query.table()) : std::string{};
         PYGIM_LOG_FMT("[Repository<%s>] load(sql=\"%s\")\n",
                       backend_name(), sql.c_str());
 
@@ -99,7 +103,7 @@ public:
         return Backend::LoadImpl::execute(handle.get(), sql, load_workers,
                                           partition_column, table_name_str,
                                           m_load_cache, m_block_size,
-                                          m_packet_size);
+                                          m_packet_size, query.params());
     }
 
     /// Load from a table name or raw SQL string.
@@ -182,6 +186,17 @@ public:
                                           batch_size, table_hint, /*bcp_workers=*/1);
     }
 
+    /// load a Query on an explicit connection; always single-worker.
+    [[nodiscard]]
+    LoadResult load_on(typename Backend::Connection& conn, Query const& query) {
+        typename Backend::Dialect const dialect{};
+        auto sql = build_sql(query, dialect);
+        return Backend::LoadImpl::execute(conn, sql, /*load_workers=*/1,
+                                          /*partition_column=*/"", std::string{},
+                                          m_load_cache, m_block_size, m_packet_size,
+                                          query.params());
+    }
+
     /// load on an explicit connection; always single-worker.
     [[nodiscard]]
     LoadResult load_on(typename Backend::Connection& conn, std::string_view source) {
@@ -201,6 +216,35 @@ public:
                                           m_load_cache, m_block_size, m_packet_size);
     }
 
+    /// Catalog description of a table (delegates to the backend SaveImpl).
+    [[nodiscard]]
+    auto describe_table(std::string_view table_name) {
+        auto handle = checkout_or_throw();
+        return Backend::SaveImpl::describe_table(handle.get(), table_name);
+    }
+
+    void truncate_table(std::string_view table_name) {
+        auto handle = checkout_or_throw();
+        Backend::SaveImpl::execute_truncate(handle.get(), table_name);
+    }
+
+    void truncate_table_on(typename Backend::Connection& conn, std::string_view table_name) {
+        Backend::SaveImpl::execute_truncate(conn, table_name);
+    }
+
+    [[nodiscard]]
+    long long delete_rows(std::string_view table_name, const std::string& where,
+                          const std::vector<QueryParam>& params) {
+        auto handle = checkout_or_throw();
+        return Backend::SaveImpl::execute_delete(handle.get(), table_name, where, params);
+    }
+
+    [[nodiscard]]
+    long long delete_rows_on(typename Backend::Connection& conn, std::string_view table_name,
+                             const std::string& where, const std::vector<QueryParam>& params) {
+        return Backend::SaveImpl::execute_delete(conn, table_name, where, params);
+    }
+
     [[nodiscard]] std::string_view connection_string() const {
         return m_pool->connection_string();
     }
@@ -208,6 +252,15 @@ public:
     [[nodiscard]] std::shared_ptr<ConnectionPool<Backend>> const& pool() const { return m_pool; }
 
 private:
+    [[nodiscard]] ConnectionHandle<Backend> checkout_or_throw() {
+        auto result = m_pool->checkout();
+        if (!result) {
+            throw std::runtime_error(
+                std::format("Repository: checkout failed: {}", pool_error_name(result.error())));
+        }
+        return std::move(*result);
+    }
+
     static constexpr const char* backend_name() {
         return Backend::name();
     }

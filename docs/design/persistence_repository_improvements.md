@@ -1,6 +1,6 @@
 # pygim persistence — repository-oriented improvements
 
-Status: P0 + 2.6 implemented (branch `core/persistence-repository`) · Audience: `pygim` maintainers.
+Status: ALL items implemented (2.1–2.12; branch `core/persistence-repository`) · Audience: `pygim` maintainers.
 
 > **Implementation status (2026-07-07).** Sections 2.1, 2.2, 2.3 and 2.6 are
 > implemented and live-verified against SQL Server 2022. Shipped names differ
@@ -10,7 +10,38 @@ Status: P0 + 2.6 implemented (branch `core/persistence-repository`) · Audience:
 > ODBC manual-commit transactions start implicitly; the `connection=`
 > parameter variant was subsumed by sessions), and `mode="upsert" /
 > "insert_missing"` with `keys=[...]`. A generic `attrs_before`-style
-> pre-connect map remains out of scope. Sections 2.4/2.5/2.7–2.12 are open.
+> pre-connect map remains out of scope.
+>
+> **P1/P2 implementation (2026-07-08).** 2.4: automatic pre-save validation
+> (sys.columns) + `DataStore.describe(table)`. 2.5: `DataStoreIntegrityError`
+> / `DataStoreTransientError` / `DataStoreDataError` under `GimError`, with
+> `sqlstate` + `native_error` attributes. 2.7: `Query.where(clause, params)`
+> / `where_in` / `load(..., params=[...])`, bound via ODBC parameters; note
+> the fluent `where()` now AND-combines rather than replacing. 2.8:
+> `persistence.pyi` + partial `py.typed`; SaveMetrics documented there. 2.9:
+> SQLAlchemy-URL translation built in (no SQLAlchemy dependency). 2.10:
+> three-part names. 2.11: `truncate` / `delete(where=, params=)` on stores
+> and sessions. 2.12: cibuildwheel builds persistence into wheels (validate
+> via a workflow_dispatch run of publish.yml before tagging a release).
+> Bonus fixes surfaced by this work: BCP constraint violations no longer
+> pass silently (committed-row shortfall → IntegrityError), and parallel
+> loads no longer drop WHERE clauses.
+>
+> **Adversarial-review hardening (2026-07-08).** A three-reviewer pass
+> (C++/lifetime, DB-semantics, API/conventions) drove follow-up fixes:
+> 3-part / temp-table schema validation now queries the *target* database's
+> `sys.columns` (was current-DB scoped); plain append validates positional
+> correspondence and fails fast instead of silently mis-binding a reordered
+> or column-omitting frame; the commit-shortfall error is classified from the
+> driver's own diagnostics and honours `IGNORE_DUP_KEY`; the BCP guard is
+> dismissed only after `bcp_done` succeeds; bound-parameter buffers are
+> function-scoped, UTF-8 minimality is enforced, and strings > 4000 UTF-16
+> units bind as `SQL_WLONGVARCHAR`; duplicate frame columns and case-only
+> catalog differences are handled; `where_in` guards the ~2100-parameter cap;
+> `GimError.sqlstate`/`native_error` have class-level defaults; the top-level
+> `pygim.acquire_datastore` now shares the URL translation; the SQLAlchemy-URL
+> translator brace-quotes hostile values and supports the named-DSN form; and
+> the wheel CI smoke-tests `pygim.persistence` with a pinned pyarrow major.
 
 This document lists concrete changes the `pygim.persistence` `DataStore` (the
 C++/ODBC extension) would need to serve a **repository / data-access layer** more

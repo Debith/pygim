@@ -48,11 +48,84 @@ PYBIND11_MODULE(_persistence, m) {
     // maintaining backward compatibility with existing except RuntimeError catches.
     static auto gim_error = py::exception<std::runtime_error>(m, "GimError", PyExc_RuntimeError);
 
+    // Class-level defaults so `err.sqlstate` / `err.native_error` are always
+    // present (the .pyi promises them on GimError). The translator below
+    // overrides them per-instance for OdbcError-derived failures; errors that
+    // never went through ODBC keep these None/0 defaults.
+    gim_error.attr("sqlstate") = py::none();
+    gim_error.attr("native_error") = py::int_(0);
+
+    // Typed error hierarchy under GimError (design doc 2.5): drives retry
+    // (Transient), skip/dedup (Integrity), and bad-data (Data) policies.
+    // The template tags are only registration keys; classification happens
+    // in the translator below from the OdbcError's SQLSTATE/native code.
+    struct integrity_tag {};
+    struct transient_tag {};
+    struct data_tag {};
+    static auto integrity_error =
+        py::exception<integrity_tag>(m, "DataStoreIntegrityError", gim_error.ptr());
+    static auto transient_error =
+        py::exception<transient_tag>(m, "DataStoreTransientError", gim_error.ptr());
+    static auto data_error =
+        py::exception<data_tag>(m, "DataStoreDataError", gim_error.ptr());
+
+    // Registered AFTER gim_error's translator so it runs first (LIFO):
+    // OdbcError derives std::runtime_error and would otherwise be flattened.
+    py::register_exception_translator([](std::exception_ptr p) {
+        using strategy::mssql::odbc::ErrorKind;
+        using strategy::mssql::odbc::OdbcError;
+        try {
+            if (p) std::rethrow_exception(p);
+        } catch (const OdbcError& e) {
+            py::handle type;
+            switch (e.kind) {
+                case ErrorKind::Integrity: type = integrity_error; break;
+                case ErrorKind::Transient: type = transient_error; break;
+                case ErrorKind::Data:      type = data_error; break;
+                default:                   type = gim_error; break;
+            }
+            py::object exc = type(py::str(e.what()));
+            exc.attr("sqlstate") =
+                e.sqlstate.empty() ? py::object(py::none()) : py::object(py::str(e.sqlstate));
+            exc.attr("native_error") = static_cast<long>(e.native);
+            PyErr_SetObject(type.ptr(), exc.ptr());
+        }
+    });
+
     // Format enum exposed to Python
     py::enum_<adapter::Format>(m, "Format")
         .value("polars", adapter::Format::Polars)
         .value("pandas", adapter::Format::Pandas)
         .export_values();
+
+    // Fluent query builder with bound parameters (design doc 2.7).
+    py::class_<core::Query>(m, "Query",
+        "Fluent query builder. where()/where_in() accept bound parameters\n"
+        "('?' markers, ODBC order) — never string-concatenate values.")
+        .def(py::init<>())
+        .def(py::init<std::string_view>(), py::arg("raw_sql"))
+        .def(py::init<std::string_view, std::vector<core::QueryParam>>(),
+             py::arg("raw_sql"), py::arg("params"),
+             "Raw SQL with '?' markers and bound parameter values.")
+        .def("select", &core::Query::select, py::arg("col"),
+             py::return_value_policy::reference_internal)
+        .def("from_table", &core::Query::from_table, py::arg("table"),
+             py::return_value_policy::reference_internal)
+        .def("where", py::overload_cast<std::string_view>(&core::Query::where),
+             py::arg("clause"), py::return_value_policy::reference_internal,
+             "Add a predicate; repeated calls AND-combine.")
+        .def("where",
+             py::overload_cast<std::string_view, std::vector<core::QueryParam>>(
+                 &core::Query::where),
+             py::arg("clause"), py::arg("params"),
+             py::return_value_policy::reference_internal,
+             "Add a predicate with bound parameters: where(\"status = ?\", [\"Approved\"]).")
+        .def("where_in", &core::Query::where_in, py::arg("column"), py::arg("values"),
+             py::return_value_policy::reference_internal,
+             "Membership predicate with one bound parameter per value; an\n"
+             "empty list matches nothing.")
+        .def("limit", &core::Query::limit, py::arg("n"),
+             py::return_value_policy::reference_internal);
 
     // ONE class, not two
     py::class_<MssqlRepo>(m, "DataStore")
@@ -102,12 +175,17 @@ manager: commits on clean exit, rolls back on exception.
 
 Session saves are single-connection (no parallel BCP workers).)doc")
         .def("load",
-             py::overload_cast<std::string_view, int, std::string_view>(&MssqlRepo::load),
+             py::overload_cast<std::string_view, int, std::string_view,
+                               std::vector<core::QueryParam>>(&MssqlRepo::load),
              py::arg("source"), py::arg("load_workers") = 1,
              py::arg("partition_column") = "",
+             py::arg("params") = std::vector<core::QueryParam>{},
              "Load data from a table name or raw SQL query. Returns a DataFrame.\n"
+             "params: bound values for '?' markers in raw SQL (predicate-safe).\n"
              "When load_workers > 1 and partition_column is empty, the integer\n"
-             "primary key column is auto-detected via ODBC metadata.")
+             "primary key column is auto-detected via ODBC metadata. Parallel\n"
+             "partitioning applies only to plain full-table loads; filtered or\n"
+             "parameterized queries run single-worker.")
         .def("load",
              py::overload_cast<core::Query const&, int, std::string_view>(&MssqlRepo::load),
              py::arg("query"), py::arg("load_workers") = 1,
@@ -115,6 +193,27 @@ Session saves are single-connection (no parallel BCP workers).)doc")
              "Load data from a Query object. Returns a DataFrame.\n"
              "When load_workers > 1 and partition_column is empty, the integer\n"
              "primary key column is auto-detected via ODBC metadata.")
+        .def("describe", &MssqlRepo::describe, py::arg("table_name"),
+             "Return the target table's column catalog as a list of dicts\n"
+             "(name, type, max_length, precision, scale, nullable,\n"
+             "is_identity, is_computed, has_default). Save operations run the\n"
+             "same check automatically and fail fast on schema mismatches.")
+        .def("truncate",
+             [](MssqlRepo& r, std::string_view table) { r.truncate(table); },
+             py::arg("table_name"),
+             "TRUNCATE TABLE. For an atomic replace, use a session:\n"
+             "truncate + save + commit in one transaction.")
+        .def("delete",
+             [](MssqlRepo& r, std::string_view table, const py::object& where,
+                std::vector<core::QueryParam> params) {
+                 return r.delete_rows(table, where, std::move(params));
+             },
+             py::arg("table_name"),
+             py::kw_only(),
+             py::arg("where") = py::none(),
+             py::arg("params") = std::vector<core::QueryParam>{},
+             "DELETE rows; where=None deletes all rows. The predicate uses\n"
+             "'?' markers with bound params. Returns affected row count.")
         .def("add_pre_transform", &MssqlRepo::add_pre_transform,
              py::arg("fn"),
              "Add a callable invoked before each save/load operation.")
@@ -144,7 +243,22 @@ Session saves are single-connection (no parallel BCP workers).)doc")
              "Save within the session transaction (same modes as DataStore.save;\n"
              "always single-connection BCP).")
         .def("load", &MssqlSession::load, py::arg("source"),
-             "Load within the session (sees this transaction's uncommitted writes).")
+             py::arg("params") = std::vector<core::QueryParam>{},
+             "Load within the session (sees this transaction's uncommitted writes).\n"
+             "params: bound values for '?' markers in raw SQL.")
+        .def("truncate", &MssqlSession::truncate, py::arg("table_name"),
+             "TRUNCATE within the session transaction (atomic replace pattern:\n"
+             "truncate + save, committed together).")
+        .def("delete",
+             [](MssqlSession& s, std::string_view table, const py::object& where,
+                std::vector<core::QueryParam> params) {
+                 return s.delete_rows(table, where, std::move(params));
+             },
+             py::arg("table_name"),
+             py::kw_only(),
+             py::arg("where") = py::none(),
+             py::arg("params") = std::vector<core::QueryParam>{},
+             "DELETE within the session transaction; returns affected rows.")
         .def("commit", &MssqlSession::commit,
              "Commit the current transaction; the session remains usable.")
         .def("rollback", &MssqlSession::rollback,

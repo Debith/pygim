@@ -401,9 +401,12 @@ def test_public_module_reexports():
     from pygim.persistence import Format as PubFormat
     from pygim.persistence import acquire_datastore as pub_acquire
 
-    # Must be the exact same objects as the direct extension imports
+    # Classes are the exact same objects as the direct extension imports;
+    # acquire_datastore is a thin Python wrapper adding SQLAlchemy-URL
+    # translation, so identity is deliberately NOT preserved for it.
     assert PubDataStore is _persistence_module.DataStore
-    assert pub_acquire is _persistence_module.acquire_datastore
+    assert pub_acquire is not _persistence_module.acquire_datastore
+    assert callable(pub_acquire)
 
     # Enum values should match across modules
     assert PubFormat.polars.name == Format.polars.name
@@ -818,5 +821,519 @@ def test_live_session_raw_sql_load_and_closed_semantics():
         for op in (session.commit, session.rollback):
             with pytest.raises(RuntimeError, match="closed"):
                 op()
+    finally:
+        cur.execute(f"DROP TABLE dbo.{table}")
+
+
+# ─── P1/P2: typed errors, schema validation, bound params, maintenance ───────
+
+
+def test_error_classification_mapping():
+    """SQLSTATE/native-code classification drives the typed error hierarchy.
+
+    Integrity (constraints), Transient (connection/deadlock/timeout), Data
+    (conversion/truncation) — mirroring the DB-API taxonomy so callers can
+    write retry/skip policies (design doc 2.5).
+    """
+    classify = LocalDataStore.classify_error
+    assert classify("23000", 2627) == "integrity"
+    assert classify("23505", 0) == "integrity"
+    assert classify("", 547) == "integrity"
+    assert classify("42000", 50000, "pygim ... duplicate merge-key ...") == "integrity"
+    assert classify("08S01", 0) == "transient"
+    assert classify("40001", 1205) == "transient"
+    assert classify("HYT00", 0) == "transient"
+    assert classify("22001", 0) == "data"
+    assert classify("22018", 0) == "data"
+    assert classify("42S02", 208) == "generic"
+
+
+def test_error_hierarchy_exports():
+    """The typed errors subclass GimError and are re-exported publicly."""
+    from pygim.persistence import (
+        DataStoreDataError,
+        DataStoreIntegrityError,
+        DataStoreTransientError,
+        GimError,
+    )
+
+    for exc in (DataStoreIntegrityError, DataStoreTransientError, DataStoreDataError):
+        assert issubclass(exc, GimError)
+        assert issubclass(exc, RuntimeError)
+
+
+def test_sqlalchemy_url_translation():
+    """mssql+pyodbc URLs translate to ODBC DSNs; raw DSNs pass through (2.9)."""
+    from pygim.persistence import _translate_conn_str as tr
+
+    raw = "Driver={X};Server=h;Database=d;"
+    assert tr(raw) is raw
+
+    dsn = tr("mssql+pyodbc://u:p%40ss@host:1433/db"
+             "?driver=ODBC+Driver+18+for+SQL+Server&Encrypt=yes")
+    assert "Driver={ODBC Driver 18 for SQL Server}" in dsn
+    assert "Server=host,1433" in dsn
+    assert "Database=db" in dsn
+    assert "UID=u" in dsn and "PWD=p@ss" in dsn
+    assert "Encrypt=yes" in dsn
+
+    # odbc_connect form wins verbatim
+    from urllib.parse import quote_plus
+    inner = "Driver={D};Server=s;Database=x;"
+    assert tr(f"mssql+pyodbc:///?odbc_connect={quote_plus(inner)}") == inner
+
+    with pytest.raises(ValueError, match="Unsupported URL scheme"):
+        tr("postgresql://u@h/db")
+
+
+def test_query_params_and_where_in(dialect):
+    """Query composes AND-combined predicates with bound parameters (2.7).
+
+    where_in renders one '?' per value; an empty IN-list must match nothing
+    (1 = 0) rather than rendering invalid SQL. Column identifiers are
+    validated — injection through where_in is impossible.
+    """
+    q = Query().from_table("t").where("status = ?", ["Approved"]).where_in("id", [1, 2])
+    assert q.where_clause == "(status = ?) AND ([id] IN (?, ?))"
+    assert q.param_count == 3
+
+    empty = Query().from_table("t").where_in("id", [])
+    assert empty.where_clause == "1 = 0"
+    assert empty.param_count == 0
+
+    with pytest.raises(RuntimeError, match="invalid column"):
+        Query().where_in("id]; DROP TABLE t--", [1])
+
+
+def test_dialect_three_part_names(dialect):
+    """Table names quote part-by-part up to database.schema.table (2.10)."""
+    assert dialect.quote_identifier("t") == "[t]"
+    assert MssqlDialect().render(Query().from_table("db.dbo.t")) == "SELECT * FROM [db].[dbo].[t]"
+
+
+def test_live_schema_validation_diagnostics():
+    """Pre-save validation names every offending column before any write (2.4).
+
+    Unknown columns, NULLs headed into NOT NULL columns, missing required
+    columns, and type-family mismatches must each be identified in one
+    structured error — and the table must remain untouched.
+    """
+    pyodbc = pytest.importorskip("pyodbc")
+    pl = pytest.importorskip("polars")
+    store, ctl = _live_store_and_cursor(pyodbc)
+    table = f"pygim_schema_{uuid.uuid4().hex[:8]}"
+    cur = ctl.cursor()
+    cur.execute(f"CREATE TABLE dbo.{table} "
+                "(id INT NOT NULL, val NVARCHAR(20) NOT NULL, n INT NULL)")
+
+    try:
+        # unknown column + missing required column
+        with pytest.raises(RuntimeError) as excinfo:
+            store.save(pl.DataFrame({"id": [1], "bogus": ["x"]}), table)
+        msg = str(excinfo.value)
+        assert "bogus" in msg and "val" in msg and table in msg
+
+        # NULLs into NOT NULL
+        with pytest.raises(RuntimeError, match="NULLs headed into NOT NULL.*val"):
+            store.save(pl.DataFrame({"id": [1], "val": [None]}), table)
+
+        # type-family mismatch (string frame column vs INT table column)
+        with pytest.raises(RuntimeError, match="type mismatches.*id"):
+            store.save(pl.DataFrame({"id": ["one"], "val": ["x"]}), table)
+
+        # nonexistent table
+        with pytest.raises(RuntimeError, match="does not exist"):
+            store.save(pl.DataFrame({"id": [1]}), "no_such_table_xyz")
+
+        assert cur.execute(f"SELECT COUNT(*) FROM dbo.{table}").fetchone()[0] == 0
+    finally:
+        cur.execute(f"DROP TABLE dbo.{table}")
+
+
+def test_live_describe():
+    """describe(table) returns the per-column catalog for pre-flight checks (2.4)."""
+    pyodbc = pytest.importorskip("pyodbc")
+    store, ctl = _live_store_and_cursor(pyodbc)
+    table = f"pygim_desc_{uuid.uuid4().hex[:8]}"
+    cur = ctl.cursor()
+    cur.execute(f"CREATE TABLE dbo.{table} "
+                "(id INT IDENTITY(1,1) PRIMARY KEY, val NVARCHAR(50) NULL, "
+                "n INT NOT NULL DEFAULT 7)")
+
+    try:
+        cols = {c["name"]: c for c in store.describe(table)}
+        assert cols["id"]["is_identity"] and not cols["id"]["nullable"]
+        assert cols["val"]["type"] == "nvarchar" and cols["val"]["nullable"]
+        assert cols["n"]["has_default"] and not cols["n"]["nullable"]
+
+        with pytest.raises(RuntimeError, match="does not exist"):
+            store.describe("no_such_table_xyz")
+    finally:
+        cur.execute(f"DROP TABLE dbo.{table}")
+
+
+def test_live_typed_errors():
+    """Live failures raise the matching typed exception with SQLSTATE attached (2.5)."""
+    pyodbc = pytest.importorskip("pyodbc")
+    pl = pytest.importorskip("polars")
+    from pygim.persistence import DataStoreDataError, DataStoreIntegrityError
+
+    store, ctl = _live_store_and_cursor(pyodbc)
+    table = f"pygim_typed_{uuid.uuid4().hex[:8]}"
+    cur = ctl.cursor()
+    cur.execute(f"CREATE TABLE dbo.{table} (id INT NOT NULL PRIMARY KEY)")
+
+    try:
+        store.save(pl.DataFrame({"id": [1]}), table)
+        # Duplicate PK via plain append: the driver reports BCP row rejection
+        # only through the committed-row count (no SQLSTATE), so the commit
+        # shortfall raises IntegrityError by construction.
+        with pytest.raises(DataStoreIntegrityError, match="committed 0 of 1"):
+            store.save(pl.DataFrame({"id": [1]}), table)
+
+        # duplicate merge keys in frame → guard THROW → IntegrityError
+        with pytest.raises(DataStoreIntegrityError):
+            store.save(pl.DataFrame({"id": [2, 2]}), table, mode="upsert", keys=["id"])
+
+        # conversion failure in a load → 22018 → DataError
+        with pytest.raises(DataStoreDataError):
+            store.load("SELECT CONVERT(INT, 'not a number') AS x")
+    finally:
+        cur.execute(f"DROP TABLE dbo.{table}")
+
+
+def test_live_bound_parameter_loads():
+    """Predicate-safe loads: '?' markers bind values, no string concatenation (2.7).
+
+    Covers Query.where(clause, params) + where_in, raw SQL with params=,
+    session loads with params, hostile string values (quote injection is
+    inert as a bound value), and NULL/unicode parameters.
+    """
+    pyodbc = pytest.importorskip("pyodbc")
+    pl = pytest.importorskip("polars")
+    from pygim.persistence import Query as PubQuery
+
+    store, ctl = _live_store_and_cursor(pyodbc)
+    table = f"pygim_params_{uuid.uuid4().hex[:8]}"
+    cur = ctl.cursor()
+    cur.execute(f"CREATE TABLE dbo.{table} (id INT, val NVARCHAR(50) NULL)")
+
+    try:
+        store.save(pl.DataFrame(
+            {"id": [1, 2, 3, 4], "val": ["a'--", "béta", "c", None]}), table)
+
+        q = PubQuery().from_table(table).where("val = ?", ["a'--"])
+        assert len(store.load(q)) == 1  # quote in value is inert
+
+        q = PubQuery().from_table(table).where_in("id", [2, 3])
+        assert len(store.load(q)) == 2
+
+        df = store.load(f"SELECT * FROM dbo.{table} WHERE val = ?", params=["béta"])
+        assert len(df) == 1  # unicode round-trips via UTF-16 binding
+
+        with store.session() as session:
+            df = session.load(f"SELECT * FROM dbo.{table} WHERE id > ?", [2])
+            assert len(df) == 2
+
+        with pytest.raises(ValueError, match="raw SQL"):
+            store.load(table, params=[1])  # bare table name takes no params
+    finally:
+        cur.execute(f"DROP TABLE dbo.{table}")
+
+
+def test_live_truncate_delete_and_atomic_replace():
+    """truncate/delete work standalone and compose into an atomic replace (2.11)."""
+    pyodbc = pytest.importorskip("pyodbc")
+    pl = pytest.importorskip("polars")
+    store, ctl = _live_store_and_cursor(pyodbc)
+    table = f"pygim_maint_{uuid.uuid4().hex[:8]}"
+    cur = ctl.cursor()
+    cur.execute(f"CREATE TABLE dbo.{table} (id INT, val NVARCHAR(20))")
+    count = lambda: cur.execute(f"SELECT COUNT(*) FROM dbo.{table}").fetchone()[0]
+
+    try:
+        store.save(pl.DataFrame({"id": [1, 2, 3], "val": ["a", "b", "c"]}), table)
+
+        deleted = store.delete(table, where="id > ?", params=[1])
+        assert deleted == 2 and count() == 1
+
+        store.truncate(table)
+        assert count() == 0
+
+        # atomic replace: truncate + save in one session transaction;
+        # a rollback restores the pre-replace contents.
+        store.save(pl.DataFrame({"id": [9], "val": ["old"]}), table)
+        session = store.session()
+        session.truncate(table)
+        session.save(pl.DataFrame({"id": [10, 11], "val": ["new", "new"]}), table)
+        session.rollback()
+        session.close()
+        rows = cur.execute(f"SELECT id FROM dbo.{table}").fetchall()
+        assert [r[0] for r in rows] == [9]  # replace rolled back atomically
+
+        with store.session() as session:
+            session.truncate(table)
+            session.save(pl.DataFrame({"id": [10, 11], "val": ["new", "new"]}), table)
+        assert count() == 2
+
+        # delete-all (where=None) and params-without-where validation
+        assert store.delete(table) == 2
+        with pytest.raises(ValueError, match="without a where"):
+            store.delete(table, params=[1])
+    finally:
+        cur.execute(f"DROP TABLE dbo.{table}")
+
+
+def test_live_three_part_table_names():
+    """Save/load resolve database.schema.table targets (2.10)."""
+    pyodbc = pytest.importorskip("pyodbc")
+    pl = pytest.importorskip("polars")
+    store, ctl = _live_store_and_cursor(pyodbc)
+    table = f"pygim_3part_{uuid.uuid4().hex[:8]}"
+    cur = ctl.cursor()
+    cur.execute(f"CREATE TABLE tempdb.dbo.{table} (id INT)")
+
+    try:
+        store.save(pl.DataFrame({"id": [1, 2]}), f"tempdb.dbo.{table}")
+        assert len(store.load(f"tempdb.dbo.{table}")) == 2
+    finally:
+        cur.execute(f"DROP TABLE tempdb.dbo.{table}")
+
+
+def test_live_parallel_load_with_filter_falls_back_correctly():
+    """Filtered queries never take the parallel partition path (bug fix).
+
+    The range-partitioned parallel loader builds its own SQL; before this
+    branch it silently dropped WHERE clauses when load_workers > 1. Filtered
+    queries must now fall back to single-worker and honor the predicate.
+    """
+    pyodbc = pytest.importorskip("pyodbc")
+    pl = pytest.importorskip("polars")
+    from pygim.persistence import Query as PubQuery
+
+    store, ctl = _live_store_and_cursor(pyodbc)
+    table = f"pygim_parfilter_{uuid.uuid4().hex[:8]}"
+    cur = ctl.cursor()
+    cur.execute(f"CREATE TABLE dbo.{table} (id INT NOT NULL PRIMARY KEY, val NVARCHAR(10))")
+
+    try:
+        store.save(pl.DataFrame({"id": list(range(100)), "val": ["x"] * 100}), table)
+        q = PubQuery().from_table(table).where("id < ?", [10])
+        df = store.load(q, load_workers=4)
+        assert len(df) == 10  # predicate honored, not dropped by partitioning
+    finally:
+        cur.execute(f"DROP TABLE dbo.{table}")
+
+
+# ─── Regression: adversarial-review findings ─────────────────────────────────
+
+
+def test_sqlalchemy_url_edge_cases():
+    """URL translation brace-quotes hostile values and supports the named-DSN form.
+
+    A password containing ';' or '}' must be brace-quoted (with '}' doubled) so
+    it cannot inject extra ODBC attributes; a percent-escaped instance name
+    (%5C) must decode to a backslash; and a bare host with no port, database, or
+    driver is treated as a named ODBC ``DSN=`` reference.
+    """
+    from pygim.persistence import _translate_conn_str as tr
+
+    pwd = tr("mssql+pyodbc://sa:p%3Bw%7Dd@host/db?driver=ODBC+Driver+18+for+SQL+Server")
+    assert "PWD={p;w}}d};" in pwd  # ';' triggers braces, '}' doubled inside
+
+    inst = tr("mssql+pyodbc://host%5CSQLEXPRESS/db?driver=D")
+    assert "Server=host\\SQLEXPRESS" in inst  # %5C decoded to a backslash
+
+    named = tr("mssql+pyodbc://sa:secret@MyDsn")
+    assert named.startswith("DSN=") and "UID=sa" in named and "PWD=secret" in named
+
+
+def test_top_level_acquire_datastore_is_translating_wrapper():
+    """pygim.acquire_datastore is the URL-translating wrapper, not the raw ext.
+
+    The top-level entry point must share pygim.persistence's SQLAlchemy-URL
+    translation; importing it straight from the compiled extension would bypass
+    that, so the two names must be the same object.
+    """
+    import pygim
+    import pygim.persistence as pers
+
+    assert pygim.acquire_datastore is pers.acquire_datastore
+
+
+def test_where_in_rejects_oversized_lists():
+    """where_in guards SQL Server's ~2100-parameter statement cap.
+
+    Each IN value binds one parameter; a list beyond the cap must raise a clear
+    error at build time rather than letting the driver fail cryptically at
+    execute, when the caller can no longer tell which query overflowed.
+    """
+    from pygim.persistence import Query as PubQuery
+
+    q = PubQuery().from_table("t")
+    with pytest.raises(RuntimeError, match="parameter limit"):
+        q.where_in("id", list(range(2001)))
+
+
+def test_gim_error_has_default_attributes():
+    """Every GimError exposes sqlstate/native_error, not just ODBC-translated ones.
+
+    The type stub promises these attributes on the base class; class-level
+    defaults must make that true for errors that never passed through ODBC, so
+    consumers can read err.sqlstate unconditionally.
+    """
+    from pygim.persistence import GimError
+
+    assert GimError.sqlstate is None
+    assert GimError.native_error == 0
+
+
+def test_live_append_rejects_column_order_mismatch():
+    """Positional append refuses a frame whose columns don't line up with the table.
+
+    Plain append binds frame column i to table ordinal i+1, so a frame with the
+    right names in the wrong order — or one that omits a column — would write
+    values into the wrong columns. Validation must reject both and leave the
+    table empty; the keyed path (MERGE by name) remains available for those.
+    """
+    pyodbc = pytest.importorskip("pyodbc")
+    pl = pytest.importorskip("polars")
+    store, ctl = _live_store_and_cursor(pyodbc)
+    table = f"pygim_ord_{uuid.uuid4().hex[:8]}"
+    cur = ctl.cursor()
+    cur.execute(f"CREATE TABLE dbo.{table} (id INT NOT NULL, val NVARCHAR(20) NULL)")
+
+    try:
+        # Correct names, reversed order → positional mismatch.
+        with pytest.raises(RuntimeError, match="append is positional"):
+            store.save(pl.DataFrame({"val": ["a"], "id": [1]}), table)
+        # Omits a column → column-count mismatch.
+        with pytest.raises(RuntimeError, match="append is positional"):
+            store.save(pl.DataFrame({"id": [1]}), table)
+        assert cur.execute(f"SELECT COUNT(*) FROM dbo.{table}").fetchone()[0] == 0
+        # In-order full frame still works.
+        store.save(pl.DataFrame({"id": [1], "val": ["a"]}), table)
+        assert cur.execute(f"SELECT COUNT(*) FROM dbo.{table}").fetchone()[0] == 1
+    finally:
+        cur.execute(f"DROP TABLE dbo.{table}")
+
+
+def test_live_duplicate_frame_columns_rejected():
+    """A frame with duplicate column names is rejected before any write.
+
+    Arrow permits duplicate field names but they can never map onto a SQL
+    table, and by-name catalog lookups would be ambiguous, so validation must
+    fail fast with a clear message rather than crash or silently mis-bind.
+    """
+    pyodbc = pytest.importorskip("pyodbc")
+    pa = pytest.importorskip("pyarrow")
+    store, ctl = _live_store_and_cursor(pyodbc)
+    table = f"pygim_dup_{uuid.uuid4().hex[:8]}"
+    cur = ctl.cursor()
+    cur.execute(f"CREATE TABLE dbo.{table} (id INT, val NVARCHAR(20))")
+
+    try:
+        dup = pa.table([pa.array([1]), pa.array([2])], names=["id", "id"])
+        with pytest.raises(RuntimeError, match="duplicate frame column names"):
+            store.save(dup, table)
+    finally:
+        cur.execute(f"DROP TABLE dbo.{table}")
+
+
+def test_live_cross_database_three_part_names():
+    """3-part saves validate against the TARGET database's catalog (2.10 fix).
+
+    sys.columns is per-database, so validating a database.schema.table target
+    must query [database].sys.columns — not the connection's current database.
+    Connecting to master while targeting tempdb proves the catalog lookup
+    follows the 3-part name: a real save succeeds and an unknown column fails.
+    """
+    pyodbc = pytest.importorskip("pyodbc")
+    pl = pytest.importorskip("polars")
+    base = _integration_conn_str(pyodbc)
+    # Point the store's connection at a DIFFERENT database than the target.
+    master_conn = re.sub(r"Database=[^;]+", "Database=master", base, count=1, flags=re.I)
+    store = acquire_datastore(master_conn, format="polars", pool_size=2)
+    ctl = pyodbc.connect(base, timeout=30)
+    ctl.autocommit = True
+    table = f"pygim_xdb_{uuid.uuid4().hex[:8]}"
+    cur = ctl.cursor()
+    cur.execute(f"CREATE TABLE tempdb.dbo.{table} (id INT NOT NULL, val NVARCHAR(20) NULL)")
+
+    try:
+        target = f"tempdb.dbo.{table}"
+        # describe reaches the tempdb catalog from a master connection.
+        assert {c["name"] for c in store.describe(target)} == {"id", "val"}
+        store.save(pl.DataFrame({"id": [1, 2], "val": ["a", "b"]}), target)
+        assert len(store.load(target)) == 2
+        # unknown column still caught via the tempdb catalog, not master's.
+        with pytest.raises(RuntimeError, match="columns not in table"):
+            store.save(pl.DataFrame({"id": [3], "val": ["c"], "nope": [1]}), target)
+    finally:
+        cur.execute(f"DROP TABLE tempdb.dbo.{table}")
+
+
+def test_live_describe_numeric_metadata():
+    """describe() reports max_length / precision / scale for sizing decisions.
+
+    Beyond names and nullability, callers need the numeric catalog fields to
+    validate widths: nvarchar(50) reports 100 bytes (2 per UTF-16 unit) and a
+    decimal(10,2) reports precision 10 / scale 2.
+    """
+    pyodbc = pytest.importorskip("pyodbc")
+    store, ctl = _live_store_and_cursor(pyodbc)
+    table = f"pygim_descnum_{uuid.uuid4().hex[:8]}"
+    cur = ctl.cursor()
+    cur.execute(f"CREATE TABLE dbo.{table} (name NVARCHAR(50) NULL, amount DECIMAL(10,2) NULL)")
+
+    try:
+        cols = {c["name"]: c for c in store.describe(table)}
+        assert cols["name"]["max_length"] == 100  # 50 UTF-16 units × 2 bytes
+        assert cols["amount"]["precision"] == 10 and cols["amount"]["scale"] == 2
+    finally:
+        cur.execute(f"DROP TABLE dbo.{table}")
+
+
+def test_live_typed_null_and_scalar_params():
+    """Bound parameters cover NULL, bool, float, and int without concatenation.
+
+    The predicate ``? IS NULL`` proves a bound NULL reaches the server as a real
+    NULL, and float/int/bool bind through their own ODBC C types — each value is
+    parameterized, never string-formatted into the SQL text.
+    """
+    pyodbc = pytest.importorskip("pyodbc")
+    store, ctl = _live_store_and_cursor(pyodbc)
+    _ = ctl  # server reachability only
+
+    # A NULL parameter makes "? IS NULL" true (1 row), a non-NULL makes it false.
+    assert len(store.load("SELECT 1 AS x WHERE ? IS NULL", params=[None])) == 1
+    assert len(store.load("SELECT 1 AS x WHERE ? IS NULL", params=[7])) == 0
+    # float, int, and bool round-trip through their bound C types.
+    assert len(store.load("SELECT 1 AS x WHERE ? > 1.5", params=[2.5])) == 1
+    assert len(store.load("SELECT 1 AS x WHERE ? = 1", params=[True])) == 1
+
+
+def test_live_session_delete_with_rollback():
+    """session.delete participates in the session transaction and rolls back.
+
+    A delete issued inside a session must be undone by rollback() together with
+    the rest of the transaction, so the rows reappear — proving delete is not
+    silently autocommitted on the session connection.
+    """
+    pyodbc = pytest.importorskip("pyodbc")
+    pl = pytest.importorskip("polars")
+    store, ctl = _live_store_and_cursor(pyodbc)
+    table = f"pygim_sessdel_{uuid.uuid4().hex[:8]}"
+    cur = ctl.cursor()
+    cur.execute(f"CREATE TABLE dbo.{table} (id INT, val NVARCHAR(10))")
+    count = lambda: cur.execute(f"SELECT COUNT(*) FROM dbo.{table}").fetchone()[0]
+
+    try:
+        store.save(pl.DataFrame({"id": [1, 2, 3], "val": ["a", "b", "c"]}), table)
+        session = store.session()
+        assert session.delete(table, where="id <= ?", params=[2]) == 2
+        session.rollback()
+        session.close()
+        assert count() == 3  # delete rolled back with the transaction
     finally:
         cur.execute(f"DROP TABLE dbo.{table}")

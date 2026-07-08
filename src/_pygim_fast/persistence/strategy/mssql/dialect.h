@@ -51,11 +51,19 @@ struct MssqlDialect {
     /// Handles one level of qualification (schema.table); unqualified names delegate
     /// to quote_identifier().
     [[nodiscard]] std::string quote_table_name(std::string_view name) const {
-        if (auto dot = name.find('.'); dot != std::string_view::npos) {
-            return quote_identifier(name.substr(0, dot)) + "." +
-                   quote_identifier(name.substr(dot + 1));
+        // Part-by-part: "dbo.t" → "[dbo].[t]", "db.dbo.t" → "[db].[dbo].[t]".
+        std::string out;
+        std::size_t start = 0;
+        while (true) {
+            auto dot = name.find('.', start);
+            const auto part = (dot == std::string_view::npos)
+                ? name.substr(start) : name.substr(start, dot - start);
+            if (!out.empty()) out += ".";
+            out += quote_identifier(part);
+            if (dot == std::string_view::npos) break;
+            start = dot + 1;
         }
-        return quote_identifier(name);
+        return out;
     }
 
     /// Quote a SQL Server identifier with square brackets.

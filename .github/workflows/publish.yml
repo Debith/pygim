@@ -59,8 +59,42 @@ jobs:
           CIBW_ARCHS_MACOS: "arm64"
           CIBW_ARCHS_WINDOWS: "AMD64"
           CIBW_ENVIRONMENT_MACOS: MACOSX_DEPLOYMENT_TARGET=13.3
+          # Persistence in wheels (design doc 2.12): unixODBC headers let the
+          # extension build; Arrow comes from the pyarrow build requirement.
+          # Repair must NOT vendor libarrow/libparquet — the extension links
+          # them via an $ORIGIN/../pyarrow rpath against the user's pyarrow.
+          # libodbc IS vendored (drivers still come from the system's
+          # odbcinst.ini at runtime).
+          CIBW_BEFORE_ALL_LINUX: "yum install -y unixODBC-devel"
+          # Install unixODBC headers; assert sql.h is really present so a brew
+          # failure fails the build instead of silently shipping a mac wheel
+          # without the persistence extension.
+          CIBW_BEFORE_ALL_MACOS: >-
+            brew install unixodbc &&
+            test -f "$(brew --prefix unixodbc)/include/sql.h"
+          # libarrow/libparquet are excluded from repair: the extension links
+          # them via an $ORIGIN/../pyarrow rpath against the user's pyarrow.
+          # This couples the wheel to the build-time pyarrow SONAME (major), so
+          # the build (pyproject build-system) and runtime (dependencies) pins
+          # must agree on the pyarrow major — see 2.12 in the design doc.
+          CIBW_REPAIR_WHEEL_COMMAND_LINUX: >-
+            auditwheel repair --exclude 'libarrow*' --exclude 'libparquet*'
+            -w {dest_dir} {wheel}
+          CIBW_REPAIR_WHEEL_COMMAND_MACOS: >-
+            delocate-wheel --require-archs {delocate_archs}
+            -e libarrow -e libparquet -w {dest_dir} -v {wheel}
+          # Base smoke test (all platforms): the pybind-only extensions.
           CIBW_TEST_COMMAND: >-
             python -c "import pygim.registry; import pygim.factory; import pygim.each; import pygim.pathset; print('smoke test OK')"
+          # Linux/macOS additionally exercise the Arrow+ODBC persistence
+          # extension so 2.12's unixODBC headers, the libarrow exclude, and the
+          # $ORIGIN/../pyarrow rpath are all verified against the runtime
+          # pyarrow (an install_require, present in the test env). Windows skips
+          # persistence (unixODBC 'odbc' vs 'odbc32'), so it keeps the base test.
+          CIBW_TEST_COMMAND_LINUX: >-
+            python -c "import pygim.registry, pygim.factory, pygim.each, pygim.pathset; import pygim.persistence as p; assert hasattr(p, 'DataStore'), 'persistence missing from wheel'; print('smoke test OK (with persistence)')"
+          CIBW_TEST_COMMAND_MACOS: >-
+            python -c "import pygim.registry, pygim.factory, pygim.each, pygim.pathset; import pygim.persistence as p; assert hasattr(p, 'DataStore'), 'persistence missing from wheel'; print('smoke test OK (with persistence)')"
 
       - name: Upload wheel artifacts
         uses: actions/upload-artifact@v4

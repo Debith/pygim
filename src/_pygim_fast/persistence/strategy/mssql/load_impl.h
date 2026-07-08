@@ -14,6 +14,7 @@
 #include "pk_detect.h"
 #include "schema_describe.h"
 #include "sql_type_map.h"
+#include "params_bind.h"
 #include "stmt_handle.h"
 
 #include "../../core/arrow_builder.h"
@@ -71,7 +72,8 @@ struct MssqlLoadImpl {
                                     std::string_view table_name,
                                     MssqlLoadCache& load_cache,
                                     int64_t block_size = kDefaultBlockSize,
-                                    int packet_size = kDefaultPacketSize) {
+                                    int packet_size = kDefaultPacketSize,
+                                    const std::vector<core::QueryParam>& params = {}) {
         QuickTimerT<SingleLoadPhase> timer("load", nullptr, false, false);
         core::LoadMetrics metrics;
 
@@ -101,6 +103,12 @@ struct MssqlLoadImpl {
         // ── 1. Allocate statement handle ────────────────────────
         StmtHandle stmt(conn.dbc());
 
+        // Bound-parameter buffers ('?' markers). Declared at function scope
+        // because ODBC requires the bound buffers to stay valid for as long
+        // as the statement holds pointers into them — i.e. until this
+        // function returns, well past the SQLExecute in the block below.
+        std::vector<std::unique_ptr<BoundParam>> bound;
+
         // ── 2. Prepare + execute ────────────────────────────────
         {
             timer.start_sub_timer(SingleLoadPhase::prepare, false);
@@ -110,6 +118,8 @@ struct MssqlLoadImpl {
                           reinterpret_cast<const SQLCHAR*>(sql.data())),
                 static_cast<SQLINTEGER>(sql.size()));
             odbc::raise_if_error(ret, SQL_HANDLE_STMT, stmt, "SQLPrepare");
+
+            bound = bind_parameters(stmt, params);
 
             ret = SQLExecute(stmt);
             odbc::raise_if_error(ret, SQL_HANDLE_STMT, stmt, "SQLExecute");

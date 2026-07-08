@@ -443,8 +443,18 @@ public:
     /// Load data from a table name or raw SQL query.
     /// Returns a Polars or Pandas DataFrame (based on format setting).
     py::object load(std::string_view source, int load_workers = 1,
-                    std::string_view partition_column = "") {
+                    std::string_view partition_column = "",
+                    std::vector<core::QueryParam> params = {}) {
         PYGIM_TIMED_SCOPE("RepositoryAdapter::load");
+        if (!params.empty()) {
+            if (!source.contains(' ')) {
+                throw py::value_error(
+                    "params requires raw SQL with '?' markers (or use a Query); "
+                    "a bare table name takes no parameters");
+            }
+            return load(core::Query(source, std::move(params)), load_workers,
+                        partition_column);
+        }
         if (m_token_auth && load_workers > 1) {
             throw py::value_error(
                 "access_token currently requires load_workers=1: parallel workers "
@@ -491,12 +501,21 @@ public:
     }
 
     /// Session-mode load: runs on the caller-held connection, single-worker.
-    py::object load_on_connection(typename Backend::Connection& conn, std::string_view source) {
+    py::object load_on_connection(typename Backend::Connection& conn, std::string_view source,
+                                  std::vector<core::QueryParam> params = {}) {
         PYGIM_TIMED_SCOPE("RepositoryAdapter::load(session)");
+        if (!params.empty() && !source.contains(' ')) {
+            throw py::value_error(
+                "params requires raw SQL with '?' markers (or use a Query); "
+                "a bare table name takes no parameters");
+        }
         run_transforms("pre_load", m_pre_transforms);
 
         auto result = [&] {
             py::gil_scoped_release release;
+            if (!params.empty()) {
+                return m_repo.load_on(conn, core::Query(source, std::move(params)));
+            }
             return m_repo.load_on(conn, source);
         }();
 
@@ -505,6 +524,70 @@ public:
 
         run_transforms("post_load", m_post_transforms);
         return df;
+    }
+
+    /// Catalog description of a table: list of per-column dicts with name,
+    /// type, nullability, identity/computed/default flags (design doc 2.4).
+    [[nodiscard]] py::list describe(std::string_view table_name) {
+        if constexpr (requires { m_repo.describe_table(table_name); }) {
+            auto schema = [&] {
+                py::gil_scoped_release release;
+                return m_repo.describe_table(table_name);
+            }();
+            py::list out;
+            for (const auto& col : schema) {
+                py::dict d;
+                d["name"]        = col.name;
+                d["type"]        = col.type_name;
+                d["max_length"]  = col.max_length;
+                d["precision"]   = col.precision;
+                d["scale"]       = col.scale;
+                d["nullable"]    = col.nullable;
+                d["is_identity"] = col.is_identity;
+                d["is_computed"] = col.is_computed;
+                d["has_default"] = col.has_default;
+                out.append(std::move(d));
+            }
+            return out;
+        } else {
+            throw std::runtime_error("describe is not supported by this backend");
+        }
+    }
+
+    /// TRUNCATE TABLE (design doc 2.11).
+    void truncate(std::string_view table_name, typename Backend::Connection* conn = nullptr) {
+        if constexpr (requires { m_repo.truncate_table(table_name); }) {
+            py::gil_scoped_release release;
+            if (conn != nullptr) {
+                m_repo.truncate_table_on(*conn, table_name);
+            } else {
+                m_repo.truncate_table(table_name);
+            }
+        } else {
+            throw std::runtime_error("truncate is not supported by this backend");
+        }
+    }
+
+    /// DELETE with optional predicate + bound params; returns affected rows.
+    [[nodiscard]] long long delete_rows(std::string_view table_name, const py::object& where,
+                                        std::vector<core::QueryParam> params,
+                                        typename Backend::Connection* conn = nullptr) {
+        std::string predicate;
+        if (!where.is_none()) {
+            predicate = where.cast<std::string>();
+        }
+        if (predicate.empty() && !params.empty()) {
+            throw py::value_error("params given without a where predicate");
+        }
+        if constexpr (requires { m_repo.delete_rows(table_name, predicate, params); }) {
+            py::gil_scoped_release release;
+            if (conn != nullptr) {
+                return m_repo.delete_rows_on(*conn, table_name, predicate, params);
+            }
+            return m_repo.delete_rows(table_name, predicate, params);
+        } else {
+            throw std::runtime_error("delete is not supported by this backend");
+        }
     }
 
     /// Open a caller-owned transaction session: one pooled connection,
@@ -585,9 +668,23 @@ public:
                                            table_name, mode, std::move(keys));
     }
 
-    py::object load(std::string_view source) {
+    py::object load(std::string_view source, std::vector<core::QueryParam> params = {}) {
         ensure_open();
-        return m_parent.load_on_connection(m_handle.get(), source);
+        return m_parent.load_on_connection(m_handle.get(), source, std::move(params));
+    }
+
+    /// TRUNCATE within the session transaction (atomic replace = truncate +
+    /// save + commit).
+    void truncate(std::string_view table_name) {
+        ensure_open();
+        m_parent.truncate(table_name, &m_handle.get());
+    }
+
+    /// DELETE within the session transaction; returns affected rows.
+    [[nodiscard]] long long delete_rows(std::string_view table_name, const py::object& where,
+                                        std::vector<core::QueryParam> params) {
+        ensure_open();
+        return m_parent.delete_rows(table_name, where, std::move(params), &m_handle.get());
     }
 
     /// Commit the current transaction. The session stays usable; the next
