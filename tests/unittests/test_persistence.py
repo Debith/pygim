@@ -476,6 +476,19 @@ def test_access_token_worker_guards():
         store.load("some_table", load_workers=2)
 
 
+def test_access_token_credential_conflict():
+    """Credentials in the connection string conflict with token auth, loudly.
+
+    The check now runs on the parsed ConnectionString, so it catches both a raw
+    DSN carrying UID/PWD and a URL carrying userinfo (user:pass@) — the latter
+    slipped past the old raw-substring scan, which never saw a 'uid=' keyword.
+    """
+    with pytest.raises(ValueError, match="conflicts with"):
+        acquire_datastore("Driver=x;Server=h;UID=sa;PWD=p;", access_token="tok")
+    with pytest.raises(ValueError, match="conflicts with"):
+        acquire_datastore("mssql+pyodbc://sa:p@h/db?driver=x", access_token="tok")
+
+
 def test_session_reexported():
     """pygim.persistence re-exports DataStoreSession alongside DataStore."""
     from pygim.persistence import DataStoreSession
@@ -882,7 +895,9 @@ def test_sqlalchemy_url_translation():
     inner = "Driver={D};Server=s;Database=x;"
     assert tr(f"mssql+pyodbc:///?odbc_connect={quote_plus(inner)}") == inner
 
-    with pytest.raises(ValueError, match="Unsupported URL scheme"):
+    # Non-mssql URLs are rejected by the C++ ConnectionString parser, which
+    # surfaces as GimError (a RuntimeError subclass) rather than ValueError.
+    with pytest.raises(RuntimeError, match="Unsupported URL scheme"):
         tr("postgresql://u@h/db")
 
 
@@ -1146,6 +1161,33 @@ def test_sqlalchemy_url_edge_cases():
 
     named = tr("mssql+pyodbc://sa:secret@MyDsn")
     assert named.startswith("DSN=") and "UID=sa" in named and "PWD=secret" in named
+
+
+def test_connection_string_value_object():
+    """ConnectionString parses DSNs/URLs and masks secrets by default (design).
+
+    str()/repr()/render() must hide the password so it never leaks into a log
+    line or traceback; render(reveal=True) yields the connect string. Value
+    equality lets the parallel-load cache key on the connection regardless of
+    whether it was given as a raw DSN or a URL.
+    """
+    from pygim.persistence import ConnectionString as CS
+
+    cs = CS.parse("Driver={ODBC Driver 18 for SQL Server};Server=h,1433;"
+                  "Database=d;UID=sa;PWD=s3cr3t;")
+    masked = cs.render()
+    assert "PWD=***" in masked and "s3cr3t" not in masked
+    assert str(cs) == masked and repr(cs) == masked      # both default to masked
+    assert "PWD=s3cr3t" in cs.render(reveal=True)         # secrets only on demand
+    assert cs.server == "h,1433" and cs.database == "d"
+
+    # The equivalent URL parses to the same value (order-independent equality).
+    url = CS.parse("mssql+pyodbc://sa:s3cr3t@h:1433/d"
+                   "?driver=ODBC+Driver+18+for+SQL+Server")
+    assert url == cs
+    # Raw DSNs round-trip verbatim so reconnection is byte-for-byte identical.
+    raw = "Driver={X};Server=h;Database=d;"
+    assert CS.parse(raw).render(reveal=True) == raw
 
 
 def test_top_level_acquire_datastore_is_translating_wrapper():

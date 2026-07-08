@@ -1,0 +1,227 @@
+@startuml connection_string_design
+!theme plain
+skinparam backgroundColor #FEFEFE
+skinparam defaultFontName Consolas
+skinparam defaultFontSize 10
+skinparam shadowing false
+skinparam classAttributeIconSize 0
+skinparam classFontStyle bold
+skinparam packageFontStyle italic
+skinparam stereotypeFontSize 9
+skinparam arrowThickness 1.2
+
+title Connection-String Subsystem — Proposed Class Diagram\n(consolidates today's scattered DSN / URL / token logic into pybind-free core)
+
+' ═══════════════════════ CORE (pybind-free, constexpr-friendly) ═══════════════════════
+' Public types flat in pygim::core (repo convention); pure helpers in core::detail.
+
+package "pygim::core  (connection string)" as p_conn #FFF3E0 {
+
+    enum Reveal <<constexpr>> {
+        Masked        ' default — Pwd / access-token → ***
+        WithSecrets   ' full DSN, only at the SQLDriverConnect boundary
+    }
+
+    enum ConnKey <<constexpr>> {
+        Driver
+        Server
+        Database
+        Uid
+        Pwd
+        TrustedConnection
+        Authentication
+        PacketSize
+        Dsn
+        Encrypt
+        TrustServerCertificate
+        Other   ' passthrough / unknown key
+        --
+        + {static} canonical(sv) : ConnKey        <<constexpr>>
+        + {static} spelling(ConnKey) : string_view <<constexpr>>
+    }
+
+    class ConnAttribute <<value>> {
+        + key   : ConnKey
+        + name  : string    ' verbatim spelling for Other
+        + value : string
+    }
+
+    ' ── Immutable value object ("the const expression") ──
+    class ConnectionString <<value, immutable>> {
+        - m_attrs : vector<ConnAttribute>   ' ordered, canonical keys
+        --
+        .. construction (no public ctor) ..
+        + {static} parse(source: string_view) : ConnectionString
+        ..                                       (facade → selects factory)
+        .. rendering (two formats; masked is the default) ..
+        + render(reveal: Reveal = Masked) : string
+        ..   Masked → for logs / OdbcError.what() / repr    ..
+        ..   WithSecrets → raw DSN for SQLDriverConnect only ..
+        .. queries (all const) ..
+        + has(ConnKey) : bool               <<constexpr>>
+        + get(ConnKey) : optional<string_view>
+        + driver() / server() / database() : optional<string_view>
+        + is_named_dsn() : bool             <<constexpr>>
+        .. functional updates (return new value) ..
+        + with_packet_size(int) : ConnectionString   ' replaces ensure_packet_size
+        + with(ConnKey, string_view) : ConnectionString
+        .. token-auth policy (pure predicate) ..
+        + token_conflicts() : vector<ConnKey> <<constexpr>>
+        ..                                    (Uid/Pwd/TrustedConnection/Authentication)
+        .. value semantics ..
+        + {static} operator==(a, b) : bool  <<constexpr, hidden friend>>
+        ..   normalized-key value equality (cache key)      ..
+    }
+
+    ' ── Fluent builder → assembles an immutable ConnectionString ──
+    class ConnectionStringBuilder <<builder>> {
+        - m_attrs : vector<ConnAttribute>
+        --
+        + driver(sv) : Builder&
+        + server(host: sv, port: optional<int>) : Builder&
+        + database(sv) : Builder&
+        + uid(sv) / pwd(sv) : Builder&
+        + named_dsn(sv) : Builder&
+        + set(ConnKey, value: sv) : Builder&
+        + set_raw(name: sv, value: sv) : Builder&
+        --
+        + build() : ConnectionString        ' brace-quotes via dsn_quote()
+        + {static} from_source(sv) : ConnectionString ' delegates to factory
+    }
+
+    ' ── Abstract factory: one product per source dialect ──
+    interface ConnectionStringFactory <<abstract factory>> {
+        + {abstract} accepts(source: sv) : bool          <<constexpr>>
+        + {abstract} create(source: sv) : ConnectionString
+    }
+
+    class OdbcDsnFactory <<factory>> {
+        + accepts(sv) : bool        ' no "://" → raw DSN
+        + create(sv) : ConnectionString  ' tokenizes key=value; pairs
+    }
+
+    class SqlAlchemyUrlFactory <<factory>> {
+        + accepts(sv) : bool        ' scheme == mssql+pyodbc
+        + create(sv) : ConnectionString
+        ..  folds in Python _translate_conn_str:  ..
+        ..  odbc_connect= passthrough, named-DSN,  ..
+        ..  host,port / database / driver / creds  ..
+    }
+
+    class ConnStringFactorySelector <<dispatch>> {
+        + {static} select(source: sv) : ConnectionStringFactory&
+        ' sniff_source(): "://" + scheme → concrete factory
+    }
+
+    ' ── Pure helpers (constexpr; verified with static_assert like plan_autowiring) ──
+    ' Live in pygim::core::detail so they don't pollute core's overload set.
+    class "<<namespace core::detail>>\ndsn helpers" as helpers <<constexpr>> {
+        + dsn_quote(value: sv) : string      ' replaces _dsn_quote
+        + mask_secret(value: sv) : string    ' → *** for Pwd / token render
+        + sniff_source(sv) : SourceKind
+        + to_lower_ascii(sv) : string
+    }
+
+    ' ── Access-token model (pure packing lifted out of the adapter) ──
+    class AccessToken <<value>> {
+        + raw : string            ' UTF-8 token text
+    }
+    class AccessTokenPacker <<constexpr>> {
+        + {static} pack(token: string_view) : vector<uint8_t>
+        ' 4-byte LE length prefix + UTF-16LE expansion
+        ' (validation: non-empty, ASCII, no embedded NUL)
+    }
+}
+
+' ═══════════════════════ CONSUMERS (store the value object, not a bare string) ═══════════════════════
+
+package "pygim::core" as p_core #FFE0B2 {
+    class "ConnectionPool<Backend>" as Pool {
+        - m_conn : ConnectionString   ' was: std::string m_conn_str
+        --
+        + connection() : ConnectionString&
+        + make_physical() ' m_connect_fn(m_conn.render(), ...)
+    }
+}
+
+package "pygim::strategy::mssql" as p_mssql #FCE4EC {
+    class OdbcConnection {
+        - m_conn : ConnectionString   ' was: std::string m_conn_str
+        - m_access_token : vector<uint8_t>
+        --
+        + open(ConnectionString, packet_size, token?)
+        '   → with_packet_size(n).render(WithSecrets) at SQLDriverConnect
+        + conn() : const ConnectionString&
+    }
+    class MssqlBackend {
+        + {static} connect(const ConnectionString&, int) : OdbcConnection
+        + {static} connect_with_token(const ConnectionString&, int, token) : OdbcConnection
+    }
+    class MssqlLoadCache {
+        - m_key : ConnectionString   ' was: std::string m_cached_conn_str
+        ' cache hit tested via ConnectionString::operator== (value equality)
+    }
+}
+
+package "pygim::adapter" as p_adapter #E3F2FD {
+    class RepositoryAdapter {
+        + create(conn_str: py::str, ..., access_token: py::object)
+        ' 1. cs = ConnectionString::parse(conn_str)
+        ' 2. if token: enforce cs.token_conflicts().empty()
+        ' 3. dispatch py token → AccessTokenPacker::pack
+    }
+}
+
+' ═══════════════════════ RELATIONSHIPS ═══════════════════════
+
+ConnectionString "1" *-- "1..*" ConnAttribute
+ConnAttribute ..> ConnKey
+ConnectionString ..> ConnKey
+ConnectionString ..> Reveal : «render mode»
+ConnectionString ..> helpers : «mask_secret»
+
+' builder ↔ value object
+ConnectionStringBuilder ..> ConnectionString : «creates»
+ConnectionStringBuilder ..> helpers : «quotes via»
+
+' abstract factory hierarchy
+ConnectionStringFactory <|.. OdbcDsnFactory
+ConnectionStringFactory <|.. SqlAlchemyUrlFactory
+ConnStringFactorySelector ..> ConnectionStringFactory : «returns»
+ConnStringFactorySelector ..> helpers : «sniff_source»
+
+' factory uses builder to assemble the product…
+OdbcDsnFactory ..> ConnectionStringBuilder : «uses»
+SqlAlchemyUrlFactory ..> ConnectionStringBuilder : «uses»
+
+' …and the builder/value-object delegate to the factory when given a whole source
+ConnectionStringBuilder ..> ConnStringFactorySelector : «from_source»
+ConnectionString ..> ConnStringFactorySelector : «parse() facade»
+
+' token
+AccessTokenPacker ..> AccessToken : «packs»
+
+' consumers depend on the value object
+Pool o-- ConnectionString
+OdbcConnection o-- ConnectionString
+MssqlLoadCache o-- ConnectionString
+MssqlBackend ..> ConnectionString
+RepositoryAdapter ..> ConnectionString
+RepositoryAdapter ..> AccessTokenPacker
+OdbcConnection ..> AccessTokenPacker
+
+note bottom of p_conn
+  <b>Ownership of what is scattered today</b>
+  • URL→DSN + brace-quote  (persistence.py _translate_conn_str/_dsn_quote)
+      → SqlAlchemyUrlFactory + dsn_quote()   [moves Python → C++ core]
+  • PacketSize append       (backend.h ensure_packet_size)
+      → ConnectionString::with_packet_size()
+  • UID/PWD/Trusted/Auth conflict scan (adapter.h substring test)
+      → ConnectionString::token_conflicts()  [real key check, not substring]
+  • Token byte-packing      (adapter.h pack_access_token)
+      → AccessTokenPacker::pack()             [pure; adapter keeps only py dispatch]
+  • 4× bare std::string copies (pool, OdbcConnection, load_cache, …)
+      → one ConnectionString value type
+end note
+
+@enduml

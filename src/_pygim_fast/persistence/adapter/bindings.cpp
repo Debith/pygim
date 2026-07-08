@@ -127,6 +127,41 @@ PYBIND11_MODULE(_persistence, m) {
         .def("limit", &core::Query::limit, py::arg("n"),
              py::return_value_policy::reference_internal);
 
+    // Connection-string value object (core/connection_string.h). Parses a raw
+    // ODBC DSN or a mssql+pyodbc:// URL; str()/repr() render with the password
+    // masked so a credential never leaks into a log or traceback.
+    py::class_<core::ConnectionString>(m, "ConnectionString",
+        "Immutable ODBC connection string. Parse a raw DSN or a\n"
+        "mssql+pyodbc:// URL; render()/str()/repr() mask the password by default.")
+        .def_static("parse", &core::ConnectionString::parse, py::arg("source"),
+                    "Parse a raw ODBC DSN or a SQLAlchemy-style URL.")
+        .def("render",
+             [](const core::ConnectionString& c, bool reveal) {
+                 return c.render(reveal ? core::Reveal::WithSecrets : core::Reveal::Masked);
+             },
+             py::arg("reveal") = false,
+             "Render to a DSN string. reveal=False (default) masks the password\n"
+             "for display; reveal=True yields the full string used to connect.")
+        .def_property_readonly("driver", [](const core::ConnectionString& c) -> py::object {
+             return c.driver() ? py::cast(std::string(*c.driver())) : py::none();
+         })
+        .def_property_readonly("server", [](const core::ConnectionString& c) -> py::object {
+             return c.server() ? py::cast(std::string(*c.server())) : py::none();
+         })
+        .def_property_readonly("database", [](const core::ConnectionString& c) -> py::object {
+             return c.database() ? py::cast(std::string(*c.database())) : py::none();
+         })
+        .def_property_readonly("is_named_dsn", &core::ConnectionString::is_named_dsn)
+        .def("__str__", [](const core::ConnectionString& c) {
+             return c.render(core::Reveal::Masked);
+         })
+        .def("__repr__", [](const core::ConnectionString& c) {
+             return c.render(core::Reveal::Masked);
+         })
+        .def("__eq__", [](const core::ConnectionString& a,
+                          const core::ConnectionString& b) { return a == b; },
+             py::is_operator());
+
     // ONE class, not two
     py::class_<MssqlRepo>(m, "DataStore")
         .def("save", &MssqlRepo::save,

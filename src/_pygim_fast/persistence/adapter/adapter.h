@@ -13,6 +13,7 @@
 #include "arrow_export.h"
 #include "arrow_import.h"
 #include "../core/connection_pool.h"
+#include "../core/connection_string.h"
 #include "../core/query.h"
 #include "../core/repository.h"
 #include "../../utils/logging.h"
@@ -139,6 +140,11 @@ public:
                                     int64_t block_size = 4096,
                                     int packet_size = 16384,
                                     py::object access_token = py::none()) {
+        // Parse the source (raw ODBC DSN or mssql+pyodbc:// URL) once, in the
+        // pybind-free core; downstream connects use the rendered DSN.
+        const core::ConnectionString cs = core::ConnectionString::parse(conn_str);
+        const std::string dsn = cs.render(core::Reveal::WithSecrets);
+
         typename core::ConnectionPool<Backend>::ConnectFn connect_fn;
         const bool token_auth = !access_token.is_none();
         if (token_auth) {
@@ -155,21 +161,18 @@ public:
                 throw py::type_error(
                     "access_token must be str, bytes, or a callable returning str/bytes");
             }
-            std::string cs_lower(conn_str);
-            std::ranges::transform(cs_lower, cs_lower.begin(),
-                                   [](unsigned char c) { return std::tolower(c); });
-            std::erase(cs_lower, ' ');
-            for (const char* kw : {"uid=", "pwd=", "trusted_connection=", "authentication="}) {
-                if (cs_lower.contains(kw)) {
-                    throw py::value_error(
-                        std::string("access_token conflicts with '") + kw +
-                        "' in conn_str; remove credential/authentication keywords "
-                        "when using token auth");
-                }
+            // Real keyword check on the parsed attributes (no substring false
+            // positives), and it works whether the source was a URL or a DSN.
+            if (const auto conflicts = cs.token_conflicts(); !conflicts.empty()) {
+                throw py::value_error(
+                    std::string("access_token conflicts with '") +
+                    std::string(core::detail::key_label(conflicts.front())) +
+                    "' in the connection string; remove credential/authentication "
+                    "keywords (and userinfo in a URL) when using token auth");
             }
             // Tokens expire while pooled connections persist, so the token
             // source (value or callable) is re-evaluated per physical connect.
-            connect_fn = [token_source = access_token](std::string_view cs,
+            connect_fn = [token_source = access_token](std::string_view cs_view,
                                                        int ps) -> typename Backend::Connection {
                 std::vector<unsigned char> packed;
                 {
@@ -178,15 +181,15 @@ public:
                     py::gil_scoped_acquire gil;
                     packed = pack_access_token(token_source);
                 }
-                if constexpr (requires { Backend::connect_with_token(cs, ps, packed); }) {
-                    return Backend::connect_with_token(cs, ps, packed);
+                if constexpr (requires { Backend::connect_with_token(cs_view, ps, packed); }) {
+                    return Backend::connect_with_token(cs_view, ps, packed);
                 } else {
                     throw std::runtime_error("access_token is not supported by this backend");
                 }
             };
         }
         auto pool = std::make_shared<core::ConnectionPool<Backend>>(
-            conn_str, pool_size, packet_size, std::move(connect_fn));
+            dsn, pool_size, packet_size, std::move(connect_fn));
         return RepositoryAdapter(std::move(pool), format,
                                  batch_size, table_hint, bcp_workers,
                                  block_size, packet_size, token_auth);
