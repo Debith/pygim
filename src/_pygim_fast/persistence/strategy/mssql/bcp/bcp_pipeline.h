@@ -344,8 +344,29 @@ inline void process_batch(BcpContext& ctx,
 // ── finalize_bcp ────────────────────────────────────────────────────────────
 
 /// Final flush + bcp_done. Retries bcp_batch once (50ms) on transient failure
-/// before raising. Throws on bcp_done failure.
-inline void finalize_bcp(BcpContext& ctx) {
+/// before raising. Throws on bcp_done failure or on a commit shortfall.
+///
+/// `guard` is dismissed the moment bcp_done succeeds, so a shortfall throw
+/// below does not provoke a second bcp_done from the guard's destructor on a
+/// connection that no longer has a bulk-copy in flight.
+inline void finalize_bcp(BcpContext& ctx, BcpSessionGuard& guard) {
+    // Diagnostics for a rejected row (e.g. constraint violation 2627) appear
+    // on the connection right after the bcp_batch/bcp_done call that dropped
+    // it, and are cleared by the next call — snapshot after each step.
+    std::string diag_text, diag_state;
+    SQLINTEGER diag_native = 0;
+    auto snapshot_diag = [&] {
+        if (!diag_text.empty()) return;
+        std::string state;
+        SQLINTEGER native = 0;
+        auto text = odbc::collect_diagnostics(SQL_HANDLE_DBC, ctx.dbc, &state, &native);
+        if (!text.empty()) {
+            diag_text = std::move(text);
+            diag_state = std::move(state);
+            diag_native = native;
+        }
+    };
+
     // Flush remaining rows that didn't trigger a batch flush
     if (ctx.sent_rows > 0 && ctx.rows_until_flush < ctx.batch_size) {
         auto ret = ctx.bcp.batch(ctx.dbc);
@@ -355,10 +376,47 @@ inline void finalize_bcp(BcpContext& ctx) {
         }
         if (ret == -1) [[unlikely]]
             odbc::raise_if_error(SQL_ERROR, SQL_HANDLE_DBC, ctx.dbc, "bcp_batch");
+        ctx.committed_rows += ret;
+        snapshot_diag();  // capture any per-row rejection diag before bcp_done clears it
     }
     auto done = ctx.bcp.done(ctx.dbc);
     if (done == -1)
         odbc::raise_if_error(SQL_ERROR, SQL_HANDLE_DBC, ctx.dbc, "bcp_done");
+    ctx.committed_rows += done;
+
+    // bcp_done succeeded: the bulk-copy is closed. Dismiss now so the shortfall
+    // path below cannot trigger a redundant bcp_done from the guard destructor.
+    guard.dismiss();
+
+    // bcp_batch/bcp_done report ROWS COMMITTED and signal per-row rejections
+    // (e.g. constraint violations, error 2627) only through the connection's
+    // diagnostics — a shortfall with no exception would be SILENT data loss
+    // masquerading as a successful save.
+    if (ctx.committed_rows < ctx.sent_rows) {
+        snapshot_diag();
+        // A unique index declared WITH (IGNORE_DUP_KEY = ON) drops duplicate
+        // rows by design and reports it as informational message 3604
+        // ("Duplicate key was ignored"). That is the table's configured dedup
+        // behaviour, not a failure — honour it rather than raising.
+        const bool ignore_dup_key =
+            diag_native == 3604 ||
+            diag_text.find("Duplicate key was ignored") != std::string::npos;
+        if (ignore_dup_key) return;
+
+        // Prefer the driver's own classification when a diagnostic is present
+        // (e.g. 23000 → Integrity, 22* → Data); fall back to Integrity when the
+        // driver left no diagnostics, since the server declining rows it
+        // accepted via bcp_sendrow is constraint/unique-index enforcement.
+        const auto kind = diag_state.empty()
+            ? odbc::ErrorKind::Integrity
+            : odbc::classify_error(diag_state, diag_native, diag_text);
+        throw odbc::OdbcError(
+            "bcp commit: server committed " + std::to_string(ctx.committed_rows) +
+            " of " + std::to_string(ctx.sent_rows) + " sent rows (constraint/index "
+            "enforcement rejected the difference)" +
+            (diag_text.empty() ? "" : (": " + diag_text)),
+            std::move(diag_state), diag_native, kind);
+    }
 }
 
 // ── bulk_insert (single connection) ─────────────────────────────────────────
@@ -420,10 +478,13 @@ inline void finalize_bcp(BcpContext& ctx) {
     }
 
     timer.start_sub_timer(BcpPhase::flush, false);
-    session_guard.dismiss();
     {
         BCP_PROF_SCOPE(prof, final_flush);
-        finalize_bcp(ctx);
+        // finalize_bcp dismisses the guard itself once bcp_done succeeds. If it
+        // throws before that (bcp_batch/bcp_done failure), the guard's own
+        // bcp_done still runs, so the connection never returns to the pool with
+        // a BCP operation in flight (HY010 on every later call).
+        finalize_bcp(ctx, session_guard);
     }
     timer.stop_sub_timer(BcpPhase::flush, false);
 
@@ -547,10 +608,9 @@ inline void finalize_bcp(BcpContext& ctx) {
                 }
 
                 wtimer.start_sub_timer(BcpWorkerPhase::flush, false);
-                guard.dismiss();
                 {
                     BCP_PROF_SCOPE(prof, final_flush);
-                    finalize_bcp(ctx);
+                    finalize_bcp(ctx, guard);  // dismisses guard once bcp_done succeeds
                 }
                 wtimer.stop_sub_timer(BcpWorkerPhase::flush, false);
 
@@ -569,16 +629,20 @@ inline void finalize_bcp(BcpContext& ctx) {
     // 7. Check for errors (rethrow first encountered)
     for (int w = 0; w < actual_workers; ++w) {
         if (results[static_cast<size_t>(w)].error) {
+            const auto& wm = results[static_cast<size_t>(w)].metrics;
+            const auto prefix = std::string("Parallel BCP worker ") + std::to_string(w)
+                + "/" + std::to_string(actual_workers)
+                + " failed (sent " + std::to_string(wm.sent_rows)
+                + "/" + std::to_string(slices[static_cast<size_t>(w)]->num_rows())
+                + " rows): ";
             try {
                 std::rethrow_exception(results[static_cast<size_t>(w)].error);
+            } catch (const odbc::OdbcError& e) {
+                // Preserve the SQLSTATE/classification so the Python boundary
+                // still raises the typed exception (Integrity/Transient/Data).
+                throw odbc::OdbcError(prefix + e.what(), e.sqlstate, e.native, e.kind);
             } catch (const std::exception& e) {
-                const auto& wm = results[static_cast<size_t>(w)].metrics;
-                throw std::runtime_error(
-                    std::string("Parallel BCP worker ") + std::to_string(w)
-                    + "/" + std::to_string(actual_workers)
-                    + " failed (sent " + std::to_string(wm.sent_rows)
-                    + "/" + std::to_string(slices[static_cast<size_t>(w)]->num_rows())
-                    + " rows): " + e.what());
+                throw std::runtime_error(prefix + e.what());
             }
         }
     }

@@ -10,12 +10,14 @@
 #pragma once
 
 #include "backend_policy.h"
+#include "connection_string.h"
 #include "../../utils/logging.h"
 
 #include <cassert>
 #include <chrono>
 #include <condition_variable>
 #include <expected>
+#include <functional>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -124,6 +126,17 @@ public:
             m_pool = nullptr;
         }
     }
+
+    /// Destroy the connection instead of returning it: use when its state is
+    /// suspect (failed rollback, autocommit restore failure, dead handle).
+    /// The pool slot is freed so a fresh connection can replace it.
+    void discard() {
+        if (m_pool) {
+            PYGIM_LOG_FMT("[ConnectionHandle] discard → destroying connection\n");
+            m_pool->discard_connection(std::move(m_connection));
+            m_pool = nullptr;
+        }
+    }
 };
 
 // ────────────────────────────────────────────────────────────────
@@ -143,29 +156,40 @@ template <BackendPolicy Backend>
 class ConnectionPool {
     friend class ConnectionHandle<Backend>;
 
-    std::string                               m_conn_str;
+public:
+    /// Override how physical connections are opened (e.g. access-token
+    /// authentication, which must set pre-connect attributes). Defaults to
+    /// Backend::connect when empty.
+    using ConnectFn =
+        std::function<typename Backend::Connection(std::string_view, int)>;
+
+private:
+    ConnectionString                          m_conn;
     std::vector<typename Backend::Connection>  m_available;
     std::size_t                               m_total_created;
     std::size_t                               m_max_size;
     int                                       m_packet_size;
     bool                                      m_closed;
+    ConnectFn                                 m_connect_fn;
     mutable std::mutex                        m_mutex;
     std::condition_variable                   m_cv;
 
 public:
-    explicit ConnectionPool(std::string_view conn_str,
+    explicit ConnectionPool(ConnectionString conn,
                             std::size_t max_size = 8,
-                            int packet_size = 16384)
-        : m_conn_str(conn_str)
+                            int packet_size = 16384,
+                            ConnectFn connect_fn = nullptr)
+        : m_conn(std::move(conn))
         , m_total_created(0)
         , m_max_size(max_size)
         , m_packet_size(packet_size)
         , m_closed(false)
+        , m_connect_fn(std::move(connect_fn))
     {
         m_available.reserve(max_size);
-        PYGIM_LOG_FMT("[ConnectionPool] created (max_size=%zu, conn_str=\"%.*s\")\n",
-                      max_size,
-                      static_cast<int>(conn_str.size()), conn_str.data());
+        const std::string masked = m_conn.render(Reveal::Masked);
+        PYGIM_LOG_FMT("[ConnectionPool] created (max_size=%zu, conn_str=\"%s\")\n",
+                      max_size, masked.c_str());
     }
 
     ~ConnectionPool() {
@@ -205,9 +229,27 @@ public:
         if (m_total_created < m_max_size) {
             ++m_total_created;
             lock.unlock();
-            auto conn = Backend::connect(m_conn_str, m_packet_size);
-            PYGIM_LOG_FMT("[ConnectionPool] checkout → created new connection\n");
-            return ConnectionHandle<Backend>(this, std::move(conn));
+            try {
+                // Render the value object to a DSN only at the connect boundary
+                // (connection creation is rare, not a hot path).
+                const std::string dsn = m_conn.render(Reveal::WithSecrets);
+                auto conn = m_connect_fn
+                    ? m_connect_fn(dsn, m_packet_size)
+                    : Backend::connect(dsn, m_packet_size);
+                PYGIM_LOG_FMT("[ConnectionPool] checkout → created new connection\n");
+                return ConnectionHandle<Backend>(this, std::move(conn));
+            } catch (...) {
+                // Give the slot back: with token auth a throwing connect is
+                // an ordinary event (expired token, raising callable), and a
+                // leaked slot would permanently shrink the pool until every
+                // checkout times out.
+                {
+                    std::lock_guard relock(m_mutex);
+                    --m_total_created;
+                }
+                m_cv.notify_one();
+                throw;
+            }
         }
 
         // Must wait for a return
@@ -258,9 +300,9 @@ public:
         return m_closed;
     }
 
-    [[nodiscard]] std::string_view connection_string() const {
+    [[nodiscard]] const ConnectionString& connection_string() const {
         // Immutable after construction — no lock needed
-        return m_conn_str;
+        return m_conn;
     }
 
     // ── Shut down pool ───────────────────────────────────────────
@@ -292,6 +334,20 @@ private:
         PYGIM_LOG_FMT("[ConnectionPool] return_connection (available=%zu→%zu)\n",
                       m_available.size(), m_available.size() + 1);
         m_available.push_back(std::move(conn));
+        m_cv.notify_one();
+    }
+
+    // Called by ConnectionHandle::discard — the connection is suspect (dead,
+    // or in an unknown transaction state) and must NOT re-enter rotation.
+    // Frees its slot so the pool can create a replacement.
+    void discard_connection(typename Backend::Connection conn) {
+        conn.close();
+        {
+            std::lock_guard lock(m_mutex);
+            if (m_total_created > 0) --m_total_created;
+            PYGIM_LOG_FMT("[ConnectionPool] discard_connection (total=%zu/%zu)\n",
+                          m_total_created, m_max_size);
+        }
         m_cv.notify_one();
     }
 

@@ -261,6 +261,8 @@ cfg["package_dir"] = {
 cfg["ext_modules"] = ext_modules
 cfg["packages"] = find_namespace_packages(where="src")
 cfg["install_requires"] = cfg.pop("dependencies")
+# Ship type stubs (PEP 561 partial): persistence.pyi + py.typed marker.
+cfg["package_data"] = {"pygim": ["*.pyi", "py.typed"]}
 
 # Map PEP 621 scripts to setuptools entry_points
 scripts = cfg.pop("scripts", None)

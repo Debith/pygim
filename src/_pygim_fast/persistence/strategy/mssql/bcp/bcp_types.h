@@ -74,6 +74,7 @@ struct BcpContext {
     SQLHDBC       dbc;
     int64_t       batch_size;
     int64_t       sent_rows{0};
+    int64_t       committed_rows{0};  //!< rows the server confirmed via bcp_batch/bcp_done
     int64_t       rows_until_flush{0};
     int64_t       processed_rows{0};
     int64_t       record_batches{0};
@@ -82,6 +83,7 @@ struct BcpContext {
     /// Session-bound fields (bcp, dbc, batch_size, rows_until_flush) are unchanged.
     BcpContext& operator+=(const BcpContext& rhs) noexcept {
         sent_rows      += rhs.sent_rows;
+        committed_rows += rhs.committed_rows;
         processed_rows += rhs.processed_rows;
         record_batches += rhs.record_batches;
         return *this;

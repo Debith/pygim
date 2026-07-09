@@ -8,12 +8,12 @@ from pygim.ioc import Container
 
 __all__ = ["PathSet", "Registry", "Factory", "Container", "create_df"]
 
-# Import C++ extension modules explicitly
+# Re-export the persistence surface from the Python module (not the compiled
+# extension directly) so the top-level entry point shares its SQLAlchemy-URL
+# translation — ``pygim.acquire_datastore`` is ``pygim.persistence.acquire_datastore``.
 try:  # normal pybind11 extension import
-    from . import _persistence as _persist_mod  # type: ignore
+    from pygim.persistence import DataStore, acquire_datastore
 
-    DataStore = _persist_mod.DataStore  # type: ignore[attr-defined]
-    acquire_datastore = _persist_mod.acquire_datastore  # type: ignore[attr-defined]
     __all__ += ["DataStore", "acquire_datastore"]
 except (
     ImportError,

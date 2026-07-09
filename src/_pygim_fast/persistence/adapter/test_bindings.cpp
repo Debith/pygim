@@ -34,8 +34,18 @@ PYBIND11_MODULE(_persistence_test, m) {
              py::return_value_policy::reference_internal)
         .def("from_table", &core::Query::from_table, py::arg("table"),
              py::return_value_policy::reference_internal)
-        .def("where", &core::Query::where, py::arg("clause"),
+        .def("where", py::overload_cast<std::string_view>(&core::Query::where),
+             py::arg("clause"), py::return_value_policy::reference_internal)
+        .def("where",
+             py::overload_cast<std::string_view, std::vector<core::QueryParam>>(
+                 &core::Query::where),
+             py::arg("clause"), py::arg("params"),
              py::return_value_policy::reference_internal)
+        .def("where_in", &core::Query::where_in, py::arg("column"), py::arg("values"),
+             py::return_value_policy::reference_internal)
+        .def_property_readonly("param_count", [](core::Query const& q) {
+            return q.params().size();
+        })
         .def("limit", &core::Query::limit, py::arg("n"),
              py::return_value_policy::reference_internal)
         .def("is_raw", &core::Query::is_raw)
@@ -87,11 +97,37 @@ PYBIND11_MODULE(_persistence_test, m) {
              py::arg("block_size") = 4096,
              py::arg("packet_size") = 16384)
         .def("save", &MssqlRepo::save,
-             py::arg("data"), py::arg("table_name"), py::arg("bcp_workers") = -1)
+             py::arg("data"), py::arg("table_name"), py::arg("bcp_workers") = -1,
+             py::kw_only(),
+             py::arg("mode") = "append",
+             py::arg("keys") = std::vector<std::string>{})
+        .def_static("pack_access_token",
+             [](py::object source) {
+                 auto packed = MssqlRepo::pack_access_token(source);
+                 return py::bytes(reinterpret_cast<const char*>(packed.data()),
+                                  static_cast<py::ssize_t>(packed.size()));
+             },
+             py::arg("source"),
+             "Test hook: SQL_COPT_SS_ACCESS_TOKEN packing (4-byte LE length + UTF-16-LE).")
+        .def_static("classify_error",
+             [](const std::string& sqlstate, long native, const std::string& message) {
+                 using strategy::mssql::odbc::ErrorKind;
+                 switch (strategy::mssql::odbc::classify_error(
+                     sqlstate, static_cast<SQLINTEGER>(native), message)) {
+                     case ErrorKind::Integrity: return "integrity";
+                     case ErrorKind::Transient: return "transient";
+                     case ErrorKind::Data:      return "data";
+                     default:                   return "generic";
+                 }
+             },
+             py::arg("sqlstate"), py::arg("native"), py::arg("message") = "",
+             "Test hook: SQLSTATE/native-code -> error-kind classification.")
         .def("load",
-             py::overload_cast<std::string_view, int, std::string_view>(&MssqlRepo::load),
+             py::overload_cast<std::string_view, int, std::string_view,
+                               std::vector<core::QueryParam>>(&MssqlRepo::load),
              py::arg("source"), py::arg("load_workers") = 1,
-             py::arg("partition_column") = "")
+             py::arg("partition_column") = "",
+             py::arg("params") = std::vector<core::QueryParam>{})
         .def("load",
              py::overload_cast<core::Query const&, int, std::string_view>(&MssqlRepo::load),
              py::arg("query"), py::arg("load_workers") = 1,

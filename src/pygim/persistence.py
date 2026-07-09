@@ -5,6 +5,13 @@ Exposes the C++ ``_persistence`` extension as ``DataStore`` with
 Format conversion (Polars/Pandas) is a runtime attribute on the adapter,
 not a template parameter.
 
+``acquire_datastore`` accepts either a raw ODBC connection string or a
+SQLAlchemy-style URL (``mssql+pyodbc://user:pass@host:port/db?driver=...``
+or the ``?odbc_connect=<url-encoded DSN>`` form). The URL → ODBC DSN
+translation now lives in the C++ core (``ConnectionString``), so both this
+module's ``acquire_datastore`` and the raw extension entry point share it —
+no SQLAlchemy dependency required.
+
 Usage::
 
     from pygim.persistence import acquire_datastore
@@ -28,11 +35,52 @@ try:
 
     Format = _ext.Format
     DataStore = _ext.DataStore
-    acquire_datastore = _ext.acquire_datastore
+    DataStoreSession = _ext.DataStoreSession
+    Query = _ext.Query
+    ConnectionString = _ext.ConnectionString
+    GimError = _ext.GimError
+    DataStoreIntegrityError = _ext.DataStoreIntegrityError
+    DataStoreTransientError = _ext.DataStoreTransientError
+    DataStoreDataError = _ext.DataStoreDataError
+
+    def _translate_conn_str(conn_str):
+        """Translate a SQLAlchemy-style URL into a raw ODBC connection string.
+
+        Thin compatibility shim over ``ConnectionString`` (the translation now
+        lives in C++ core). Raw DSNs (no ``://``) pass through untouched; URLs
+        are parsed and rendered with credentials for connecting.
+        """
+        if "://" not in conn_str:
+            return conn_str
+        return ConnectionString.parse(conn_str).render(reveal=True)
+
+    def acquire_datastore(conn_str, *args, **kwargs):
+        """Create a DataStore from an ODBC DSN or SQLAlchemy-style URL.
+
+        The connection string (raw DSN or ``mssql+pyodbc://`` URL) is passed
+        straight to the extension, which parses it via ``ConnectionString`` —
+        see the compiled ``pygim._persistence.acquire_datastore`` for the full
+        parameter documentation.
+        """
+        return _ext.acquire_datastore(conn_str, *args, **kwargs)
+
+    # Guard the concat: under ``python -OO`` docstrings are stripped to None.
+    acquire_datastore.__doc__ = (
+        (acquire_datastore.__doc__ or "")
+        + "\n\n"
+        + (_ext.acquire_datastore.__doc__ or "")
+    )
 
     __all__ = [
         "Format",
         "DataStore",
+        "DataStoreSession",
+        "Query",
+        "ConnectionString",
+        "GimError",
+        "DataStoreIntegrityError",
+        "DataStoreTransientError",
+        "DataStoreDataError",
         "acquire_datastore",
     ]
 except ImportError:  # pragma: no cover – extension absent (Arrow/ODBC not installed)
