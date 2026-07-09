@@ -6,13 +6,12 @@
 #pragma once
 
 #include "../../core/backend_policy.h"
+#include "../../core/connection_string.h"
 #include "../../../utils/logging.h"
-#include "../../../utils/core_utils.h"
 #include "dialect.h"
 #include "odbc_error.h"
 #include "bcp/bcp_api.h"   // SQL_COPT_SS_BCP, SQL_BCP_ON
 
-#include <format>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -28,26 +27,6 @@ namespace pygim::strategy::mssql {
 
 inline constexpr int kDefaultPacketSize = 16384;
 
-/// Ensure the connection string contains a PacketSize setting.
-/// If the user already specified PacketSize (or "Packet Size"), their value is preserved.
-/// Otherwise, appends ";PacketSize=<default_size>".
-[[nodiscard]] inline std::string ensure_packet_size(std::string_view conn_str,
-                                                     int packet_size = kDefaultPacketSize)
-{
-    // Case-insensitive, whitespace-insensitive search for "packetsize="
-    auto lower = to_lower_copy(std::string(conn_str));
-    std::erase(lower, ' ');
-
-    if (lower.contains("packetsize="))
-        return std::string(conn_str);  // User specified — respect it
-
-    std::string result(conn_str);
-    if (!result.empty() && result.back() != ';')
-        result += ';';
-    result += std::format("PacketSize={}", packet_size);
-    return result;
-}
-
 // ────────────────────────────────────────────────────────────────
 // OdbcConnection — real ODBC connection (SQLHENV + SQLHDBC)
 // ────────────────────────────────────────────────────────────────
@@ -55,10 +34,11 @@ inline constexpr int kDefaultPacketSize = 16384;
 /// OdbcConnection — wraps SQLHENV + SQLHDBC handles with BCP enabled.
 /// RAII: close() in destructor; move-only.
 struct OdbcConnection {
-    SQLHENV     m_env{SQL_NULL_HENV};
-    SQLHDBC     m_dbc{SQL_NULL_HDBC};
-    std::string m_conn_str;
-    bool        m_connected{false};
+    SQLHENV                 m_env{SQL_NULL_HENV};
+    SQLHDBC                 m_dbc{SQL_NULL_HDBC};
+    core::ConnectionString  m_conn{core::ConnectionString::parse("")};
+    std::string             m_conn_str;   //!< rendered DSN (packet-size included)
+    bool                    m_connected{false};
     // Packed ACCESSTOKEN struct. Microsoft: "The ACCESSTOKEN must remain
     // allocated for as long as the connection handle is allocated", so the
     // buffer lives here, matching the DBC's lifetime. (Vector moves keep the
@@ -71,6 +51,7 @@ struct OdbcConnection {
     // Move-only (owns ODBC handles)
     OdbcConnection(OdbcConnection&& other) noexcept
         : m_env(other.m_env), m_dbc(other.m_dbc),
+          m_conn(std::move(other.m_conn)),
           m_conn_str(std::move(other.m_conn_str)),
           m_connected(other.m_connected),
           m_access_token(std::move(other.m_access_token)) {
@@ -83,6 +64,7 @@ struct OdbcConnection {
             close();
             m_env = other.m_env;
             m_dbc = other.m_dbc;
+            m_conn = std::move(other.m_conn);
             m_conn_str = std::move(other.m_conn_str);
             m_connected = other.m_connected;
             m_access_token = std::move(other.m_access_token);
@@ -105,7 +87,13 @@ struct OdbcConnection {
     ///     connection handle.
     void open(std::string_view conn_str, int packet_size = kDefaultPacketSize,
               std::vector<unsigned char> access_token = {}) {
-        m_conn_str = ensure_packet_size(conn_str, packet_size);
+        // Model the DSN as a value object and add PacketSize structurally,
+        // preserving any caller-specified value (replaces ensure_packet_size).
+        m_conn = core::ConnectionString::parse(conn_str);
+        if (!m_conn.has(core::ConnKey::PacketSize)) {
+            m_conn = m_conn.with_packet_size(packet_size);
+        }
+        m_conn_str = m_conn.render(core::Reveal::WithSecrets);
         m_access_token = std::move(access_token);
 
         // 1. Allocate environment handle + set ODBC 3.x
@@ -211,8 +199,12 @@ struct OdbcConnection {
     /// Accessor: ODBC connection handle (needed by BCP pipeline).
     [[nodiscard]] SQLHDBC dbc() const noexcept { return m_dbc; }
 
-    /// Accessor: connection string (needed for parallel pool).
+    /// Accessor: rendered connection string (needed for the parallel pools,
+    /// which reconnect siblings via their own SQLDriverConnect).
     [[nodiscard]] const std::string& conn_str() const noexcept { return m_conn_str; }
+
+    /// Accessor: the parsed connection-string value object.
+    [[nodiscard]] const core::ConnectionString& connection() const noexcept { return m_conn; }
 
     /// Is this connection currently open?
     [[nodiscard]] bool connected() const noexcept { return m_connected; }

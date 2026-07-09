@@ -53,7 +53,8 @@ public:
     [[nodiscard]]
     static Repository create(std::string_view conn_str, std::size_t pool_size = 4,
                              int64_t block_size = 4096, int packet_size = 16384) {
-        auto pool = std::make_shared<ConnectionPool<Backend>>(conn_str, pool_size, packet_size);
+        auto pool = std::make_shared<ConnectionPool<Backend>>(
+            ConnectionString::parse(conn_str), pool_size, packet_size);
         return Repository(std::move(pool), block_size, packet_size);
     }
 
@@ -245,7 +246,7 @@ public:
         return Backend::SaveImpl::execute_delete(conn, table_name, where, params);
     }
 
-    [[nodiscard]] std::string_view connection_string() const {
+    [[nodiscard]] const ConnectionString& connection_string() const {
         return m_pool->connection_string();
     }
 

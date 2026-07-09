@@ -10,6 +10,7 @@
 #pragma once
 
 #include "backend_policy.h"
+#include "connection_string.h"
 #include "../../utils/logging.h"
 
 #include <cassert>
@@ -163,7 +164,7 @@ public:
         std::function<typename Backend::Connection(std::string_view, int)>;
 
 private:
-    std::string                               m_conn_str;
+    ConnectionString                          m_conn;
     std::vector<typename Backend::Connection>  m_available;
     std::size_t                               m_total_created;
     std::size_t                               m_max_size;
@@ -174,11 +175,11 @@ private:
     std::condition_variable                   m_cv;
 
 public:
-    explicit ConnectionPool(std::string_view conn_str,
+    explicit ConnectionPool(ConnectionString conn,
                             std::size_t max_size = 8,
                             int packet_size = 16384,
                             ConnectFn connect_fn = nullptr)
-        : m_conn_str(conn_str)
+        : m_conn(std::move(conn))
         , m_total_created(0)
         , m_max_size(max_size)
         , m_packet_size(packet_size)
@@ -186,9 +187,9 @@ public:
         , m_connect_fn(std::move(connect_fn))
     {
         m_available.reserve(max_size);
-        PYGIM_LOG_FMT("[ConnectionPool] created (max_size=%zu, conn_str=\"%.*s\")\n",
-                      max_size,
-                      static_cast<int>(conn_str.size()), conn_str.data());
+        const std::string masked = m_conn.render(Reveal::Masked);
+        PYGIM_LOG_FMT("[ConnectionPool] created (max_size=%zu, conn_str=\"%s\")\n",
+                      max_size, masked.c_str());
     }
 
     ~ConnectionPool() {
@@ -229,9 +230,12 @@ public:
             ++m_total_created;
             lock.unlock();
             try {
+                // Render the value object to a DSN only at the connect boundary
+                // (connection creation is rare, not a hot path).
+                const std::string dsn = m_conn.render(Reveal::WithSecrets);
                 auto conn = m_connect_fn
-                    ? m_connect_fn(m_conn_str, m_packet_size)
-                    : Backend::connect(m_conn_str, m_packet_size);
+                    ? m_connect_fn(dsn, m_packet_size)
+                    : Backend::connect(dsn, m_packet_size);
                 PYGIM_LOG_FMT("[ConnectionPool] checkout → created new connection\n");
                 return ConnectionHandle<Backend>(this, std::move(conn));
             } catch (...) {
@@ -296,9 +300,9 @@ public:
         return m_closed;
     }
 
-    [[nodiscard]] std::string_view connection_string() const {
+    [[nodiscard]] const ConnectionString& connection_string() const {
         // Immutable after construction — no lock needed
-        return m_conn_str;
+        return m_conn;
     }
 
     // ── Shut down pool ───────────────────────────────────────────

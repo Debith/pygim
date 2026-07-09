@@ -141,9 +141,9 @@ public:
                                     int packet_size = 16384,
                                     py::object access_token = py::none()) {
         // Parse the source (raw ODBC DSN or mssql+pyodbc:// URL) once, in the
-        // pybind-free core; downstream connects use the rendered DSN.
+        // pybind-free core; the pool owns the value object and renders it to a
+        // DSN at each physical connect.
         const core::ConnectionString cs = core::ConnectionString::parse(conn_str);
-        const std::string dsn = cs.render(core::Reveal::WithSecrets);
 
         typename core::ConnectionPool<Backend>::ConnectFn connect_fn;
         const bool token_auth = !access_token.is_none();
@@ -189,7 +189,7 @@ public:
             };
         }
         auto pool = std::make_shared<core::ConnectionPool<Backend>>(
-            dsn, pool_size, packet_size, std::move(connect_fn));
+            cs, pool_size, packet_size, std::move(connect_fn));
         return RepositoryAdapter(std::move(pool), format,
                                  batch_size, table_hint, bcp_workers,
                                  block_size, packet_size, token_auth);
@@ -230,18 +230,8 @@ public:
                     "the UTF-16 expansion and length prefix itself)");
             }
         }
-        std::vector<unsigned char> packed;
-        packed.reserve(4 + raw.size() * 2);
-        const std::uint32_t byte_len = static_cast<std::uint32_t>(raw.size() * 2);
-        packed.push_back(static_cast<unsigned char>(byte_len & 0xFF));
-        packed.push_back(static_cast<unsigned char>((byte_len >> 8) & 0xFF));
-        packed.push_back(static_cast<unsigned char>((byte_len >> 16) & 0xFF));
-        packed.push_back(static_cast<unsigned char>((byte_len >> 24) & 0xFF));
-        for (unsigned char c : raw) {
-            packed.push_back(c);
-            packed.push_back(0);
-        }
-        return packed;
+        // Pure byte-packing lives in the core value-object layer.
+        return core::AccessTokenPacker::pack(raw);
     }
 
     // ── Transform hooks ──────────────────────────────────────

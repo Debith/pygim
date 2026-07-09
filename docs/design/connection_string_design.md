@@ -1,18 +1,36 @@
 # Connection-string subsystem — design
 
-Status: **Phase 1 implemented (2026-07-08)** · Audience: `pygim` maintainers · Diagram: [`connection_string_design.puml`](connection_string_design.puml)
+Status: **Phase 1 + 2 implemented (2026-07-09)** · Audience: `pygim` maintainers · Diagram: [`connection_string_design.puml`](connection_string_design.puml)
 
-> **Phase 1 landed:** `core/connection_string.h` (value object + builder +
-> `OdbcDsnFactory`/`SqlAlchemyUrlFactory` + `parse()` facade + constexpr
-> `detail` helpers) is implemented, bound to Python as `ConnectionString`
-> (`str`/`repr`/`render()` mask the password), and wired into
-> `RepositoryAdapter::create` — which now parses the source (URL **or** DSN) in
-> C++ and derives the token-conflict check from the parsed keys. The Python
-> `_translate_conn_str`/`_dsn_quote` translation was removed; `_translate_conn_str`
-> remains as a thin shim over `ConnectionString`. **Phase 2 (not yet done):**
-> migrate the `std::string m_conn_str` members in `ConnectionPool` /
-> `OdbcConnection` / `MssqlLoadCache` to hold `ConnectionString`, and move
-> `pack_access_token` / `ensure_packet_size` into core.
+> **Phase 1 landed (2026-07-08):** `core/connection_string.h` (value object +
+> builder + `OdbcDsnFactory`/`SqlAlchemyUrlFactory` + `parse()` facade +
+> constexpr `detail` helpers), bound to Python as `ConnectionString`
+> (`str`/`repr`/`render()` mask the password), wired into
+> `RepositoryAdapter::create` which parses the source (URL **or** DSN) in C++
+> and derives the token-conflict check from the parsed keys. Python
+> `_translate_conn_str`/`_dsn_quote` translation removed (thin shim retained).
+>
+> **Phase 2 landed (2026-07-09):**
+>
+> - `ConnectionPool` holds a `ConnectionString` (was `std::string m_conn_str`),
+>   renders it to a DSN only at the connect boundary, and **logs it masked** —
+>   the raw connection string no longer flows into logs.
+> - `OdbcConnection` holds the `ConnectionString` value object (`connection()`
+>   accessor) plus the rendered DSN it connected with (`conn_str()`, kept for
+>   the parallel/BCP sibling pools that reconnect via their own SQLDriverConnect).
+> - `ensure_packet_size` (bespoke string-munging) **deleted** — `open()` now adds
+>   PacketSize structurally via `ConnectionString::with_packet_size()`, still
+>   preserving a caller-specified value.
+> - `pack_access_token`'s pure byte-packing (length prefix + UTF-16LE) moved to
+>   `core::AccessTokenPacker::pack()`; the adapter keeps only `py::object`
+>   dispatch and `py::value_error`-typed validation.
+>
+> **Deliberate refinement vs. the diagram:** `MssqlLoadCache` still keys on the
+> rendered DSN string rather than storing a `ConnectionString`. The key always
+> arrives as `OdbcConnection::conn_str()` — a canonical `render()` output — so
+> string comparison already *is* value comparison there, without paying a parse
+> per `ensure_pool` call. `ConnectionString::operator==` remains available for
+> when a caller genuinely holds two value objects.
 
 ## Problem
 

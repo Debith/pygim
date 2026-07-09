@@ -466,6 +466,29 @@ inline ConnectionString ConnectionString::parse(std::string_view source) {
     return dsn_factory.create(source);
 }
 
+// ── Access-token packing ────────────────────────────────────────────────────
+
+/// Pack a validated ASCII token into the SQL_COPT_SS_ACCESS_TOKEN payload:
+/// a 4-byte little-endian byte-length prefix followed by the token expanded to
+/// UTF-16LE. Pure (no ODBC, no pybind); the caller validates the token first
+/// (non-empty, ASCII, no embedded NUL) so it can raise its own error types.
+struct AccessTokenPacker {
+    [[nodiscard]] static std::vector<unsigned char> pack(std::string_view ascii_token) {
+        std::vector<unsigned char> packed;
+        packed.reserve(4 + ascii_token.size() * 2);
+        const std::uint32_t byte_len = static_cast<std::uint32_t>(ascii_token.size() * 2);
+        packed.push_back(static_cast<unsigned char>(byte_len & 0xFF));
+        packed.push_back(static_cast<unsigned char>((byte_len >> 8) & 0xFF));
+        packed.push_back(static_cast<unsigned char>((byte_len >> 16) & 0xFF));
+        packed.push_back(static_cast<unsigned char>((byte_len >> 24) & 0xFF));
+        for (unsigned char c : ascii_token) {
+            packed.push_back(c);
+            packed.push_back(0);
+        }
+        return packed;
+    }
+};
+
 // ── constexpr contracts (compile-time verified, like plan_autowiring) ────────
 
 static_assert(detail::iequals("PWD", "pwd"));
