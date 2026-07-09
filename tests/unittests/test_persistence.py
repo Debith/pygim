@@ -965,6 +965,29 @@ def test_live_schema_validation_diagnostics():
         cur.execute(f"DROP TABLE dbo.{table}")
 
 
+def test_live_uuid_binary_into_uniqueidentifier():
+    """A fixed_size_binary[16] frame column saves into a uniqueidentifier column.
+
+    create_df and BCP represent a GUID as its 16 raw bytes (fixed_size_binary),
+    so schema validation must accept Binary — not just String — against a
+    uniqueidentifier target, or every UUID save is wrongly rejected.
+    """
+    pyodbc = pytest.importorskip("pyodbc")
+    pygim_mod = pytest.importorskip("pygim")
+    store, ctl = _live_store_and_cursor(pyodbc)
+    table = f"pygim_uuid_{uuid.uuid4().hex[:8]}"
+    cur = ctl.cursor()
+    cur.execute(f"CREATE TABLE dbo.{table} (id INT NOT NULL, gid UNIQUEIDENTIFIER NOT NULL)")
+
+    try:
+        # create_df emits the uuid column as fixed_size_binary[16] (Arrow).
+        df = pygim_mod.create_df({"id": "serial", "gid": "uuid"}, rows=5, format="arrow")
+        store.save(df, table)
+        assert cur.execute(f"SELECT COUNT(*) FROM dbo.{table}").fetchone()[0] == 5
+    finally:
+        cur.execute(f"DROP TABLE dbo.{table}")
+
+
 def test_live_describe():
     """describe(table) returns the per-column catalog for pre-flight checks (2.4)."""
     pyodbc = pytest.importorskip("pyodbc")

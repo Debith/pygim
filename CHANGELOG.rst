@@ -25,6 +25,7 @@ Added
 
 Fixed
 ~~~~~
+- Persistence: Pre-save schema validation wrongly rejected a ``fixed_size_binary[16]`` frame column against a ``uniqueidentifier`` target — the 16 raw bytes are exactly how ``create_df`` and BCP represent a GUID. Validation now accepts Binary (as well as String) against ``uniqueidentifier``, so UUID saves are no longer blocked.
 - Persistence/BCP: Fix silent data loss on constraint violations — ``bcp_batch``/``bcp_done`` return rows COMMITTED, and rejected rows (e.g. duplicate keys, error 2627) were silently dropped while ``save()`` reported success. The pipeline now tracks committed counts and raises ``DataStoreIntegrityError`` on any shortfall, on both single-connection and parallel paths.
 - Persistence: Parallel loads (``load_workers > 1``) silently DROPPED the query's WHERE/columns/limit — the range-partitioned path builds its own SQL. Filtered or parameterized queries now fall back to single-worker and honor the predicate; only plain full-table scans partition.
 - Persistence/BCP: Plain ``save()`` (append) bound the frame to table columns by position, so a frame with correct names in the wrong order — or omitting an IDENTITY column — silently wrote values into the wrong columns. Append now validates positional correspondence and fails fast; use ``mode="upsert"``/``"insert_missing"`` (MERGE by name) for partial or reordered frames.

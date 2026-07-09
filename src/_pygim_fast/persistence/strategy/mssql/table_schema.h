@@ -235,7 +235,10 @@ inline void validate_frame_against_table(const arrow::Table& frame,
         const bool compatible =
             ff == tf ||
             ff == detail::TypeFamily::Other || tf == detail::TypeFamily::Other ||
-            (ff == detail::TypeFamily::String && tf == detail::TypeFamily::Guid);
+            // uniqueidentifier accepts a GUID as text OR as its 16 raw bytes
+            // (fixed_size_binary[16], which is what create_df/BCP produce).
+            (tf == detail::TypeFamily::Guid &&
+             (ff == detail::TypeFamily::String || ff == detail::TypeFamily::Binary));
         if (!compatible) {
             type_mismatch += (type_mismatch.empty() ? "" : ", ") + field->name() +
                 " (frame " + field->type()->ToString() + " vs table " + col->type_name + ")";
