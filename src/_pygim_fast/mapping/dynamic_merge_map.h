@@ -13,6 +13,9 @@ enum class MergeStrategy {
     Max,
     Min,
     Replace,
+    Extend,   // sequences concatenate (arithmetic degrades to Sum)
+    Union,    // sequences append only unseen elements (order-preserving)
+    Deep,     // mappings merge recursively, leaves resolved by their own strategy
 };
 
 template <typename T, typename = void>
@@ -120,11 +123,18 @@ private:
         return (it == m_strategies.end()) ? m_default_strategy : it->second;
     }
 
+    // Extend/Union/Deep concern containers; this generic template resolves them to
+    // the closest scalar meaning (Extend sums arithmetics, Union/Deep replace) —
+    // the full container semantics live in typed wrappers (e.g. the Python
+    // gimdict binding, which recurses into dicts and unions sequences).
     static T apply(MergeStrategy strategy, const T& lhs, const T& rhs) {
         switch (strategy) {
             case MergeStrategy::Replace:
+            case MergeStrategy::Union:
+            case MergeStrategy::Deep:
                 return rhs;
             case MergeStrategy::Sum:
+            case MergeStrategy::Extend:
                 if constexpr (std::is_arithmetic_v<T>) return lhs + rhs;
                 return rhs;
             case MergeStrategy::Max:

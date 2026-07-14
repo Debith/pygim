@@ -20,6 +20,9 @@ MergeStrategy parse_merge_strategy(const std::string& value) {
       if (value == "max") return MergeStrategy::Max;
       if (value == "min") return MergeStrategy::Min;
       if (value == "replace") return MergeStrategy::Replace;
+      if (value == "extend") return MergeStrategy::Extend;
+      if (value == "union") return MergeStrategy::Union;
+      if (value == "deep") return MergeStrategy::Deep;
       throw py::value_error("invalid merge strategy: " + value);
 }
 
@@ -33,6 +36,12 @@ std::string merge_strategy_name(MergeStrategy strategy) {
                   return "min";
             case MergeStrategy::Replace:
                   return "replace";
+            case MergeStrategy::Extend:
+                  return "extend";
+            case MergeStrategy::Union:
+                  return "union";
+            case MergeStrategy::Deep:
+                  return "deep";
       }
       return "replace";
 }
@@ -199,14 +208,16 @@ private:
             return default_strategy_for_type(rhs_type);
       }
 
-      static py::object apply(MergeStrategy strategy, py::handle lhs, py::handle rhs) {
+      py::object apply(MergeStrategy strategy, py::handle lhs, py::handle rhs) const {
             switch (strategy) {
                   case MergeStrategy::Replace:
                         return py::reinterpret_borrow<py::object>(rhs);
-                  case MergeStrategy::Sum: {
+                  case MergeStrategy::Sum:
+                  case MergeStrategy::Extend: {
+                        // Extend rides PyNumber_Add: list/tuple/str concatenate there too.
                         PyObject* out = PyNumber_Add(lhs.ptr(), rhs.ptr());
                         if (out == nullptr) {
-                              throw py::type_error("sum strategy failed for incompatible values");
+                              throw py::type_error("sum/extend strategy failed for incompatible values");
                         }
                         return py::reinterpret_steal<py::object>(out);
                   }
@@ -214,8 +225,50 @@ private:
                         return py::module_::import("builtins").attr("max")(lhs, rhs);
                   case MergeStrategy::Min:
                         return py::module_::import("builtins").attr("min")(lhs, rhs);
+                  case MergeStrategy::Union:
+                        return apply_union(lhs, rhs);
+                  case MergeStrategy::Deep:
+                        return apply_deep(lhs, rhs);
             }
             return py::reinterpret_borrow<py::object>(rhs);
+      }
+
+      // Order-preserving union of sequences: keep lhs, append rhs elements not
+      // already present. Non-sequences (or strings) fall back to replace.
+      static py::object apply_union(py::handle lhs, py::handle rhs) {
+            if (!py::isinstance<py::list>(lhs) || !py::isinstance<py::list>(rhs)) {
+                  return py::reinterpret_borrow<py::object>(rhs);
+            }
+            py::list out(py::reinterpret_borrow<py::list>(lhs));
+            py::list merged;
+            for (const auto& item : out) merged.append(item);
+            for (const auto& item : py::reinterpret_borrow<py::list>(rhs)) {
+                  if (!merged.contains(item)) merged.append(item);
+            }
+            return merged;
+      }
+
+      // Recursive mapping merge: shared keys resolve through this dict's own
+      // strategies (so nested dicts keep deep-merging, numeric leaves keep
+      // stacking). Non-mappings fall back to replace.
+      py::object apply_deep(py::handle lhs, py::handle rhs) const {
+            if (!py::isinstance<py::dict>(lhs) || !py::isinstance<py::dict>(rhs)) {
+                  return py::reinterpret_borrow<py::object>(rhs);
+            }
+            py::dict out;
+            for (const auto& item : py::reinterpret_borrow<py::dict>(lhs)) {
+                  out[item.first] = item.second;
+            }
+            for (const auto& item : py::reinterpret_borrow<py::dict>(rhs)) {
+                  if (!out.contains(item.first)) {
+                        out[item.first] = item.second;
+                        continue;
+                  }
+                  auto l = py::reinterpret_borrow<py::object>(out[item.first]);
+                  auto r = py::reinterpret_borrow<py::object>(item.second);
+                  out[item.first] = apply(strategy_for(item.first, l, r), l, r);
+            }
+            return out;
       }
 
 private:
@@ -282,6 +335,9 @@ PYBIND11_MODULE(utils, m) {
     py::module_ collections_abc = py::module_::import("collections.abc");
     collections_abc.attr("MutableMapping").attr("register")(gimdict_cls);
 
-    // Convenience named strategy for ergonomic kwargs like str=utils.replace
+    // Convenience named strategies for ergonomic kwargs like str=utils.replace
     m.attr("replace") = py::str("replace");
+    m.attr("extend") = py::str("extend");
+    m.attr("union") = py::str("union");
+    m.attr("deep") = py::str("deep");
 }
