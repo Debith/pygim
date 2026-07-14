@@ -1,25 +1,32 @@
 # -*- coding: utf-8 -*-
 """pygim \u2014 Lightweight, high-performance Python utilities backed by C++ extensions."""
 
-from pygim.pathset import PathSet
-from pygim.registry import Registry
-from pygim.factory import Factory
-from pygim.ioc import Container
+# Top-level names resolve LAZILY (PEP 562): importing ``pygim`` — or one clean
+# submodule like ``pygim.utils`` — must not drag in every compiled extension.
+# A submodule that fails to load (missing build, toolchain/libstdc++ mismatch)
+# then only breaks the callers that actually use it.
+_LAZY_EXPORTS = {
+    "PathSet": ("pygim.pathset", "PathSet"),
+    "Registry": ("pygim.registry", "Registry"),
+    "Factory": ("pygim.factory", "Factory"),
+    "Container": ("pygim.ioc", "Container"),
+    # Re-exported from the Python module (not the compiled extension directly)
+    # so the top-level entry point shares its SQLAlchemy-URL translation.
+    "DataStore": ("pygim.persistence", "DataStore"),
+    "acquire_datastore": ("pygim.persistence", "acquire_datastore"),
+}
 
-__all__ = ["PathSet", "Registry", "Factory", "Container", "create_df"]
+__all__ = [*_LAZY_EXPORTS, "create_df"]
 
-# Import C++ extension modules explicitly
-try:  # normal pybind11 extension import
-    from . import _persistence as _persist_mod  # type: ignore
 
-    DataStore = _persist_mod.DataStore  # type: ignore[attr-defined]
-    acquire_datastore = _persist_mod.acquire_datastore  # type: ignore[attr-defined]
-    __all__ += ["DataStore", "acquire_datastore"]
-except (
-    ImportError,
-    ModuleNotFoundError,
-):  # pragma: no cover - if compiled extension missing
-    pass
+def __getattr__(name):
+    try:
+        module_name, attr = _LAZY_EXPORTS[name]
+    except KeyError:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}") from None
+    import importlib
+
+    return getattr(importlib.import_module(module_name), attr)
 
 
 def create_df(
