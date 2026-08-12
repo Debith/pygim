@@ -632,10 +632,13 @@ def test_differential_oracles_installed_in_ci():
 # --------------------------------------------------------------------------- #
 # pathlib is the oracle for path semantics (the decode oracles are above)
 # --------------------------------------------------------------------------- #
+# NOTE: "a." and "..a" are deliberately absent — pathlib itself changed their
+# stem/suffix between 3.12 and 3.14 (see test_dot_edge_semantics_are_pinned),
+# so they cannot be differential-tested against a version-dependent oracle.
 PATH_CORPUS = [
-    "a.yaml", "a.", "a..b", ".bashrc", ".bashrc.swp", "..", ".", "a/b/", "/",
+    "a.yaml", "a..b", ".bashrc", ".bashrc.swp", "..", ".", "a/b/", "/",
     "a//b", "archive.tar.gz", "a.b.c.d", "no_ext", "/abs/x.yml", "./rel",
-    "spa ce/f.yaml", "...", "..a", "a...gz", "a/./b", "x.YAML",
+    "spa ce/f.yaml", "...", "a...gz", "a/./b", "x.YAML",
 ]
 
 
@@ -649,7 +652,11 @@ def test_name_components_match_pathlib(s):
     assert p.stem == ref.stem, f"stem({s!r})"
     assert p.suffix == ref.suffix, f"suffix({s!r})"
     assert p.suffixes == list(ref.suffixes), f"suffixes({s!r})"
-    assert p.parts == list(ref.parts), f"parts({s!r})"
+    # parts: the root component is "/" vs "\\" depending on platform flavour;
+    # compare separator-normalised.
+    ours = [x.replace("\\", "/") for x in p.parts]
+    theirs = [x.replace("\\", "/") for x in ref.parts]
+    assert ours == theirs, f"parts({s!r})"
     assert p.is_absolute() == ref.is_absolute(), f"is_absolute({s!r})"
 
 
@@ -756,3 +763,22 @@ def test_nasty_scalar_corpus_never_crashes(temp_dir):
             pygim.path(f).read()          # any result is fine...
         except (RuntimeError, ValueError, UnicodeDecodeError):
             pass                          # ...and any loud error is fine.
+
+
+def test_dot_edge_semantics_are_pinned():
+    """pathlib is an unstable oracle for these two shapes.
+
+    CPython reversed itself between 3.12 and 3.14: 'a.' went from
+    (stem 'a.', suffix '') to (stem 'a', suffix '.'), and '..a' from
+    (stem '.', suffix '.a') to (stem '..a', suffix ''). A differential
+    assert would therefore fail on one interpreter or another by
+    construction. pygim pins the 3.12/3.13-family behaviour explicitly;
+    revisit if the ecosystem settles on the 3.14 rules.
+    """
+    p = pygim.path("a.")
+    assert (p.stem, p.suffix, p.suffixes) == ("a.", "", [])
+    q = pygim.path("..a")
+    # 3.12-family pathlib is internally INCONSISTENT here (suffix says '.a',
+    # suffixes says []) because the two properties use different algorithms;
+    # 3.14 resolved it the other way. We mirror 3.12 faithfully, wart and all.
+    assert (q.stem, q.suffix, q.suffixes) == (".", ".a", [])
