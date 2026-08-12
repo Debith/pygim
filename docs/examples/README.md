@@ -33,9 +33,14 @@ for f in docs/examples/*/example_*.py; do python "$f" || break; done
 | factory | [example_02_interface_enforcement.py](factory/example_02_interface_enforcement.py) | Factories that validate every product against an interface at creation time |
 | each | [example_01_broadcasting.py](each/example_01_broadcasting.py) | Broadcasting attribute reads and method calls over any iterable, argument forwarding, the dunder guard rail |
 | pathset | [example_01_path_collections.py](pathset/example_01_path_collections.py) | Set semantics over filesystem paths, removal and cloning, bulk file reading, glob-style matching |
-| pathlike | [example_01_reading_configs.py](pathlike/example_01_reading_configs.py) | One-call YAML/JSON/TOML decoding, YAML 1.2 scalar typing (hex/big ints, 1.1-isms stay strings), TOML datetimes, strict JSON errors |
-| pathlike | [example_02_engines_and_writing.py](pathlike/example_02_engines_and_writing.py) | Engine pinning and precedence, write() round-trips with trap strings, non-finite float policy, TOML read-only |
-| pathlike | [example_03_traversal_and_performance.py](pathlike/example_03_traversal_and_performance.py) | glob/rglob/iterdir with pin inheritance, the PathSet bridge, GIL-released parallel reads, key_cache interning |
+| pathlike | [example_01_read_a_config.py](pathlike/example_01_read_a_config.py) | One call from a path to native Python objects |
+| pathlike | [example_02_pathlib_parity.py](pathlike/example_02_pathlib_parity.py) | os.PathLike integration, name components, `/` composition |
+| pathlike | [example_03_yaml_12_scalars.py](pathlike/example_03_yaml_12_scalars.py) | YAML 1.2 scalar typing: hex/octal/big ints, 1.1-isms staying strings, dot-form floats, quoting |
+| pathlike | [example_04_json_and_toml.py](pathlike/example_04_json_and_toml.py) | Strict JSON with filename in errors; TOML with real datetime objects |
+| pathlike | [example_05_engine_pinning.py](pathlike/example_05_engine_pinning.py) | Pinning an engine at construction, refusal to guess, pin inheritance, per-call override |
+| pathlike | [example_06_writing.py](pathlike/example_06_writing.py) | write() round-trips, trap-string quoting, non-finite float policies, TOML read-only |
+| pathlike | [example_07_traversal.py](pathlike/example_07_traversal.py) | glob/rglob/iterdir, sorted+deduplicated results, pin inheritance, the PathSet bridge |
+| pathlike | [example_08_parallel_and_key_cache.py](pathlike/example_08_parallel_and_key_cache.py) | GIL-released parallel reads, key_cache interning semantics and proof |
 | persistence | [arrow_bcp_quickstart.md](arrow_bcp_quickstart.md) | Quickstart for the Arrow/BCP persistence layer (prose walkthrough, requires a database) |
 
 ## Conventions
