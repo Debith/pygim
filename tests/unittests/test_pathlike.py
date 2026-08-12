@@ -12,9 +12,10 @@ import pathlib
 
 def _write(temp_dir, name, text):
     p = temp_dir / name
-    # Explicit encoding and newline: Windows would otherwise write cp1252 and
-    # CRLF, breaking the UTF-8 parsers and byte-size assertions.
-    p.write_text(text, encoding="utf-8", newline="\n")
+    # Exact bytes on every platform and Python (write_text(newline=) needs
+    # 3.10+): Windows text mode would otherwise write cp1252 and CRLF,
+    # breaking the UTF-8 parsers and byte-size assertions.
+    p.write_bytes(text.encode("utf-8"))
     return p
 
 
