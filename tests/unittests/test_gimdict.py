@@ -137,3 +137,20 @@ def test_gimdict_new_strategy_aliases_round_trip(name):
     d = utils.gimdict({})
     d.set_type_strategy("list", name)
     assert d.type_strategy("list") == name
+
+
+def test_gimdict_multiply_strategy_by_type():
+    d1 = utils.gimdict({"speed": 30}, int=utils.multiply)
+    d2 = utils.gimdict({"speed": 0})
+    assert (d1 | d2)["speed"] == 0          # 30 * 0 — a rider effect like Paralyzed
+    d3 = utils.gimdict({"speed": 2})
+    assert (d1 | d3)["speed"] == 60         # 30 * 2 — Haste-style doubling
+
+
+def test_gimdict_multiply_strategy_per_key():
+    d1 = utils.gimdict({"speed": 30, "hp": 10})
+    d1.set_strategy("speed", "multiply")
+    d2 = utils.gimdict({"speed": 2, "hp": 2})
+    d3 = d1 | d2
+    assert d3["speed"] == 60                # per-key multiply
+    assert d3["hp"] == 12                   # ints elsewhere keep the Sum default

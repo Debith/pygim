@@ -23,6 +23,7 @@ MergeStrategy parse_merge_strategy(const std::string& value) {
       if (value == "extend") return MergeStrategy::Extend;
       if (value == "union") return MergeStrategy::Union;
       if (value == "deep") return MergeStrategy::Deep;
+      if (value == "multiply") return MergeStrategy::Multiply;
       throw py::value_error("invalid merge strategy: " + value);
 }
 
@@ -42,6 +43,8 @@ std::string merge_strategy_name(MergeStrategy strategy) {
                   return "union";
             case MergeStrategy::Deep:
                   return "deep";
+            case MergeStrategy::Multiply:
+                  return "multiply";
       }
       return "replace";
 }
@@ -165,8 +168,11 @@ public:
 
       PyGimDict merged(const PyGimDict& other) const {
             PyGimDict out;
-            out.m_values = py::dict(m_values);
-            out.m_key_strategies = py::dict(m_key_strategies);
+            // Real dict copies — py::dict(m_values) only copies the HANDLE (both
+            // gimdicts would share one PyDict, so `a | b` would mutate `a`).
+            out.m_values = py::reinterpret_steal<py::dict>(PyDict_Copy(m_values.ptr()));
+            out.m_key_strategies =
+                py::reinterpret_steal<py::dict>(PyDict_Copy(m_key_strategies.ptr()));
             out.m_type_strategies = m_type_strategies;
             out.m_explicit_default = m_explicit_default;
 
@@ -218,6 +224,13 @@ private:
                         PyObject* out = PyNumber_Add(lhs.ptr(), rhs.ptr());
                         if (out == nullptr) {
                               throw py::type_error("sum/extend strategy failed for incompatible values");
+                        }
+                        return py::reinterpret_steal<py::object>(out);
+                  }
+                  case MergeStrategy::Multiply: {
+                        PyObject* out = PyNumber_Multiply(lhs.ptr(), rhs.ptr());
+                        if (out == nullptr) {
+                              throw py::type_error("multiply strategy failed for incompatible values");
                         }
                         return py::reinterpret_steal<py::object>(out);
                   }
@@ -340,4 +353,5 @@ PYBIND11_MODULE(utils, m) {
     m.attr("extend") = py::str("extend");
     m.attr("union") = py::str("union");
     m.attr("deep") = py::str("deep");
+    m.attr("multiply") = py::str("multiply");
 }
