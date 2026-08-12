@@ -10,13 +10,17 @@
 // rapidyaml aborts the process on a parse error by default; we install a throwing
 // error callback so malformed input surfaces as a Python exception instead.
 
+#include <cmath>
 #include <string>
 #include <string_view>
+#include <unordered_map>
 
 #include <pybind11/pybind11.h>
 
 #include "third_party/rapidyaml/ryml_all.hpp"
 #include "third_party/simdjson/simdjson.h"
+#define TOML_EXCEPTIONS 0   // error-code API (toml::parse_result), no throw across nogil
+#include "third_party/tomlplusplus/toml.hpp"
 #include "core.h"
 
 namespace pygim::pathlike {
@@ -247,6 +251,49 @@ static_assert(!is_core_float("inf") && !is_core_float("nan") && !is_core_float("
     return py::float_(py::str(s));
 }
 
+// True when an unquoted scalar resolves to a plain string (i.e. none of the
+// core-schema classifiers claim it). Also the emit-side quoting rule: a
+// string value that is NOT plain must be quoted, or it would read back typed.
+[[nodiscard]] constexpr bool scalar_is_string(std::string_view s) noexcept {
+    bool b = false;
+    double d = 0.0;
+    return !is_null_scalar(s) && !parse_bool(s, b) && !is_core_int(s) &&
+           !is_core_float(s) && !parse_special_float(s, d);
+}
+
+static_assert(scalar_is_string("hello") && scalar_is_string("yes") &&
+              scalar_is_string("0b1") && scalar_is_string("inf"));
+static_assert(!scalar_is_string("null") && !scalar_is_string("true") &&
+              !scalar_is_string("0x1A") && !scalar_is_string("2.5") &&
+              !scalar_is_string(".inf") && !scalar_is_string(""));
+
+// Per-read() key interning cache: documents with repeated mapping keys (rows
+// of records) reuse one py::str per distinct key instead of allocating each
+// time. `capacity` bounds distinct entries (0 disables; beyond capacity keys
+// still convert, they just aren't remembered).
+class KeyCache {
+public:
+    explicit KeyCache(std::size_t capacity) : m_capacity(capacity) {}
+
+    [[nodiscard]] py::str get(std::string_view key) {
+        if (m_capacity == 0) return py::str(key);
+        if (auto it = m_map.find(key); it != m_map.end()) return it->second;
+        py::str s(key);
+        if (m_map.size() < m_capacity) m_map.emplace(key, s);
+        return s;
+    }
+
+private:
+    struct sv_hash {
+        using is_transparent = void;
+        [[nodiscard]] std::size_t operator()(std::string_view s) const noexcept {
+            return std::hash<std::string_view>{}(s);
+        }
+    };
+    std::size_t m_capacity;
+    std::unordered_map<std::string, py::str, sv_hash, std::equal_to<>> m_map;
+};
+
 // A single YAML scalar -> the Python object it denotes. Quoted scalars are always
 // strings (the author asked for text); unquoted scalars are type-inferred.
 [[nodiscard]] inline py::object scalar_to_py(std::string_view s, bool quoted) {
@@ -266,56 +313,73 @@ static_assert(!is_core_float("inf") && !is_core_float("nan") && !is_core_float("
 }
 
 // Recursively materialise a rapidyaml node as a native Python object.
-py::object node_to_py(ryml::ConstNodeRef node);  // fwd (mutual recursion via children)
+py::object node_to_py(ryml::ConstNodeRef node, KeyCache& keys);  // fwd (mutual recursion)
 
-[[nodiscard]] inline py::object map_to_py(ryml::ConstNodeRef node) {
+[[nodiscard]] inline py::object map_to_py(ryml::ConstNodeRef node, KeyCache& keys) {
     py::dict out;
     for (ryml::ConstNodeRef child : node.children()) {
-        py::object key = scalar_to_py(to_sv(child.key()), child.is_key_quoted());
-        out[key] = node_to_py(child);
+        const std::string_view k = to_sv(child.key());
+        // String keys (quoted, or unquoted-but-plain) go through the interning
+        // cache; typed keys (ints, bools, ...) resolve like any scalar.
+        py::object key = (child.is_key_quoted() || scalar_is_string(k))
+                             ? py::object(keys.get(k))
+                             : scalar_to_py(k, false);
+        out[key] = node_to_py(child, keys);
     }
     return out;
 }
 
-[[nodiscard]] inline py::object seq_to_py(ryml::ConstNodeRef node) {
+[[nodiscard]] inline py::object seq_to_py(ryml::ConstNodeRef node, KeyCache& keys) {
     py::list out;
-    for (ryml::ConstNodeRef child : node.children()) out.append(node_to_py(child));
+    for (ryml::ConstNodeRef child : node.children()) out.append(node_to_py(child, keys));
     return out;
 }
 
-inline py::object node_to_py(ryml::ConstNodeRef node) {
-    if (node.is_stream()) return seq_to_py(node);   // a multi-document stream -> list of docs
-    if (node.is_map()) return map_to_py(node);
-    if (node.is_seq()) return seq_to_py(node);
+inline py::object node_to_py(ryml::ConstNodeRef node, KeyCache& keys) {
+    if (node.is_stream()) return seq_to_py(node, keys);   // multi-doc stream -> list of docs
+    if (node.is_map()) return map_to_py(node, keys);
+    if (node.is_seq()) return seq_to_py(node, keys);
     if (node.has_val()) return scalar_to_py(to_sv(node.val()), node.is_val_quoted());
-    return py::none();                              // empty document
+    return py::none();                                    // empty document
 }
 
-[[nodiscard]] inline py::object load_yaml(std::string_view text) {
-    ensure_throwing_callbacks();
-    ryml::Tree tree = ryml::parse_in_arena(ryml::csubstr(text.data(), text.size()));
-    tree.resolve();                                 // expand anchors / *aliases
-    return node_to_py(tree.crootref());
+// File I/O and parsing run with the GIL RELEASED (pure C++; the throwing ryml
+// callback is GIL-free too), so reads scale across Python threads. Only the
+// materialisation into Python objects reacquires the GIL.
+[[nodiscard]] inline py::object load_yaml(const file& f, KeyCache& keys) {
+    ryml::Tree tree;
+    {
+        py::gil_scoped_release nogil;
+        ensure_throwing_callbacks();
+        const std::string bytes = f.read_bytes();
+        try {
+            tree = ryml::parse_in_arena(ryml::csubstr(bytes.data(), bytes.size()));
+        } catch (const std::runtime_error& e) {
+            throw std::runtime_error(std::string(e.what()) + " in " + f.fspath());
+        }
+        tree.resolve();                             // expand anchors / *aliases
+    }
+    return node_to_py(tree.crootref(), keys);
 }
 
 // ── JSON engine (simdjson) ─────────────────────────────────────────────────
 // Recursively materialise a simdjson DOM element as a native Python object.
 // JSON semantics are exact: object keys are strings, numbers arrive already
 // typed by the parser (int64 / uint64 / double).
-[[nodiscard]] inline py::object json_to_py(simdjson::dom::element el) {
+[[nodiscard]] inline py::object json_to_py(simdjson::dom::element el, KeyCache& keys) {
     using simdjson::dom::element_type;
     switch (el.type()) {
         case element_type::OBJECT: {
             py::dict out;
             for (auto [key, value] : simdjson::dom::object(el)) {
-                out[py::str(std::string(key))] = json_to_py(value);
+                out[keys.get(key)] = json_to_py(value, keys);
             }
             return out;
         }
         case element_type::ARRAY: {
             py::list out;
             for (simdjson::dom::element child : simdjson::dom::array(el)) {
-                out.append(json_to_py(child));
+                out.append(json_to_py(child, keys));
             }
             return out;
         }
@@ -329,29 +393,200 @@ inline py::object node_to_py(ryml::ConstNodeRef node) {
     throw std::runtime_error("json: unhandled element type");
 }
 
-[[nodiscard]] inline py::object load_json(const std::string& fspath) {
-    try {
-        simdjson::dom::parser parser;
-        return json_to_py(parser.load(fspath));
-    } catch (const simdjson::simdjson_error& e) {
-        throw std::runtime_error("JSON parse error (" + fspath + "): " + e.what());
+[[nodiscard]] inline py::object load_json(const file& f, KeyCache& keys) {
+    simdjson::dom::parser parser;   // must outlive the element it returns
+    simdjson::dom::element doc;
+    {
+        py::gil_scoped_release nogil;
+        try {
+            doc = parser.load(f.fspath());
+        } catch (const simdjson::simdjson_error& e) {
+            throw std::runtime_error("JSON parse error (" + f.fspath() + "): " + e.what());
+        }
     }
+    return json_to_py(doc, keys);
+}
+
+// ── TOML engine (toml++) ────────────────────────────────────────────────────
+// Dates and times materialise as datetime.date / time / datetime — matching
+// what the stdlib's tomllib produces, so the two are drop-in comparable.
+
+[[nodiscard]] inline py::object toml_date_to_py(const toml::date& d) {
+    static py::object cls = py::module_::import("datetime").attr("date");
+    return cls(d.year, d.month, d.day);
+}
+
+[[nodiscard]] inline py::object toml_time_to_py(const toml::time& t) {
+    static py::object cls = py::module_::import("datetime").attr("time");
+    return cls(t.hour, t.minute, t.second, t.nanosecond / 1000);
+}
+
+[[nodiscard]] inline py::object toml_datetime_to_py(const toml::date_time& dt) {
+    static py::object dt_cls = py::module_::import("datetime").attr("datetime");
+    static py::object tz_cls = py::module_::import("datetime").attr("timezone");
+    static py::object td_cls = py::module_::import("datetime").attr("timedelta");
+    py::object tz = py::none();
+    if (dt.offset) {
+        tz = tz_cls(td_cls(py::arg("minutes") = dt.offset->minutes));
+    }
+    return dt_cls(dt.date.year, dt.date.month, dt.date.day, dt.time.hour, dt.time.minute,
+                  dt.time.second, dt.time.nanosecond / 1000, tz);
+}
+
+[[nodiscard]] inline py::object toml_to_py(const toml::node& n, KeyCache& keys) {
+    if (const toml::table* t = n.as_table()) {
+        py::dict out;
+        for (const auto& [key, value] : *t) out[keys.get(key.str())] = toml_to_py(value, keys);
+        return out;
+    }
+    if (const toml::array* a = n.as_array()) {
+        py::list out;
+        for (const toml::node& child : *a) out.append(toml_to_py(child, keys));
+        return out;
+    }
+    if (const auto* v = n.as_string())         return py::str(v->get());
+    if (const auto* v = n.as_integer())        return py::int_(v->get());
+    if (const auto* v = n.as_floating_point()) return py::float_(v->get());
+    if (const auto* v = n.as_boolean())        return py::bool_(v->get());
+    if (const auto* v = n.as_date())           return toml_date_to_py(v->get());
+    if (const auto* v = n.as_time())           return toml_time_to_py(v->get());
+    if (const auto* v = n.as_date_time())      return toml_datetime_to_py(v->get());
+    throw std::runtime_error("toml: unhandled node type");
+}
+
+[[nodiscard]] inline py::object load_toml(const file& f, KeyCache& keys) {
+    toml::parse_result result = [&f] {
+        py::gil_scoped_release nogil;
+        const std::string bytes = f.read_bytes();
+        return toml::parse(std::string_view(bytes), std::string_view(f.fspath()));
+    }();
+    if (!result) {
+        const auto& err = result.error();
+        throw std::runtime_error("TOML parse error (" + f.fspath() + ", line " +
+                                 std::to_string(err.source().begin.line) +
+                                 "): " + std::string(err.description()));
+    }
+    return toml_to_py(result.table(), keys);
+}
+
+// ── Write side: Python object -> ryml tree -> YAML / JSON text ─────────────
+// Strings are double-quoted exactly when an unquoted spelling would read back
+// typed (scalar_is_string() is false) — the same constexpr classifiers that
+// gate reading also guarantee the round-trip.
+
+// Serialise a scalar into the tree arena, returning the stored csubstr.
+[[nodiscard]] inline ryml::csubstr arena_sv(ryml::Tree& tree, std::string_view s) {
+    return tree.to_arena(ryml::csubstr(s.data(), s.size()));
+}
+
+inline void py_to_node(ryml::Tree& tree, ryml::NodeRef node, py::handle obj, bool json_mode) {
+    auto set_scalar = [&](std::string_view text, bool quote) {
+        node.set_val(arena_sv(tree, text));
+        if (quote) node |= ryml::VAL_DQUO;
+    };
+
+    if (obj.is_none()) {
+        node.set_val("null");
+        return;
+    }
+    if (py::isinstance<py::bool_>(obj)) {   // before int: bool subclasses int
+        node.set_val(obj.cast<bool>() ? "true" : "false");
+        return;
+    }
+    if (py::isinstance<py::int_>(obj)) {
+        set_scalar(py::str(obj).cast<std::string>(), false);
+        return;
+    }
+    if (py::isinstance<py::float_>(obj)) {
+        const double d = obj.cast<double>();
+        if (std::isinf(d) || std::isnan(d)) {
+            if (json_mode) {
+                throw std::invalid_argument("json cannot represent non-finite floats");
+            }
+            node.set_val(std::isnan(d) ? ryml::csubstr(".nan") :
+                         d > 0 ? ryml::csubstr(".inf") : ryml::csubstr("-.inf"));
+            return;
+        }
+        set_scalar(py::repr(obj).cast<std::string>(), false);
+        return;
+    }
+    if (py::isinstance<py::str>(obj)) {
+        const std::string s = obj.cast<std::string>();
+        set_scalar(s, json_mode || !detail::scalar_is_string(s) || s.empty());
+        return;
+    }
+    if (py::isinstance<py::dict>(obj)) {
+        node |= ryml::MAP;
+        for (auto item : obj.cast<py::dict>()) {
+            if (!py::isinstance<py::str>(item.first)) {
+                throw std::invalid_argument("write: mapping keys must be str, got " +
+                                            py::str(py::type::of(item.first)).cast<std::string>());
+            }
+            const std::string k = item.first.cast<std::string>();
+            ryml::NodeRef child = node.append_child();
+            child.set_key(arena_sv(tree, k));
+            if (json_mode || !detail::scalar_is_string(k) || k.empty()) {
+                child |= ryml::KEY_DQUO;
+            }
+            py_to_node(tree, child, item.second, json_mode);
+        }
+        return;
+    }
+    if (py::isinstance<py::list>(obj) || py::isinstance<py::tuple>(obj)) {
+        node |= ryml::SEQ;
+        for (auto item : obj.cast<py::sequence>()) {
+            ryml::NodeRef child = node.append_child();
+            py_to_node(tree, child, item, json_mode);
+        }
+        return;
+    }
+    throw std::invalid_argument("write: unsupported type " +
+                                py::str(py::type::of(obj)).cast<std::string>());
 }
 
 }  // namespace detail
 
-// Read `f` and decode it with `engine`. YAML is native C++ (rapidyaml); JSON
-// is native C++ too (simdjson, SIMD-accelerated).
-[[nodiscard]] inline py::object load(const file& f, Engine engine) {
+// Read `f` and decode it with `engine`, all native C++: YAML via rapidyaml,
+// JSON via simdjson (SIMD-accelerated), TOML via toml++. `key_cache_capacity`
+// bounds the per-read key-interning cache (0 disables it).
+[[nodiscard]] inline py::object load(const file& f, Engine engine,
+                                     std::size_t key_cache_capacity = 256) {
+    detail::KeyCache keys(key_cache_capacity);
     switch (engine) {
-        case Engine::Yaml:
-            return detail::load_yaml(f.read_bytes());
-        case Engine::Json:
-            return detail::load_json(f.fspath());
-        case Engine::Unknown:
-            break;
+        case Engine::Yaml: return detail::load_yaml(f, keys);
+        case Engine::Json: return detail::load_json(f, keys);
+        case Engine::Toml: return detail::load_toml(f, keys);
+        case Engine::Unknown: break;
     }
     throw std::invalid_argument("no engine resolved for " + f.fspath());
+}
+
+// Serialise `obj` to `f` with `engine`. The tree is built under the GIL (it
+// reads Python objects); emit + file write run with the GIL released.
+inline void write(const file& f, py::handle obj, Engine engine) {
+    if (engine == Engine::Toml) {
+        throw std::invalid_argument("toml write not implemented yet (read-only engine)");
+    }
+    if (engine == Engine::Unknown) {
+        throw std::invalid_argument("no engine resolved for " + f.fspath());
+    }
+    const bool json_mode = engine == Engine::Json;
+    ryml::Tree tree;
+    ryml::NodeRef root = tree.rootref();
+    detail::py_to_node(tree, root, obj, json_mode);
+    {
+        py::gil_scoped_release nogil;
+        std::string text;
+        if (json_mode) {
+            ryml::emitrs_json(tree, tree.root_id(), &text);
+        } else {
+            ryml::emitrs_yaml(tree, tree.root_id(), &text);
+        }
+        std::ofstream ofs(f.path(), std::ios::binary | std::ios::trunc);
+        if (!ofs) throw std::runtime_error("cannot open file for writing: " + f.fspath());
+        ofs.write(text.data(), static_cast<std::streamsize>(text.size()));
+        if (!ofs) throw std::runtime_error("write failed: " + f.fspath());
+    }
 }
 
 }  // namespace pygim::pathlike

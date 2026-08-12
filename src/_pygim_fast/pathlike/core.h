@@ -10,6 +10,7 @@
 // This header carries no pybind11 and no YAML library, so it stays fast to compile
 // and trivially testable; the engine glue that must speak Python lives in adapter.h.
 
+#include <algorithm>
 #include <array>
 #include <cstdint>
 #include <filesystem>
@@ -26,13 +27,14 @@ namespace pygim::pathlike {
 namespace fs = std::filesystem;
 
 // The decoders `read()` can dispatch to. `Unknown` means "no engine resolved".
-enum class Engine { Unknown, Yaml, Json };
+enum class Engine { Unknown, Yaml, Json, Toml };
 
 // Compile-time extension -> optimal engine. The whole format registry is here.
-inline constexpr std::array<std::pair<std::string_view, Engine>, 3> kExtEngines{{
+inline constexpr std::array<std::pair<std::string_view, Engine>, 4> kExtEngines{{
     {".yaml", Engine::Yaml},
     {".yml", Engine::Yaml},
     {".json", Engine::Json},
+    {".toml", Engine::Toml},
 }};
 
 // The optimal engine for a file extension (leading dot, lower-case), decided at
@@ -48,6 +50,7 @@ inline constexpr std::array<std::pair<std::string_view, Engine>, 3> kExtEngines{
 [[nodiscard]] constexpr Engine engine_from_name(std::string_view name) noexcept {
     if (name == "yaml" || name == "yml") return Engine::Yaml;
     if (name == "json") return Engine::Json;
+    if (name == "toml") return Engine::Toml;
     return Engine::Unknown;
 }
 
@@ -55,6 +58,7 @@ inline constexpr std::array<std::pair<std::string_view, Engine>, 3> kExtEngines{
     switch (e) {
         case Engine::Yaml: return "yaml";
         case Engine::Json: return "json";
+        case Engine::Toml: return "toml";
         case Engine::Unknown: return "unknown";
     }
     return "unknown";
@@ -64,6 +68,7 @@ inline constexpr std::array<std::pair<std::string_view, Engine>, 3> kExtEngines{
 static_assert(engine_for_ext(".yaml") == Engine::Yaml);
 static_assert(engine_for_ext(".yml") == Engine::Yaml);
 static_assert(engine_for_ext(".json") == Engine::Json);
+static_assert(engine_for_ext(".toml") == Engine::Toml);
 static_assert(engine_for_ext(".txt") == Engine::Unknown);
 static_assert(engine_from_name("yaml") == Engine::Yaml);
 static_assert(engine_from_name("json") == Engine::Json);
@@ -121,6 +126,34 @@ consteval bool case_folds_before_lookup() {
            engine_for_ext(ascii_lower(".Yml")) == Engine::Yaml &&
            engine_for_ext(ascii_lower(".JSON")) == Engine::Json;
 }
+
+// One glob *segment* against one path component: `*` and `?`, never crossing
+// a directory separator (the walk in file::glob() handles `/` and `**`).
+[[nodiscard]] constexpr bool glob_match(std::string_view pattern, std::string_view name) noexcept {
+    std::size_t p = 0, n = 0;
+    std::size_t star_p = std::string_view::npos, star_n = 0;
+    while (n < name.size()) {
+        if (p < pattern.size() && (pattern[p] == '?' || pattern[p] == name[n])) {
+            ++p; ++n;
+        } else if (p < pattern.size() && pattern[p] == '*') {
+            star_p = p++;
+            star_n = n;
+        } else if (star_p != std::string_view::npos) {
+            p = star_p + 1;
+            n = ++star_n;
+        } else {
+            return false;
+        }
+    }
+    while (p < pattern.size() && pattern[p] == '*') ++p;
+    return p == pattern.size();
+}
+
+static_assert(glob_match("*", "anything") && glob_match("*.yaml", "a.yaml") &&
+              glob_match("a?c", "abc") && glob_match("a*c*e", "abcde") &&
+              glob_match("*.tar.*", "x.tar.gz") && glob_match("**", "name"));
+static_assert(!glob_match("*.yaml", "a.yml") && !glob_match("a?c", "ac") &&
+              !glob_match("", "x") && !glob_match("b*", "abc") && glob_match("", ""));
 
 // Near-misses stay Unknown: raw lookups are exact (case, dot, whole string).
 consteval bool misses_stay_unknown() {
@@ -245,6 +278,46 @@ public:
     [[nodiscard]] bool is_symlink() const { return fs::is_symlink(m_path); }
     [[nodiscard]] std::uintmax_t size() const { return fs::file_size(m_path); }
 
+    // -- directory traversal (pathlib parity; results inherit the engine pin)
+    // Children of this directory, sorted for determinism.
+    [[nodiscard]] std::vector<file> iterdir() const {
+        std::vector<file> out;
+        for (const auto& e : fs::directory_iterator(m_path)) out.emplace_back(e.path(), m_engine);
+        sort_by_path(out);
+        return out;
+    }
+
+    // Relative glob: `*` and `?` within a component, `/` separates components,
+    // `**` matches any number of directories (and, as the final component,
+    // every descendant). Sorted, deduplicated.
+    [[nodiscard]] std::vector<file> glob(std::string_view pattern) const {
+        if (pattern.empty()) throw std::invalid_argument("glob: empty pattern");
+        std::vector<std::string> segs;
+        for (std::size_t start = 0; start <= pattern.size();) {
+            const std::size_t slash = pattern.find('/', start);
+            const std::size_t end = (slash == std::string_view::npos) ? pattern.size() : slash;
+            if (end > start) segs.emplace_back(pattern.substr(start, end - start));
+            if (slash == std::string_view::npos) break;
+            start = slash + 1;
+        }
+        if (segs.empty() || fs::path(pattern).is_absolute()) {
+            throw std::invalid_argument("glob: pattern must be relative, got '" +
+                                        std::string(pattern) + "'");
+        }
+        std::vector<file> out;
+        glob_walk(m_path, segs, 0, out);
+        sort_by_path(out);
+        out.erase(std::unique(out.begin(), out.end(),
+                              [](const file& a, const file& b) { return a.path() == b.path(); }),
+                  out.end());
+        return out;
+    }
+
+    // glob("**/" + pattern): the pattern anywhere under this directory.
+    [[nodiscard]] std::vector<file> rglob(std::string_view pattern) const {
+        return glob("**/" + std::string(pattern));
+    }
+
     // Which engine read() will decode with, in precedence order: the caller's
     // override wins, then the engine pinned at construction, then the
     // compile-time choice for this extension. Throws if none resolves — the
@@ -278,6 +351,45 @@ public:
     }
 
 private:
+    static void sort_by_path(std::vector<file>& v) {
+        std::sort(v.begin(), v.end(),
+                  [](const file& a, const file& b) { return a.path() < b.path(); });
+    }
+
+    // Walk one pattern segment at `base`. Iteration errors (permissions,
+    // races) are skipped rather than thrown — matching pathlib's tolerance.
+    void glob_walk(const fs::path& base, const std::vector<std::string>& segs,
+                   std::size_t idx, std::vector<file>& out) const {
+        const std::string& seg = segs[idx];
+        const bool last = idx + 1 == segs.size();
+        std::error_code ec;
+        if (seg == "**") {
+            if (last) {   // final `**`: every descendant, files and directories
+                for (fs::recursive_directory_iterator it(base, ec), end; !ec && it != end;
+                     it.increment(ec)) {
+                    out.emplace_back(it->path(), m_engine);
+                }
+                return;
+            }
+            glob_walk(base, segs, idx + 1, out);   // `**` matching zero directories
+            for (fs::recursive_directory_iterator it(base, ec), end; !ec && it != end;
+                 it.increment(ec)) {
+                std::error_code dec;
+                if (it->is_directory(dec) && !dec) glob_walk(it->path(), segs, idx + 1, out);
+            }
+            return;
+        }
+        for (fs::directory_iterator it(base, ec), end; !ec && it != end; it.increment(ec)) {
+            if (!detail::glob_match(seg, it->path().filename().string())) continue;
+            if (last) {
+                out.emplace_back(it->path(), m_engine);
+            } else {
+                std::error_code dec;
+                if (it->is_directory(dec) && !dec) glob_walk(it->path(), segs, idx + 1, out);
+            }
+        }
+    }
+
     fs::path m_path;
     Engine   m_engine{Engine::Unknown};   // pinned at construction; Unknown = auto
 };

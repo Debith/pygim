@@ -113,7 +113,7 @@ def test_unknown_extension_raises(temp_dir):
 def test_unknown_engine_raises(temp_dir):
     f = _write(temp_dir, "data.yaml", "a: 1\n")
     with pytest.raises(ValueError):
-        pygim.path(f).read(engine="toml")
+        pygim.path(f).read(engine="xml")
 
 
 def test_json_engine_reads_natively(temp_dir):
@@ -350,3 +350,251 @@ def test_yaml_read_matches_pyyaml_on_common_ground(temp_dir, doc):
 
     f = _write(temp_dir, "common.yaml", doc)
     assert pygim.path(f).read() == yaml.safe_load(doc)
+
+
+# --------------------------------------------------------------------------- #
+# TOML engine (toml++): differential against the stdlib tomllib
+# --------------------------------------------------------------------------- #
+TOML_CORPUS = [
+    'title = "basic"\ncount = 42\nratio = 2.5\nactive = true\n',
+    '[server]\nhost = "x"\nports = [8001, 8002]\n[server.limits]\nmax = 10\n',
+    'day = 2024-01-15\ntea = 10:30:15\nstamp = 2024-01-15T10:30:00+02:00\nlocal = 2024-01-15T10:30:00\n',
+    '[[points]]\nx = 1\n[[points]]\nx = 2\n',
+    'inline = { a = 1, b = "two" }\nunicode = "hätä"\nneg = -17\nbig_f = 1e10\n',
+]
+
+
+@pytest.mark.parametrize("doc", TOML_CORPUS)
+def test_toml_read_matches_tomllib(temp_dir, doc):
+    import tomllib
+
+    f = _write(temp_dir, "diff.toml", doc)
+    assert pygim.path(f).read() == tomllib.loads(doc)
+
+
+def test_toml_write_not_implemented(temp_dir):
+    with pytest.raises(ValueError, match="toml write not implemented"):
+        pygim.path(temp_dir / "out.toml").write({"a": 1})
+
+
+def test_toml_parse_error_has_filename_and_line(temp_dir):
+    f = _write(temp_dir, "broken.toml", "a = \n")
+    with pytest.raises(RuntimeError, match="TOML parse error.*broken.toml.*line"):
+        pygim.path(f).read()
+
+
+# --------------------------------------------------------------------------- #
+# write(): serialisation round-trips through the same classifiers as read()
+# --------------------------------------------------------------------------- #
+WRITE_ROUNDTRIP_OBJS = [
+    {"name": "plain", "count": 3, "ratio": 2.5, "on": True, "off": False, "none": None},
+    {"tricky_strings": ["true", "null", "0x1A", "1e3", "yes", ".inf", "", "010"]},
+    {"big": 12345678901234567890123, "neg": -12345678901234567890123},
+    {"specials": [float("inf"), float("-inf")]},
+    {"nested": {"a": [1, {"b": [2, 3]}, "x"], "empty_list": [], "empty_map": {}}},
+    {"unicode": "hätä — åäö", "key with space": 1},
+    [1, "two", None, {"k": "v"}],
+]
+
+
+@pytest.mark.parametrize("obj", WRITE_ROUNDTRIP_OBJS)
+def test_yaml_write_read_roundtrip(temp_dir, obj):
+    p = pygim.path(temp_dir / "rt.yaml")
+    p.write(obj)
+    back = p.read()
+    assert back == obj
+    # types too, not just equality (True == 1 would slip through ==)
+    assert repr(back) == repr(obj)
+
+
+def test_yaml_write_nan_roundtrip(temp_dir):
+    import math
+
+    p = pygim.path(temp_dir / "nan.yaml")
+    p.write({"v": float("nan")})
+    assert math.isnan(p.read()["v"])
+
+
+@pytest.mark.parametrize("obj", [o for o in WRITE_ROUNDTRIP_OBJS
+                                 if not (isinstance(o, dict) and ("specials" in o or "big" in o))])
+def test_json_write_matches_stdlib(temp_dir, obj):
+    import json
+
+    p = pygim.path(temp_dir / "rt.json")
+    p.write(obj)
+    assert json.loads(p.path_text() if hasattr(p, "path_text") else open(p).read()) == obj
+    assert p.read() == obj
+
+
+def test_json_write_rejects_non_finite(temp_dir):
+    with pytest.raises(ValueError, match="non-finite"):
+        pygim.path(temp_dir / "x.json").write({"v": float("inf")})
+
+
+def test_write_rejects_non_str_keys_and_unknown_types(temp_dir):
+    p = pygim.path(temp_dir / "x.yaml")
+    with pytest.raises(ValueError, match="keys must be str"):
+        p.write({1: "a"})
+    with pytest.raises(ValueError, match="unsupported type"):
+        p.write({"a": {1, 2}})
+
+
+def test_write_resolves_engine_like_read(temp_dir):
+    p = pygim.path(temp_dir / "data.dat", engine="json")   # pin drives write too
+    p.write({"a": 1})
+    import json
+
+    assert json.loads(open(p).read()) == {"a": 1}
+    with pytest.raises(ValueError, match="no engine"):
+        pygim.path(temp_dir / "x.dat").write({"a": 1})     # nothing resolves
+
+
+# --------------------------------------------------------------------------- #
+# Parallel reads: I/O + parsing run with the GIL released
+# --------------------------------------------------------------------------- #
+def test_parallel_reads_are_correct(temp_dir):
+    from concurrent.futures import ThreadPoolExecutor
+
+    files = []
+    for i in range(48):
+        ext = [".yaml", ".json", ".toml"][i % 3]
+        text = {
+            ".yaml": f"v: {i}\nitems: [1, 2]\n",
+            ".json": f'{{"v": {i}, "items": [1, 2]}}',
+            ".toml": f"v = {i}\nitems = [1, 2]\n",
+        }[ext]
+        files.append(pygim.path(_write(temp_dir, f"p{i}{ext}", text)))
+
+    with ThreadPoolExecutor(max_workers=8) as ex:
+        results = list(ex.map(lambda f: f.read(), files))
+    assert all(results[i] == {"v": i, "items": [1, 2]} for i in range(48))
+
+
+def test_parallel_reads_of_same_file(temp_dir):
+    from concurrent.futures import ThreadPoolExecutor
+
+    f = pygim.path(_write(temp_dir, "shared.yaml", "k: [1, 2, 3]\n"))
+    with ThreadPoolExecutor(max_workers=8) as ex:
+        results = list(ex.map(lambda _: f.read(), range(64)))
+    assert all(r == {"k": [1, 2, 3]} for r in results)
+
+
+# --------------------------------------------------------------------------- #
+# Key-interning cache: capacity is a pure optimisation, never a semantic
+# --------------------------------------------------------------------------- #
+@pytest.mark.parametrize("size", [0, 2, 256, -1])
+def test_key_cache_sizes_are_equivalent(temp_dir, size):
+    import json
+
+    rows = [{"id": i, "name": f"n{i % 3}", "value": i} for i in range(50)]
+    f = _write(temp_dir, "rows.json", json.dumps(rows))
+    assert pygim.path(f).read(key_cache=size) == rows
+
+
+def test_key_cache_interns_identical_key_objects(temp_dir):
+    f = _write(temp_dir, "two.json", '[{"key": 1}, {"key": 2}]')
+    a, b = pygim.path(f).read(key_cache=-1)
+    assert next(iter(a)) is next(iter(b))          # same interned py::str
+    a0, b0 = pygim.path(f).read(key_cache=0)
+    assert next(iter(a0)) == next(iter(b0))        # equal, not required to be identical
+
+
+# --------------------------------------------------------------------------- #
+# Directory traversal: iterdir / glob / rglob / pathset bridge
+# --------------------------------------------------------------------------- #
+@pytest.fixture()
+def tree(temp_dir):
+    for name in ["a.yaml", "b.yml", "c.json", "sub/d.yaml", "sub/deep/e.yaml", "sub/f.json"]:
+        p = temp_dir / name
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text("k: 1\n" if not name.endswith(".json") else '{"k": 1}')
+    return temp_dir
+
+
+def test_glob_single_level(tree):
+    assert [f.name for f in pygim.path(tree).glob("*.yaml")] == ["a.yaml"]
+    assert [f.name for f in pygim.path(tree).glob("*.y*")] == ["a.yaml", "b.yml"]
+    assert [f.name for f in pygim.path(tree).glob("sub/*.yaml")] == ["d.yaml"]
+
+
+def test_rglob_recursive_and_sorted(tree):
+    names = [f.name for f in pygim.path(tree).rglob("*.yaml")]
+    assert names == sorted(names) and set(names) == {"a.yaml", "d.yaml", "e.yaml"}
+
+
+def test_glob_results_inherit_engine_pin(tree):
+    hits = pygim.path(tree, engine="yaml").rglob("*.json")
+    assert hits and all(f.engine == "yaml" for f in hits)
+    assert hits[0].read() == {"k": 1}              # pin overrides .json extension
+
+
+def test_iterdir_sorted_children(tree):
+    names = [f.name for f in pygim.path(tree).iterdir()]
+    assert names == sorted(names) and "sub" in names
+
+
+def test_glob_rejects_bad_patterns(tree):
+    with pytest.raises(ValueError):
+        pygim.path(tree).glob("")
+    with pytest.raises(ValueError):
+        pygim.path(tree).glob("/abs/*.yaml")
+
+
+def test_glob_on_missing_directory_is_empty(temp_dir):
+    assert pygim.path(temp_dir / "nope").glob("*.yaml") == []
+
+
+def test_pathset_bridge(tree):
+    from pygim.pathset import PathSet
+
+    ps = pygim.path(tree).pathset("**/*.yaml")
+    assert isinstance(ps, PathSet) and len(ps) == 3
+
+
+# --------------------------------------------------------------------------- #
+# Pinned YAML semantics discovered empirically (see also the 1.2 corpus)
+# --------------------------------------------------------------------------- #
+def test_duplicate_mapping_keys_last_wins(temp_dir):
+    # YAML calls duplicate keys invalid; like PyYAML and json.loads we take
+    # the last occurrence rather than erroring. Pinned deliberately.
+    f = _write(temp_dir, "dup.yaml", "a: 1\na: 2\n")
+    assert pygim.path(f).read() == {"a": 2}
+
+
+def test_merge_keys_are_expanded(temp_dir):
+    # rapidyaml's resolve() expands YAML 1.1 merge keys; we inherit (and want)
+    # that behaviour even though 1.2 dropped `<<` from the spec.
+    f = _write(temp_dir, "mk.yaml", "base: &b\n  x: 1\nderived:\n  <<: *b\n  y: 2\n")
+    assert pygim.path(f).read()["derived"] == {"x": 1, "y": 2}
+
+
+def test_yaml_parse_error_includes_filename(temp_dir):
+    f = _write(temp_dir, "broken.yaml", "a: [1, 2\n")
+    with pytest.raises(RuntimeError, match="broken.yaml"):
+        pygim.path(f).read()
+
+
+def test_engine_none_is_auto(temp_dir):
+    f = _write(temp_dir, "auto.yaml", "k: 1\n")
+    assert pygim.path(f, engine=None).read() == {"k": 1}
+    assert pygim.path(f, engine=None).engine is None
+    assert pygim.path(f).read(engine=None) == {"k": 1}
+
+
+def test_toml_extension_autoselects(temp_dir):
+    f = _write(temp_dir, "auto.toml", 'k = 1\n')
+    p = pygim.path(f)
+    assert p.engine is None and p.read() == {"k": 1}
+
+
+def test_json_bigint_limitation_is_loud(temp_dir):
+    # simdjson's DOM cannot represent integers beyond 64 bits. Writing them is
+    # valid JSON (stdlib reads it fine); our reader refuses LOUDLY rather than
+    # silently truncating. Pinned as a known, documented divergence.
+    import json
+
+    p = pygim.path(temp_dir / "big.json")
+    p.write({"big": 12345678901234567890123})
+    assert json.loads(open(str(p)).read()) == {"big": 12345678901234567890123}
+    with pytest.raises(RuntimeError, match="BIGINT"):
+        p.read()
