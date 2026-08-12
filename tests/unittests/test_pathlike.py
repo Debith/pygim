@@ -116,10 +116,9 @@ def test_unknown_engine_raises(temp_dir):
         pygim.path(f).read(engine="toml")
 
 
-def test_json_engine_not_implemented_yet(temp_dir):
+def test_json_engine_reads_natively(temp_dir):
     f = _write(temp_dir, "data.json", '{"a": 1}')
-    with pytest.raises(RuntimeError):
-        pygim.path(f).read()                          # reserved for a future simdjson engine
+    assert pygim.path(f).read() == {"a": 1}           # simdjson engine, chosen by extension
 
 
 def test_missing_file_raises(temp_dir):
@@ -216,3 +215,138 @@ def test_status_and_size(temp_dir):
 
 def test_file_is_hashable():
     assert len({pygim.path("a"), pygim.path("a"), pygim.path("b")}) == 2
+
+
+# --------------------------------------------------------------------------- #
+# Engine selection: read(engine=) > constructor pin > extension
+# --------------------------------------------------------------------------- #
+def test_engine_pinned_at_construction_reads_unknown_extension(temp_dir):
+    f = _write(temp_dir, "config.dat", "name: test\ncount: 3\n")
+    p = pygim.path(f, engine="yaml")
+    assert p.engine == "yaml"
+    assert p.read() == {"name": "test", "count": 3}
+
+
+def test_engine_defaults_to_auto():
+    assert pygim.path("a.yaml").engine is None            # auto: extension decides
+
+
+def test_engine_pin_propagates_to_derived_paths():
+    p = pygim.path("a/b.dat", engine="yaml")
+    assert p.parent.engine == "yaml"
+    assert p.with_name("c.dat").engine == "yaml"
+    assert p.with_suffix(".cfg").engine == "yaml"
+    assert (p / "sub.dat").engine == "yaml"
+    assert all(x.engine == "yaml" for x in p.parents)
+
+
+def test_engine_pin_shown_in_repr():
+    assert repr(pygim.path("x.dat", engine="yaml")) == 'file("file://x.dat", engine=yaml)'
+    assert repr(pygim.path("x.yaml")) == 'file("file://x.yaml")'   # auto: unchanged
+
+
+def test_read_engine_overrides_construction_pin(temp_dir):
+    f = _write(temp_dir, "doc.dat", '{"a": 1}')
+    p = pygim.path(f, engine="yaml")
+    assert p.read(engine="json") == {"a": 1}              # per-call override wins
+
+
+def test_unknown_engine_name_raises_at_construction():
+    with pytest.raises(ValueError, match="unknown engine: 'xml'"):
+        pygim.path("a.yaml", engine="xml")
+
+
+def test_unknown_extension_without_pin_still_refuses(temp_dir):
+    f = _write(temp_dir, "mystery.dat", "k: v\n")
+    with pytest.raises(ValueError, match="no engine for extension"):
+        pygim.path(f).read()
+
+
+# --------------------------------------------------------------------------- #
+# JSON engine (simdjson): differential against the stdlib json module
+# --------------------------------------------------------------------------- #
+JSON_CORPUS = [
+    '{"a": 1, "b": 2.5, "c": true, "d": false, "e": null}',
+    '[1, [2, [3, [4]]], {"deep": {"deeper": []}}]',
+    '{"unicode": "h\u00e4t\u00e4 \u2014 \u00e5\u00e4\u00f6", "empty": {}, "list": []}',
+    '{"big": 9223372036854775807, "neg": -9223372036854775808, "u64": 18446744073709551615}',
+    '{"floats": [0.1, 1e10, -2.5e-3, 123456.789]}',
+    '"just a string"',
+    '42',
+    '[]',
+]
+
+
+@pytest.mark.parametrize("doc", JSON_CORPUS)
+def test_json_read_matches_stdlib_json(temp_dir, doc):
+    import json
+
+    f = _write(temp_dir, "diff.json", doc)
+    assert pygim.path(f).read() == json.loads(doc)
+
+
+def test_json_engine_is_strict_not_yaml(temp_dir):
+    # {a: 1} is valid YAML but invalid JSON: proves .json is NOT routed to the
+    # YAML engine, and that the engine override still rescues the read.
+    f = _write(temp_dir, "notjson.json", "{a: 1}")
+    with pytest.raises(RuntimeError, match="JSON parse error"):
+        pygim.path(f).read()
+    assert pygim.path(f).read(engine="yaml") == {"a": 1}
+
+
+# --------------------------------------------------------------------------- #
+# YAML 1.2 core schema: hand-authored expected values (the spec, encoded)
+# --------------------------------------------------------------------------- #
+YAML_12_SCALARS = [
+    # (document, expected)          — core-schema resolution, quoted stays str
+    ("v: 0x1A", {"v": 26}),                    # hex int
+    ("v: 0o17", {"v": 15}),                    # octal int
+    ("v: 010", {"v": 10}),                     # leading zero is DECIMAL in 1.2
+    ("v: 12345678901234567890123", {"v": 12345678901234567890123}),  # exact big int
+    ("v: -12345678901234567890123", {"v": -12345678901234567890123}),
+    ("v: yes", {"v": "yes"}),                  # 1.1 bools stay strings in 1.2
+    ("v: On", {"v": "On"}),
+    ("v: 1_000", {"v": "1_000"}),              # 1.1 underscore ints stay strings
+    ("v: 0b1", {"v": "0b1"}),                  # binary is not core schema
+    ("v: -0x1A", {"v": "-0x1A"}),              # signed hex is not core schema
+    ("v: '0x1A'", {"v": "0x1A"}),              # quoting suppresses resolution
+    ("v: 1e3", {"v": 1000.0}),                 # exponent float without dot
+    ("v: .5", {"v": 0.5}),
+    ("v: 1e999", {"v": float("inf")}),         # overflow saturates like float()
+    ("v: inf", {"v": "inf"}),                  # strtod-isms are NOT core floats
+    ("v: nan", {"v": "nan"}),
+    ("v: Infinity", {"v": "Infinity"}),
+]
+
+
+@pytest.mark.parametrize("doc,expected", YAML_12_SCALARS)
+def test_yaml_12_core_schema_scalars(temp_dir, doc, expected):
+    f = _write(temp_dir, "scalar.yaml", doc + "\n")
+    obj = pygim.path(f).read()
+    assert obj == expected
+    for k in expected:
+        assert type(obj[k]) is type(expected[k])
+
+
+# --------------------------------------------------------------------------- #
+# Differential harness: cross-check against PyYAML on 1.1/1.2 common ground
+# --------------------------------------------------------------------------- #
+YAML_COMMON_GROUND = [
+    "a: 1\nb: 2.5\nc: true\nd: null\ne: text\n",
+    "list:\n  - 1\n  - two\n  - 3.0\n  - null\n",
+    "nested:\n  x:\n    y:\n      z: [1, 2, 3]\n",
+    "empty_map: {}\nempty_list: []\n",
+    'quoted: "123"\nsingle: \'true\'\n',
+    "anchors:\n  base: &b {k: 1}\n  copy: *b\n",
+    "negative: -17\nzero: 0\nplus: +5\n",
+    "inf: .inf\nneg_inf: -.inf\n",
+    "multi: |\n  line one\n  line two\n",
+]
+
+
+@pytest.mark.parametrize("doc", YAML_COMMON_GROUND)
+def test_yaml_read_matches_pyyaml_on_common_ground(temp_dir, doc):
+    yaml = pytest.importorskip("yaml")
+
+    f = _write(temp_dir, "common.yaml", doc)
+    assert pygim.path(f).read() == yaml.safe_load(doc)

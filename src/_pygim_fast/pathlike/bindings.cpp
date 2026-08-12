@@ -31,6 +31,20 @@ using namespace pygim::pathlike;
 static_assert(engine_for_ext(".yaml") == Engine::Yaml, "yaml dispatch");
 static_assert(engine_for_ext(".json") == Engine::Json, "json dispatch");
 
+namespace {
+
+// "" -> auto (Engine::Unknown); a known name -> that engine; anything else throws.
+Engine engine_from_arg(const std::string& name) {
+    if (name.empty()) return Engine::Unknown;
+    const Engine e = engine_from_name(name);
+    if (e == Engine::Unknown) {
+        throw std::invalid_argument("unknown engine: '" + name + "' (known: yaml, json)");
+    }
+    return e;
+}
+
+}  // namespace
+
 PYBIND11_MODULE(pathlike, m) {
     m.doc() = "path(): an os.PathLike that reads & decodes itself with the optimal engine.";
 
@@ -38,10 +52,23 @@ PYBIND11_MODULE(pathlike, m) {
 A filesystem path that knows how to read and decode itself.
 
 Never constructed directly — use ``pygim.path(...)``. The decoding engine is chosen
-at compile time from the extension (``.yaml``/``.yml`` -> YAML); pass ``engine=`` to
-override. Implements ``os.PathLike``, so it drops into ``open()``, ``Path()``, etc.
+at compile time from the extension (``.yaml``/``.yml`` -> YAML via rapidyaml,
+``.json`` -> JSON via simdjson); pin one with ``engine=`` at construction, or
+override per call with ``read(engine=...)``. Implements ``os.PathLike``, so it
+drops into ``open()``, ``Path()``, etc.
 )doc")
-        .def(py::init<fs::path>(), py::arg("path"))
+        .def(py::init([](fs::path p, const std::string& engine) {
+                 return file(std::move(p), engine_from_arg(engine));
+             }),
+             py::arg("path"), py::arg("engine") = std::string())
+        .def_property_readonly(
+            "engine",
+            [](const file& f) -> py::object {
+                const Engine e = f.pinned_engine();
+                if (e == Engine::Unknown) return py::none();
+                return py::str(std::string(engine_label(e)));
+            },
+            "The engine pinned at construction ('yaml'/'json'), or None for auto.")
         .def("__fspath__", &file::fspath, "os.PathLike protocol: the plain path string.")
         .def("__repr__", &file::repr)
         .def("__str__", &file::fspath)
@@ -97,8 +124,13 @@ override. Implements ``os.PathLike``, so it drops into ``open()``, ``Path()``, e
              "Decode the file to native Python objects using the optimal engine "
              "(or the named engine=).");
 
-    m.def("path", [](fs::path p) { return file(std::move(p)); }, py::arg("path"),
-          "Wrap a path in a self-reading, self-decoding file().");
+    m.def("path",
+          [](fs::path p, const std::string& engine) {
+              return file(std::move(p), engine_from_arg(engine));
+          },
+          py::arg("path"), py::arg("engine") = std::string(),
+          "Wrap a path in a self-reading, self-decoding file(). Pass engine= to pin "
+          "the decoder ('yaml'/'json'); default resolves from the extension.");
 
 #ifdef VERSION_INFO
     m.attr("__version__") = MACRO_STRINGIFY(VERSION_INFO);

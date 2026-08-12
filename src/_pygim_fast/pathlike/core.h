@@ -71,22 +71,90 @@ static_assert(engine_from_name("") == Engine::Unknown);
 
 namespace detail {
 // ASCII lower-case of a short extension, so ".YAML" resolves like ".yaml".
-[[nodiscard]] inline std::string ascii_lower(std::string_view s) {
+// constexpr so the lower-case-then-lookup chain is provable at compile time.
+[[nodiscard]] constexpr std::string ascii_lower(std::string_view s) {
     std::string out(s);
     for (char& c : out) {
         if (c >= 'A' && c <= 'Z') c = static_cast<char>(c - 'A' + 'a');
     }
     return out;
 }
+
+// ── Exhaustive compile-time proof of the format registry ──────────────────
+// The spot checks above pin known entries; these validators sweep the WHOLE
+// table, so a format added to kExtEngines later is proven automatically.
+// consteval (not constexpr): they can never be compiled into runtime code.
+
+// Every entry resolves to its declared engine, never Unknown, and keeps the
+// key contract: leading dot, lower-case (ascii_lower() is a no-op on keys).
+consteval bool table_entries_resolve() {
+    for (const auto& [ext, eng] : kExtEngines) {
+        if (eng == Engine::Unknown) return false;
+        if (engine_for_ext(ext) != eng) return false;
+        if (ext.size() < 2 || ext.front() != '.') return false;
+        if (ascii_lower(ext) != ext) return false;
+    }
+    return true;
+}
+
+// Duplicate keys would make later entries silently unreachable (first match wins).
+consteval bool table_has_no_duplicates() {
+    for (std::size_t i = 0; i < kExtEngines.size(); ++i) {
+        for (std::size_t j = i + 1; j < kExtEngines.size(); ++j) {
+            if (kExtEngines[i].first == kExtEngines[j].first) return false;
+        }
+    }
+    return true;
+}
+
+// engine_label() -> engine_from_name() round-trips for every reachable engine.
+consteval bool labels_roundtrip() {
+    for (const auto& [ext, eng] : kExtEngines) {
+        if (engine_from_name(engine_label(eng)) != eng) return false;
+    }
+    return engine_label(Engine::Unknown) == std::string_view{"unknown"};
+}
+
+// The lower-case-then-lookup chain used by resolve_engine(), proven end to end.
+consteval bool case_folds_before_lookup() {
+    return engine_for_ext(ascii_lower(".YAML")) == Engine::Yaml &&
+           engine_for_ext(ascii_lower(".Yml")) == Engine::Yaml &&
+           engine_for_ext(ascii_lower(".JSON")) == Engine::Json;
+}
+
+// Near-misses stay Unknown: raw lookups are exact (case, dot, whole string).
+consteval bool misses_stay_unknown() {
+    return engine_for_ext("") == Engine::Unknown &&
+           engine_for_ext(".") == Engine::Unknown &&
+           engine_for_ext("yaml") == Engine::Unknown &&
+           engine_for_ext(".yaml ") == Engine::Unknown &&
+           engine_for_ext(".YAML") == Engine::Unknown &&
+           engine_from_name("YAML") == Engine::Unknown &&
+           engine_from_name(".yaml") == Engine::Unknown;
+}
 }  // namespace detail
+
+static_assert(detail::table_entries_resolve());
+static_assert(detail::table_has_no_duplicates());
+static_assert(detail::labels_roundtrip());
+static_assert(detail::case_folds_before_lookup());
+static_assert(detail::misses_stay_unknown());
+// Out-of-range enum values (reachable via static_cast) still label as "unknown".
+static_assert(engine_label(static_cast<Engine>(42)) == std::string_view{"unknown"});
 
 // A filesystem path that reads and decodes itself. Models os.PathLike (it exposes
 // __fspath__ through the binding), so it drops straight into open(), Path(), etc.
+// An engine may be pinned at construction; Engine::Unknown means "auto by
+// extension". Derived paths (parent(), with_suffix(), ...) inherit the pin.
 class file {
 public:
-    explicit file(fs::path p) : m_path(std::move(p)) {}
+    explicit file(fs::path p, Engine engine = Engine::Unknown)
+        : m_path(std::move(p)), m_engine(engine) {}
 
     [[nodiscard]] const fs::path& path() const noexcept { return m_path; }
+
+    // The engine pinned at construction; Engine::Unknown = auto by extension.
+    [[nodiscard]] Engine pinned_engine() const noexcept { return m_engine; }
 
     // os.PathLike: the plain filesystem string.
     [[nodiscard]] std::string fspath() const { return m_path.string(); }
@@ -124,15 +192,22 @@ public:
 
     // "file://<path>" URI (forward slashes on every platform) and its repr.
     [[nodiscard]] std::string uri() const { return "file://" + m_path.generic_string(); }
-    [[nodiscard]] std::string repr() const { return "file(\"" + uri() + "\")"; }
+    [[nodiscard]] std::string repr() const {
+        std::string out = "file(\"" + uri() + "\"";
+        if (m_engine != Engine::Unknown) {
+            out += ", engine=";
+            out += engine_label(m_engine);
+        }
+        return out + ")";
+    }
 
     // -- path composition (pathlib-style) ---------------------------------
     // `self / other` — append a component (an absolute `other` replaces, as in
     // std::filesystem and pathlib). `other / self` is the reflected form.
-    [[nodiscard]] file joined(const fs::path& other) const { return file(m_path / other); }
-    [[nodiscard]] file rjoined(const fs::path& other) const { return file(other / m_path); }
+    [[nodiscard]] file joined(const fs::path& other) const { return file(m_path / other, m_engine); }
+    [[nodiscard]] file rjoined(const fs::path& other) const { return file(other / m_path, m_engine); }
 
-    [[nodiscard]] file parent() const { return file(m_path.parent_path()); }
+    [[nodiscard]] file parent() const { return file(m_path.parent_path(), m_engine); }
 
     // Ancestors, closest first: "a/b/c" -> ["a/b", "a"].
     [[nodiscard]] std::vector<file> parents() const {
@@ -140,7 +215,7 @@ public:
         fs::path cur = m_path.parent_path();
         fs::path prev;
         while (!cur.empty() && cur != prev) {
-            out.emplace_back(cur);
+            out.emplace_back(cur, m_engine);
             prev = cur;
             cur = cur.parent_path();
         }
@@ -151,16 +226,16 @@ public:
     [[nodiscard]] file with_suffix(const std::string& s) const {
         fs::path p = m_path;
         p.replace_extension(s);
-        return file(p);
+        return file(p, m_engine);
     }
     [[nodiscard]] file with_name(const std::string& n) const {
         fs::path p = m_path;
         p.replace_filename(n);
-        return file(p);
+        return file(p, m_engine);
     }
     [[nodiscard]] file with_stem(const std::string& s) const { return with_name(s + suffix()); }
-    [[nodiscard]] file absolute() const { return file(fs::absolute(m_path)); }
-    [[nodiscard]] file resolve() const { return file(fs::weakly_canonical(m_path)); }
+    [[nodiscard]] file absolute() const { return file(fs::absolute(m_path), m_engine); }
+    [[nodiscard]] file resolve() const { return file(fs::weakly_canonical(m_path), m_engine); }
 
     // -- filesystem status ------------------------------------------------
     [[nodiscard]] bool is_absolute() const { return m_path.is_absolute(); }
@@ -170,8 +245,9 @@ public:
     [[nodiscard]] bool is_symlink() const { return fs::is_symlink(m_path); }
     [[nodiscard]] std::uintmax_t size() const { return fs::file_size(m_path); }
 
-    // Which engine read() will decode with: the caller's override wins, else the
-    // compile-time choice for this extension. Throws if neither resolves — the
+    // Which engine read() will decode with, in precedence order: the caller's
+    // override wins, then the engine pinned at construction, then the
+    // compile-time choice for this extension. Throws if none resolves — the
     // firewall against silently guessing a format.
     [[nodiscard]] Engine resolve_engine(std::string_view requested) const {
         if (!requested.empty()) {
@@ -182,11 +258,12 @@ public:
             }
             return named;
         }
+        if (m_engine != Engine::Unknown) return m_engine;
         const std::string ext = detail::ascii_lower(m_path.extension().string());
         const Engine byext = engine_for_ext(ext);
         if (byext == Engine::Unknown) {
             throw std::invalid_argument("no engine for extension '" + ext +
-                                        "' — pass read(engine=...)");
+                                        "' — pass engine= at construction or read(engine=...)");
         }
         return byext;
     }
@@ -202,6 +279,7 @@ public:
 
 private:
     fs::path m_path;
+    Engine   m_engine{Engine::Unknown};   // pinned at construction; Unknown = auto
 };
 
 }  // namespace pygim::pathlike
