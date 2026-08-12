@@ -12,7 +12,9 @@ import pathlib
 
 def _write(temp_dir, name, text):
     p = temp_dir / name
-    p.write_text(text)
+    # Explicit encoding and newline: Windows would otherwise write cp1252 and
+    # CRLF, breaking the UTF-8 parsers and byte-size assertions.
+    p.write_text(text, encoding="utf-8", newline="\n")
     return p
 
 
@@ -140,17 +142,18 @@ def test_malformed_yaml_raises_not_aborts(temp_dir):
 def test_truediv_joins_and_returns_a_file():
     p = pygim.path("base") / "sub" / "doc.yaml"
     assert isinstance(p, pathlike.file)
-    assert os.fspath(p) == "base/sub/doc.yaml"
+    assert pathlib.PurePath(os.fspath(p)) == pathlib.PurePath("base/sub/doc.yaml")
     assert p.suffix == ".yaml"                       # still a decodable file after joining
 
 
 def test_rtruediv_joins_from_a_string():
     p = "root" / pygim.path("leaf.yaml")
-    assert os.fspath(p) == "root/leaf.yaml"
+    assert pathlib.PurePath(os.fspath(p)) == pathlib.PurePath("root/leaf.yaml")
 
 
 def test_joinpath_appends_many_components():
-    assert os.fspath(pygim.path("a").joinpath("b", "c.yaml")) == "a/b/c.yaml"
+    joined = pygim.path("a").joinpath("b", "c.yaml")
+    assert pathlib.PurePath(os.fspath(joined)) == pathlib.PurePath("a/b/c.yaml")
 
 
 def test_absolute_component_replaces():
@@ -160,7 +163,8 @@ def test_absolute_component_replaces():
 
 def test_parent_name_stem_and_flags():
     p = pygim.path("a/b/c.yaml")
-    assert os.fspath(p.parent) == "a/b" and isinstance(p.parent, pathlike.file)
+    assert pathlib.PurePath(os.fspath(p.parent)) == pathlib.PurePath("a/b")
+    assert isinstance(p.parent, pathlike.file)
     assert p.name == "c.yaml" and p.stem == "c"
     assert p.is_absolute() is False
     assert pygim.path("/x/y").is_absolute() is True
@@ -422,7 +426,7 @@ def test_json_write_matches_stdlib(temp_dir, obj):
 
     p = pygim.path(temp_dir / "rt.json")
     p.write(obj)
-    assert json.loads(p.path_text() if hasattr(p, "path_text") else open(p).read()) == obj
+    assert json.loads(open(p, encoding="utf-8").read()) == obj
     assert p.read() == obj
 
 

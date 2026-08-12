@@ -300,7 +300,10 @@ public:
             if (slash == std::string_view::npos) break;
             start = slash + 1;
         }
-        if (segs.empty() || fs::path(pattern).is_absolute()) {
+        // A leading '/' is rejected explicitly: on Windows fs::path("/x") is
+        // NOT is_absolute() (no drive), yet the pattern is clearly not
+        // relative in the caller's intent.
+        if (segs.empty() || pattern.front() == '/' || fs::path(pattern).is_absolute()) {
             throw std::invalid_argument("glob: pattern must be relative, got '" +
                                         std::string(pattern) + "'");
         }

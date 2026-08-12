@@ -73,6 +73,41 @@ def _base_kwargs():
     }
 
 
+_STD_PROBE_CACHE = {}
+
+
+def _first_supported_std(requested):
+    """The first ``-std=`` dialect the build compiler accepts, walking down
+    from *requested*.
+
+    CI images and user machines may ship a compiler that predates the
+    requested standard's flag (GCC 13 has no ``-std=c++26``); the code must
+    still build, so degrade to the nearest accepted dialect flag rather than
+    fail. Windows never reaches this (MSVC uses ``/std:c++latest``).
+    """
+    if requested in _STD_PROBE_CACHE:
+        return _STD_PROBE_CACHE[requested]
+    import shutil
+    import subprocess
+
+    cxx = os.environ.get("CXX") or shutil.which("c++") or shutil.which("g++")
+    fallbacks = {"c++26": ["c++2c", "c++23"], "c++2c": ["c++23"]}
+    chosen = requested
+    if cxx:
+        for cand in [requested, *fallbacks.get(requested, [])]:
+            probe = subprocess.run(
+                [cxx, f"-std={cand}", "-x", "c++", "-fsyntax-only", "-"],
+                input=b"int main(){}", capture_output=True,
+            )
+            if probe.returncode == 0:
+                chosen = cand
+                break
+    if chosen != requested:
+        print(f"[setup.py] {cxx}: -std={requested} unsupported, using -std={chosen}")
+    _STD_PROBE_CACHE[requested] = chosen
+    return chosen
+
+
 def _dep_available(dep_name):
     """Return True if the extension for *dep_name* can be built on this platform."""
     if dep_name == "odbc" and sys.platform == "win32":
@@ -256,7 +291,8 @@ for ext_toml in sorted(FAST_ROOT.rglob("ext.*.toml")):
     if std:
         args = kwargs["extra_compile_args"]
         args[:] = [a for a in args if not (a.startswith("-std=") or a.startswith("/std:"))]
-        args.append("/std:c++latest" if sys.platform == "win32" else f"-std={std}")
+        args.append("/std:c++latest" if sys.platform == "win32"
+                    else f"-std={_first_supported_std(std)}")
 
     ext_modules.append(
         Pybind11Extension(
