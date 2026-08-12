@@ -371,9 +371,18 @@ TOML_CORPUS = [
 ]
 
 
+def _toml_oracle():
+    """tomllib (3.11+ stdlib) or its tomli backport — same API."""
+    try:
+        import tomllib
+        return tomllib
+    except ModuleNotFoundError:
+        return pytest.importorskip("tomli")
+
+
 @pytest.mark.parametrize("doc", TOML_CORPUS)
 def test_toml_read_matches_tomllib(temp_dir, doc):
-    tomllib = pytest.importorskip("tomllib")   # stdlib only since Python 3.11
+    tomllib = _toml_oracle()
 
     f = _write(temp_dir, "diff.toml", doc)
     assert pygim.path(f).read() == tomllib.loads(doc)
@@ -605,3 +614,145 @@ def test_json_bigint_limitation_is_loud(temp_dir):
     assert json.loads(open(str(p)).read()) == {"big": 12345678901234567890123}
     with pytest.raises(RuntimeError, match="BIGINT"):
         p.read()
+
+
+def test_differential_oracles_installed_in_ci():
+    """The differential harness must actually RUN in the merge gate.
+
+    importorskip keeps casual local runs friendly, but a skipped oracle test
+    is invisible on a green run — so in CI a missing oracle is a FAILURE,
+    ensuring the gate cannot silently hollow out.
+    """
+    if not os.environ.get("CI"):
+        pytest.skip("oracle presence only enforced on CI")
+    import yaml  # noqa: F401  (PyYAML: the YAML common-ground oracle)
+    _toml_oracle()  # tomllib or tomli: the TOML oracle
+
+
+# --------------------------------------------------------------------------- #
+# pathlib is the oracle for path semantics (the decode oracles are above)
+# --------------------------------------------------------------------------- #
+PATH_CORPUS = [
+    "a.yaml", "a.", "a..b", ".bashrc", ".bashrc.swp", "..", ".", "a/b/", "/",
+    "a//b", "archive.tar.gz", "a.b.c.d", "no_ext", "/abs/x.yml", "./rel",
+    "spa ce/f.yaml", "...", "..a", "a...gz", "a/./b", "x.YAML",
+]
+
+
+@pytest.mark.parametrize("s", PATH_CORPUS)
+def test_name_components_match_pathlib(s):
+    # The class docstring claims pathlib parity; this test makes pathlib the
+    # oracle for it, the same way PyYAML/tomllib are oracles for decoding.
+    # (PurePosixPath on POSIX, PureWindowsPath on Windows — both must agree.)
+    p, ref = pygim.path(s), pathlib.PurePath(s)
+    assert p.name == ref.name, f"name({s!r})"
+    assert p.stem == ref.stem, f"stem({s!r})"
+    assert p.suffix == ref.suffix, f"suffix({s!r})"
+    assert p.suffixes == list(ref.suffixes), f"suffixes({s!r})"
+    assert p.parts == list(ref.parts), f"parts({s!r})"
+    assert p.is_absolute() == ref.is_absolute(), f"is_absolute({s!r})"
+
+
+# --------------------------------------------------------------------------- #
+# Encoding contract: UTF-8 in (BOM tolerated), everything else fails LOUDLY
+# --------------------------------------------------------------------------- #
+def _write_bytes(temp_dir, name, data):
+    p = temp_dir / name
+    p.write_bytes(data)
+    return p
+
+
+@pytest.mark.parametrize("name,doc", [
+    ("bom.yaml", b"k: 1\n"),
+    ("bom.json", b'{"k": 1}'),
+    ("bom.toml", b"k = 1\n"),
+])
+def test_utf8_bom_is_tolerated(temp_dir, name, doc):
+    # What Windows Notepad writes; PyYAML/json/tomllib all tolerate it.
+    f = _write_bytes(temp_dir, name, b"\xef\xbb\xbf" + doc)
+    assert pygim.path(f).read() == {"k": 1}
+
+
+@pytest.mark.parametrize("name,doc", [
+    ("u16.yaml", "k: 1\n"),
+    ("u16.json", '{"k": 1}'),
+    ("u16.toml", "k = 1\n"),
+])
+def test_utf16_fails_loudly(temp_dir, name, doc):
+    # What PowerShell `>` redirection writes. Without the explicit gate the
+    # YAML engine parsed this into NUL-riddled garbage strings — found by
+    # this corpus. Garbage-out is never acceptable; a clear error is.
+    f = _write_bytes(temp_dir, name, doc.encode("utf-16"))
+    with pytest.raises(RuntimeError, match="UTF-16|UTF8|utf-8|invalid"):
+        pygim.path(f).read()
+
+
+@pytest.mark.parametrize("name,doc", [
+    ("l1.yaml", b"k: h\xe4t\xe4\n"),
+    ("l1.json", b'{"k": "h\xe4t\xe4"}'),
+    ("l1.toml", b'k = "h\xe4t\xe4"\n'),
+])
+def test_invalid_utf8_fails_loudly_with_filename(temp_dir, name, doc):
+    # Latin-1 bytes. The YAML engine used to raise a confusing
+    # UnicodeDecodeError at materialisation time — or NOTHING when the bad
+    # byte sat in a comment; now every engine rejects up front, naming the file.
+    f = _write_bytes(temp_dir, name, doc)
+    with pytest.raises(RuntimeError, match=name.split(".")[0]):
+        pygim.path(f).read()
+
+
+def test_invalid_utf8_in_comment_still_fails(temp_dir):
+    f = _write_bytes(temp_dir, "cmt.yaml", b"k: 1  # h\xe4t\xe4\n")
+    with pytest.raises(RuntimeError, match="not valid UTF-8"):
+        pygim.path(f).read()
+
+
+# --------------------------------------------------------------------------- #
+# Concurrency: parse ERRORS across threads (success is covered above)
+# --------------------------------------------------------------------------- #
+def test_concurrent_parse_errors_propagate_cleanly(temp_dir):
+    # The spiciest path in the extension: several threads simultaneously hit
+    # the throwing ryml error callback while the GIL is released. Each thread
+    # must get its own clean Python exception — no crashes, no cross-talk.
+    from concurrent.futures import ThreadPoolExecutor
+
+    good = pygim.path(_write(temp_dir, "good.yaml", "k: 1\n"))
+    bad = pygim.path(_write(temp_dir, "bad.yaml", "k: [1, 2\n"))
+
+    def read_one(i):
+        f = bad if i % 2 else good
+        try:
+            return f.read()
+        except RuntimeError as e:
+            return f"error:{'bad.yaml' in str(e)}"
+
+    with ThreadPoolExecutor(max_workers=8) as ex:
+        results = list(ex.map(read_one, range(64)))
+    assert all(r == {"k": 1} for r in results[::2])
+    assert all(r == "error:True" for r in results[1::2])
+
+
+# --------------------------------------------------------------------------- #
+# Robustness: read() must throw-or-return on arbitrary input, never crash
+# --------------------------------------------------------------------------- #
+def test_nasty_scalar_corpus_never_crashes(temp_dir):
+    import random
+
+    nasty = [
+        "", ":", "-", "---", "...", "{", "[", "'", '"', "\\", "\t", "%YAML 1.2",
+        "&a *a", "*undefined", "!!binary xxx", "a: " + "9" * 5000,
+        "a: " + "\ud800".encode("utf-8", "surrogatepass").decode("latin1"),
+        "\x00".join("ab"), "🎲: 🎯", "- " * 1000, "[" * 200, "?" * 100,
+    ]
+    rng = random.Random(42)   # deterministic: same corpus every run
+    charset = ":-[]{}#&*!|>'\"%@` \n\tabc0123456789.ä世"
+    nasty += ["".join(rng.choice(charset) for _ in range(rng.randint(1, 200)))
+              for _ in range(100)]
+
+    for i, doc in enumerate(nasty):
+        f = temp_dir / f"nasty_{i}.yaml"
+        f.write_bytes(doc.encode("utf-8", "replace"))
+        try:
+            pygim.path(f).read()          # any result is fine...
+        except (RuntimeError, ValueError, UnicodeDecodeError):
+            pass                          # ...and any loud error is fine.

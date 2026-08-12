@@ -343,6 +343,26 @@ inline py::object node_to_py(ryml::ConstNodeRef node, KeyCache& keys) {
     return py::none();                                    // empty document
 }
 
+// rapidyaml is UTF-8 only: without this gate, UTF-16 input parses "successfully"
+// into NUL-riddled garbage, and stray invalid bytes surface as a confusing
+// UnicodeDecodeError at materialisation time — or not at all when they sit in
+// a comment. Discovered by the encoding corpus tests; fail loudly instead.
+// (simdjson's SIMD validate_utf8 is already linked in; a UTF-8 BOM is fine —
+// rapidyaml skips it, matching PyYAML/json/tomllib.)
+inline void require_utf8(const std::string& bytes, const std::string& fspath) {
+    const std::string_view b(bytes);
+    if (b.starts_with("\xFF\xFE") || b.starts_with("\xFE\xFF") ||
+        b.find('\0') != std::string_view::npos) {
+        throw std::runtime_error("cannot decode " + fspath +
+                                 ": input looks like UTF-16/32 or binary — "
+                                 "pathlike engines require UTF-8");
+    }
+    if (!simdjson::validate_utf8(bytes.data(), bytes.size())) {
+        throw std::runtime_error("cannot decode " + fspath +
+                                 ": input is not valid UTF-8");
+    }
+}
+
 // File I/O and parsing run with the GIL RELEASED (pure C++; the throwing ryml
 // callback is GIL-free too), so reads scale across Python threads. Only the
 // materialisation into Python objects reacquires the GIL.
@@ -352,6 +372,7 @@ inline py::object node_to_py(ryml::ConstNodeRef node, KeyCache& keys) {
         py::gil_scoped_release nogil;
         ensure_throwing_callbacks();
         const std::string bytes = f.read_bytes();
+        require_utf8(bytes, f.fspath());
         try {
             tree = ryml::parse_in_arena(ryml::csubstr(bytes.data(), bytes.size()));
         } catch (const std::runtime_error& e) {
@@ -398,8 +419,12 @@ inline py::object node_to_py(ryml::ConstNodeRef node, KeyCache& keys) {
     simdjson::dom::element doc;
     {
         py::gil_scoped_release nogil;
+        const std::string bytes = f.read_bytes();
+        // Same encoding gate as YAML: UTF-16 input otherwise dies with a
+        // misleading UNESCAPED_CHARS parse error instead of naming the cause.
+        require_utf8(bytes, f.fspath());
         try {
-            doc = parser.load(f.fspath());
+            doc = parser.parse(simdjson::padded_string(bytes));
         } catch (const simdjson::simdjson_error& e) {
             throw std::runtime_error("JSON parse error (" + f.fspath() + "): " + e.what());
         }

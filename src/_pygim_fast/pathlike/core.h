@@ -193,18 +193,41 @@ public:
     [[nodiscard]] std::string fspath() const { return m_path.string(); }
 
     // -- name components (pathlib parity: case preserved) -----------------
-    [[nodiscard]] std::string name() const { return m_path.filename().string(); }
-    [[nodiscard]] std::string stem() const { return m_path.stem().string(); }
+    // These follow PATHLIB's rules, not std::filesystem's, wherever the two
+    // disagree (proven by the PurePath differential tests): trailing slashes
+    // are ignored, "." / ".." have no name, and a trailing dot is NOT a
+    // suffix ("a." -> suffix "", where fs::path::extension() says ".").
+    [[nodiscard]] std::string name() const {
+        fs::path p = m_path;
+        if (!p.has_filename() && p.has_parent_path()) p = p.parent_path();  // "a/b/" -> "a/b"
+        const std::string n = p.filename().string();
+        if (n == ".") return "";   // pathlib: "." has no name (".." keeps its)
+        return n;
+    }
+
+    [[nodiscard]] std::string stem() const {
+        const std::string n = name();
+        const std::size_t dot = n.rfind('.');
+        if (dot == std::string::npos || dot == 0 || dot == n.size() - 1) return n;
+        return n.substr(0, dot);
+    }
 
     // Final extension including the dot (".gz"); "" if none. Case is preserved,
     // like pathlib — engine resolution lower-cases separately.
-    [[nodiscard]] std::string suffix() const { return m_path.extension().string(); }
+    [[nodiscard]] std::string suffix() const {
+        const std::string n = name();
+        const std::size_t dot = n.rfind('.');
+        if (dot == std::string::npos || dot == 0 || dot == n.size() - 1) return "";
+        return n.substr(dot);
+    }
 
     // Every extension of the final component: "a.tar.gz" -> [".tar", ".gz"].
-    // A leading-dot name (".bashrc") has no suffixes, as in pathlib.
+    // A leading-dot name (".bashrc") has no suffixes, and a trailing dot has
+    // none either, as in pathlib.
     [[nodiscard]] std::vector<std::string> suffixes() const {
-        const std::string n = m_path.filename().string();
+        const std::string n = name();
         std::vector<std::string> out;
+        if (n.empty() || n.back() == '.') return out;
         const std::size_t start = n.find_first_not_of('.');
         if (start == std::string::npos) return out;
         std::size_t dot = n.find('.', start);
@@ -217,9 +240,15 @@ public:
     }
 
     // Path components in order: "a/b/c.yaml" -> ["a", "b", "c.yaml"].
+    // pathlib normalisation: "." components and empties (trailing slashes)
+    // are dropped; the root component ("/") is kept.
     [[nodiscard]] std::vector<std::string> parts() const {
         std::vector<std::string> out;
-        for (const fs::path& part : m_path) out.push_back(part.string());
+        for (const fs::path& part : m_path) {
+            const std::string s = part.string();
+            if (s.empty() || s == ".") continue;
+            out.push_back(s);
+        }
         return out;
     }
 
