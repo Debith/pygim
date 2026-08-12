@@ -167,7 +167,9 @@ def test_parent_name_stem_and_flags():
     assert isinstance(p.parent, pathlike.file)
     assert p.name == "c.yaml" and p.stem == "c"
     assert p.is_absolute() is False
-    assert pygim.path("/x/y").is_absolute() is True
+    # A genuinely absolute path on every platform ("/x/y" has no drive on
+    # Windows, so std::filesystem correctly calls it relative there).
+    assert pygim.path(pathlib.Path.cwd()).is_absolute() is True
 
 
 def test_join_then_read(temp_dir):
@@ -370,7 +372,7 @@ TOML_CORPUS = [
 
 @pytest.mark.parametrize("doc", TOML_CORPUS)
 def test_toml_read_matches_tomllib(temp_dir, doc):
-    import tomllib
+    tomllib = pytest.importorskip("tomllib")   # stdlib only since Python 3.11
 
     f = _write(temp_dir, "diff.toml", doc)
     assert pygim.path(f).read() == tomllib.loads(doc)
