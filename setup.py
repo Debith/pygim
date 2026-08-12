@@ -47,6 +47,11 @@ else:
         "-flto",
     ]
     extra_link_args_global = ["-flto"]
+    if sys.platform.startswith("linux"):
+        # Bundle the C++ runtime into each extension so a build with a newer GCC
+        # (e.g. system g++-16) still loads in the conda Python, whose own
+        # libstdc++ may be older than the compiler's.
+        extra_link_args_global.append("-static-libstdc++")
 
 
 # ── Build environment ──────────────────────────────────────────────────────
@@ -244,6 +249,14 @@ for ext_toml in sorted(FAST_ROOT.rglob("ext.*.toml")):
         configurator = _DEP_CONFIGURATORS.get(dep)
         if configurator:
             configurator(kwargs)
+
+    # Optional per-extension C++ standard override (default: the global standard).
+    # e.g. ext.pathlike.toml sets std = "c++26" while the rest stay on c++23.
+    std = ext_cfg.get("std")
+    if std:
+        args = kwargs["extra_compile_args"]
+        args[:] = [a for a in args if not (a.startswith("-std=") or a.startswith("/std:"))]
+        args.append("/std:c++latest" if sys.platform == "win32" else f"-std={std}")
 
     ext_modules.append(
         Pybind11Extension(

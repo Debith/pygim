@@ -7,6 +7,8 @@
 # then only breaks the callers that actually use it.
 _LAZY_EXPORTS = {
     "PathSet": ("pygim.pathset", "PathSet"),
+    "path": ("pygim.pathlike", "path"),
+    "file": ("pygim.pathlike", "file"),
     "Registry": ("pygim.registry", "Registry"),
     "Factory": ("pygim.factory", "Factory"),
     "Container": ("pygim.ioc", "Container"),
@@ -26,7 +28,22 @@ def __getattr__(name):
         raise AttributeError(f"module {__name__!r} has no attribute {name!r}") from None
     import importlib
 
-    return getattr(importlib.import_module(module_name), attr)
+    module = importlib.import_module(module_name)
+    if module_name == "pygim.pathlike":
+        _register_pathlike(module)
+    return getattr(module, attr)
+
+
+def _register_pathlike(module):
+    """Declare ``pathlike.file`` a virtual subclass of ``os.PathLike``.
+
+    ``file`` exposes ``__fspath__``, so ``os.PathLike`` already accepts it through
+    its ``__subclasshook__``; registering makes that explicit in the ABC registry.
+    Done on first use, so the lazy-import contract above still holds.
+    """
+    import os
+
+    os.PathLike.register(module.file)
 
 
 def create_df(
