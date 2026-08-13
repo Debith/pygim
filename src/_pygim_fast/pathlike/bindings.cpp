@@ -63,6 +63,39 @@ py::str fspath_str(const file& f) {
 #endif
 }
 
+// ── Typed file classes ─────────────────────────────────────────────────────
+// path("x.yaml") returns a yamlfile, "x.json" a jsonfile, "x.toml" a
+// tomlfile — subclasses of file whose TYPE mirrors the engine the path
+// resolves to, so `isinstance(p, yamlfile)` reads naturally. They carry no
+// state of their own; constructing one directly PINS its format.
+
+struct yaml_file : file { explicit yaml_file(file f) : file(std::move(f)) {} };
+struct json_file : file { explicit json_file(file f) : file(std::move(f)) {} };
+struct toml_file : file { explicit toml_file(file f) : file(std::move(f)) {} };
+
+// The engine read()/write() would use: constructor pin, else the extension.
+Engine resolved_engine(const file& f) {
+    if (f.pinned_engine() != Engine::Unknown) return f.pinned_engine();
+    return engine_for_ext(pygim::pathlike::detail::ascii_lower(f.path().extension().string()));
+}
+
+// Cast a file as the subclass matching its resolved engine (plain file if none).
+py::object wrap(file f) {
+    switch (resolved_engine(f)) {
+        case Engine::Yaml: return py::cast(yaml_file(std::move(f)));
+        case Engine::Json: return py::cast(json_file(std::move(f)));
+        case Engine::Toml: return py::cast(toml_file(std::move(f)));
+        case Engine::Unknown: break;
+    }
+    return py::cast(std::move(f));
+}
+
+py::list wrap_all(std::vector<file> files) {
+    py::list out;
+    for (file& f : files) out.append(wrap(std::move(f)));
+    return out;
+}
+
 }  // namespace
 
 PYBIND11_MODULE(pathlike, m) {
@@ -85,11 +118,12 @@ drops into ``open()``, ``Path()``, etc.
         .def_property_readonly(
             "engine",
             [](const file& f) -> py::object {
-                const Engine e = f.pinned_engine();
+                const Engine e = resolved_engine(f);
                 if (e == Engine::Unknown) return py::none();
                 return py::str(std::string(engine_label(e)));
             },
-            "The engine pinned at construction ('yaml'/'json'/'toml'), or None for auto.")
+            "The engine read()/write() will use — the constructor pin, else the "
+            "extension ('yaml'/'json'/'toml') — or None when neither resolves.")
         // Decode the NATIVE path representation (wstring on Windows — lossless;
         // bytes via the filesystem encoding on POSIX). fs::path::string() would
         // narrow through the ACP on Windows and can mangle non-ASCII paths.
@@ -110,28 +144,32 @@ drops into ``open()``, ``Path()``, etc.
                                "All extensions of the final component ('.tar.gz' -> ['.tar','.gz']).")
         .def_property_readonly("parts", &file::parts, "The path components as a list.")
         // -- composition: path / "sub" / "file.yaml" --
-        .def("__truediv__", [](const file& f, const fs::path& other) { return f.joined(other); },
+        .def("__truediv__", [](const file& f, const fs::path& other) { return wrap(f.joined(other)); },
              py::is_operator())
-        .def("__rtruediv__", [](const file& f, const fs::path& other) { return f.rjoined(other); },
+        .def("__rtruediv__", [](const file& f, const fs::path& other) { return wrap(f.rjoined(other)); },
              py::is_operator())
         .def("joinpath",
              [](const file& f, const py::args& parts) {
                  file out = f;
                  for (const py::handle& part : parts) out = out.joined(part.cast<fs::path>());
-                 return out;
+                 return wrap(std::move(out));
              },
              "Append one or more path components, like pathlib's joinpath().")
-        .def_property_readonly("parent", &file::parent, "The parent directory as a file().")
-        .def_property_readonly("parents", &file::parents, "Ancestor directories, closest first.")
+        .def_property_readonly("parent", [](const file& f) { return wrap(f.parent()); },
+                               "The parent directory as a file().")
+        .def_property_readonly("parents", [](const file& f) { return wrap_all(f.parents()); },
+                               "Ancestor directories, closest first.")
         // -- derived paths (return new file()s) --
-        .def("with_suffix", &file::with_suffix, py::arg("suffix"),
-             "A copy with the final suffix replaced.")
-        .def("with_name", &file::with_name, py::arg("name"),
-             "A copy with the final component replaced.")
-        .def("with_stem", &file::with_stem, py::arg("stem"),
-             "A copy with the stem replaced (suffix kept).")
-        .def("absolute", &file::absolute, "An absolute copy (does not resolve symlinks/..).")
-        .def("resolve", &file::resolve, "A canonical, absolute copy (resolves symlinks/..).")
+        .def("with_suffix", [](const file& f, const std::string& s) { return wrap(f.with_suffix(s)); },
+             py::arg("suffix"), "A copy with the final suffix replaced.")
+        .def("with_name", [](const file& f, const std::string& n) { return wrap(f.with_name(n)); },
+             py::arg("name"), "A copy with the final component replaced.")
+        .def("with_stem", [](const file& f, const std::string& s) { return wrap(f.with_stem(s)); },
+             py::arg("stem"), "A copy with the stem replaced (suffix kept).")
+        .def("absolute", [](const file& f) { return wrap(f.absolute()); },
+             "An absolute copy (does not resolve symlinks/..).")
+        .def("resolve", [](const file& f) { return wrap(f.resolve()); },
+             "A canonical, absolute copy (resolves symlinks/..).")
         // -- filesystem status --
         .def("is_absolute", &file::is_absolute, "Whether the path is absolute.")
         .def("exists", &file::exists, "Whether the path exists on disk.")
@@ -166,11 +204,14 @@ drops into ``open()``, ``Path()``, etc.
              "strings that would read back typed are quoted automatically, so "
              "write/read round-trips.")
         // -- directory traversal (results inherit the engine pin) --
-        .def("iterdir", &file::iterdir, "The directory's children, sorted.")
-        .def("glob", &file::glob, py::arg("pattern"),
+        .def("iterdir", [](const file& f) { return wrap_all(f.iterdir()); },
+             "The directory's children, sorted.")
+        .def("glob", [](const file& f, std::string_view p) { return wrap_all(f.glob(p)); },
+             py::arg("pattern"),
              "Relative glob: * and ? within a component, ** across directories. "
              "Sorted and deduplicated; results inherit the engine pin.")
-        .def("rglob", &file::rglob, py::arg("pattern"),
+        .def("rglob", [](const file& f, std::string_view p) { return wrap_all(f.rglob(p)); },
+             py::arg("pattern"),
              "glob('**/' + pattern): the pattern anywhere under this directory.")
         .def("pathset",
              [](const file& f, const std::string& pattern) {
@@ -182,13 +223,29 @@ drops into ``open()``, ``Path()``, etc.
              "The glob results as a pygim.pathset.PathSet, for set algebra and "
              "Filter queries.");
 
+    // Typed subclasses: same state, the TYPE mirrors the resolved engine.
+    // Constructing one directly PINS its format: yamlfile(p) == path(p, engine="yaml").
+    py::class_<yaml_file, file>(m, "yamlfile",
+                                "A file whose resolved engine is YAML; constructing one pins it.")
+        .def(py::init([](fs::path p) { return yaml_file(file(std::move(p), Engine::Yaml)); }),
+             py::arg("path"));
+    py::class_<json_file, file>(m, "jsonfile",
+                                "A file whose resolved engine is JSON; constructing one pins it.")
+        .def(py::init([](fs::path p) { return json_file(file(std::move(p), Engine::Json)); }),
+             py::arg("path"));
+    py::class_<toml_file, file>(m, "tomlfile",
+                                "A file whose resolved engine is TOML; constructing one pins it.")
+        .def(py::init([](fs::path p) { return toml_file(file(std::move(p), Engine::Toml)); }),
+             py::arg("path"));
+
     m.def("path",
           [](fs::path p, const std::optional<std::string>& engine) {
-              return file(std::move(p), engine_from_arg(engine));
+              return wrap(file(std::move(p), engine_from_arg(engine)));
           },
           py::arg("path"), py::arg("engine") = py::none(),
-          "Wrap a path in a self-reading, self-decoding file(). Pass engine= to pin "
-          "the decoder ('yaml'/'json'/'toml'); default resolves from the extension.");
+          "Wrap a path in a self-reading, self-decoding file() — typed as yamlfile/"
+          "jsonfile/tomlfile when an engine resolves. Pass engine= to pin the "
+          "decoder ('yaml'/'json'/'toml'); default resolves from the extension.");
 
 #ifdef VERSION_INFO
     m.attr("__version__") = MACRO_STRINGIFY(VERSION_INFO);

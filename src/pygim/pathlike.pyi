@@ -33,7 +33,9 @@ class file(os.PathLike[str]):
 
     # -- engine -------------------------------------------------------------
     @property
-    def engine(self) -> str | None: ...
+    def engine(self) -> str | None:
+        """The engine read()/write() will use — the constructor pin, else the
+        extension — or None when neither resolves."""
 
     # -- os.PathLike / identity ----------------------------------------------
     def __fspath__(self) -> str: ...
@@ -82,3 +84,16 @@ class file(os.PathLike[str]):
     def rglob(self, pattern: str) -> list[file]: ...
     def pathset(self, pattern: str = "*") -> Any:
         """The glob results as a pygim.pathset.PathSet."""
+
+
+class yamlfile(file):
+    """A file whose resolved engine is YAML; constructing one pins it."""
+    def __init__(self, path: str | os.PathLike[str]) -> None: ...
+
+class jsonfile(file):
+    """A file whose resolved engine is JSON; constructing one pins it."""
+    def __init__(self, path: str | os.PathLike[str]) -> None: ...
+
+class tomlfile(file):
+    """A file whose resolved engine is TOML; constructing one pins it."""
+    def __init__(self, path: str | os.PathLike[str]) -> None: ...

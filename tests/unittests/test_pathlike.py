@@ -234,8 +234,12 @@ def test_engine_pinned_at_construction_reads_unknown_extension(temp_dir):
     assert p.read() == {"name": "test", "count": 3}
 
 
-def test_engine_defaults_to_auto():
-    assert pygim.path("a.yaml").engine is None            # auto: extension decides
+def test_engine_reports_resolution():
+    # .engine is the RESOLVED engine: pin if set, else the extension.
+    assert pygim.path("a.yaml").engine == "yaml"
+    assert pygim.path("a.toml").engine == "toml"
+    assert pygim.path("a.json").engine == "json"
+    assert pygim.path("a.txt").engine is None             # nothing resolves
 
 
 def test_engine_pin_propagates_to_derived_paths():
@@ -629,14 +633,14 @@ def test_yaml_parse_error_includes_filename(temp_dir):
 def test_engine_none_is_auto(temp_dir):
     f = _write(temp_dir, "auto.yaml", "k: 1\n")
     assert pygim.path(f, engine=None).read() == {"k": 1}
-    assert pygim.path(f, engine=None).engine is None
+    assert pygim.path(f, engine=None).engine == "yaml"    # resolved by extension
     assert pygim.path(f).read(engine=None) == {"k": 1}
 
 
 def test_toml_extension_autoselects(temp_dir):
     f = _write(temp_dir, "auto.toml", 'k = 1\n')
     p = pygim.path(f)
-    assert p.engine is None and p.read() == {"k": 1}
+    assert p.engine == "toml" and p.read() == {"k": 1}
 
 
 def test_json_bigint_limitation_is_loud(temp_dir):
@@ -818,3 +822,34 @@ def test_dot_edge_semantics_are_pinned():
     # suffixes says []) because the two properties use different algorithms;
     # 3.14 resolved it the other way. We mirror 3.12 faithfully, wart and all.
     assert (q.stem, q.suffix, q.suffixes) == (".", ".a", [])
+
+
+# --------------------------------------------------------------------------- #
+# Typed file classes: the type mirrors the resolved engine
+# --------------------------------------------------------------------------- #
+def test_path_returns_engine_typed_subclasses():
+    from pygim.pathlike import file, jsonfile, tomlfile, yamlfile
+
+    assert isinstance(pygim.path("a.yaml"), yamlfile)
+    assert isinstance(pygim.path("a.toml"), tomlfile)
+    assert isinstance(pygim.path("a.json"), jsonfile)
+    assert isinstance(pygim.path("a.yaml"), file)          # still a file
+    assert type(pygim.path("a.txt")) is file               # unresolved: plain file
+
+
+def test_typed_subclass_follows_pin_and_derivation():
+    from pygim.pathlike import jsonfile, tomlfile, yamlfile
+
+    assert isinstance(pygim.path("a.json", engine="yaml"), yamlfile)   # pin wins
+    assert isinstance(pygim.path("a.yaml").with_suffix(".json"), jsonfile)
+    assert isinstance(pygim.path("cfg.yaml").parent / "x.toml", tomlfile)
+
+
+def test_direct_subclass_construction_pins(temp_dir):
+    from pygim.pathlike import yamlfile
+
+    f = _write(temp_dir, "legacy.dat", "k: 1\n")
+    p = yamlfile(f)                                        # type == pinned engine
+    assert p.engine == "yaml" and isinstance(p, yamlfile)
+    assert p.read() == {"k": 1}
+    assert isinstance(p.with_name("other.dat"), yamlfile)  # pin travels, type too

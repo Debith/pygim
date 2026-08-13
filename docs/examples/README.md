@@ -41,6 +41,7 @@ for f in docs/examples/*/example_*.py; do python "$f" || break; done
 | pathlike | [example_06_writing.py](pathlike/example_06_writing.py) | write() round-trips, trap-string quoting, non-finite float policies, TOML read-only |
 | pathlike | [example_07_traversal.py](pathlike/example_07_traversal.py) | glob/rglob/iterdir, sorted+deduplicated results, pin inheritance, the PathSet bridge |
 | pathlike | [example_08_parallel_and_key_cache.py](pathlike/example_08_parallel_and_key_cache.py) | GIL-released parallel reads, key_cache interning semantics and proof |
+| pathlike | [example_09_typed_files.py](pathlike/example_09_typed_files.py) | `.engine` naming the resolved engine; `yamlfile`/`jsonfile`/`tomlfile` types mirroring it through pins and derived paths |
 | persistence | [arrow_bcp_quickstart.md](arrow_bcp_quickstart.md) | Quickstart for the Arrow/BCP persistence layer (prose walkthrough, requires a database) |
 
 ## Conventions
