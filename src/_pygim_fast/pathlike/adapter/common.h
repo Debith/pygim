@@ -12,7 +12,7 @@
 #include <pybind11/pybind11.h>
 
 #include "third_party/simdjson/simdjson.h"
-#include "core.h"
+#include "../core.h"
 
 namespace pygim::pathlike::detail {
 

@@ -10,8 +10,8 @@
 
 #include "third_party/simdjson/simdjson.h"
 #include "common.h"
-#include "core.h"
-#include "scalars.h"
+#include "../core.h"
+#include "materialize.h"
 
 namespace pygim::pathlike::detail {
 

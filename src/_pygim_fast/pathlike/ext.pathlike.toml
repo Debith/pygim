@@ -1,6 +1,6 @@
 [extension]
 module = "pathlike"
-sources = ["bindings.cpp", "third_party/simdjson/simdjson.cpp"]
+sources = ["adapter/bindings.cpp", "adapter/third_party/simdjson/simdjson.cpp"]
 # The path/file class is written against C++26 (constexpr dispatch, etc.); the
 # global default is C++23, so this extension overrides just its own -std flag.
 std = "c++26"

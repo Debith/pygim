@@ -14,8 +14,8 @@
 #define TOML_EXCEPTIONS 0   // error-code API (toml::parse_result), no throw across nogil
 #include "third_party/tomlplusplus/toml.hpp"
 #include "common.h"
-#include "core.h"
-#include "scalars.h"
+#include "../core.h"
+#include "materialize.h"
 
 namespace pygim::pathlike::detail {
 

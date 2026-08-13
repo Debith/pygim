@@ -19,8 +19,8 @@
 
 #include "third_party/rapidyaml/ryml_all.hpp"
 #include "common.h"
-#include "core.h"
-#include "scalars.h"
+#include "../core.h"
+#include "materialize.h"
 
 namespace pygim::pathlike::detail {
 

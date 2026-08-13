@@ -14,11 +14,11 @@
 
 #include <pybind11/pybind11.h>
 
-#include "core.h"
+#include "../core.h"
 #include "engine_json.h"
 #include "engine_toml.h"
 #include "engine_yaml.h"
-#include "scalars.h"
+#include "materialize.h"
 
 namespace pygim::pathlike {
 

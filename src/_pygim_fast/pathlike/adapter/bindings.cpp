@@ -19,7 +19,7 @@
 #include <optional>
 #include <string>
 
-#include "core.h"
+#include "../core.h"
 #include "adapter.h"
 
 #define STRINGIFY(x) #x
