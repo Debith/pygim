@@ -25,8 +25,9 @@ class file(os.PathLike[str]):
         and parsing). ``key_cache`` bounds key interning: 0 off, -1 unbounded."""
 
     def write(self, obj: Any, engine: Engine | None = None) -> None:
-        """Serialise dict/list/str/int/float/bool/None with the resolved
-        engine (YAML or JSON; TOML is read-only)."""
+        """Serialise obj with the resolved engine. YAML/JSON accept
+        dict/list/str/int/float/bool/None roots; TOML requires a mapping
+        root, has no null, and additionally supports datetime values."""
 
     def read_bytes(self) -> bytes: ...
 

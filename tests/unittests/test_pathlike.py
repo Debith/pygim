@@ -388,9 +388,45 @@ def test_toml_read_matches_tomllib(temp_dir, doc):
     assert pygim.path(f).read() == tomllib.loads(doc)
 
 
-def test_toml_write_not_implemented(temp_dir):
-    with pytest.raises(ValueError, match="toml write not implemented"):
-        pygim.path(temp_dir / "out.toml").write({"a": 1})
+TOML_WRITE_OBJS = [
+    {"title": "svc", "count": 42, "ratio": 2.5, "on": True, "inf": float("inf")},
+    {"tags": ["a", "b"], "nested": {"deep": {"x": 1}}, "points": [{"x": 1}, {"x": 2}]},
+    {"unicode": "hätä — åäö", "empty": {}, "seq": []},
+]
+
+
+@pytest.mark.parametrize("obj", TOML_WRITE_OBJS)
+def test_toml_write_read_roundtrip(temp_dir, obj):
+    p = pygim.path(temp_dir / "rt.toml")
+    p.write(obj)
+    assert p.read() == obj
+    assert _toml_oracle().loads((temp_dir / "rt.toml").read_text(encoding="utf-8")) == obj
+
+
+def test_toml_write_datetimes_roundtrip(temp_dir):
+    import datetime as dt
+
+    obj = {
+        "day": dt.date(2024, 1, 15),
+        "tea": dt.time(10, 30, 15, 250000),
+        "stamp": dt.datetime(2024, 1, 15, 10, 30,
+                             tzinfo=dt.timezone(dt.timedelta(hours=2))),
+        "naive": dt.datetime(2024, 1, 15, 10, 30),
+    }
+    p = pygim.path(temp_dir / "dt.toml")
+    p.write(obj)
+    assert p.read() == obj
+    assert _toml_oracle().loads((temp_dir / "dt.toml").read_text(encoding="utf-8")) == obj
+
+
+def test_toml_write_rejections_are_loud(temp_dir):
+    p = pygim.path(temp_dir / "bad.toml")
+    with pytest.raises(ValueError, match="must be a mapping"):
+        p.write([1, 2])                       # TOML documents are tables
+    with pytest.raises(ValueError, match="no null"):
+        p.write({"a": None})
+    with pytest.raises(ValueError, match="64-bit"):
+        p.write({"a": 2**70})
 
 
 def test_toml_parse_error_has_filename_and_line(temp_dir):

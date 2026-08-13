@@ -161,9 +161,10 @@ drops into ``open()``, ``Path()``, etc.
                                                     : engine_label(named)));
              },
              py::arg("obj"), py::arg("engine") = py::none(),
-             "Serialise obj (dict/list/str/int/float/bool/None) to this path "
-             "with the resolved engine. Strings that would read back typed are "
-             "quoted automatically, so write/read round-trips.")
+             "Serialise obj to this path with the resolved engine (yaml/json/"
+             "toml). TOML requires a mapping root and supports datetimes; "
+             "strings that would read back typed are quoted automatically, so "
+             "write/read round-trips.")
         // -- directory traversal (results inherit the engine pin) --
         .def("iterdir", &file::iterdir, "The directory's children, sorted.")
         .def("glob", &file::glob, py::arg("pattern"),

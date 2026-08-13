@@ -44,38 +44,44 @@ def records(n, key_maker):
 
 
 def make_files(tmp):
-    """Write one file per (format, shape); return {label: (file, oracle_fn)}."""
+    """One decode workload per (format x shape); return {label: (file, oracle_fn)}.
+
+    The files are written by pygim itself — ``path(...).write(content)`` is
+    format-universal, so a single loop covers yaml, json and toml. The only
+    format-specific fact left is which reference parser to race (chosen by
+    suffix), and that TOML roots must be mappings (TOML documents are tables).
+    """
+    import tomllib
+    import yaml
+
+    oracles = {
+        ".yaml": lambda text: yaml.load(text, Loader=yaml.CSafeLoader),
+        ".json": json.loads,
+        ".toml": tomllib.loads,
+    }
+
     config = {
         "server": {"host": "db.example.com", "port": 5432, "opts": {"tls": True, "retry": 3}},
         "features": [f"feature-{i}" for i in range(50)],
         "limits": {f"limit_{i}": i * 1.5 for i in range(50)},
     }
     rows = records(20_000, lambda k: f"key{k}")
+    workloads = {
+        "config.yaml": config,
+        "config.json": config,
+        "config.toml": config,
+        "records.yaml": rows,
+        "records.json": rows,
+        "records.toml": {"rows": rows},   # mapping root, as TOML requires
+    }
 
     out = {}
-
-    import yaml
-    y1 = tmp / "config.yaml"
-    y1.write_text(yaml.safe_dump(config))
-    out["yaml config (2 KB)"] = (y1, lambda p: yaml.load(p.read_text(), Loader=yaml.CSafeLoader))
-    y2 = tmp / "records.yaml"
-    y2.write_text(yaml.safe_dump(rows))
-    out["yaml records (3 MB)"] = (y2, lambda p: yaml.load(p.read_text(), Loader=yaml.CSafeLoader))
-
-    j1 = tmp / "config.json"
-    j1.write_text(json.dumps(config))
-    out["json config (2 KB)"] = (j1, lambda p: json.loads(p.read_text()))
-    j2 = tmp / "records.json"
-    j2.write_text(json.dumps(rows))
-    out["json records (2 MB)"] = (j2, lambda p: json.loads(p.read_text()))
-
-    import tomllib
-    t1 = tmp / "config.toml"
-    lines = ['[server]\nhost = "db.example.com"\nport = 5432\n[server.opts]\ntls = true\nretry = 3\n']
-    lines.append("[limits]\n" + "".join(f"limit_{i} = {i * 1.5}\n" for i in range(50)))
-    t1.write_text("".join(lines))
-    out["toml config (1 KB)"] = (t1, lambda p: tomllib.loads(p.read_text()))
-
+    for name, content in workloads.items():
+        f = pygim.path(tmp / name)
+        f.write(content)
+        label = f"{name} ({f.size() / 1024:,.0f} KB)"
+        oracle = oracles[f.suffix]
+        out[label] = (f, lambda fp, o=oracle: o(Path(fp).read_text()))
     return out
 
 

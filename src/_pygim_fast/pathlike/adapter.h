@@ -479,6 +479,92 @@ inline void require_utf8(const std::string& bytes, const std::string& fspath) {
     throw std::runtime_error("toml: unhandled node type");
 }
 
+// ── TOML write side ────────────────────────────────────────────────────────
+// Python object -> toml++ node, inserted via `ins` (a lambda targeting either
+// a table slot or an array slot — one conversion, both containers). Container
+// recursion goes through the non-template table/array builders, so the
+// template is instantiated exactly twice regardless of nesting depth.
+// TOML has no null and its integers are int64, so both fail loudly.
+
+[[nodiscard]] inline toml::table py_to_toml_table(py::handle obj);
+[[nodiscard]] inline toml::array py_to_toml_array(py::handle obj);
+
+template <typename Insert>
+inline void py_to_toml_value(py::handle obj, Insert&& ins) {
+    static py::object date_cls = py::module_::import("datetime").attr("date");
+    static py::object time_cls = py::module_::import("datetime").attr("time");
+    static py::object datetime_cls = py::module_::import("datetime").attr("datetime");
+
+    if (obj.is_none()) {
+        throw std::invalid_argument("toml cannot represent None (TOML has no null)");
+    }
+    if (py::isinstance<py::bool_>(obj)) return ins(obj.cast<bool>());   // before int
+    if (py::isinstance<py::int_>(obj)) {
+        try {
+            return ins(obj.cast<int64_t>());
+        } catch (const py::cast_error&) {
+            throw std::invalid_argument("toml integers are 64-bit; value out of range: " +
+                                        py::str(obj).cast<std::string>());
+        }
+    }
+    if (py::isinstance<py::float_>(obj)) return ins(obj.cast<double>());
+    if (py::isinstance<py::str>(obj)) return ins(obj.cast<std::string>());
+    if (py::isinstance(obj, datetime_cls)) {        // before date: datetime IS a date
+        toml::date_time dt;
+        dt.date = {obj.attr("year").cast<uint16_t>(), obj.attr("month").cast<uint8_t>(),
+                   obj.attr("day").cast<uint8_t>()};
+        dt.time = {obj.attr("hour").cast<uint8_t>(), obj.attr("minute").cast<uint8_t>(),
+                   obj.attr("second").cast<uint8_t>(),
+                   obj.attr("microsecond").cast<uint32_t>() * 1000u};
+        py::object off = obj.attr("utcoffset")();
+        if (!off.is_none()) {
+            dt.offset = toml::time_offset(0, static_cast<int16_t>(
+                off.attr("total_seconds")().cast<double>() / 60.0));
+        }
+        return ins(dt);
+    }
+    if (py::isinstance(obj, date_cls)) {
+        return ins(toml::date{obj.attr("year").cast<uint16_t>(),
+                              obj.attr("month").cast<uint8_t>(),
+                              obj.attr("day").cast<uint8_t>()});
+    }
+    if (py::isinstance(obj, time_cls)) {
+        return ins(toml::time{obj.attr("hour").cast<uint8_t>(),
+                              obj.attr("minute").cast<uint8_t>(),
+                              obj.attr("second").cast<uint8_t>(),
+                              obj.attr("microsecond").cast<uint32_t>() * 1000u});
+    }
+    if (py::isinstance<py::dict>(obj)) return ins(py_to_toml_table(obj));
+    if (py::isinstance<py::list>(obj) || py::isinstance<py::tuple>(obj)) {
+        return ins(py_to_toml_array(obj));
+    }
+    throw std::invalid_argument("toml write: unsupported type " +
+                                py::str(py::type::of(obj)).cast<std::string>());
+}
+
+[[nodiscard]] inline toml::array py_to_toml_array(py::handle obj) {
+    toml::array out;
+    for (auto item : obj.cast<py::sequence>()) {
+        py_to_toml_value(item, [&out](auto&& v) { out.push_back(std::forward<decltype(v)>(v)); });
+    }
+    return out;
+}
+
+[[nodiscard]] inline toml::table py_to_toml_table(py::handle obj) {
+    toml::table out;
+    for (auto item : obj.cast<py::dict>()) {
+        if (!py::isinstance<py::str>(item.first)) {
+            throw std::invalid_argument("write: mapping keys must be str, got " +
+                                        py::str(py::type::of(item.first)).cast<std::string>());
+        }
+        const std::string key = item.first.cast<std::string>();
+        py_to_toml_value(item.second, [&out, &key](auto&& v) {
+            out.insert_or_assign(key, std::forward<decltype(v)>(v));
+        });
+    }
+    return out;
+}
+
 [[nodiscard]] inline py::object load_toml(const file& f, KeyCache& keys) {
     toml::parse_result result = [&f] {
         py::gil_scoped_release nogil;
@@ -586,14 +672,36 @@ inline void py_to_node(ryml::Tree& tree, ryml::NodeRef node, py::handle obj, boo
     throw std::invalid_argument("no engine resolved for " + f.fspath());
 }
 
-// Serialise `obj` to `f` with `engine`. The tree is built under the GIL (it
-// reads Python objects); emit + file write run with the GIL released.
+namespace detail {
+
+inline void write_text_file(const file& f, std::string_view text) {
+    std::ofstream ofs(f.path(), std::ios::binary | std::ios::trunc);
+    if (!ofs) throw std::runtime_error("cannot open file for writing: " + f.fspath());
+    ofs.write(text.data(), static_cast<std::streamsize>(text.size()));
+    if (!ofs) throw std::runtime_error("write failed: " + f.fspath());
+}
+
+}  // namespace detail
+
+// Serialise `obj` to `f` with `engine`. The document model is built under the
+// GIL (it reads Python objects); emit + file write run with the GIL released.
+// TOML additionally requires a mapping at the root — TOML documents ARE
+// tables — where YAML/JSON also accept sequence roots.
 inline void write(const file& f, py::handle obj, Engine engine) {
-    if (engine == Engine::Toml) {
-        throw std::invalid_argument("toml write not implemented yet (read-only engine)");
-    }
     if (engine == Engine::Unknown) {
         throw std::invalid_argument("no engine resolved for " + f.fspath());
+    }
+    if (engine == Engine::Toml) {
+        if (!py::isinstance<py::dict>(obj)) {
+            throw std::invalid_argument(
+                "toml write: content must be a mapping (TOML documents are tables)");
+        }
+        toml::table root = detail::py_to_toml_table(obj);
+        py::gil_scoped_release nogil;
+        std::stringstream ss;
+        ss << root << '\n';
+        detail::write_text_file(f, ss.str());
+        return;
     }
     const bool json_mode = engine == Engine::Json;
     ryml::Tree tree;
@@ -607,10 +715,7 @@ inline void write(const file& f, py::handle obj, Engine engine) {
         } else {
             ryml::emitrs_yaml(tree, tree.root_id(), &text);
         }
-        std::ofstream ofs(f.path(), std::ios::binary | std::ios::trunc);
-        if (!ofs) throw std::runtime_error("cannot open file for writing: " + f.fspath());
-        ofs.write(text.data(), static_cast<std::streamsize>(text.size()));
-        if (!ofs) throw std::runtime_error("write failed: " + f.fspath());
+        detail::write_text_file(f, text);
     }
 }
 
