@@ -57,6 +57,11 @@ test = [
   'coverage',
   'coverage[toml]',
   'pyodbc',
+  # Differential-test oracles: the pathlike harness compares decoding against
+  # reference implementations. These MUST be present wherever the suite acts
+  # as a merge gate (test_differential_oracles_installed_in_ci enforces it).
+  'pyyaml',
+  'tomli; python_version < "3.11"',
 ]
 
 pandas = [

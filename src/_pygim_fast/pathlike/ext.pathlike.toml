@@ -1,0 +1,14 @@
+[extension]
+module = "pathlike"
+# The tests/static TUs hold the exhaustive compile-time proof suites: wiring
+# them into the sources means every build proves the invariants (an unwired
+# static test file tests nothing). They contribute no runtime code.
+sources = [
+  "adapter/bindings.cpp",
+  "adapter/third_party/simdjson/simdjson.cpp",
+  "../../../tests/static/pathlike_core_proofs.cpp",
+  "../../../tests/static/pathlike_scalar_proofs.cpp",
+]
+# The path/file class is written against C++26 (constexpr dispatch, etc.); the
+# global default is C++23, so this extension overrides just its own -std flag.
+std = "c++26"

@@ -47,6 +47,11 @@ else:
         "-flto",
     ]
     extra_link_args_global = ["-flto"]
+    if sys.platform.startswith("linux"):
+        # Bundle the C++ runtime into each extension so a build with a newer GCC
+        # (e.g. system g++-16) still loads in the conda Python, whose own
+        # libstdc++ may be older than the compiler's.
+        extra_link_args_global.append("-static-libstdc++")
 
 
 # ── Build environment ──────────────────────────────────────────────────────
@@ -66,6 +71,41 @@ def _base_kwargs():
         "extra_compile_args": list(extra_compile_args),
         "extra_link_args": list(extra_link_args_global),
     }
+
+
+_STD_PROBE_CACHE = {}
+
+
+def _first_supported_std(requested):
+    """The first ``-std=`` dialect the build compiler accepts, walking down
+    from *requested*.
+
+    CI images and user machines may ship a compiler that predates the
+    requested standard's flag (GCC 13 has no ``-std=c++26``); the code must
+    still build, so degrade to the nearest accepted dialect flag rather than
+    fail. Windows never reaches this (MSVC uses ``/std:c++latest``).
+    """
+    if requested in _STD_PROBE_CACHE:
+        return _STD_PROBE_CACHE[requested]
+    import shutil
+    import subprocess
+
+    cxx = os.environ.get("CXX") or shutil.which("c++") or shutil.which("g++")
+    fallbacks = {"c++26": ["c++2c", "c++23"], "c++2c": ["c++23"]}
+    chosen = requested
+    if cxx:
+        for cand in [requested, *fallbacks.get(requested, [])]:
+            probe = subprocess.run(
+                [cxx, f"-std={cand}", "-x", "c++", "-fsyntax-only", "-"],
+                input=b"int main(){}", capture_output=True,
+            )
+            if probe.returncode == 0:
+                chosen = cand
+                break
+    if chosen != requested:
+        print(f"[setup.py] {cxx}: -std={requested} unsupported, using -std={chosen}")
+    _STD_PROBE_CACHE[requested] = chosen
+    return chosen
 
 
 def _dep_available(dep_name):
@@ -244,6 +284,15 @@ for ext_toml in sorted(FAST_ROOT.rglob("ext.*.toml")):
         configurator = _DEP_CONFIGURATORS.get(dep)
         if configurator:
             configurator(kwargs)
+
+    # Optional per-extension C++ standard override (default: the global standard).
+    # e.g. ext.pathlike.toml sets std = "c++26" while the rest stay on c++23.
+    std = ext_cfg.get("std")
+    if std:
+        args = kwargs["extra_compile_args"]
+        args[:] = [a for a in args if not (a.startswith("-std=") or a.startswith("/std:"))]
+        args.append("/std:c++latest" if sys.platform == "win32"
+                    else f"-std={_first_supported_std(std)}")
 
     ext_modules.append(
         Pybind11Extension(
