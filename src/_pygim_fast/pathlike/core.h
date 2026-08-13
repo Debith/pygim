@@ -47,18 +47,22 @@ inline constexpr std::array<std::pair<std::string_view, Engine>, 4> kExtEngines{
 }
 
 // The engine a caller named explicitly (read(engine="yaml")); "" means "auto".
+// Both spellings select: the FORMAT ("yaml") and the LIBRARY ("rapidyaml") —
+// formats are what users think in, libraries are what engine_label() reports.
 [[nodiscard]] constexpr Engine engine_from_name(std::string_view name) noexcept {
-    if (name == "yaml" || name == "yml") return Engine::Yaml;
-    if (name == "json") return Engine::Json;
-    if (name == "toml") return Engine::Toml;
+    if (name == "yaml" || name == "yml" || name == "rapidyaml") return Engine::Yaml;
+    if (name == "json" || name == "simdjson") return Engine::Json;
+    if (name == "toml" || name == "toml++" || name == "tomlplusplus") return Engine::Toml;
     return Engine::Unknown;
 }
 
+// Engines are LIBRARIES, so their labels are library names: what .engine
+// reports and repr() shows is the actual decoder implementation.
 [[nodiscard]] constexpr std::string_view engine_label(Engine e) noexcept {
     switch (e) {
-        case Engine::Yaml: return "yaml";
-        case Engine::Json: return "json";
-        case Engine::Toml: return "toml";
+        case Engine::Yaml: return "rapidyaml";
+        case Engine::Json: return "simdjson";
+        case Engine::Toml: return "toml++";
         case Engine::Unknown: return "unknown";
     }
     return "unknown";
@@ -359,7 +363,8 @@ public:
             const Engine named = engine_from_name(requested);
             if (named == Engine::Unknown) {
                 throw std::invalid_argument("unknown engine: '" + std::string(requested) +
-                                            "' (known: yaml, json)");
+                                            "' (known: yaml/rapidyaml, json/simdjson, "
+                                            "toml/toml++)");
             }
             return named;
         }

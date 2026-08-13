@@ -230,29 +230,29 @@ def test_file_is_hashable():
 def test_engine_pinned_at_construction_reads_unknown_extension(temp_dir):
     f = _write(temp_dir, "config.dat", "name: test\ncount: 3\n")
     p = pygim.path(f, engine="yaml")
-    assert p.engine == "yaml"
+    assert p.engine == "rapidyaml"
     assert p.read() == {"name": "test", "count": 3}
 
 
 def test_engine_reports_resolution():
     # .engine is the RESOLVED engine: pin if set, else the extension.
-    assert pygim.path("a.yaml").engine == "yaml"
-    assert pygim.path("a.toml").engine == "toml"
-    assert pygim.path("a.json").engine == "json"
+    assert pygim.path("a.yaml").engine == "rapidyaml"   # engines are LIBRARIES
+    assert pygim.path("a.toml").engine == "toml++"
+    assert pygim.path("a.json").engine == "simdjson"
     assert pygim.path("a.txt").engine is None             # nothing resolves
 
 
 def test_engine_pin_propagates_to_derived_paths():
     p = pygim.path("a/b.dat", engine="yaml")
-    assert p.parent.engine == "yaml"
-    assert p.with_name("c.dat").engine == "yaml"
-    assert p.with_suffix(".cfg").engine == "yaml"
-    assert (p / "sub.dat").engine == "yaml"
-    assert all(x.engine == "yaml" for x in p.parents)
+    assert p.parent.engine == "rapidyaml"
+    assert p.with_name("c.dat").engine == "rapidyaml"
+    assert p.with_suffix(".cfg").engine == "rapidyaml"
+    assert (p / "sub.dat").engine == "rapidyaml"
+    assert all(x.engine == "rapidyaml" for x in p.parents)
 
 
 def test_engine_pin_shown_in_repr():
-    assert repr(pygim.path("x.dat", engine="yaml")) == 'file("file://x.dat", engine=yaml)'
+    assert repr(pygim.path("x.dat", engine="yaml")) == 'file("file://x.dat", engine=rapidyaml)'
     assert repr(pygim.path("x.yaml")) == 'file("file://x.yaml")'   # auto: unchanged
 
 
@@ -580,7 +580,7 @@ def test_rglob_recursive_and_sorted(tree):
 
 def test_glob_results_inherit_engine_pin(tree):
     hits = pygim.path(tree, engine="yaml").rglob("*.json")
-    assert hits and all(f.engine == "yaml" for f in hits)
+    assert hits and all(f.engine == "rapidyaml" for f in hits)
     assert hits[0].read() == {"k": 1}              # pin overrides .json extension
 
 
@@ -633,14 +633,14 @@ def test_yaml_parse_error_includes_filename(temp_dir):
 def test_engine_none_is_auto(temp_dir):
     f = _write(temp_dir, "auto.yaml", "k: 1\n")
     assert pygim.path(f, engine=None).read() == {"k": 1}
-    assert pygim.path(f, engine=None).engine == "yaml"    # resolved by extension
+    assert pygim.path(f, engine=None).engine == "rapidyaml"    # resolved by extension
     assert pygim.path(f).read(engine=None) == {"k": 1}
 
 
 def test_toml_extension_autoselects(temp_dir):
     f = _write(temp_dir, "auto.toml", 'k = 1\n')
     p = pygim.path(f)
-    assert p.engine == "toml" and p.read() == {"k": 1}
+    assert p.engine == "toml++" and p.read() == {"k": 1}
 
 
 def test_json_bigint_limitation_is_loud(temp_dir):
@@ -850,6 +850,6 @@ def test_direct_subclass_construction_pins(temp_dir):
 
     f = _write(temp_dir, "legacy.dat", "k: 1\n")
     p = yamlfile(f)                                        # type == pinned engine
-    assert p.engine == "yaml" and isinstance(p, yamlfile)
+    assert p.engine == "rapidyaml" and isinstance(p, yamlfile)
     assert p.read() == {"k": 1}
     assert isinstance(p.with_name("other.dat"), yamlfile)  # pin travels, type too

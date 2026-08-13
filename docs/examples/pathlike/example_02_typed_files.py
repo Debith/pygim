@@ -19,9 +19,10 @@ from pygim.pathlike import file, jsonfile, tomlfile, yamlfile
 # ----------------------------------------------------------------------------
 # 1. The resolved engine is visible on every path
 # ----------------------------------------------------------------------------
-assert pygim.path("app.yaml").engine == "yaml"
-assert pygim.path("app.toml").engine == "toml"
-assert pygim.path("app.json").engine == "json"
+# Engines are LIBRARIES, so .engine names the actual decoder implementation.
+assert pygim.path("app.yaml").engine == "rapidyaml"
+assert pygim.path("app.toml").engine == "toml++"
+assert pygim.path("app.json").engine == "simdjson"
 assert pygim.path("app.txt").engine is None      # nothing resolves -> no engine
 
 # ----------------------------------------------------------------------------
@@ -46,7 +47,7 @@ assert isinstance(pygim.path("cfg.yaml").parent / "x.toml", tomlfile)
 #                    ┌─ yamlfile(p) == pygim.path(p, engine="yaml")
 #                    ▼
 p = yamlfile("legacy.dat")
-assert p.engine == "yaml"
+assert p.engine == "rapidyaml"
 assert isinstance(p.with_name("other.dat"), yamlfile)    # pin travels, type too
 
 print("pathlike typed files example OK:", type(pygim.path("app.yaml")).__name__)

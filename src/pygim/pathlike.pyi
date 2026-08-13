@@ -7,7 +7,8 @@ public contract of ``pygim.path(...)`` / ``pathlike.file``.
 import os
 from typing import Any, Literal
 
-Engine = Literal["yaml", "yml", "json", "toml"]
+# Selection accepts FORMAT names and LIBRARY names; .engine reports the library.
+Engine = Literal["yaml", "yml", "json", "toml", "rapidyaml", "simdjson", "toml++"]
 
 def path(path: str | os.PathLike[str], engine: Engine | None = None) -> file:
     """Wrap a path in a self-reading, self-decoding file().
@@ -34,8 +35,9 @@ class file(os.PathLike[str]):
     # -- engine -------------------------------------------------------------
     @property
     def engine(self) -> str | None:
-        """The engine read()/write() will use — the constructor pin, else the
-        extension — or None when neither resolves."""
+        """The engine (library) read()/write() will use — the constructor pin,
+        else the extension ('rapidyaml'/'simdjson'/'toml++') — or None when
+        neither resolves."""
 
     # -- os.PathLike / identity ----------------------------------------------
     def __fspath__(self) -> str: ...

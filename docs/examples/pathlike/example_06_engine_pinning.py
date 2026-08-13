@@ -32,7 +32,7 @@ legacy.write_text("name: imported\nversion: 3\n")
 #                            │  everything derived from it (None = by extension)
 #                            ▼
 p = pygim.path(legacy, engine="yaml")
-assert p.engine == "yaml"
+assert p.engine == "rapidyaml"
 assert p.read() == {"name": "imported", "version": 3}
 
 # ----------------------------------------------------------------------------
@@ -48,8 +48,8 @@ else:
 # ----------------------------------------------------------------------------
 # 3. The pin travels with derived paths
 # ----------------------------------------------------------------------------
-assert p.with_name("other.dat").engine == "yaml"
-assert p.parent.engine == "yaml"
+assert p.with_name("other.dat").engine == "rapidyaml"
+assert p.parent.engine == "rapidyaml"
 
 # ----------------------------------------------------------------------------
 # 4. A per-call engine= overrides everything

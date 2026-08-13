@@ -41,7 +41,7 @@ Engine engine_from_arg(const std::optional<std::string>& name) {
     const Engine e = engine_from_name(*name);
     if (e == Engine::Unknown) {
         throw std::invalid_argument("unknown engine: '" + *name +
-                                    "' (known: yaml, json, toml)");
+                                    "' (known: yaml/rapidyaml, json/simdjson, toml/toml++)");
     }
     return e;
 }
@@ -122,8 +122,9 @@ drops into ``open()``, ``Path()``, etc.
                 if (e == Engine::Unknown) return py::none();
                 return py::str(std::string(engine_label(e)));
             },
-            "The engine read()/write() will use — the constructor pin, else the "
-            "extension ('yaml'/'json'/'toml') — or None when neither resolves.")
+            "The engine (library) read()/write() will use — the constructor pin, "
+            "else the extension ('rapidyaml'/'simdjson'/'toml++') — or None when "
+            "neither resolves.")
         // Decode the NATIVE path representation (wstring on Windows — lossless;
         // bytes via the filesystem encoding on POSIX). fs::path::string() would
         // narrow through the ACP on Windows and can mangle non-ASCII paths.

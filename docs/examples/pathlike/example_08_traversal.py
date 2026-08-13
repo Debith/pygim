@@ -55,7 +55,7 @@ assert [f.name for f in children] == sorted(f.name for f in children)
 # YAML subset, so this gives a legitimate uniform view).
 pinned = pygim.path(root, engine="yaml")
 hits = pinned.rglob("*.json")
-assert all(f.engine == "yaml" for f in hits)
+assert all(f.engine == "rapidyaml" for f in hits)
 assert hits[0].read() == {"k": 4}
 
 # ----------------------------------------------------------------------------

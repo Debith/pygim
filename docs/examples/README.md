@@ -34,14 +34,14 @@ for f in docs/examples/*/example_*.py; do python "$f" || break; done
 | each | [example_01_broadcasting.py](each/example_01_broadcasting.py) | Broadcasting attribute reads and method calls over any iterable, argument forwarding, the dunder guard rail |
 | pathset | [example_01_path_collections.py](pathset/example_01_path_collections.py) | Set semantics over filesystem paths, removal and cloning, bulk file reading, glob-style matching |
 | pathlike | [example_01_read_a_config.py](pathlike/example_01_read_a_config.py) | One call from a path to native Python objects |
-| pathlike | [example_02_pathlib_parity.py](pathlike/example_02_pathlib_parity.py) | os.PathLike integration, name components, `/` composition |
-| pathlike | [example_03_yaml_12_scalars.py](pathlike/example_03_yaml_12_scalars.py) | YAML 1.2 scalar typing: hex/octal/big ints, 1.1-isms staying strings, dot-form floats, quoting |
-| pathlike | [example_04_json_and_toml.py](pathlike/example_04_json_and_toml.py) | Strict JSON with filename in errors; TOML with real datetime objects |
-| pathlike | [example_05_engine_pinning.py](pathlike/example_05_engine_pinning.py) | Pinning an engine at construction, refusal to guess, pin inheritance, per-call override |
-| pathlike | [example_06_writing.py](pathlike/example_06_writing.py) | write() round-trips, trap-string quoting, non-finite float policies, TOML read-only |
-| pathlike | [example_07_traversal.py](pathlike/example_07_traversal.py) | glob/rglob/iterdir, sorted+deduplicated results, pin inheritance, the PathSet bridge |
-| pathlike | [example_08_parallel_and_key_cache.py](pathlike/example_08_parallel_and_key_cache.py) | GIL-released parallel reads, key_cache interning semantics and proof |
-| pathlike | [example_09_typed_files.py](pathlike/example_09_typed_files.py) | `.engine` naming the resolved engine; `yamlfile`/`jsonfile`/`tomlfile` types mirroring it through pins and derived paths |
+| pathlike | [example_02_typed_files.py](pathlike/example_02_typed_files.py) | `.engine` naming the decoding library (rapidyaml/simdjson/toml++); `yamlfile`/`jsonfile`/`tomlfile` types mirroring it through pins and derived paths |
+| pathlike | [example_03_pathlib_parity.py](pathlike/example_03_pathlib_parity.py) | os.PathLike integration, name components, `/` composition |
+| pathlike | [example_04_yaml_12_scalars.py](pathlike/example_04_yaml_12_scalars.py) | YAML 1.2 scalar typing: hex/octal/big ints, 1.1-isms staying strings, dot-form floats, quoting |
+| pathlike | [example_05_json_and_toml.py](pathlike/example_05_json_and_toml.py) | Strict JSON with filename in errors; TOML with real datetime objects |
+| pathlike | [example_06_engine_pinning.py](pathlike/example_06_engine_pinning.py) | Pinning an engine at construction, refusal to guess, pin inheritance, per-call override |
+| pathlike | [example_07_writing.py](pathlike/example_07_writing.py) | write() round-trips for all three formats, trap-string quoting, non-finite float policies, TOML mapping roots |
+| pathlike | [example_08_traversal.py](pathlike/example_08_traversal.py) | glob/rglob/iterdir, sorted+deduplicated results, pin inheritance, the PathSet bridge |
+| pathlike | [example_09_parallel_and_key_cache.py](pathlike/example_09_parallel_and_key_cache.py) | GIL-released parallel reads, key_cache interning semantics and proof |
 | persistence | [arrow_bcp_quickstart.md](arrow_bcp_quickstart.md) | Quickstart for the Arrow/BCP persistence layer (prose walkthrough, requires a database) |
 
 ## Conventions
