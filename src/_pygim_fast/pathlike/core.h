@@ -14,6 +14,7 @@
 #include <array>
 #include <cstdint>
 #include <filesystem>
+#include <format>
 #include <fstream>
 #include <sstream>
 #include <stdexcept>
@@ -195,12 +196,8 @@ public:
     // "file://<path>" URI (forward slashes on every platform) and its repr.
     [[nodiscard]] std::string uri() const { return "file://" + m_path.generic_string(); }
     [[nodiscard]] std::string repr() const {
-        std::string out = "file(\"" + uri() + "\"";
-        if (m_engine != Engine::Unknown) {
-            out += ", engine=";
-            out += engine_label(m_engine);
-        }
-        return out + ")";
+        if (m_engine == Engine::Unknown) return std::format("file(\"{}\")", uri());
+        return std::format("file(\"{}\", engine={})", uri(), engine_label(m_engine));
     }
 
     // -- path composition (pathlib-style) ---------------------------------
