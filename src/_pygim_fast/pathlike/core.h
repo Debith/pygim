@@ -68,7 +68,9 @@ inline constexpr std::array<std::pair<std::string_view, Engine>, 4> kExtEngines{
     return "unknown";
 }
 
-// Compile-time proof that the dispatch table is what we think it is.
+// Spot proof that the dispatch table is what we think it is — the exhaustive
+// suites (whole-table sweeps, duplicates, label round-trips, glob matcher)
+// live in tests/static/pathlike_core_proofs.cpp, compiled by every build.
 static_assert(engine_for_ext(".yaml") == Engine::Yaml);
 static_assert(engine_for_ext(".yml") == Engine::Yaml);
 static_assert(engine_for_ext(".json") == Engine::Json);
@@ -87,48 +89,6 @@ namespace detail {
         if (c >= 'A' && c <= 'Z') c = static_cast<char>(c - 'A' + 'a');
     }
     return out;
-}
-
-// ── Exhaustive compile-time proof of the format registry ──────────────────
-// The spot checks above pin known entries; these validators sweep the WHOLE
-// table, so a format added to kExtEngines later is proven automatically.
-// consteval (not constexpr): they can never be compiled into runtime code.
-
-// Every entry resolves to its declared engine, never Unknown, and keeps the
-// key contract: leading dot, lower-case (ascii_lower() is a no-op on keys).
-consteval bool table_entries_resolve() {
-    for (const auto& [ext, eng] : kExtEngines) {
-        if (eng == Engine::Unknown) return false;
-        if (engine_for_ext(ext) != eng) return false;
-        if (ext.size() < 2 || ext.front() != '.') return false;
-        if (ascii_lower(ext) != ext) return false;
-    }
-    return true;
-}
-
-// Duplicate keys would make later entries silently unreachable (first match wins).
-consteval bool table_has_no_duplicates() {
-    for (std::size_t i = 0; i < kExtEngines.size(); ++i) {
-        for (std::size_t j = i + 1; j < kExtEngines.size(); ++j) {
-            if (kExtEngines[i].first == kExtEngines[j].first) return false;
-        }
-    }
-    return true;
-}
-
-// engine_label() -> engine_from_name() round-trips for every reachable engine.
-consteval bool labels_roundtrip() {
-    for (const auto& [ext, eng] : kExtEngines) {
-        if (engine_from_name(engine_label(eng)) != eng) return false;
-    }
-    return engine_label(Engine::Unknown) == std::string_view{"unknown"};
-}
-
-// The lower-case-then-lookup chain used by resolve_engine(), proven end to end.
-consteval bool case_folds_before_lookup() {
-    return engine_for_ext(ascii_lower(".YAML")) == Engine::Yaml &&
-           engine_for_ext(ascii_lower(".Yml")) == Engine::Yaml &&
-           engine_for_ext(ascii_lower(".JSON")) == Engine::Json;
 }
 
 // One glob *segment* against one path component: `*` and `?`, never crossing
@@ -153,31 +113,7 @@ consteval bool case_folds_before_lookup() {
     return p == pattern.size();
 }
 
-static_assert(glob_match("*", "anything") && glob_match("*.yaml", "a.yaml") &&
-              glob_match("a?c", "abc") && glob_match("a*c*e", "abcde") &&
-              glob_match("*.tar.*", "x.tar.gz") && glob_match("**", "name"));
-static_assert(!glob_match("*.yaml", "a.yml") && !glob_match("a?c", "ac") &&
-              !glob_match("", "x") && !glob_match("b*", "abc") && glob_match("", ""));
-
-// Near-misses stay Unknown: raw lookups are exact (case, dot, whole string).
-consteval bool misses_stay_unknown() {
-    return engine_for_ext("") == Engine::Unknown &&
-           engine_for_ext(".") == Engine::Unknown &&
-           engine_for_ext("yaml") == Engine::Unknown &&
-           engine_for_ext(".yaml ") == Engine::Unknown &&
-           engine_for_ext(".YAML") == Engine::Unknown &&
-           engine_from_name("YAML") == Engine::Unknown &&
-           engine_from_name(".yaml") == Engine::Unknown;
-}
 }  // namespace detail
-
-static_assert(detail::table_entries_resolve());
-static_assert(detail::table_has_no_duplicates());
-static_assert(detail::labels_roundtrip());
-static_assert(detail::case_folds_before_lookup());
-static_assert(detail::misses_stay_unknown());
-// Out-of-range enum values (reachable via static_cast) still label as "unknown".
-static_assert(engine_label(static_cast<Engine>(42)) == std::string_view{"unknown"});
 
 // A filesystem path that reads and decodes itself. Models os.PathLike (it exposes
 // __fspath__ through the binding), so it drops straight into open(), Path(), etc.
