@@ -97,6 +97,12 @@ struct merge_trait : merge_trait_tag {
         const MergeStrategy* strategy = m_strategies.find(key);
         return strategy == nullptr ? m_default_strategy : *strategy;
     }
+    // Whether a PER-KEY strategy is set (nullptr: only the default applies).
+    // Richer value domains (the Python adapter's type-based rules) slot their
+    // resolution between "per-key" and "default", so they need the distinction.
+    [[nodiscard]] constexpr const MergeStrategy* key_strategy(const K& key) const {
+        return m_strategies.find(key);
+    }
 
     // ── fold surfaces ───────────────────────────────────────────────────────
     // merged()/operator| — merge as an operation: fold into a NEW map and
