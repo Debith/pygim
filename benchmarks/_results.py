@@ -41,17 +41,28 @@ def _cpu_model():
     return platform.processor() or platform.machine()
 
 
-def save(bench, sections, *, reps):
+# The convention: results ride IN the merge commit they describe, so the
+# record cannot name that commit's hash (a file cannot contain the hash of
+# the commit it is part of). The file's location is the attribution.
+IN_TREE_NOTE = ("record is committed into the commit it measures; the file's "
+                "location in history is the attribution.")
+
+
+def save(bench, sections, *, reps, in_tree=True):
     """Append one run record to ``results/<bench>.jsonl``; return the file path.
 
     ``sections`` is the benchmark's own structure of raw measurements
     (seconds as floats). ``reps`` records the best-of-N protocol used.
+    ``in_tree`` (the default, matching the one-record-per-merge convention)
+    omits the self-referential commit hash; pass ``in_tree=False`` for a
+    record that stays outside history and names the commit it measured.
     """
     record = {
         "schema": SCHEMA,
         "bench": bench,
         "utc": datetime.now(timezone.utc).isoformat(timespec="seconds"),
-        "commit": _git("rev-parse", "--short", "HEAD"),
+        "commit": None if in_tree else _git("rev-parse", "--short", "HEAD"),
+        "commit_note": IN_TREE_NOTE if in_tree else None,
         "branch": _git("rev-parse", "--abbrev-ref", "HEAD"),
         "dirty": bool(_git("status", "--porcelain")),
         "python": platform.python_version(),
