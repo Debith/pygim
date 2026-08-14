@@ -38,9 +38,20 @@
 
 namespace meta = std::meta;
 
-// ── 1. enum <-> string, derived ─────────────────────────────────────────────
+// ── 1. enum <-> string, derived from the REAL toolkit enum ──────────────────
+// The experiment compiles against the actual mapping-toolkit headers, so
+// these proofs track the real MergeStrategy: adding an enumerator there
+// updates both spelling directions here with no edit. (This costs godbolt
+// single-file compiles — verification is the local gcc16 env and, later, the
+// CI proof leg, both of which see the repo.)
 
-enum class MergeStrategy { Sum, Max, Min, Replace, Extend, Union, Deep, Multiply };
+#include "../src/_pygim_fast/mapping/merge.h"
+
+using pygim::mapping::MergeStrategy;
+
+// Cross-proof: the real strategy machinery is visible and behaves.
+static_assert(pygim::mapping::merge_combine(MergeStrategy::Multiply, 30, 0) == 0);
+static_assert(pygim::mapping::merge_combine(MergeStrategy::Sum, 30, 12) == 42);
 
 constexpr char ascii_lower(char c) { return (c >= 'A' && c <= 'Z') ? char(c + 32) : c; }
 
@@ -54,7 +65,7 @@ constexpr bool iequal(std::string_view a, std::string_view b) {
 
 consteval std::string_view strategy_name(MergeStrategy s) {
     template for (constexpr auto e :
-                  std::define_static_array(meta::enumerators_of(^^MergeStrategy))) {
+                  std::define_static_array(meta::enumerators_of(^^pygim::mapping::MergeStrategy))) {
         if (s == [:e:]) return meta::identifier_of(e);
     }
     return "<unnamed>";
@@ -64,7 +75,7 @@ consteval std::string_view strategy_name(MergeStrategy s) {
 // resolve; -1 for a miss (kept as int to stay a plain literal type).
 consteval int parse_strategy(std::string_view name) {
     template for (constexpr auto e :
-                  std::define_static_array(meta::enumerators_of(^^MergeStrategy))) {
+                  std::define_static_array(meta::enumerators_of(^^pygim::mapping::MergeStrategy))) {
         if (iequal(name, meta::identifier_of(e))) return int([:e:]);
     }
     return -1;
@@ -76,7 +87,7 @@ static_assert(parse_strategy("sum") == int(MergeStrategy::Sum));
 static_assert(parse_strategy("MULTIPLY") == int(MergeStrategy::Multiply));
 static_assert(parse_strategy("average") == -1);
 // Both directions track the enum: adding an enumerator updates them for free.
-static_assert(meta::enumerators_of(^^MergeStrategy).size() == 8);
+static_assert(meta::enumerators_of(^^pygim::mapping::MergeStrategy).size() == 8);
 
 // ── 2. read_as<T>: struct materialisation from a parsed document ────────────
 
@@ -145,7 +156,7 @@ consteval MergeStrategy declared_strategy(std::string_view member, MergeStrategy
                   std::define_static_array(meta::nonstatic_data_members_of(^^T, ctx))) {
         if (meta::identifier_of(m) == member) {
             template for (constexpr auto a : std::define_static_array(meta::annotations_of(m))) {
-                if constexpr (meta::type_of(a) == ^^MergeStrategy) {
+                if constexpr (meta::type_of(a) == ^^pygim::mapping::MergeStrategy) {
                     return meta::extract<MergeStrategy>(a);
                 }
             }

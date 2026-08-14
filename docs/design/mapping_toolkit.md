@@ -1,6 +1,8 @@
 # Mapping Toolkit — Design
 
-Status: DRAFT for review · Target branch: `core/gimdict-merge`
+Status: IMPLEMENTED through step 6 on `core/gimdict-merge` — pending:
+hash/interned engines and the Registry guts-swap (benchmark-gated), the
+py_mapping adapter, and the plain-read() default decision.
 
 ## Goal
 
