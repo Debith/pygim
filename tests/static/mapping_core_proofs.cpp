@@ -10,7 +10,7 @@
 // (C++23, GCC 14+); on an older frontend they drop out while the storage-law
 // and frozen-surface proofs still run (graduated coverage, see gimmap.h).
 
-#include "../../src/_pygim_fast/mapping/gimmap.h"
+#include "../../src/_pygim_fast/mapping/merge.h"   // includes gimmap.h + storage.h
 
 namespace {
 
@@ -161,6 +161,92 @@ consteval bool lvalue_freeze_copies() {
     return frozen.size() == 1 && m.size() == 2;
 }
 static_assert(lvalue_freeze_copies());
+
+// ── merge trait: application laws (merge_combine, plain value domain) ───────
+
+using pygim::mapping::merge_combine;
+using pygim::mapping::MergeStrategy;
+
+static_assert(merge_combine(MergeStrategy::Sum, 30, 12) == 42);
+static_assert(merge_combine(MergeStrategy::Max, 30, 12) == 30);
+static_assert(merge_combine(MergeStrategy::Min, 30, 12) == 12);
+static_assert(merge_combine(MergeStrategy::Replace, 30, 12) == 12);
+static_assert(merge_combine(MergeStrategy::Multiply, 30, 0) == 0);      // Speed x0
+static_assert(merge_combine(MergeStrategy::Extend, 30, 12) == 42);      // degrades to Sum
+static_assert(merge_combine(MergeStrategy::Union, 30, 12) == 12);       // scalar: replace
+static_assert(merge_combine(MergeStrategy::Deep, 30, 12) == 12);        // scalar: replace
+
+// ── merge trait: resolution laws (per-key beats default) ────────────────────
+
+using pygim::mapping::has_merge;
+using pygim::mapping::merge_trait;
+
+using MutMerge = gimmap<FS, pygim::mapping::mutable_trait, merge_trait<int>>;
+using FrozenMerge = gimmap<FS, merge_trait<int>>;
+
+static_assert(has_merge<MutMerge> && has_merge<FrozenMerge> && !has_merge<Mut>);
+
+consteval bool per_key_strategy_beats_default() {
+    MutMerge m;
+    m.set_default_strategy(MergeStrategy::Sum);
+    m.set_merge_strategy(1, MergeStrategy::Max);
+    return m.strategy_for(1) == MergeStrategy::Max &&
+           m.strategy_for(2) == MergeStrategy::Sum;      // unlisted key: default
+}
+static_assert(per_key_strategy_beats_default());
+
+consteval bool default_strategy_is_replace_until_set() {
+    const MutMerge m;
+    return m.default_strategy() == MergeStrategy::Replace;
+}
+static_assert(default_strategy_is_replace_until_set());
+
+// ── merge as an operation: | folds and returns the FROZEN base type ─────────
+
+consteval bool merged_folds_and_freezes() {
+    MutMerge a;
+    a.set_default_strategy(MergeStrategy::Sum);
+    a.set(1, 10);
+    a.set(2, 20);
+    MutMerge b;
+    b.set(1, 32);       // shared key: folds by A's strategy (target decides)
+    b.set(3, 30);       // new key: inserted
+    auto folded = a | b;
+    static_assert(std::is_same_v<decltype(folded), gimmap<FS>>);   // FROZEN
+    static_assert(!exposes_set<decltype(folded)>);
+    return folded.at(1) == 42 && folded.at(2) == 20 && folded.at(3) == 30 &&
+           a.size() == 2 && b.size() == 2;               // both sides untouched
+}
+static_assert(merged_folds_and_freezes());
+
+// ── in-place accumulator surface (needs mutable; unbounded accumulation) ────
+
+template <typename M>
+concept exposes_merge_in = requires(M m) { m.merge_in(1, 2); };
+
+static_assert(exposes_merge_in<MutMerge>);
+static_assert(!exposes_merge_in<FrozenMerge>);   // frozen+merge folds functionally only
+static_assert(!exposes_merge_in<Mut>);           // mutation alone doesn't merge
+
+consteval bool merge_in_accumulates_to_one_value() {
+    MutMerge m;
+    m.set_default_strategy(MergeStrategy::Sum);
+    for (int sample = 1; sample <= 100; ++sample) m.merge_in(7, sample);
+    return m.size() == 1 && m.at(7) == 5050;     // folded, not 100 contributions
+}
+static_assert(merge_in_accumulates_to_one_value());
+
+consteval bool merge_with_folds_whole_map() {
+    MutMerge target;
+    target.set_default_strategy(MergeStrategy::Max);
+    target.set(1, 10);
+    Mut other;                                    // any map with items() works
+    other.set(1, 7);
+    other.set(2, 20);
+    target.merge_with(other);
+    return target.at(1) == 10 && target.at(2) == 20;
+}
+static_assert(merge_with_folds_whole_map());
 
 #endif  // PYGIM_HAS_DEDUCING_THIS
 

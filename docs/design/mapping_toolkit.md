@@ -115,12 +115,20 @@ Trait presence is detected structurally (`std::derived_from<M, mutable_trait>`
 → `concept has_mutable<M>`), which drives both dependency checks and the
 binding layer's `if constexpr` surface emission.
 
-### merge_trait
+### merge_trait — the strategy machinery (fold-now)
 
-Split established in the gimdict-surface discussion:
+Whole-map merge is an **operation, not a product**: `a | b` folds immediately
+and returns the FROZEN base map — a merged result IS a snapshot, so there is
+no separate "mergedict" product. Assembly flows stay layered until observed;
+what keeps fold-in-place merging alive as its own capability is **unbounded
+accumulation** (QuickTimer's PhaseMap: thousands of `Sum` merges into the
+same keys — layers would store every contribution, O(N) memory and O(N)
+reads, where `merge_in` folds to one value, O(1)).
 
-- **Resolution** (which strategy applies: per-key table → default) lives in the
-  trait — shared, proven by static asserts, never duplicated again.
+- **Resolution** (which strategy applies: per-key table → default; the merge
+  *target* decides) lives in the trait — shared, proven by static asserts,
+  never duplicated again. Stateful, so the trait is keyed:
+  `merge_trait<K>`.
 - **Application** (how two values combine) is a customization point found by
   ADL: `merge_combine(strategy, lhs, rhs)`. The core provides the arithmetic
   overloads (from `DynamicMergeMap::combine`); the adapter layer provides the
@@ -129,9 +137,13 @@ Split established in the gimdict-surface discussion:
 
 Surface depends on which traits are present:
 
-- with `mutable`: `merge_in(key, value)`, `merge_with(other)`, `operator|`
-- frozen + merge: only functional `operator| → new frozen map`
-  (value-semantics sheet algebra — no mutation anywhere)
+- frozen + merge: `merged(other)` / `operator|` → **`gimmap<S>` (frozen)** —
+  value-semantics algebra, no mutation anywhere
+- with `mutable`: additionally `merge_in(key, value)` and `merge_with(other)`
+  — the in-place accumulator surface
+
+Guidance: **assembly = layered; accumulation = merge-in-place.** `layers`
+requires `merge` because observe/snapshot fold through this machinery.
 
 ### layer_trait  (requires merge + mutable)
 
@@ -158,20 +170,36 @@ silent-discard on `Registry(hooks=False).add_on_register`).
 
 Curated combos (each a real pybind class; the factory hides variant dispatch):
 
-| Python name | composition | protocol |
+`gimdict(...)` is a **factory** (the `path()` pattern): the kwarg is the
+trait's name, the returned type is the curated combo, and adapter-level C++
+inheritance (the pathlike typed-files trick) makes the variants a family —
+`isinstance(x, pygim.gimmap)` holds for everything the factory makes.
+
+| spelling | composition | protocol |
 |---|---|---|
-| `frozendict` | `gimmap<engine>` | `Mapping`, hashable* |
-| `gimdict` | `mutable + merge` | `MutableMapping` — **existing API preserved**, `test_gimdict.py` must pass unchanged |
-| `sheetdict` (name TBD) | `mutable + merge + layers` | `MutableMapping` + provenance surface; `.snapshot() → frozendict` |
+| `gimdict({...}, frozen=True)` | `gimmap<engine>` | `Mapping`, hashable* |
+| `gimdict({...})` | `mutable + merge` | `MutableMapping` — **existing API preserved**, `test_gimdict.py` must pass unchanged |
+| `gimdict({...}, layers=True)` | `mutable + merge + layers` | gimdict family + provenance surface; `.snapshot() →` frozen |
 
 \* hashable like tuple: hashing raises if a value is unhashable.
 
-Engine choice mirrors pathlike's precedent — same keyword, same honesty about
-what's underneath:
+Transitions mirror the C++ type moves: `.freeze()`, `.thaw()`,
+`.with_layers()`. Engine choice mirrors pathlike's precedent — same keyword,
+same honesty about what's underneath:
 
 ```python
 d = pygim.gimdict({"hp": 10}, engine="flat")     # or "hash", default "auto"
 ```
+
+**pathlike hands decoded data to a factory — it never learns trait names.**
+`read(into=callable)` calls any callable with the decoded object
+(`json.loads(object_hook=…)` precedent); preconfigured variants are
+`functools.partial(gimdict, layers=True, int="sum")`. The C++ mirror is
+`read_as<T>()` — the type is the factory — dispatching construction through
+a `builder<T>` ADL customization point (gimmap builder inserts pairs; the
+reflection-era builder fills struct members, proven in
+`experiments/reflection_bindings.cpp`). `read_as<gimmap<…>>` needs the C++
+document value type — a step-4 design item.
 
 `engine="auto"` picks by the benchmark-measured crossover (a constant sourced
 from the results series, not a guess). Runtime engine choice = `std::variant`
@@ -211,9 +239,9 @@ of hand-written; nothing above it changes.
    + `mutable_trait` + static proofs + bench harness. No Python changes.
 2. **merge_trait**: resolution extracted; `DynamicMergeMap` keeps its public
    shape (thin wrapper or alias) so `QuickTimer`/existing users are untouched.
-3. **Python rebind**: `gimdict` over the toolkit (variant over engines);
-   `frozendict` appears; `test_gimdict.py` unchanged and green.
-4. **layer_trait**: `sheetdict`, `snapshot() → frozendict`; then pathlike
+3. **Python rebind**: the `gimdict` factory over the toolkit (variant over
+   engines); `frozen=True` appears; `test_gimdict.py` unchanged and green.
+4. **layer_trait**: `gimdict(layers=True)`, `snapshot() → frozen`; then pathlike
    `read → gimdict` lands on top (the pinned question resumes here).
 5. **hooks/strict traits**: Registry convergence; silent-no-op fix.
 6. **Reflection**: `bind_mapping` generation + `[[=MergeStrategy]]` member
@@ -227,4 +255,4 @@ of hand-written; nothing above it changes.
   cover documents and registries; revisit if a use case appears.
 - Free-threaded Python: frozen maps are trivially safe for concurrent reads;
   mutable trait under 3.13t needs the same audit pathlike deferred.
-- Naming: `sheetdict` vs `layerdict` vs growing `gimdict` — decide at step 4.
+- Plain `read()` default (dict vs gimdict) — benchmark-gated, decided at step 4.

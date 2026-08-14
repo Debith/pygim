@@ -41,28 +41,13 @@
 #include <utility>
 #include <vector>
 
+// MergeStrategy and MergeDefaultStrategy moved to mapping/merge.h (toolkit
+// step 2); same names, same namespace — the public shape is unchanged. This
+// class's internal combine() stays until step 4 rebases the layered channel
+// onto the toolkit's layer_trait.
+#include "merge.h"
+
 namespace pygim::mapping {
-
-enum class MergeStrategy {
-    Sum,
-    Max,
-    Min,
-    Replace,
-    Extend,    // sequences concatenate (arithmetic degrades to Sum)
-    Union,     // sequences append only unseen elements (order-preserving)
-    Deep,      // mappings merge recursively, leaves resolved by their own strategy
-    Multiply,  // numeric product — rider effects like "Speed x0" (non-arithmetic: replace)
-};
-
-template <typename T, typename = void>
-struct MergeDefaultStrategy {
-    static constexpr MergeStrategy value = MergeStrategy::Replace;
-};
-
-template <typename T>
-struct MergeDefaultStrategy<T, std::enable_if_t<std::is_arithmetic_v<T>>> {
-    static constexpr MergeStrategy value = MergeStrategy::Sum;
-};
 
 namespace detail {
 
