@@ -26,17 +26,17 @@ Two standing rules inherited from the rest of pygim:
 ```
 Layer 3  Python bindings   bind_mapping<M>, curated combos, engine= factory
 Layer 2  traits            mutable, merge, layers, hooks, strict   (mixins)
-Layer 1  basic_map<S,Ts…>  assembly; the FROZEN base surface; freeze/thaw
+Layer 1  gimmap<S,Ts…>  assembly; the FROZEN base surface; freeze/thaw
 Layer 0  storage engines   flat, hash, interned…; py_mapping adapter
 ```
 
 The key inversion: **immutable is the base, mutability is a trait.**
 
 ```
-basic_map<S>                          → Mapping   (frozen, hashable)
-basic_map<S, mutable>                 → MutableMapping
-basic_map<S, mutable, merge>          → gimdict (today's API)
-basic_map<S, mutable, merge, layers>  → character-sheet map
+gimmap<S>                          → Mapping   (frozen, hashable)
+gimmap<S, mutable>                 → MutableMapping
+gimmap<S, mutable, merge>          → gimdict (today's API)
+gimmap<S, mutable, merge, layers>  → character-sheet map
 ```
 
 ## Layer 0 — storage concept and engines
@@ -75,7 +75,7 @@ Engines, in build order:
 semantics are proven once on the flat engine; other engines are covered by the
 runtime differential tests (identical trait code, so semantics can't diverge).
 
-## Layers 1–2 — basic_map and traits
+## Layers 1–2 — gimmap and traits
 
 Traits are plain structs with **deducing-this** methods (C++23; the toolkit
 requires `__cpp_explicit_this_parameter` — GCC 14+, MSVC 19.32+; local dev has
@@ -95,7 +95,7 @@ struct mutable_trait {
 
 ```cpp
 template <storage S, typename... Traits>
-class basic_map : public Traits... {
+class gimmap : public Traits... {
     static_assert(traits_dependencies_ok<Traits...>());   // layers ⇒ merge+mutable
     S m_storage;
 public:
@@ -106,7 +106,7 @@ public:
     constexpr const S& storage() const noexcept { return m_storage; }
 
     // Cross-type transitions:
-    //   freeze(): moves storage into basic_map<S>            (drops traits, cheap)
+    //   freeze(): moves storage into gimmap<S>            (drops traits, cheap)
     //   thaw<Ts...>(): copies storage into a mutable variant
 };
 ```
@@ -140,7 +140,7 @@ semantics: base channel + source-tagged contributions, `apply`, `remove`
 (O(footprint) via the reverse index), `operator<< / >>`, `sources`,
 `footprint`, `observe`.
 
-**`snapshot()` returns `basic_map<S>`** — the frozen base type. "A NEW frozen
+**`snapshot()` returns `gimmap<S>`** — the frozen base type. "A NEW frozen
 point-in-time view" stops being a docstring and becomes the type system:
 live sheet = MutableMapping, observed sheet = Mapping.
 
@@ -149,7 +149,7 @@ live sheet = MutableMapping, observed sheet = Mapping.
 `hooks_trait` ports `HooksBundle` (the policy object remains the mechanism for
 calls woven *inside* operations); `strict_trait` ports
 `register_or_override`'s duplicate/override semantics. With both, `Registry`
-becomes `basic_map<hash_storage, mutable, strict, hooks>` behind its existing
+becomes `gimmap<hash_storage, mutable, strict, hooks>` behind its existing
 adapter — Python API unchanged. Per the surface-honesty rule, hook
 registration methods exist only when the trait is present (fixes the current
 silent-discard on `Registry(hooks=False).add_on_register`).
@@ -160,7 +160,7 @@ Curated combos (each a real pybind class; the factory hides variant dispatch):
 
 | Python name | composition | protocol |
 |---|---|---|
-| `frozendict` | `basic_map<engine>` | `Mapping`, hashable* |
+| `frozendict` | `gimmap<engine>` | `Mapping`, hashable* |
 | `gimdict` | `mutable + merge` | `MutableMapping` — **existing API preserved**, `test_gimdict.py` must pass unchanged |
 | `sheetdict` (name TBD) | `mutable + merge + layers` | `MutableMapping` + provenance surface; `.snapshot() → frozendict` |
 
@@ -192,7 +192,7 @@ of hand-written; nothing above it changes.
 - `tests/static/mapping_core_proofs.cpp` — constexpr suites on `flat_storage`:
   storage laws, merge resolution, layered reversibility/footprint (ported from
   `dynamic_merge_map.h`'s `compile_tests`), and **negative composition
-  proofs**: `static_assert(!has_set<basic_map<flat_storage<K,V>>>)` — the
+  proofs**: `static_assert(!has_set<gimmap<flat_storage<K,V>>>)` — the
   frozen type provably lacks mutation. Wired into ext sources (an unwired
   static test file tests nothing).
 - Python: protocol conformance + differential vs `dict` on mixed workloads;
@@ -207,7 +207,7 @@ of hand-written; nothing above it changes.
 
 ## Build order (each step lands independently, everything stays green)
 
-1. **Skeleton**: `storage` concept + `flat_storage` (extracted) + `basic_map`
+1. **Skeleton**: `storage` concept + `flat_storage` (extracted) + `gimmap`
    + `mutable_trait` + static proofs + bench harness. No Python changes.
 2. **merge_trait**: resolution extracted; `DynamicMergeMap` keeps its public
    shape (thin wrapper or alias) so `QuickTimer`/existing users are untouched.

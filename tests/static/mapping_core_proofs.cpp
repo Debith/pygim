@@ -1,4 +1,4 @@
-// Compile-time proofs for mapping/storage.h + mapping/basic_map.h.
+// Compile-time proofs for mapping/storage.h + mapping/gimmap.h.
 //
 // This TU is part of the pygim.utils extension's SOURCES (see ext.utils.toml):
 // it is compiled by every build, so a violated invariant cannot produce a
@@ -8,13 +8,13 @@
 // The suites run on flat_storage — the constexpr engine — so every law is
 // evaluated during compilation. Trait proofs additionally need deducing this
 // (C++23, GCC 14+); on an older frontend they drop out while the storage-law
-// and frozen-surface proofs still run (graduated coverage, see basic_map.h).
+// and frozen-surface proofs still run (graduated coverage, see gimmap.h).
 
-#include "../../src/_pygim_fast/mapping/basic_map.h"
+#include "../../src/_pygim_fast/mapping/gimmap.h"
 
 namespace {
 
-using pygim::mapping::basic_map;
+using pygim::mapping::gimmap;
 using pygim::mapping::flat_storage;
 using pygim::mapping::storage;
 
@@ -70,7 +70,7 @@ static_assert(clear_empties());
 
 // ── frozen base surface ─────────────────────────────────────────────────────
 
-using Frozen = basic_map<FS>;
+using Frozen = gimmap<FS>;
 
 consteval bool frozen_reads_work() {
     const Frozen m{{1, 10}, {2, 20}};
@@ -117,7 +117,7 @@ static_assert(!exposes_clear<Frozen>);
 using pygim::mapping::has_mutable;
 using pygim::mapping::mutable_trait;
 
-using Mut = basic_map<FS, mutable_trait>;
+using Mut = gimmap<FS, mutable_trait>;
 
 static_assert(has_mutable<Mut> && !has_mutable<Frozen>);
 static_assert(exposes_set<Mut> && exposes_erase<Mut> && exposes_clear<Mut>);

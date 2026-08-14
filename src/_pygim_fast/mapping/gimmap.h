@@ -1,5 +1,5 @@
 #pragma once
-// mapping/basic_map.h — trait assembly over a storage engine.
+// mapping/gimmap.h — trait assembly over a storage engine.
 //
 // The inversion at the heart of the toolkit (docs/design/mapping_toolkit.md):
 // the base map is FROZEN — the read-only Mapping surface. Mutability is the
@@ -7,8 +7,8 @@
 // throws: the method does not exist, and misuse is a compile error. The
 // negative proofs in tests/static/mapping_core_proofs.cpp pin that down.
 //
-//   basic_map<S>                 -> Mapping        (frozen)
-//   basic_map<S, mutable_trait>  -> MutableMapping
+//   gimmap<S>                 -> Mapping        (frozen)
+//   gimmap<S, mutable_trait>  -> MutableMapping
 //   + merge / layers / hooks     -> later steps
 //
 // Traits are plain structs whose methods use C++23 deducing this (P0847):
@@ -57,7 +57,7 @@ consteval bool traits_dependencies_ok() {
 }
 
 template <storage S, typename... Traits>
-class basic_map : public Traits... {
+class gimmap : public Traits... {
     static_assert(traits_dependencies_ok<Traits...>());
 
 public:
@@ -65,11 +65,11 @@ public:
     using mapped_type = typename S::mapped_type;
     using storage_type = S;
 
-    constexpr basic_map() = default;
-    constexpr explicit basic_map(S storage_) : m_storage(std::move(storage_)) {}
+    constexpr gimmap() = default;
+    constexpr explicit gimmap(S storage_) : m_storage(std::move(storage_)) {}
     // Construction fills the storage directly; construction is not mutation,
     // so the frozen base is buildable without the mutable trait.
-    constexpr basic_map(std::initializer_list<typename S::item_type> items)
+    constexpr gimmap(std::initializer_list<typename S::item_type> items)
         requires std::constructible_from<S, std::initializer_list<typename S::item_type>>
         : m_storage(items) {}
 
@@ -79,7 +79,7 @@ public:
     }
     [[nodiscard]] constexpr const mapped_type& at(const key_type& key) const {
         const mapped_type* value = m_storage.find(key);
-        if (value == nullptr) throw std::out_of_range("basic_map: key not found");
+        if (value == nullptr) throw std::out_of_range("gimmap: key not found");
         return *value;
     }
     [[nodiscard]] constexpr mapped_type value_or(const key_type& key,
@@ -93,27 +93,27 @@ public:
     [[nodiscard]] constexpr std::size_t size() const noexcept { return m_storage.size(); }
     [[nodiscard]] constexpr bool empty() const noexcept { return m_storage.empty(); }
 
-    friend constexpr bool operator==(const basic_map& lhs, const basic_map& rhs) {
+    friend constexpr bool operator==(const gimmap& lhs, const gimmap& rhs) {
         return lhs.m_storage == rhs.m_storage;
     }
 
     // ── transitions ─────────────────────────────────────────────────────────
     // freeze(): the storage moves (or copies, from an lvalue) into a bare
-    // frozen basic_map<S> — traits drop away in the TYPE, not by runtime flag.
-    [[nodiscard]] constexpr basic_map<S> freeze() && {
-        return basic_map<S>(std::move(m_storage));
+    // frozen gimmap<S> — traits drop away in the TYPE, not by runtime flag.
+    [[nodiscard]] constexpr gimmap<S> freeze() && {
+        return gimmap<S>(std::move(m_storage));
     }
-    [[nodiscard]] constexpr basic_map<S> freeze() const&
+    [[nodiscard]] constexpr gimmap<S> freeze() const&
         requires std::copyable<S>
     {
-        return basic_map<S>(m_storage);
+        return gimmap<S>(m_storage);
     }
     // thaw<Ts...>(): copy into a trait-bearing variant of the same storage.
     template <typename... Ts>
-    [[nodiscard]] constexpr basic_map<S, Ts...> thaw() const
+    [[nodiscard]] constexpr gimmap<S, Ts...> thaw() const
         requires std::copyable<S>
     {
-        return basic_map<S, Ts...>(m_storage);
+        return gimmap<S, Ts...>(m_storage);
     }
 
     // ── trait interface (documented internal) ───────────────────────────────
@@ -134,8 +134,8 @@ concept has_mutable = std::derived_from<M, mutable_trait>;
 
 // Spot proofs only — the exhaustive suites (including the negative
 // composition proofs) live in tests/static/mapping_core_proofs.cpp.
-static_assert(has_mutable<basic_map<flat_storage<int, int>, mutable_trait>>);
-static_assert(!has_mutable<basic_map<flat_storage<int, int>>>);
+static_assert(has_mutable<gimmap<flat_storage<int, int>, mutable_trait>>);
+static_assert(!has_mutable<gimmap<flat_storage<int, int>>>);
 #endif
 
 }  // namespace pygim::mapping
