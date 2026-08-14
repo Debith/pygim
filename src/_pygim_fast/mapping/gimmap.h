@@ -34,11 +34,26 @@ namespace pygim::mapping {
 #define PYGIM_HAS_DEDUCING_THIS 0
 #endif
 
+// Trait family tags: unguarded plain structs, so the dependency gate below
+// compiles on every frontend even where the deducing-this trait bodies drop.
+struct mutable_trait_tag {};
+struct merge_trait_tag {};
+struct layer_trait_tag {};
+struct hooks_trait_tag {};
+struct strict_trait_tag {};
+
 #if PYGIM_HAS_DEDUCING_THIS
 // mutable_trait — the map gains set / erase / clear. Everything routes through
-// the storage concept; no engine specifics leak in.
-struct mutable_trait {
+// the storage concept; no engine specifics leak in. set() is also the hook
+// point: when hooks_trait is present, register callbacks fire before the
+// write (the woven-inside-operations pattern from RegistryCore, spelled as a
+// compile-time presence check — absent trait, zero cost, no branch).
+struct mutable_trait : mutable_trait_tag {
     constexpr void set(this auto& self, const auto& key, auto value) {
+        if constexpr (std::derived_from<std::remove_cvref_t<decltype(self)>,
+                                        hooks_trait_tag>) {
+            self.run_register(key, value);
+        }
         self.storage().insert(key, std::move(value));
     }
     constexpr bool erase(this auto& self, const auto& key) {
@@ -48,11 +63,18 @@ struct mutable_trait {
 };
 #endif
 
-// Dependency gate, checked at assembly. Grows with the trait set:
-// merge (step 2) has no requirements; layers (step 4) will require
-// merge + mutable; hooks (step 5) none. Today only mutable exists.
+// The dependency gate, checked at assembly: layers fold THROUGH the merge
+// machinery and write layer state, so layer_trait requires merge + mutable;
+// strict registration writes, so strict_trait requires mutable. merge and
+// hooks stand alone.
 template <typename... Traits>
 consteval bool traits_dependencies_ok() {
+    constexpr bool wants_layers = (std::derived_from<Traits, layer_trait_tag> || ...);
+    constexpr bool wants_strict = (std::derived_from<Traits, strict_trait_tag> || ...);
+    constexpr bool has_merge = (std::derived_from<Traits, merge_trait_tag> || ...);
+    constexpr bool has_mut = (std::derived_from<Traits, mutable_trait_tag> || ...);
+    if (wants_layers && !(has_merge && has_mut)) return false;
+    if (wants_strict && !has_mut) return false;
     return true;
 }
 

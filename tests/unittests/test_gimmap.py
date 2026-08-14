@@ -111,3 +111,69 @@ def test_merge_in_accumulates_in_place():
         d.merge_in("total", sample)
     assert d["total"] == 5050
     assert len(d) == 1
+
+
+# ── layers: merge with memory ────────────────────────────────────────────────
+
+def test_layers_record_fold_and_remove():
+    s = utils.gimdict({"speed": 30}, layers=True)
+    s.apply("haste", "speed", 2, "multiply")
+    s.apply("paralyzed", "speed", 0, "multiply")
+    assert s["speed"] == 0                     # folded on read
+    s.remove("paralyzed")                      # lift the condition
+    assert s["speed"] == 60                    # old value returns, no inverses
+    assert s.sources("speed") == ["haste"]
+
+
+def test_layered_is_a_gimdict_family_member():
+    s = utils.gimdict(layers=True)
+    assert isinstance(s, utils.gimmap)
+    assert isinstance(s, MutableMapping)
+
+
+def test_layered_key_without_base_channel():
+    s = utils.gimdict(layers=True)
+    s.apply("blessing", "luck", 5)
+    s.apply("blessing", "luck", 3)             # int type-default: sum
+    assert s["luck"] == 8
+    assert "luck" in s and len(s) == 1
+    assert s.footprint("blessing") == ["luck"]
+
+
+def test_snapshot_is_frozen_and_independent():
+    s = utils.gimdict({"hp": 10}, layers=True)
+    s.merge_from({"hp": 2}, source="race")
+    snap = s.snapshot()
+    assert isinstance(snap, utils.frozen_gimmap)
+    assert snap["hp"] == 12
+    s.apply("curse", "hp", -100)               # later edit
+    assert snap["hp"] == 12 and s["hp"] == -88
+
+
+def test_layered_merge_with_source_is_removable():
+    base = utils.gimdict({"hp": 10, "speed": 30}, layers=True)
+    grown = base.merge({"hp": 2}, source="race")
+    assert grown["hp"] == 12
+    assert base["hp"] == 10                    # merge(source=...) is functional
+    grown.remove("race")
+    assert grown["hp"] == 10
+
+
+def test_layered_functional_merge_returns_frozen():
+    s = utils.gimdict({"hp": 10}, layers=True)
+    s.apply("race", "hp", 2)
+    folded = s | {"hp": 5}
+    assert isinstance(folded, utils.frozen_gimmap)
+    assert folded["hp"] == 17                  # observed 12, then +5
+
+
+def test_frozen_and_layers_are_exclusive():
+    with pytest.raises(ValueError):
+        utils.gimdict({}, frozen=True, layers=True)
+
+
+def test_plain_gimdict_has_no_layer_surface():
+    d = utils.gimdict({})
+    assert not hasattr(d, "apply")
+    assert not hasattr(d, "sources")
+    assert not hasattr(d, "snapshot")

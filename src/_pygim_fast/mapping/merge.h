@@ -75,8 +75,8 @@ template <typename T>
 
 #if PYGIM_HAS_DEDUCING_THIS
 
-// Base tag so trait presence stays detectable across key types.
-struct merge_trait_tag {};
+// (merge_trait_tag lives in gimmap.h with the other family tags, so the
+// dependency gate compiles on every frontend.)
 
 // merge_trait<K> — stateful (per-key strategy table + default), hence keyed.
 // The map it is mixed into supplies values and storage; the trait supplies

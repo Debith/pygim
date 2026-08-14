@@ -18,12 +18,14 @@
 
 #include <pybind11/pybind11.h>
 
+#include <algorithm>
 #include <optional>
 #include <string>
 #include <unordered_map>
 #include <utility>
+#include <vector>
 
-#include "merge.h"
+#include "layers.h"
 
 namespace pygim::mapping {
 
@@ -82,7 +84,12 @@ inline MergeStrategy default_strategy_for_type(const std::string& type_name) {
 
 using PyFlat = flat_storage<std::string, py::object>;
 using PyFrozenMap = gimmap<PyFlat>;
-using PyMap = gimmap<PyFlat, mutable_trait, merge_trait<std::string>>;
+// One C++ map type backs BOTH Python classes: a layered map with zero
+// contributions behaves exactly like a plain gimdict (base channel only), so
+// the plain class simply does not EXPOSE the layered surface — the adapter
+// inheritance (pyg_layered : pyg_gimdict) then works without dual state.
+using PyMap = gimmap<PyFlat, mutable_trait, merge_trait<std::string>,
+                     layer_trait<std::string, py::object>>;
 
 // Deep recursion needs the resolver mid-application, so resolution and
 // application travel together. Order (pinned by test_gimdict.py): per-key
@@ -340,24 +347,140 @@ struct pyg_gimdict : pyg_gimmap {
     }
 };
 
+struct pyg_layered;
+inline py::dict mapping_items(py::handle other);
+
 inline pyg_frozen pyg_gimdict::merged(py::handle other) const {
     pyg_gimdict work;
     work.map = map;                          // copies storage + strategy table
     work.type_strategies = type_strategies;
     work.explicit_default = explicit_default;
-
-    py::dict incoming;
-    if (py::isinstance<pyg_gimdict>(other)) {
-        incoming = other.cast<const pyg_gimdict&>().to_dict();
-    } else if (py::isinstance<pyg_frozen>(other)) {
-        incoming = other.cast<const pyg_frozen&>().to_dict();
-    } else if (PyMapping_Check(other.ptr())) {
-        incoming = py::dict(py::reinterpret_borrow<py::object>(other));
-    } else {
-        throw py::type_error("can only merge with a mapping");
-    }
-    for (const auto& item : incoming) work.merge_in(item.first, item.second);
+    for (const auto& item : mapping_items(other)) work.merge_in(item.first, item.second);
     return work.freeze();
+}
+
+// ── the layered variant: merge with MEMORY (provenance + undo) ──────────────
+// Reads OBSERVE (base channel + contributions folded on demand); set/del keep
+// writing the base channel through the inherited surface. Contribution
+// strategies resolve at apply time: explicit > per-key > type-of-value >
+// explicit default > type default.
+struct pyg_layered : pyg_gimdict {
+    [[nodiscard]] std::vector<std::string> all_keys() const {
+        std::vector<std::string> keys;
+        for (const auto& [key, value] : map.items()) keys.push_back(key);
+        for (const auto& [key, layers] : map.layer_items()) {
+            if (map.storage().find(key) == nullptr) keys.push_back(key);
+        }
+        std::sort(keys.begin(), keys.end());
+        return keys;
+    }
+
+    [[nodiscard]] py::object observe_key(const std::string& key) const {
+        const py_folder f = folder();
+        std::optional<py::object> acc;
+        if (const py::object* base = map.storage().find(key)) acc = *base;
+        if (const auto* layers = map.contributions(key)) {
+            for (const auto& c : *layers) {
+                acc = acc.has_value() ? f.combine(c.strategy, *acc, c.value) : c.value;
+            }
+        }
+        if (!acc.has_value()) throw py::key_error("key not found");
+        return *acc;
+    }
+    [[nodiscard]] py::object observed_getitem(py::handle key) const {
+        return observe_key(require_str_key(key));
+    }
+    [[nodiscard]] py::object observed_get(py::handle key, py::object fallback) const {
+        const std::string k = require_str_key(key);
+        if (!map.holds(k)) {
+            if (fallback.is_none()) throw py::key_error("key not found");
+            return fallback;
+        }
+        return observe_key(k);
+    }
+    [[nodiscard]] bool observed_contains(py::handle key) const {
+        return py::isinstance<py::str>(key) && map.holds(py::str(key).cast<std::string>());
+    }
+    [[nodiscard]] std::size_t observed_size() const { return all_keys().size(); }
+    [[nodiscard]] py::object observed_iter() const {
+        py::list keys;
+        for (const auto& key : all_keys()) keys.append(py::str(key));
+        return py::iter(keys);
+    }
+    [[nodiscard]] py::dict observed_dict() const {
+        py::dict out;
+        for (const auto& key : all_keys()) out[py::str(key)] = observe_key(key);
+        return out;
+    }
+
+    void apply(py::handle source, py::handle key, py::handle value, py::handle strategy) {
+        const std::string k = require_str_key(key);
+        MergeStrategy resolved = MergeStrategy::Replace;
+        if (!strategy.is_none()) {
+            resolved = parse_merge_strategy_obj(strategy);
+        } else if (const MergeStrategy* per_key = map.key_strategy(k)) {
+            resolved = *per_key;
+        } else if (auto it = type_strategies.find(py_type_name(value));
+                   it != type_strategies.end()) {
+            resolved = it->second;
+        } else if (explicit_default.has_value()) {
+            resolved = *explicit_default;
+        } else {
+            resolved = default_strategy_for_type(py_type_name(value));
+        }
+        map.apply(py::str(source).cast<std::string>(), k, resolved,
+                  py::reinterpret_borrow<py::object>(value));
+    }
+    void remove(py::handle source) { map.remove(py::str(source).cast<std::string>()); }
+    [[nodiscard]] py::list sources(py::handle key) const {
+        py::list out;
+        for (const auto& s : map.sources(require_str_key(key))) out.append(py::str(s));
+        return out;
+    }
+    [[nodiscard]] py::list footprint(py::handle source) const {
+        py::list out;
+        for (const auto& k : map.footprint(py::str(source).cast<std::string>())) {
+            out.append(py::str(k));
+        }
+        return out;
+    }
+
+    // The observed state as a plain (base-channel) gimdict, strategies kept —
+    // both snapshot() and functional merges route through this flattening.
+    [[nodiscard]] pyg_gimdict flattened() const {
+        pyg_gimdict flat;
+        flat.map = map;                      // per-key strategies preserved
+        flat.type_strategies = type_strategies;
+        flat.explicit_default = explicit_default;
+        for (const auto& key : all_keys()) flat.map.set(key, observe_key(key));
+        return flat;
+    }
+    [[nodiscard]] pyg_frozen snapshot() const { return flattened().freeze(); }
+    [[nodiscard]] pyg_frozen merged_observed(py::handle other) const {
+        return flattened().merged(other);
+    }
+    // Layered whole-map merge: record other's items as contributions.
+    void merge_from(py::handle other, py::handle source) {
+        for (const auto& item : mapping_items(other)) {
+            apply(source, item.first, item.second, py::none());
+        }
+    }
+};
+
+inline py::dict mapping_items(py::handle other) {
+    if (py::isinstance<pyg_layered>(other)) {
+        return other.cast<const pyg_layered&>().observed_dict();
+    }
+    if (py::isinstance<pyg_gimdict>(other)) {
+        return other.cast<const pyg_gimdict&>().to_dict();
+    }
+    if (py::isinstance<pyg_frozen>(other)) {
+        return other.cast<const pyg_frozen&>().to_dict();
+    }
+    if (PyMapping_Check(other.ptr())) {
+        return py::dict(py::reinterpret_borrow<py::object>(other));
+    }
+    throw py::type_error("can only merge with a mapping");
 }
 
 inline bool pyg_frozen::eq(py::handle other) const {
@@ -374,10 +497,15 @@ inline bool pyg_frozen::eq(py::handle other) const {
 
 inline py::object gimdict_factory(py::object initial, py::kwargs kwargs) {
     bool frozen = false;
+    bool layers = false;
     std::string engine = "auto";
     if (kwargs.contains("frozen")) {
         frozen = py::bool_(kwargs["frozen"]);
         PyDict_DelItemString(kwargs.ptr(), "frozen");
+    }
+    if (kwargs.contains("layers")) {
+        layers = py::bool_(kwargs["layers"]);
+        PyDict_DelItemString(kwargs.ptr(), "layers");
     }
     if (kwargs.contains("engine")) {
         engine = py::str(kwargs["engine"]).cast<std::string>();
@@ -388,7 +516,17 @@ inline py::object gimdict_factory(py::object initial, py::kwargs kwargs) {
                               "' is not available yet: backends are benchmark-gated "
                               "(see docs/design/mapping_toolkit.md); use 'flat'");
     }
+    if (frozen && layers) {
+        throw py::value_error("frozen and layers are exclusive: frozen is a RESULT — "
+                              "take snapshot() of a layered map instead");
+    }
 
+    if (layers) {
+        auto d = pyg_layered();
+        d.set_type_strategies(kwargs);
+        d.fill_from(std::move(initial));       // initial fills the base channel
+        return py::cast(std::move(d));
+    }
     auto d = pyg_gimdict();
     d.set_type_strategies(kwargs);
     d.fill_from(std::move(initial));
@@ -441,6 +579,46 @@ inline void register_mapping(py::module_& m) {
         .def("__len__", &pyg_gimdict::size)
         .def("__contains__", &pyg_gimdict::contains, py::is_operator())
         .def("__or__", &pyg_gimdict::merged, py::is_operator());
+
+    // Layered variant: reads observe (fold on demand); the inherited mutable
+    // surface writes the base channel. isinstance-wise it IS a gimdict.
+    py::class_<pyg_layered, pyg_gimdict>(m, "layered_gimmap",
+            "gimdict with MEMORY: contributions are recorded per source and "
+            "folded on read, so remove(source) brings the old value back and "
+            "sources()/footprint() answer who touched what. Made by "
+            "gimdict(..., layers=True); snapshot() -> frozen_gimmap.")
+        .def("apply", &pyg_layered::apply, py::arg("source"), py::arg("key"),
+             py::arg("value"), py::arg("strategy") = py::none())
+        .def("remove", &pyg_layered::remove, py::arg("source"))
+        .def("sources", &pyg_layered::sources, py::arg("key"))
+        .def("footprint", &pyg_layered::footprint, py::arg("source"))
+        .def("snapshot", &pyg_layered::snapshot)
+        .def("freeze", &pyg_layered::snapshot)   // freeze == snapshot here
+        .def("merge",
+             [](const pyg_layered& self, py::handle other, py::handle source) {
+                 if (source.is_none()) return py::cast(self.merged_observed(other));
+                 auto copy = self;                 // functional: record on a copy
+                 copy.merge_from(other, source);
+                 return py::cast(std::move(copy));
+             },
+             py::arg("other"), py::arg("source") = py::none(),
+             "merge(other) folds the observed state and returns it frozen; "
+             "merge(other, source=...) records other's items as removable "
+             "contributions from that source and returns the new layered map.")
+        .def("merge_from", &pyg_layered::merge_from, py::arg("other"), py::arg("source"),
+             "In-place: record other's items as contributions from source.")
+        .def("get", &pyg_layered::observed_get, py::arg("key"), py::arg("default") = py::none())
+        .def("contains", &pyg_layered::observed_contains, py::arg("key"))
+        .def("to_dict", &pyg_layered::observed_dict)
+        .def("__getitem__", &pyg_layered::observed_getitem)
+        .def("__contains__", &pyg_layered::observed_contains, py::is_operator())
+        .def("__iter__", &pyg_layered::observed_iter)
+        .def("__len__", &pyg_layered::observed_size)
+        .def("__or__",
+             [](const pyg_layered& self, py::handle other) {
+                 return self.merged_observed(other);
+             },
+             py::is_operator());
 
     // gimdict() is the FACTORY (the path() pattern): kwargs name the traits,
     // the returned type is the curated combo, isinstance(x, gimmap) spans all.

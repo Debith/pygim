@@ -87,7 +87,14 @@ public:
     [[nodiscard]] constexpr bool empty() const noexcept { return m_items.empty(); }
     constexpr void clear() { m_items.clear(); }
 
-    constexpr bool operator==(const flat_storage&) const = default;
+    // Constrained rather than defaulted: a defaulted constexpr == is checked
+    // eagerly at class instantiation, which breaks engines whose mapped_type
+    // is not equality-comparable (e.g. the layer trait's contribution lists).
+    constexpr bool operator==(const flat_storage& other) const
+        requires std::equality_comparable<item_type>
+    {
+        return m_items == other.m_items;
+    }
 
 private:
     [[nodiscard]] constexpr std::size_t lower_bound_idx(const K& key) const {

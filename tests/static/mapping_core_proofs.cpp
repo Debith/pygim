@@ -10,7 +10,8 @@
 // (C++23, GCC 14+); on an older frontend they drop out while the storage-law
 // and frozen-surface proofs still run (graduated coverage, see gimmap.h).
 
-#include "../../src/_pygim_fast/mapping/merge.h"   // includes gimmap.h + storage.h
+#include "../../src/_pygim_fast/mapping/hooks.h"    // includes gimmap.h -> storage.h
+#include "../../src/_pygim_fast/mapping/layers.h"   // includes merge.h -> gimmap.h
 
 namespace {
 
@@ -247,6 +248,125 @@ consteval bool merge_with_folds_whole_map() {
     return target.at(1) == 10 && target.at(2) == 20;
 }
 static_assert(merge_with_folds_whole_map());
+
+// ── layer trait: merge with memory (provenance + undo) ──────────────────────
+
+using pygim::mapping::has_layers_trait;
+using pygim::mapping::layer_trait;
+using pygim::mapping::traits_dependencies_ok;
+
+using Sheet = gimmap<FS, pygim::mapping::mutable_trait, merge_trait<int>,
+                     layer_trait<int, int>>;
+
+static_assert(has_layers_trait<Sheet> && !has_layers_trait<MutMerge>);
+
+// The dependency gate: layers demand merge + mutable, in any order.
+static_assert(!traits_dependencies_ok<layer_trait<int, int>>());
+static_assert(!traits_dependencies_ok<pygim::mapping::mutable_trait, layer_trait<int, int>>());
+static_assert(!traits_dependencies_ok<merge_trait<int>, layer_trait<int, int>>());
+static_assert(traits_dependencies_ok<pygim::mapping::mutable_trait, merge_trait<int>,
+                                     layer_trait<int, int>>());
+
+template <typename M>
+concept exposes_apply = requires(M m) { m.apply("who", 1, 2); };
+static_assert(exposes_apply<Sheet>);
+static_assert(!exposes_apply<MutMerge>);      // merging alone has no layers
+
+consteval bool layered_removal_restores_the_old_value() {
+    Sheet s;
+    s.set(1, 30);                                          // base speed 30
+    s.apply("haste", 1, MergeStrategy::Multiply, 2);       // x2 -> 60
+    s.apply("paralyzed", 1, MergeStrategy::Multiply, 0);   // x0 -> 0
+    const bool paralyzed = s.observe(1) == 0;
+    s.remove("paralyzed");                                 // lift the condition
+    return paralyzed && s.observe(1) == 60;                // no inverse math
+}
+static_assert(layered_removal_restores_the_old_value());
+
+consteval bool first_contribution_establishes_without_base() {
+    Sheet s;                                               // no base for key 7
+    s.apply("blessing", 7, MergeStrategy::Sum, 5);
+    s.apply("blessing", 7, MergeStrategy::Sum, 3);
+    return s.observe(7) == 8 && s.holds(7) && !s.contains(7);   // layers-only key
+}
+static_assert(first_contribution_establishes_without_base());
+
+consteval bool provenance_answers_who_and_where() {
+    Sheet s;
+    s.set(1, 10);
+    s.apply("race", 1, MergeStrategy::Sum, 2);
+    s.apply("race", 2, MergeStrategy::Sum, 5);
+    s.apply("item", 1, MergeStrategy::Max, 4);
+    const auto who = s.sources(1);                         // application order
+    const auto where = s.footprint("race");                // reverse index
+    return who.size() == 2 && who[0] == "race" && who[1] == "item" &&
+           where.size() == 2 && where[0] == 1 && where[1] == 2;
+}
+static_assert(provenance_answers_who_and_where());
+
+consteval bool snapshot_is_frozen_and_independent() {
+    Sheet s;
+    s.set(1, 10);
+    s.apply("race", 1, MergeStrategy::Sum, 2);
+    auto snap = s.snapshot();
+    static_assert(std::is_same_v<decltype(snap), gimmap<FS>>);   // the frozen type
+    static_assert(!exposes_set<decltype(snap)>);
+    s.apply("curse", 1, MergeStrategy::Sum, -100);         // later edit
+    return snap.at(1) == 12 && s.observe(1) == -88;        // snapshot untouched
+}
+static_assert(snapshot_is_frozen_and_independent());
+
+// ── hooks + strict: the Registry-convergence pair ───────────────────────────
+
+using pygim::mapping::has_hooks;
+using pygim::mapping::has_strict;
+using pygim::mapping::hooks_trait;
+using pygim::mapping::strict_trait;
+
+// Constexpr-friendly callback for the proofs (std::function is runtime-only).
+struct CountingHook {
+    int* count;
+    constexpr void operator()(const int&, const int&) const { ++*count; }
+};
+
+using Hooked = gimmap<FS, pygim::mapping::mutable_trait,
+                      hooks_trait<int, int, CountingHook>>;
+
+static_assert(has_hooks<Hooked> && !has_hooks<Mut>);
+static_assert(!traits_dependencies_ok<strict_trait>());   // strict writes: needs mutable
+static_assert(traits_dependencies_ok<pygim::mapping::mutable_trait, strict_trait>());
+
+// Surface honesty: a hookless map HAS no add_on_register — the Registry
+// silent-discard misuse class is unrepresentable in the toolkit.
+template <typename M>
+concept exposes_add_on_register = requires(M m, CountingHook h) { m.add_on_register(h); };
+static_assert(exposes_add_on_register<Hooked>);
+static_assert(!exposes_add_on_register<Mut>);
+static_assert(!exposes_add_on_register<Frozen>);
+
+consteval bool hooks_fire_on_every_write() {
+    int fired = 0;
+    Hooked m;
+    m.add_on_register(CountingHook{&fired});
+    m.add_on_register(CountingHook{&fired});   // two hooks registered
+    m.set(1, 10);
+    m.set(2, 20);
+    return fired == 4 && m.at(1) == 10;        // 2 hooks x 2 writes
+}
+static_assert(hooks_fire_on_every_write());
+
+consteval bool strict_insert_and_override_route_through_hooks() {
+    int fired = 0;
+    gimmap<FS, pygim::mapping::mutable_trait, strict_trait,
+           hooks_trait<int, int, CountingHook>> m;
+    m.add_on_register(CountingHook{&fired});
+    m.register_or_override(1, 10, false);      // new key: plain insert
+    m.register_or_override(1, 11, true);       // existing key: override
+    return m.at(1) == 11 && fired == 2;        // hooks fired for BOTH writes
+}
+static_assert(strict_insert_and_override_route_through_hooks());
+// (The throwing paths — duplicate insert, override-of-missing — cannot be
+// proven in consteval; they stay pinned by Registry's runtime tests.)
 
 #endif  // PYGIM_HAS_DEDUCING_THIS
 
