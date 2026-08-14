@@ -1,3 +1,6 @@
 [extension]
 module = "utils"
-sources = ["bindings.cpp"]
+# The tests/static TU holds the mapping toolkit's compile-time proof suites:
+# wiring it into the sources means every build proves the invariants (an
+# unwired static test file tests nothing). It contributes no runtime code.
+sources = ["bindings.cpp", "../../../tests/static/mapping_core_proofs.cpp"]
