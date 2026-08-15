@@ -110,11 +110,9 @@ def test_key_name_must_be_str_or_none(registry):
 
 
 def test_hooks_invocation(registry):
-    """Validate that hook callbacks fire only when hooks=True.
-
-    We attach counters. For hooks disabled, callbacks should still be *registered*
-    but underlying C++ no-op specializations mean they won't execute.
-    """
+    """Hook callbacks fire when hooks=True; registering one on a hookless
+    registry RAISES (surface honesty: silently discarding a callback was the
+    old behavior and is exactly the misuse this guards against)."""
     # Arrange
     events = {"register": 0, "pre": 0, "post": 0}
 
@@ -124,27 +122,31 @@ def test_hooks_invocation(registry):
     def on_pre(key, value):
         events["pre"] += 1
 
+    hooks_enabled = "hooks=True" in repr(registry)
+    if not hooks_enabled:
+        with pytest.raises(ValueError):
+            registry.on_register(on_register)
+        with pytest.raises(ValueError):
+            registry.on_pre(on_pre)
+        with pytest.raises(ValueError):
+            registry.on_post(lambda *a, **k: None)
+        return
+
     registry.on_register(on_register)
     registry.on_pre(on_pre)
     registry.on_post(lambda *a, **k: events.__setitem__("post", events["post"] + 1))
 
-    # Act: register a function, access it (triggers pre), then manually post.
+    # Act: register a function, then access it (triggers pre).
     def foo():
         return 42
 
     registry.register("foo", foo)
-    _ = registry["foo"]  # triggers pre when hooks enabled
+    _ = registry["foo"]
 
-    # Assert
-
-    # If hooks are enabled we expect positive counts; otherwise all zeros.
-    if events["register"] == 0:
-        # hooks disabled path; ensure all zero
-        assert events == {"register": 0, "pre": 0, "post": 0}
-    else:
-        # hooks enabled: register fired exactly once; pre at least once; post may still be 0 (no explicit post trigger path in binding)
-        assert events["register"] == 1
-        assert events["pre"] >= 1
+    # Assert: register fired exactly once; pre at least once; post has no
+    # explicit trigger path in the binding.
+    assert events["register"] == 1
+    assert events["pre"] >= 1
     assert events["post"] in (0, 1)
 
 
@@ -204,8 +206,12 @@ def test_identity_duplicate_without_override(identity_registry):
 
 
 def test_post_hook_invocation(registry):
-    # Only meaningful if hooks enabled; otherwise post should be a no-op.
+    # Registering a post hook on a hookless registry raises (surface honesty).
     events = {"post": 0}
+    if "hooks=True" not in repr(registry):
+        with pytest.raises(ValueError):
+            registry.on_post(lambda *a: None)
+        return
     registry.on_post(lambda *a: events.__setitem__("post", events["post"] + 1))
 
     def f():
@@ -213,10 +219,7 @@ def test_post_hook_invocation(registry):
 
     registry.register("f", f)
     registry.post("f", None)
-    if "hooks" in repr(registry) and "hooks=True" in repr(registry):
-        assert events["post"] == 1
-    else:
-        assert events["post"] == 0
+    assert events["post"] == 1
 
 
 def test_qualname_string_id_duplicate(registry):
@@ -284,20 +287,24 @@ def test_capacity_reserve():
     assert "f" in r
 
 
-def test_hooks_disabled_noop_callbacks():
+def test_hooks_disabled_rejects_callbacks():
+    # The old contract silently DISCARDED these callbacks — the misuse this
+    # replaces. A hookless registry now refuses them loudly.
     r = Registry(hooks=False)
-    counters = {"reg": 0, "pre": 0, "post": 0}
-    r.on_register(lambda *a: counters.__setitem__("reg", counters["reg"] + 1))
-    r.on_pre(lambda *a: counters.__setitem__("pre", counters["pre"] + 1))
-    r.on_post(lambda *a: counters.__setitem__("post", counters["post"] + 1))
+    with pytest.raises(ValueError, match="hooks=True"):
+        r.on_register(lambda *a: None)
+    with pytest.raises(ValueError, match="hooks=True"):
+        r.on_pre(lambda *a: None)
+    with pytest.raises(ValueError, match="hooks=True"):
+        r.on_post(lambda *a: None)
 
+    # Everything that is not a hook keeps working on a hookless registry.
     def f():
         return 1
 
     r.register("f", f)
-    _ = r["f"]
-    r.post("f", None)
-    assert counters == {"reg": 0, "pre": 0, "post": 0}
+    assert r["f"]() == 1
+    r.post("f", None)                  # post-ing events stays a no-op path
 
 
 if __name__ == "__main__":

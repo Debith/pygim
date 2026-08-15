@@ -5,7 +5,13 @@
 #include <vector>
 #include <ranges>
 #include <algorithm>
+#if __has_include(<format>)
 #include <format>
+#define PYGIM_HAS_STD_FORMAT 1
+#else
+#include <cstdio>
+#define PYGIM_HAS_STD_FORMAT 0
+#endif
 #include <cmath>
 #include <cstddef>
 #include <array>
@@ -129,7 +135,14 @@ template <std::size_t N>
         abs_value /= step;
         ++index;
     }
+#if PYGIM_HAS_STD_FORMAT
     return std::format("{:.{}f} {}", value, precision, units[index]);
+#else
+    // Portability fallback for toolchains without <format> (e.g. GCC 11).
+    char buffer[64];
+    std::snprintf(buffer, sizeof(buffer), "%.*f %s", precision, value, units[index]);
+    return buffer;
+#endif
 }
 
 [[nodiscard]] inline std::string format_bytes_per_second(double bytes_per_second, int precision = 2) {

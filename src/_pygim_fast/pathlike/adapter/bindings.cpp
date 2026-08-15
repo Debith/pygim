@@ -181,17 +181,30 @@ drops into ``open()``, ``Path()``, etc.
         .def("read_bytes", [](const file& f) { return py::bytes(f.read_bytes()); },
              "The raw file bytes, undecoded.")
         .def("read",
-             [](const file& f, const std::optional<std::string>& engine, py::ssize_t key_cache) {
+             [](const file& f, const std::optional<std::string>& engine, py::ssize_t key_cache,
+                py::object into) {
                  const Engine named = engine_from_arg(engine);
-                 return load(f, f.resolve_engine(named == Engine::Unknown
-                                                     ? std::string_view{}
-                                                     : engine_label(named)),
-                             cache_capacity_from_arg(key_cache));
+                 py::object decoded =
+                     load(f, f.resolve_engine(named == Engine::Unknown
+                                                  ? std::string_view{}
+                                                  : engine_label(named)),
+                          cache_capacity_from_arg(key_cache));
+                 // The factory contract: pathlike stays ignorant of what the
+                 // caller builds — into= is ANY callable given the decoded
+                 // object (json.loads(object_hook=...) precedent).
+                 if (into.is_none()) return decoded;
+                 if (!PyCallable_Check(into.ptr())) {
+                     throw py::type_error("into= must be callable (e.g. pygim.utils.gimdict "
+                                          "or functools.partial(gimdict, layers=True))");
+                 }
+                 return into(std::move(decoded));
              },
              py::arg("engine") = py::none(), py::arg("key_cache") = 256,
+             py::arg("into") = py::none(),
              "Decode the file to native Python objects (I/O and parsing release "
              "the GIL). engine= overrides for this call; key_cache bounds the "
-             "key-interning cache (0 off, -1 unbounded).")
+             "key-interning cache (0 off, -1 unbounded); into= is a callable "
+             "given the decoded object — its return value becomes read()'s.")
         .def("write",
              [](const file& f, py::handle obj, const std::optional<std::string>& engine) {
                  const Engine named = engine_from_arg(engine);

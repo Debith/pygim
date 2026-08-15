@@ -257,7 +257,18 @@ public:
             m_var);
     }
 
+    // Surface honesty: with hooks=False the NoHooks core would accept and
+    // silently DISCARD the callback — misuse must fail loudly instead.
+    void require_hooks(const char* method) const {
+        if (!m_hooks) {
+            throw py::value_error(std::string(method) +
+                                  " requires a hook-capable registry: construct "
+                                  "Registry(hooks=True)");
+        }
+    }
+
     void on_register(std::function<void(py::object, py::object)> fn) {
+        require_hooks("on_register");
         std::visit(
             [&](auto& reg) {
                 reg.add_on_register([fn = std::move(fn)](const auto& key, const auto& value) {
@@ -268,6 +279,7 @@ public:
     }
 
     void on_pre(std::function<void(py::object, py::object)> fn) {
+        require_hooks("on_pre");
         std::visit(
             [&](auto& reg) {
                 reg.add_on_pre([fn = std::move(fn)](const auto& key, auto& value) {
@@ -278,6 +290,7 @@ public:
     }
 
     void on_post(std::function<void(py::object, py::object)> fn) {
+        require_hooks("on_post");
         std::visit(
             [&](auto& reg) {
                 reg.add_on_post([fn = std::move(fn)](const auto& key, const py::object& payload) {

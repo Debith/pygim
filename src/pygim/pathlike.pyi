@@ -5,6 +5,7 @@ public contract of ``pygim.path(...)`` / ``pathlike.file``.
 """
 
 import os
+from collections.abc import Callable
 from typing import Any, Literal
 
 # Selection accepts FORMAT names and LIBRARY names; .engine reports the library.
@@ -21,9 +22,16 @@ class file(os.PathLike[str]):
     def __init__(self, path: str | os.PathLike[str], engine: Engine | None = None) -> None: ...
 
     # -- decoding / encoding ------------------------------------------------
-    def read(self, engine: Engine | None = None, key_cache: int = 256) -> Any:
+    def read(
+        self,
+        engine: Engine | None = None,
+        key_cache: int = 256,
+        into: Callable[[Any], Any] | None = None,
+    ) -> Any:
         """Decode the file to native Python objects (GIL released during I/O
-        and parsing). ``key_cache`` bounds key interning: 0 off, -1 unbounded."""
+        and parsing). ``key_cache`` bounds key interning: 0 off, -1 unbounded.
+        ``into`` is any callable given the decoded object; its return value
+        becomes read()'s (e.g. ``into=pygim.utils.gimdict``)."""
 
     def write(self, obj: Any, engine: Engine | None = None) -> None:
         """Serialise obj with the resolved engine. YAML/JSON accept
