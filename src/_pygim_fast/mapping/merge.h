@@ -18,6 +18,7 @@
 
 #include <type_traits>
 #include <utility>
+#include <vector>
 
 #include "gimmap.h"
 #include "storage.h"
@@ -103,6 +104,11 @@ struct merge_trait : merge_trait_tag {
     [[nodiscard]] constexpr const MergeStrategy* key_strategy(const K& key) const {
         return m_strategies.find(key);
     }
+    // The whole per-key table (iterable) — carried across freeze/thaw so
+    // merge configuration survives type transitions.
+    [[nodiscard]] constexpr const flat_storage<K, MergeStrategy>& key_strategies() const {
+        return m_strategies;
+    }
 
     // ── fold surfaces ───────────────────────────────────────────────────────
     // merged()/operator| — merge as an operation: fold into a NEW map and
@@ -122,21 +128,31 @@ struct merge_trait : merge_trait_tag {
     }
 
     // merge_in()/merge_with() — the in-place accumulator surface; only a
-    // mutable map can fold into itself.
+    // mutable map can fold into itself. Both routes go through set(), so
+    // merges ARE writes: hooks fire, and no reference into storage is held
+    // across merge_combine (whose T-supplied operators may run arbitrary
+    // code — including code that mutates this very map).
     template <typename Self>
     constexpr void merge_in(this Self& self, const K& key, const auto& value)
         requires std::derived_from<Self, mutable_trait>
     {
-        if (auto* existing = self.storage().find(key)) {
-            *existing = merge_combine(self.strategy_for(key), *existing, value);
+        if (const auto* existing = self.storage().find(key)) {
+            auto current = *existing;                 // own a copy; drop the pointer
+            self.set(key, merge_combine(self.strategy_for(key), current, value));
         } else {
-            self.storage().insert(key, value);
+            self.set(key, value);
         }
     }
     template <typename Self, typename Other>
     constexpr void merge_with(this Self& self, const Other& other)
         requires std::derived_from<Self, mutable_trait>
     {
+        // Direct iteration is safe even when &other == &self: every key of
+        // self exists in self, so merge_in can only take the ASSIGN path
+        // (no insert, no reallocation, references stay valid). If merge_in
+        // ever grows an invalidating path, the consteval self-merge proof in
+        // tests/static/mapping_merge_proofs.cpp fails the build — constant
+        // evaluation rejects reads through invalidated storage.
         for (const auto& [key, value] : other.items()) self.merge_in(key, value);
     }
 

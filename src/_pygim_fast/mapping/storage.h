@@ -9,6 +9,7 @@
 // deterministic order. That guarantee is part of the engine's contract and
 // surfaces verbatim in the Python docstrings — honesty over imitating dict.
 
+#include <algorithm>
 #include <concepts>
 #include <cstddef>
 #include <initializer_list>
@@ -78,6 +79,25 @@ public:
         if (idx >= m_items.size() || !(m_items[idx].first == key)) return false;
         m_items.erase(m_items.begin() + static_cast<std::ptrdiff_t>(idx));
         return true;
+    }
+
+    // Bulk load, REPLACING the contents: sort once, keep the LAST of equal
+    // keys (matching repeated insert-or-assign). O(n log n) where n repeated
+    // insert() calls on unsorted input degrade to O(n^2) tail-shifting.
+    constexpr void assign_bulk(std::vector<item_type> items) {
+        std::stable_sort(items.begin(), items.end(),
+                         [](const item_type& a, const item_type& b) {
+                             return a.first < b.first;
+                         });
+        std::vector<item_type> unique;
+        unique.reserve(items.size());
+        for (std::size_t i = 0; i < items.size(); ++i) {
+            if (i + 1 < items.size() && items[i + 1].first == items[i].first) {
+                continue;   // superseded by a later write to the same key
+            }
+            unique.push_back(std::move(items[i]));
+        }
+        m_items = std::move(unique);
     }
 
     [[nodiscard]] constexpr const std::vector<item_type>& items() const noexcept {

@@ -199,23 +199,45 @@ inline std::string require_str_key(py::handle key) {
 // Family tag: isinstance(x, utils.gimmap) spans everything the factory makes.
 struct pyg_gimmap {};
 
+struct pyg_gimdict;
+struct pyg_layered;
+inline py::dict mapping_items(py::handle other);
+
 struct pyg_frozen : pyg_gimmap {
     PyFrozenMap map;
+    // Merge configuration carried ACROSS the freeze: a merged result must
+    // still know how to keep merging (chained assembly: acc = acc | frag),
+    // and thaw() must restore what freeze() saw.
+    flat_storage<std::string, MergeStrategy> key_strategies;
+    std::unordered_map<std::string, MergeStrategy> type_strategies;
+    std::optional<MergeStrategy> explicit_default;
 
     explicit pyg_frozen(PyFrozenMap m) : map(std::move(m)) {}
+    pyg_frozen(PyFrozenMap m, flat_storage<std::string, MergeStrategy> keyed,
+               std::unordered_map<std::string, MergeStrategy> typed,
+               std::optional<MergeStrategy> fallback)
+        : map(std::move(m)),
+          key_strategies(std::move(keyed)),
+          type_strategies(std::move(typed)),
+          explicit_default(std::move(fallback)) {}
 
     [[nodiscard]] py::object getitem(py::handle key) const {
         const py::object* value = map.storage().find(require_str_key(key));
         if (value == nullptr) throw py::key_error("key not found");
         return *value;
     }
+    // Family-consistent get(): the historical no-default-RAISES quirk holds on
+    // both sides of a freeze, so the same call can't change meaning mid-chain.
     [[nodiscard]] py::object get(py::handle key, py::object fallback) const {
         const py::object* value = map.storage().find(require_str_key(key));
-        return value == nullptr ? std::move(fallback) : *value;
+        if (value != nullptr) return *value;
+        if (fallback.is_none()) throw py::key_error("key not found");
+        return fallback;
     }
     [[nodiscard]] bool contains(py::handle key) const {
-        return py::isinstance<py::str>(key) &&
-               map.storage().find(py::str(key).cast<std::string>()) != nullptr;
+        // require_str_key: non-str keys are a TypeError on the whole surface,
+        // `in` included — never a silent False.
+        return map.storage().find(require_str_key(key)) != nullptr;
     }
     [[nodiscard]] std::size_t size() const { return map.size(); }
     [[nodiscard]] py::dict to_dict() const {
@@ -238,6 +260,9 @@ struct pyg_frozen : pyg_gimmap {
         return py::hash(py::tuple(pairs));
     }
     [[nodiscard]] bool eq(py::handle other) const;
+    // Defined below (need the mutable type complete):
+    [[nodiscard]] pyg_gimdict thawed() const;
+    [[nodiscard]] pyg_frozen merged(py::handle other) const;
 };
 
 struct pyg_gimdict : pyg_gimmap {
@@ -256,11 +281,17 @@ struct pyg_gimdict : pyg_gimmap {
         if (!PyMapping_Check(initial.ptr())) {
             throw py::type_error("gimdict initializer must be a mapping");
         }
-        py::dict d(initial);
+        // mapping_items handles the gimdict family natively (dict(x) would
+        // mis-parse a keys()-less mapping); assign_bulk loads sorted in one
+        // pass instead of n tail-shifting inserts.
+        py::dict d = mapping_items(initial);
+        std::vector<PyFlat::item_type> items;
+        items.reserve(static_cast<std::size_t>(py::len(d)));
         for (const auto& item : d) {
-            map.set(require_str_key(item.first),
-                    py::reinterpret_borrow<py::object>(item.second));
+            items.emplace_back(require_str_key(item.first),
+                               py::reinterpret_borrow<py::object>(item.second));
         }
+        map.storage().assign_bulk(std::move(items));
     }
     void set_type_strategies(const py::kwargs& kwargs) {
         for (const auto& item : kwargs) {
@@ -289,8 +320,7 @@ struct pyg_gimdict : pyg_gimmap {
         return fallback;
     }
     [[nodiscard]] bool contains(py::handle key) const {
-        return py::isinstance<py::str>(key) &&
-               map.storage().find(py::str(key).cast<std::string>()) != nullptr;
+        return map.storage().find(require_str_key(key)) != nullptr;
     }
     [[nodiscard]] std::size_t size() const { return map.size(); }
     [[nodiscard]] py::object iter_keys() const {
@@ -329,26 +359,29 @@ struct pyg_gimdict : pyg_gimmap {
     // ── merge surfaces ──────────────────────────────────────────────────────
     void merge_in(py::handle key, py::handle value) {
         const std::string k = require_str_key(key);
-        py::object* existing = map.storage().find(k);
+        const py::object* existing = map.storage().find(k);
         if (existing == nullptr) {
             map.set(k, py::reinterpret_borrow<py::object>(value));
             return;
         }
+        // Own a reference and DROP the pointer before combine(): the combine
+        // can run arbitrary Python (a value's __add__), which may mutate this
+        // very map and reallocate the storage under a held pointer.
+        py::object current = *existing;
         const py_folder f = folder();
-        *existing = f.combine(f.resolve(key, *existing, value), *existing, value);
+        py::object combined = f.combine(f.resolve(key, current, value), current, value);
+        map.set(k, std::move(combined));       // re-find inside set: always valid
     }
     // Merge as an operation: fold into a NEW map, return it FROZEN (the
     // design's "a merged result IS a snapshot"). Accepts the gimdict family
-    // or any mapping.
+    // or any mapping. The frozen result CARRIES the strategy configuration.
     [[nodiscard]] pyg_frozen merged(py::handle other) const;
 
     [[nodiscard]] pyg_frozen freeze() const {
-        return pyg_frozen(PyFrozenMap(map.storage()));
+        return pyg_frozen(PyFrozenMap(map.storage()), map.key_strategies(),
+                          type_strategies, explicit_default);
     }
 };
-
-struct pyg_layered;
-inline py::dict mapping_items(py::handle other);
 
 inline pyg_frozen pyg_gimdict::merged(py::handle other) const {
     pyg_gimdict work;
@@ -378,11 +411,15 @@ struct pyg_layered : pyg_gimdict {
     [[nodiscard]] py::object observe_key(const std::string& key) const {
         const py_folder f = folder();
         std::optional<py::object> acc;
-        if (const py::object* base = map.storage().find(key)) acc = *base;
-        if (const auto* layers = map.contributions(key)) {
-            for (const auto& c : *layers) {
-                acc = acc.has_value() ? f.combine(c.strategy, *acc, c.value) : c.value;
-            }
+        if (const py::object* base = map.storage().find(key)) acc = *base;   // copy
+        // Fold over an OWNED copy of the contributions: combine() can run
+        // arbitrary Python that mutates this map and reallocates the vector
+        // a live pointer/iterator would dangle into.
+        std::vector<std::remove_cvref_t<decltype(*map.contributions(key))>::value_type>
+            layers_copy;
+        if (const auto* layers = map.contributions(key)) layers_copy = *layers;
+        for (const auto& c : layers_copy) {
+            acc = acc.has_value() ? f.combine(c.strategy, *acc, c.value) : c.value;
         }
         if (!acc.has_value()) throw py::key_error("key not found");
         return *acc;
@@ -399,7 +436,7 @@ struct pyg_layered : pyg_gimdict {
         return observe_key(k);
     }
     [[nodiscard]] bool observed_contains(py::handle key) const {
-        return py::isinstance<py::str>(key) && map.holds(py::str(key).cast<std::string>());
+        return map.holds(require_str_key(key));
     }
     [[nodiscard]] std::size_t observed_size() const { return all_keys().size(); }
     [[nodiscard]] py::object observed_iter() const {
@@ -483,6 +520,59 @@ inline py::dict mapping_items(py::handle other) {
     throw py::type_error("can only merge with a mapping");
 }
 
+// thaw(): one-shot sorted-storage copy, merge configuration RESTORED — the
+// freeze/thaw round trip loses nothing.
+inline pyg_gimdict pyg_frozen::thawed() const {
+    pyg_gimdict d;
+    d.map.storage() = map.storage();
+    for (const auto& [key, strategy] : key_strategies.items()) {
+        d.map.set_merge_strategy(key, strategy);
+    }
+    d.type_strategies = type_strategies;
+    d.explicit_default = explicit_default;
+    return d;
+}
+
+// Frozen results keep merging: chained assembly (acc = acc | frag | frag)
+// works because the carried configuration travels through every fold.
+inline pyg_frozen pyg_frozen::merged(py::handle other) const {
+    return thawed().merged(other);
+}
+
+// lhs | self where lhs is a plain mapping: fold lhs as the base, then self's
+// observed items in, under SELF's strategy configuration (the only one there
+// is). Serves the __ror__ bindings for the whole family.
+inline pyg_frozen fold_reversed(py::handle lhs, const py::dict& self_items,
+                                const flat_storage<std::string, MergeStrategy>& keyed,
+                                const std::unordered_map<std::string, MergeStrategy>& typed,
+                                const std::optional<MergeStrategy>& fallback) {
+    pyg_gimdict work;
+    for (const auto& [key, strategy] : keyed.items()) {
+        work.map.set_merge_strategy(key, strategy);
+    }
+    work.type_strategies = typed;
+    work.explicit_default = fallback;
+    py::dict base = mapping_items(lhs);
+    std::vector<PyFlat::item_type> items;
+    items.reserve(static_cast<std::size_t>(py::len(base)));
+    for (const auto& item : base) {
+        items.emplace_back(require_str_key(item.first),
+                           py::reinterpret_borrow<py::object>(item.second));
+    }
+    work.map.storage().assign_bulk(std::move(items));
+    for (const auto& item : self_items) work.merge_in(item.first, item.second);
+    return work.freeze();
+}
+
+// Python's binary-operator protocol: an incompatible operand yields
+// NotImplemented (so the other side's __ror__ gets its turn), never a throw.
+inline bool merge_compatible(py::handle other) {
+    return py::isinstance<pyg_gimmap>(other) || PyMapping_Check(other.ptr());
+}
+inline py::object not_implemented() {
+    return py::reinterpret_borrow<py::object>(py::handle(Py_NotImplemented));
+}
+
 inline bool pyg_frozen::eq(py::handle other) const {
     if (py::isinstance<pyg_frozen>(other)) {
         return map == other.cast<const pyg_frozen&>().map;
@@ -543,18 +633,49 @@ inline void register_mapping(py::module_& m) {
             "like tuple. Made by gimdict(..., frozen=True), .freeze(), or merges.")
         .def("get", &pyg_frozen::get, py::arg("key"), py::arg("default") = py::none())
         .def("to_dict", &pyg_frozen::to_dict)
-        .def("thaw", [](const pyg_frozen& self) {
-                auto d = pyg_gimdict();
-                for (const auto& [key, value] : self.map.items()) d.map.set(key, value);
-                return d;
-            },
-            "Copy into a mutable gimdict.")
+        .def("thaw", &pyg_frozen::thawed,
+             "Copy into a mutable gimdict; merge configuration is restored.")
+        .def("merge", &pyg_frozen::merged, py::arg("other"),
+             "Fold other in under the carried strategies; returns a new frozen map.")
+        // keys/values/items make the class a REAL mapping to CPython: dict(x)
+        // and the ABC mixin methods route through keys(), without which the
+        // iterator gets mis-parsed as a sequence of pairs.
+        .def("keys", [](const pyg_frozen& self) {
+                py::list out;
+                for (const auto& [key, value] : self.map.items()) out.append(py::str(key));
+                return out;
+            })
+        .def("values", [](const pyg_frozen& self) {
+                py::list out;
+                for (const auto& [key, value] : self.map.items()) out.append(value);
+                return out;
+            })
+        .def("items", [](const pyg_frozen& self) {
+                py::list out;
+                for (const auto& [key, value] : self.map.items()) {
+                    out.append(py::make_tuple(py::str(key), value));
+                }
+                return out;
+            })
         .def("__getitem__", &pyg_frozen::getitem)
         .def("__contains__", &pyg_frozen::contains, py::is_operator())
         .def("__iter__", &pyg_frozen::iter_keys)
         .def("__len__", &pyg_frozen::size)
         .def("__eq__", &pyg_frozen::eq, py::is_operator())
-        .def("__hash__", &pyg_frozen::hash);
+        .def("__hash__", &pyg_frozen::hash)
+        .def("__or__",
+             [](const pyg_frozen& self, py::handle other) -> py::object {
+                 if (!merge_compatible(other)) return not_implemented();
+                 return py::cast(self.merged(other));
+             },
+             py::is_operator())
+        .def("__ror__",
+             [](const pyg_frozen& self, py::handle lhs) -> py::object {
+                 if (!merge_compatible(lhs)) return not_implemented();
+                 return py::cast(fold_reversed(lhs, self.to_dict(), self.key_strategies,
+                                               self.type_strategies, self.explicit_default));
+             },
+             py::is_operator());
 
     auto gimdict_cls = py::class_<pyg_gimdict, pyg_gimmap>(m, "gimdict_type",
             "MutableMapping with merge strategies over the flat engine "
@@ -572,13 +693,43 @@ inline void register_mapping(py::module_& m) {
         .def("merge", &pyg_gimdict::merged, py::arg("other"))
         .def("freeze", &pyg_gimdict::freeze)
         .def("to_dict", &pyg_gimdict::to_dict)
+        .def("keys", [](const pyg_gimdict& self) {
+                py::list out;
+                for (const auto& [key, value] : self.map.items()) out.append(py::str(key));
+                return out;
+            })
+        .def("values", [](const pyg_gimdict& self) {
+                py::list out;
+                for (const auto& [key, value] : self.map.items()) out.append(value);
+                return out;
+            })
+        .def("items", [](const pyg_gimdict& self) {
+                py::list out;
+                for (const auto& [key, value] : self.map.items()) {
+                    out.append(py::make_tuple(py::str(key), value));
+                }
+                return out;
+            })
         .def("__getitem__", &pyg_gimdict::getitem)
         .def("__setitem__", &pyg_gimdict::setitem)
         .def("__delitem__", &pyg_gimdict::delitem)
         .def("__iter__", &pyg_gimdict::iter_keys)
         .def("__len__", &pyg_gimdict::size)
         .def("__contains__", &pyg_gimdict::contains, py::is_operator())
-        .def("__or__", &pyg_gimdict::merged, py::is_operator());
+        .def("__or__",
+             [](const pyg_gimdict& self, py::handle other) -> py::object {
+                 if (!merge_compatible(other)) return not_implemented();
+                 return py::cast(self.merged(other));
+             },
+             py::is_operator())
+        .def("__ror__",
+             [](const pyg_gimdict& self, py::handle lhs) -> py::object {
+                 if (!merge_compatible(lhs)) return not_implemented();
+                 return py::cast(fold_reversed(lhs, self.to_dict(),
+                                               self.map.key_strategies(),
+                                               self.type_strategies, self.explicit_default));
+             },
+             py::is_operator());
 
     // Layered variant: reads observe (fold on demand); the inherited mutable
     // surface writes the base channel. isinstance-wise it IS a gimdict.
@@ -610,13 +761,39 @@ inline void register_mapping(py::module_& m) {
         .def("get", &pyg_layered::observed_get, py::arg("key"), py::arg("default") = py::none())
         .def("contains", &pyg_layered::observed_contains, py::arg("key"))
         .def("to_dict", &pyg_layered::observed_dict)
+        .def("keys", [](const pyg_layered& self) {
+                py::list out;
+                for (const auto& key : self.all_keys()) out.append(py::str(key));
+                return out;
+            })
+        .def("values", [](const pyg_layered& self) {
+                py::list out;
+                for (const auto& key : self.all_keys()) out.append(self.observe_key(key));
+                return out;
+            })
+        .def("items", [](const pyg_layered& self) {
+                py::list out;
+                for (const auto& key : self.all_keys()) {
+                    out.append(py::make_tuple(py::str(key), self.observe_key(key)));
+                }
+                return out;
+            })
         .def("__getitem__", &pyg_layered::observed_getitem)
         .def("__contains__", &pyg_layered::observed_contains, py::is_operator())
         .def("__iter__", &pyg_layered::observed_iter)
         .def("__len__", &pyg_layered::observed_size)
         .def("__or__",
-             [](const pyg_layered& self, py::handle other) {
-                 return self.merged_observed(other);
+             [](const pyg_layered& self, py::handle other) -> py::object {
+                 if (!merge_compatible(other)) return not_implemented();
+                 return py::cast(self.merged_observed(other));
+             },
+             py::is_operator())
+        .def("__ror__",
+             [](const pyg_layered& self, py::handle lhs) -> py::object {
+                 if (!merge_compatible(lhs)) return not_implemented();
+                 return py::cast(fold_reversed(lhs, self.observed_dict(),
+                                               self.map.key_strategies(),
+                                               self.type_strategies, self.explicit_default));
              },
              py::is_operator());
 

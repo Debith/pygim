@@ -177,3 +177,97 @@ def test_plain_gimdict_has_no_layer_surface():
     assert not hasattr(d, "apply")
     assert not hasattr(d, "sources")
     assert not hasattr(d, "snapshot")
+
+
+# ── review regressions: every finding stays fixed ────────────────────────────
+
+def test_copy_construct_from_every_family_member():
+    d1 = utils.gimdict({"hp": 10, "ab": 1})
+    assert utils.gimdict(d1).to_dict() == {"hp": 10, "ab": 1}
+    f = utils.gimdict({"ab": 2}, frozen=True)
+    assert utils.gimdict(f).to_dict() == {"ab": 2}
+    s = utils.gimdict({"hp": 10}, layers=True)
+    s.apply("race", "hp", 2)
+    assert utils.gimdict(s).to_dict() == {"hp": 12}     # observed values travel
+
+
+def test_dict_conversion_and_mapping_views():
+    d = utils.gimdict({"b": 2, "a": 1})
+    assert dict(d) == {"a": 1, "b": 2}
+    assert list(d.keys()) == ["a", "b"]
+    assert list(d.values()) == [1, 2]
+    assert list(d.items()) == [("a", 1), ("b", 2)]
+    assert dict(d.freeze()) == {"a": 1, "b": 2}
+
+
+def test_equality_across_family_types():
+    f = utils.gimdict({"ab": 1}, frozen=True)
+    assert f == utils.gimdict({"ab": 1})
+    assert f == {"ab": 1}
+    assert not (f == utils.gimdict({"ab": 2}))
+
+
+def test_chained_merge_folds_left():
+    a = utils.gimdict({"hp": 1}, int="sum")
+    total = a | utils.gimdict({"hp": 2}) | {"hp": 3}
+    assert isinstance(total, utils.frozen_gimmap)
+    assert total["hp"] == 6
+
+
+def test_strategies_survive_freeze_thaw_and_chained_merges():
+    # The character.py assembly pattern: fold-left with deep/union stacking.
+    acc = utils.gimdict({}, dict=utils.deep, list=utils.union)
+    acc = acc | {"abilities": {"DEX": 3}, "gear": ["Dagger"]}
+    acc = acc | {"abilities": {"DEX": 1, "WIS": 2}, "gear": ["Dagger", "Rope"]}
+    assert acc.to_dict() == {"abilities": {"DEX": 4, "WIS": 2},
+                             "gear": ["Dagger", "Rope"]}
+    thawed = acc.thaw()                              # configuration restored
+    folded = thawed | {"abilities": {"CON": 1}}
+    assert folded["abilities"] == {"DEX": 4, "WIS": 2, "CON": 1}
+
+
+def test_ror_lets_other_operands_lead():
+    d = utils.gimdict({"hp": 2}, int="sum")
+    out = {"hp": 10} | d          # dict.__or__ -> NotImplemented -> d.__ror__
+    assert out["hp"] == 12
+
+    class Wrapper:
+        def __ror__(self, other):
+            return "wrapped"
+
+    assert (utils.gimdict({"a": 1}) | Wrapper()) == "wrapped"
+
+
+def test_reentrant_combine_is_safe():
+    d = utils.gimdict(int="sum")
+
+    class Evil(int):
+        def __radd__(self, other):
+            for i in range(64):                      # reallocate storage mid-combine
+                d[f"x{i}"] = i
+            return int(other) + int(self)
+
+    d["k"] = 1
+    d.merge_in("k", Evil(5))
+    assert d["k"] == 6                               # lands in the right slot
+    assert len(d) == 65
+
+
+def test_non_str_keys_raise_on_the_whole_surface():
+    d = utils.gimdict({"a": 1})
+    with pytest.raises(TypeError):
+        1 in d                                       # `in` included — no silent False
+    with pytest.raises(TypeError):
+        d[1]
+    with pytest.raises(TypeError):
+        1 in d.freeze()
+
+
+def test_get_quirk_is_family_consistent():
+    d = utils.gimdict({"a": 1})
+    f = d.freeze()
+    with pytest.raises(KeyError):
+        d.get("missing")
+    with pytest.raises(KeyError):
+        f.get("missing")                             # same quirk on both sides
+    assert f.get("missing", 42) == 42
