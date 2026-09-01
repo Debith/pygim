@@ -13,12 +13,9 @@
 // driver library at runtime on every platform (dlopen on POSIX, LoadLibrary on
 // Windows).
 
-#include <sql.h>
-#include <sqlext.h>
+#include "../../../odbc_headers.h"  // windows.h-before-sql.h on Windows
 
-#if defined(_WIN32) || defined(_WIN64)
-#include <windows.h>  // LoadLibraryW / GetProcAddress (idempotent after sql.h)
-#else
+#if !defined(_WIN32) && !defined(_WIN64)
 #include <dlfcn.h>
 #include <glob.h>
 #endif

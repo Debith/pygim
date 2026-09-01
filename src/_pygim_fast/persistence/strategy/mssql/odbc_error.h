@@ -6,8 +6,7 @@
 #include <stdexcept>
 #include <string>
 
-#include <sql.h>
-#include <sqlext.h>
+#include "../../odbc_headers.h"
 // ODBC headers may define BOOL/INT macros that collide with C++ identifiers.
 #ifdef BOOL
 #  undef BOOL

@@ -13,9 +13,7 @@
 #include <utility>
 #include <vector>
 
-#include <sql.h>
-#include <sqlext.h>
-#include <sqltypes.h>
+#include "../../odbc_headers.h"
 #ifdef BOOL
 #  undef BOOL
 #endif
