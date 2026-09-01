@@ -23,17 +23,21 @@ Usage::
     print(f"Saved {metrics['processed_rows']} rows in {metrics['total_seconds']:.2f}s")
 """
 
-try:
-    from pygim import _persistence as _ext  # type: ignore
+# Load Arrow's shared libraries into the process *before* the extension, so the
+# dynamic loader resolves libarrow/libparquet from the pyarrow package itself
+# rather than from whatever RPATH happened to be baked in at build time.
+import pyarrow
+import pyarrow.parquet  # noqa: F401
 
-    Format = _ext.Format
-    DataStore = _ext.DataStore
-    acquire_datastore = _ext.acquire_datastore
+# The extension is mandatory: if it is missing, the ImportError must surface.
+from pygim import _persistence as _ext  # type: ignore
 
-    __all__ = [
-        "Format",
-        "DataStore",
-        "acquire_datastore",
-    ]
-except ImportError:  # pragma: no cover – extension absent (Arrow/ODBC not installed)
-    __all__ = []
+Format = _ext.Format
+DataStore = _ext.DataStore
+acquire_datastore = _ext.acquire_datastore
+
+__all__ = [
+    "Format",
+    "DataStore",
+    "acquire_datastore",
+]

@@ -68,3 +68,61 @@ def test_std_probe_caches_per_requested_standard(tmp_path, monkeypatch):
     # Second call must come from the cache: break the compiler to prove it.
     monkeypatch.setenv("CXX", "/nonexistent-compiler")
     assert ns["_first_supported_std"]("c++26") == "c++23"
+
+
+# ─── Mandatory extensions: missing deps abort the build, never skip ──────────
+
+
+def _dep_ns(**overrides):
+    ns = _extract("_require_dep", "_odbc_include_dirs", "_odbc_library_name",
+                  "_DEP_INSTALL_HINTS", "_DEP_CONFIGURATORS")
+    ns["Path"] = pathlib.Path
+    ns.setdefault("conda_prefix", None)
+    ns.update(overrides)
+    return ns
+
+
+def test_missing_unixodbc_is_a_build_error_not_a_skip(tmp_path, monkeypatch):
+    monkeypatch.setattr(sys, "platform", "linux")
+    ns = _dep_ns(_odbc_include_dirs=lambda: [tmp_path])
+    with pytest.raises(SystemExit) as exc:
+        ns["_require_dep"]("odbc", "pygim._persistence")
+    msg = str(exc.value)
+    assert "pygim._persistence" in msg
+    assert "sql.h" in msg and str(tmp_path) in msg
+    assert "unixodbc" in msg.lower()  # actionable install hint
+
+
+def test_present_unixodbc_header_passes(tmp_path, monkeypatch):
+    monkeypatch.setattr(sys, "platform", "linux")
+    (tmp_path / "sql.h").write_text("")
+    ns = _dep_ns(_odbc_include_dirs=lambda: [tmp_path])
+    assert ns["_require_dep"]("odbc", "pygim._persistence") is None
+
+
+def test_odbc_on_windows_relies_on_the_sdk(monkeypatch):
+    monkeypatch.setattr(sys, "platform", "win32")
+    ns = _dep_ns(_odbc_include_dirs=list)  # no unixODBC anywhere
+    assert ns["_require_dep"]("odbc", "pygim._persistence") is None
+
+
+def test_unknown_dep_preset_is_a_build_error():
+    ns = _dep_ns()
+    with pytest.raises(SystemExit) as exc:
+        ns["_require_dep"]("pg", "pygim.future")
+    assert "'pg'" in str(exc.value) and "pygim.future" in str(exc.value)
+
+
+@pytest.mark.parametrize("platform,expected", [
+    ("linux", "odbc"), ("darwin", "odbc"), ("win32", "odbc32"),
+])
+def test_odbc_link_library_per_platform(monkeypatch, platform, expected):
+    monkeypatch.setattr(sys, "platform", platform)
+    assert _dep_ns()["_odbc_library_name"]() == expected
+
+
+def test_setup_py_never_skips_an_extension():
+    """Guard against the skip pattern creeping back in."""
+    src = SETUP_PY.read_text(encoding="utf-8")
+    assert "Skipping" not in src
+    assert "_dep_available" not in src
