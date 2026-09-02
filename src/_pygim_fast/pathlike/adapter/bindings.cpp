@@ -248,9 +248,8 @@ drops into ``open()``, ``Path()``, etc.
           "jsonfile/tomlfile when an engine resolves. Pass engine= to pin the "
           "decoder ('yaml'/'json'/'toml'); default resolves from the extension.");
 
-#ifdef VERSION_INFO
-    m.attr("__version__") = MACRO_STRINGIFY(VERSION_INFO);
-#else
-    m.attr("__version__") = "dev";
+#ifndef VERSION_INFO
+#error "VERSION_INFO must be defined by the build system (setup.py base_macros)"
 #endif
+    m.attr("__version__") = MACRO_STRINGIFY(VERSION_INFO);
 }

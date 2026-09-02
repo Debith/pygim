@@ -4,19 +4,17 @@ import uuid
 
 import pytest
 
-_persistence_test = pytest.importorskip(
-    "pygim._persistence_test",
-    reason="C++ persistence extension not built (Arrow/ODBC not installed)",
-)
+# The persistence extensions are mandatory parts of the library: if they are
+# missing, this module must fail to import rather than silently skip.
+# (tests/conftest.py preloads Arrow so the raw extension resolves libarrow.)
+from pygim import _persistence_test
+from pygim import persistence as _persistence_module
+
 LocalDataStore = _persistence_test.DataStore
 Query = _persistence_test.Query
 MssqlDialect = _persistence_test.MssqlDialect
 LocalFormat = _persistence_test.Format
 
-_persistence_module = pytest.importorskip(
-    "pygim._persistence",
-    reason="C++ persistence extension not built (Arrow/ODBC not installed)",
-)
 acquire_datastore = _persistence_module.acquire_datastore
 Format = _persistence_module.Format
 
@@ -307,7 +305,7 @@ def test_acquire_datastore_invalid_format():
 
 def test_acquire_datastore_live_round_trip():
     pyodbc = pytest.importorskip("pyodbc")
-    pl = pytest.importorskip("polars")
+    import polars as pl  # hard dependency of pygim: must be present wherever pygim imports
 
     conn_str = _integration_conn_str(pyodbc)
     table_name = f"pygim_persist_{uuid.uuid4().hex[:8]}"

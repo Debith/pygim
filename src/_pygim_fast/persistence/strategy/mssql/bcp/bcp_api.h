@@ -6,15 +6,21 @@
 #include <stdexcept>
 #include <string>
 
-#if defined(_WIN32) || defined(_WIN64)
-#include <msodbcsql.h>
-#else
+// Deliberately independent of the MSSQL driver's Client SDK (<msodbcsql.h>):
+// that header is only present when the driver SDK is installed, so relying on
+// it would make the build environment-dependent.  Instead the small set of BCP
+// constants/types is declared here and the entry points are resolved from the
+// driver library at runtime on every platform (dlopen on POSIX, LoadLibrary on
+// Windows).
+
+#include "../../../odbc_headers.h"  // windows.h-before-sql.h on Windows
+
+#if !defined(_WIN32) && !defined(_WIN64)
 #include <dlfcn.h>
 #include <glob.h>
-#include <sql.h>
-#include <sqlext.h>
+#endif
 
-// BCP-specific constants not provided by unixODBC headers.
+// BCP-specific constants not provided by the ODBC driver-manager headers.
 #ifndef SQL_COPT_SS_BCP
 #define SQL_COPT_SS_BASE  1200
 #define SQL_COPT_SS_BCP   (SQL_COPT_SS_BASE + 19)
@@ -26,20 +32,20 @@
 #define DB_IN 1
 #endif
 
-// Type aliases used by BCP (not in unixODBC headers on Linux).
+// Type aliases used by BCP.  On Windows BYTE/LPCWSTR already exist with these
+// exact underlying types (SQLWCHAR is wchar_t there), and redeclaring an alias
+// to the same type is well-formed; DBINT/LPCBYTE exist only in the driver SDK.
 #ifndef PYGIM_BCP_TYPES_DEFINED
 #define PYGIM_BCP_TYPES_DEFINED
 using DBINT   = int;
 using BYTE    = unsigned char;
 using LPCBYTE = const BYTE*;
-#ifndef LPCWSTR
+#if !defined(_WIN32) && !defined(_WIN64)
 using LPCWSTR = const SQLWCHAR*;
 #endif
 #endif
 
 #include "../../../odbc_compat.h"
-
-#endif // !Windows
 
 // ODBC headers may define BOOL/INT macros that collide with C++ identifiers.
 #ifdef BOOL
@@ -109,7 +115,24 @@ struct BcpApi {
 [[nodiscard]] inline const BcpApi& ensure_bcp_api() {
     static const BcpApi api = [] {
         BcpApi a;
-#if !defined(_WIN32) && !defined(_WIN64)
+#if defined(_WIN32) || defined(_WIN64)
+        HMODULE handle = LoadLibraryW(L"msodbcsql18.dll");
+        if (!handle) handle = LoadLibraryW(L"msodbcsql17.dll");
+
+        if (handle) {
+            const auto sym = [handle](const char* name) {
+                return GetProcAddress(handle, name);
+            };
+            a.init    = reinterpret_cast<bcp_initW_fn>(sym("bcp_initW"));
+            a.bind    = reinterpret_cast<bcp_bind_fn>(sym("bcp_bind"));
+            a.sendrow = reinterpret_cast<bcp_sendrow_fn>(sym("bcp_sendrow"));
+            a.batch   = reinterpret_cast<bcp_batch_fn>(sym("bcp_batch"));
+            a.done    = reinterpret_cast<bcp_done_fn>(sym("bcp_done"));
+            a.collen  = reinterpret_cast<bcp_collen_fn>(sym("bcp_collen"));
+            a.colptr  = reinterpret_cast<bcp_colptr_fn>(sym("bcp_colptr"));
+            a.control = reinterpret_cast<bcp_control_fn>(sym("bcp_control"));
+        }
+#else
         // Try the SONAME symlink first (survives driver updates),
         // then glob for the versioned .so.
         static constexpr const char* soname = "libmsodbcsql-18.so";
@@ -148,7 +171,8 @@ struct BcpApi {
     if (!api.loaded()) [[unlikely]] {
         throw std::runtime_error(
             "BCP functions not available. SQL Server ODBC Driver 17/18+ required.\n"
-            "Install: sudo ACCEPT_EULA=Y apt-get install -y msodbcsql18");
+            "Linux: sudo ACCEPT_EULA=Y apt-get install -y msodbcsql18\n"
+            "Windows: install the Microsoft ODBC Driver 17/18 for SQL Server");
     }
     return api;
 }

@@ -4,8 +4,7 @@
 
 #pragma once
 
-#include <sql.h>
-#include <sqltypes.h>
+#include "odbc_headers.h"
 
 // ODBC headers pollute the macro namespace — clean up.
 #ifdef BOOL

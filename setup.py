@@ -52,6 +52,13 @@ else:
         # (e.g. system g++-16) still loads in the conda Python, whose own
         # libstdc++ may be older than the compiler's.
         extra_link_args_global.append("-static-libstdc++")
+        # Hide the statically linked libstdc++ symbols.  Without this every
+        # extension exports its own copy of the C++ runtime, and as soon as a
+        # library built against the *dynamic* libstdc++ (pyarrow's libarrow)
+        # is loaded into the same process the two runtimes interpose each
+        # other -- observed as a segfault in pathlike's TOML reader whenever
+        # pyarrow had been imported first.
+        extra_link_args_global.append("-Wl,--exclude-libs,ALL")
 
 
 # ── Build environment ──────────────────────────────────────────────────────
@@ -62,8 +69,8 @@ if not conda_prefix and hasattr(sys, "prefix"):
 
 
 # ── Dependency presets ─────────────────────────────────────────────────────
-# Each ext.*.toml can list deps from this table.  Any dep not listed here
-# is silently ignored (forward-compatible with future presets like "pg").
+# Each ext.*.toml can list deps from this table.  Every listed dep must be
+# present at build time; unknown or missing deps abort the build (_require_dep).
 
 
 def _base_kwargs():
@@ -108,58 +115,101 @@ def _first_supported_std(requested):
     return chosen
 
 
-def _dep_available(dep_name):
-    """Return True if the extension for *dep_name* can be built on this platform."""
-    if dep_name == "odbc" and sys.platform == "win32":
-        # ODBC extensions link against 'odbc' (unixODBC) which doesn't exist on
-        # Windows — the Windows equivalent is 'odbc32'.  Skip until the build
-        # configuration handles this platform difference.
-        print(
-            "[setup.py] Skipping odbc extensions: not supported on Windows "
-            "(library name incompatibility: 'odbc' vs 'odbc32')."
+def _odbc_include_dirs():
+    """Directories searched for the unixODBC header ``sql.h`` (non-Windows)."""
+    dirs = [
+        Path("/usr/include"),
+        Path("/usr/local/include"),
+        Path("/opt/homebrew/include"),
+        Path(sys.prefix) / "include",
+    ]
+    if conda_prefix:
+        dirs.append(Path(conda_prefix) / "include")
+    return list(dict.fromkeys(dirs))  # sys.prefix and conda_prefix usually coincide
+
+
+def _odbc_library_name():
+    """ODBC driver-manager link library: unixODBC's ``odbc``, or ``odbc32`` from the Windows SDK."""
+    return "odbc32" if sys.platform == "win32" else "odbc"
+
+
+_DEP_INSTALL_HINTS = {
+    "odbc": (
+        "the unixODBC development files: `apt install unixodbc-dev` (Debian/Ubuntu), "
+        "`yum install unixODBC-devel` (RHEL/manylinux), `brew install unixodbc` (macOS) "
+        "or `conda install -c conda-forge unixodbc` (conda env). On Windows, sql.h and "
+        "odbc32.lib ship with the Windows SDK used by MSVC."
+    ),
+    "arrow": "pyarrow (`pip install pyarrow`); its wheels bundle the Arrow C++ headers and libraries.",
+}
+
+
+def _require_dep(dep_name, module_name):
+    """Abort the build unless *dep_name* is available for *module_name*.
+
+    pygim is a complete library: every extension is mandatory on every
+    platform.  A missing system dependency is therefore a build error with an
+    actionable message -- never a silently skipped module, which would only
+    resurface much later as an ImportError at runtime (or as a stale binary
+    from an older build being picked up by an editable install).
+    """
+
+    def fail(problem):
+        raise SystemExit(
+            f"[setup.py] Cannot build {module_name}: {problem}.\n"
+            f"           Install {_DEP_INSTALL_HINTS.get(dep_name, dep_name)}"
         )
-        return False
+
     if dep_name == "odbc":
-        # unixODBC headers must exist somewhere the compiler will look;
-        # otherwise the persistence extensions cannot build and must be
-        # skipped (their tests auto-skip without the driver anyway).
-        include_candidates = [
-            Path("/usr/include"),
-            Path("/usr/local/include"),
-            Path("/opt/homebrew/include"),
-            Path(sys.prefix) / "include",
-        ]
-        if conda_prefix:
-            include_candidates.append(Path(conda_prefix) / "include")
-        if not any((inc / "sql.h").exists() for inc in include_candidates):
-            print(
-                "[setup.py] Skipping odbc extensions: unixODBC headers "
-                "(sql.h) not found in any known include directory."
-            )
-            return False
-        return True
-    if dep_name == "arrow" and sys.platform == "win32":
-        # pyarrow pip package on Windows ships DLLs but not the import
-        # libraries (.lib) that MSVC needs at link time.  Skip unless
-        # Arrow C++ is installed separately (e.g. via conda).
+        if sys.platform == "win32":
+            return  # sql.h and odbc32.lib come from the Windows SDK bundled with MSVC.
+        dirs = _odbc_include_dirs()
+        if not any((inc / "sql.h").exists() for inc in dirs):
+            fail("unixODBC header sql.h not found in " + ", ".join(str(d) for d in dirs))
+        return
+    if dep_name == "arrow":
         try:
             import pyarrow as _pa
-
-            for d in _pa.get_library_dirs():
-                if (Path(d) / "arrow.lib").exists():
-                    return True
         except ImportError:
-            pass
-        if conda_prefix:
-            lib = Path(f"{conda_prefix}/Library/lib")
-            if (lib / "arrow.lib").exists():
-                return True
-        print(
-            "[setup.py] Skipping arrow extensions on Windows: "
-            "Arrow C++ import libraries (.lib) not found."
-        )
-        return False
-    return True  # All other deps must be present; build fails fast if not.
+            fail("pyarrow is not importable in the build environment")
+        if sys.platform == "win32":
+            # MSVC links against import libraries.  pyarrow wheels ship
+            # arrow.lib / parquet.lib next to the DLLs (verified for 23.x).
+            lib_dirs = [Path(d) for d in _pa.get_library_dirs()]
+            if conda_prefix:
+                lib_dirs.append(Path(conda_prefix) / "Library" / "lib")
+            if not any((d / "arrow.lib").exists() for d in lib_dirs):
+                fail("Arrow import library arrow.lib not found in "
+                     + ", ".join(str(d) for d in lib_dirs))
+        return
+    if dep_name not in _DEP_CONFIGURATORS:
+        fail(f"unknown dependency preset {dep_name!r} in its ext.*.toml "
+             f"(known: {sorted(_DEP_CONFIGURATORS)})")
+
+
+def _require_compiler():
+    """Abort before compilation if no usable C++ compiler is available.
+
+    Repository rule: anything the build needs must be verified to exist
+    before compilation begins.  Without this, setuptools fails mid-build
+    with the far less actionable "command 'g++' failed: No such file or
+    directory" (observed when building outside an activated conda env).
+    """
+    if sys.platform == "win32":
+        return  # MSVC is located by setuptools via vswhere; no cheap probe exists.
+    import shutil
+
+    cxx = os.environ.get("CXX")
+    if cxx and shutil.which(cxx.split()[0]):
+        return
+    if any(shutil.which(c) for c in ("c++", "g++", "clang++")):
+        return
+    raise SystemExit(
+        "[setup.py] No C++ compiler found (checked $CXX, c++, g++, clang++).\n"
+        "           Install one: `conda install -c conda-forge cxx-compiler` (or activate the\n"
+        "           conda env that provides it), `apt install g++` (Debian/Ubuntu), or the\n"
+        "           Xcode command-line tools (macOS)."
+    )
 
 
 _DEP_CONFIGURATORS = {
@@ -230,7 +280,7 @@ def _apply_arrow(kw):
 
 def _apply_odbc(kw):
     _apply_arrow(kw)  # Arrow + Parquet headers/libs and rpath are shared.
-    kw.setdefault("libraries", []).extend(["odbc", "parquet"])
+    kw.setdefault("libraries", []).extend([_odbc_library_name(), "parquet"])
     # Base standard is already C++23 (required for std::expected etc.).
     # MSSQL ODBC Driver 18 shared library (Linux).
     mssql_odbc_lib = Path("/opt/microsoft/msodbcsql18/lib64")
@@ -260,16 +310,16 @@ def _apply_odbc(kw):
 FAST_ROOT = Path("src/_pygim_fast")
 ext_modules = []
 
+_require_compiler()
+
 for ext_toml in sorted(FAST_ROOT.rglob("ext.*.toml")):
     ext_cfg = tomllib.loads(ext_toml.read_text(encoding="utf-8"))["extension"]
     module_name = f"pygim.{ext_cfg['module']}"
 
-    # Skip extensions whose system dependencies are not installed.
+    # Every extension is mandatory: a missing system dependency aborts the build.
     deps = ext_cfg.get("deps", [])
-    missing = [d for d in deps if not _dep_available(d)]
-    if missing:
-        print(f"[setup.py] Skipping {module_name}: missing system deps {missing}")
-        continue
+    for dep in deps:
+        _require_dep(dep, module_name)
 
     # Resolve sources relative to the colocated manifest.
     ext_stem = ext_toml.stem.split(".", 1)[1]  # "ext.factory" → "factory"
@@ -281,9 +331,7 @@ for ext_toml in sorted(FAST_ROOT.rglob("ext.*.toml")):
     # Build kwargs from dep presets
     kwargs = _base_kwargs()
     for dep in deps:
-        configurator = _DEP_CONFIGURATORS.get(dep)
-        if configurator:
-            configurator(kwargs)
+        _DEP_CONFIGURATORS[dep](kwargs)
 
     # Optional per-extension C++ standard override (default: the global standard).
     # e.g. ext.pathlike.toml sets std = "c++26" while the rest stay on c++23.

@@ -74,17 +74,15 @@ def create_df(
     >>> import pygim
     >>> df = pygim.create_df({"id": "int32", "name": "string"}, rows=10)  # doctest: +SKIP
     """
+    import pyarrow as pa  # before the extension: it links against Arrow's libs
+
     from pygim.datagen import generate as _generate  # C++ extension
 
     exporter = _generate(schema, rows, seed, null_fraction)
-    import pyarrow as pa
 
     table = pa.RecordBatchReader.from_stream(exporter).read_all()
     if format == "arrow":
         return table
-    try:
-        import polars as pl
+    import polars as pl  # hard dependency; a missing install must fail, not change the return type
 
-        return pl.from_arrow(table)
-    except ImportError:
-        return table
+    return pl.from_arrow(table)

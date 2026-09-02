@@ -37,18 +37,24 @@ jobs:
         sudo apt-get update
         sudo ACCEPT_EULA=Y apt-get install -y msodbcsql18 unixodbc-dev
 
+    - name: Install unixODBC (macOS)
+      if: matrix.os == 'macos-latest'
+      # Build-time requirement: setup.py aborts if sql.h is missing, because
+      # every extension (persistence included) is mandatory. Must not fail soft.
+      run: brew install unixodbc
+
     - name: Install MSSQL ODBC Driver 18 (macOS)
       if: matrix.os == 'macos-latest'
       # Best-effort: the Microsoft tap periodically breaks on new runner
-      # images. Persistence tests auto-skip when the driver is missing, so
-      # a failed install should not mask the rest of the test suite.
+      # images. The driver is only needed at runtime by the live-database
+      # tests, which skip when no SQL Server is reachable anyway.
       continue-on-error: true
       run: |
         brew tap microsoft/mssql-release https://github.com/microsoft/homebrew-mssql-release
         # Newer Homebrew refuses formulae from untrusted third-party taps in
         # non-interactive runs; older brews do not have the command yet.
         brew trust microsoft/mssql-release || true
-        HOMEBREW_ACCEPT_EULA=Y brew install msodbcsql18 unixodbc
+        HOMEBREW_ACCEPT_EULA=Y brew install msodbcsql18
 
     - name: Install dependencies (Linux & MacOS)
       if: matrix.os != 'windows-latest'
@@ -59,9 +65,21 @@ jobs:
 
     - name: Install dependencies (Windows)
       if: matrix.os == 'windows-latest'
+      # ODBC (sql.h, odbc32.lib) comes from the Windows SDK bundled with MSVC;
+      # Arrow import libraries (arrow.lib, parquet.lib) ship in the pyarrow wheel.
+      # On failure, surface compiler/pip errors as check annotations so the
+      # cause is visible without downloading logs.
+      shell: pwsh
       run: |
         python -m pip install --upgrade pip
-        python -m pip install .[test] -f .
+        python -m pip install .[test] -f . -v 2>&1 | Tee-Object -FilePath build.log
+        if ($LASTEXITCODE -ne 0) {
+          Get-Content build.log |
+            Select-String -Pattern 'error C\d+|fatal error|LINK :|error LNK|error:|SystemExit|\[setup\.py\]' |
+            Select-Object -First 15 |
+            ForEach-Object { Write-Output "::error::$($_.Line.Trim())" }
+          exit 1
+        }
 
     - name: Remove source files (Linux & MacOS)
       if: matrix.os != 'windows-latest'
