@@ -120,3 +120,49 @@ happily loads it — deferring the failure to an unrelated moment at runtime
 (see the RPATH decay above: the stale binary may reference libraries from
 an environment that no longer exists). `test_setup_helpers.py` pins this
 behaviour and guards against the skip pattern returning.
+
+## Conditional-compilation policy
+
+**Rule: the code that compiles must be the same everywhere.** Every line of
+first-party C++ compiles on Linux, macOS and Windows, locally and in CI. If
+something the build needs is missing, that is discovered *before*
+compilation begins (`setup.py::_require_dep`, `_require_compiler`) and the
+build aborts with an install hint — never by preprocessor fallback that
+quietly produces a different binary.
+
+Conditional compilation is allowed in exactly four situations:
+
+1. **Platform selection** between complete, equivalent implementations —
+   `#if defined(_WIN32)` choosing `LoadLibraryW` vs `dlopen` in
+   `bcp_api.h`. A platform API cannot be installed as a dependency; both
+   branches carry the full feature.
+2. **Macro hygiene** — `NOMINMAX`, `WIN32_LEAN_AND_MEAN`, `#undef BOOL/INT`,
+   include guards, and defining spec-canonical ODBC constants the platform
+   headers omit (`SQL_COPT_SS_BCP`, `DB_IN`). These never change behaviour;
+   they defend the macro namespace or supply constants whose values are
+   fixed by specification.
+3. **Explicit opt-in flags with environment-independent defaults** —
+   `PYGIM_BCP_PROFILING`, `PYGIM_SCOPE_LOGGING_ENABLED`. Default-off on
+   every machine; enabling is a deliberate developer action, never a
+   side effect of what happens to be installed.
+4. **The bounded compiler-standard fallback** —
+   `setup.py::_first_supported_std` walks c++26 → c++2c → c++23 and prints
+   what it chose. Compiler capability is the one dependency that cannot be
+   installed (Apple Clang will not grow c++26 support on demand), so the
+   code must remain valid at the floor standard — which CI proves by
+   actually compiling there.
+
+**Never allowed:** `__has_include`, or `#ifdef <symbol>` that drops
+functionality when a header or library is absent. Removed offenders, kept
+here as precedent:
+
+- `#ifdef SQL_DATETIME` around a switch case in `sql_type_map.h` —
+  `SQL_DATETIME` is core ODBC (spec value 9); the guard could only ever
+  silently remove a type mapping on a hypothetical broken platform.
+- `#ifdef VERSION_INFO … #else "dev"` in the bindings — masked a
+  build-system regression as version `"dev"`; now `#error`.
+- `except ImportError: return table` in `create_df` — polars is a hard
+  dependency; the fallback changed the return type on a broken install.
+
+`test_setup_helpers.py::test_no_availability_conditional_compilation`
+enforces the bans mechanically (vendored `third_party/` exempt).

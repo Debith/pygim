@@ -83,9 +83,8 @@ PYBIND11_MODULE(pathset, m)
 
     /* ...add size_gt(), newer_than(), etc. the same way… */
 
-    #ifdef VERSION_INFO
+#ifndef VERSION_INFO
+#error "VERSION_INFO must be defined by the build system (setup.py base_macros)"
+#endif
     m.attr("__version__") = MACRO_STRINGIFY(VERSION_INFO);
-    #else
-    m.attr("__version__") = "dev";
-    #endif
 }

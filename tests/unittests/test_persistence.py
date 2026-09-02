@@ -305,7 +305,7 @@ def test_acquire_datastore_invalid_format():
 
 def test_acquire_datastore_live_round_trip():
     pyodbc = pytest.importorskip("pyodbc")
-    pl = pytest.importorskip("polars")
+    import polars as pl  # hard dependency of pygim: must be present wherever pygim imports
 
     conn_str = _integration_conn_str(pyodbc)
     table_name = f"pygim_persist_{uuid.uuid4().hex[:8]}"

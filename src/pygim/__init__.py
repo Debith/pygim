@@ -83,9 +83,6 @@ def create_df(
     table = pa.RecordBatchReader.from_stream(exporter).read_all()
     if format == "arrow":
         return table
-    try:
-        import polars as pl
+    import polars as pl  # hard dependency; a missing install must fail, not change the return type
 
-        return pl.from_arrow(table)
-    except ImportError:
-        return table
+    return pl.from_arrow(table)

@@ -126,3 +126,45 @@ def test_setup_py_never_skips_an_extension():
     src = SETUP_PY.read_text(encoding="utf-8")
     assert "Skipping" not in src
     assert "_dep_available" not in src
+
+
+def test_missing_compiler_is_a_preflight_build_error(monkeypatch):
+    import shutil
+    ns = _extract("_require_compiler")
+    monkeypatch.setattr(sys, "platform", "linux")
+    monkeypatch.delenv("CXX", raising=False)
+    monkeypatch.setattr(shutil, "which", lambda _c: None)
+    with pytest.raises(SystemExit) as exc:
+        ns["_require_compiler"]()
+    assert "No C++ compiler" in str(exc.value)
+
+
+def test_present_compiler_passes(monkeypatch):
+    import shutil
+    ns = _extract("_require_compiler")
+    monkeypatch.setattr(sys, "platform", "linux")
+    monkeypatch.delenv("CXX", raising=False)
+    monkeypatch.setattr(shutil, "which", lambda c: "/usr/bin/c++" if c == "c++" else None)
+    assert ns["_require_compiler"]() is None
+
+
+def test_no_availability_conditional_compilation():
+    """Repository rule: code must never silently vary with the environment.
+
+    Banned in first-party C++: `__has_include` (compiles different code
+    depending on what happens to be installed) and the `#ifdef VERSION_INFO`
+    fallback pattern (masks a build-system regression as version "dev").
+    Platform selection (#if defined(_WIN32)), macro hygiene and explicit
+    opt-in flags with environment-independent defaults remain allowed —
+    see docs/design/cpp_runtime_linking.md.
+    """
+    fast = SETUP_PY.parent / "src" / "_pygim_fast"
+    offenders = []
+    for f in list(fast.rglob("*.h")) + list(fast.rglob("*.cpp")):
+        if "third_party" in f.parts:
+            continue  # vendored code is exempt
+        text = f.read_text(encoding="utf-8", errors="ignore")
+        for banned in ("__has_include", "#ifdef VERSION_INFO"):
+            if banned in text:
+                offenders.append(f"{f.relative_to(fast)}: {banned}")
+    assert not offenders, offenders

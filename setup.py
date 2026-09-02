@@ -187,6 +187,31 @@ def _require_dep(dep_name, module_name):
              f"(known: {sorted(_DEP_CONFIGURATORS)})")
 
 
+def _require_compiler():
+    """Abort before compilation if no usable C++ compiler is available.
+
+    Repository rule: anything the build needs must be verified to exist
+    before compilation begins.  Without this, setuptools fails mid-build
+    with the far less actionable "command 'g++' failed: No such file or
+    directory" (observed when building outside an activated conda env).
+    """
+    if sys.platform == "win32":
+        return  # MSVC is located by setuptools via vswhere; no cheap probe exists.
+    import shutil
+
+    cxx = os.environ.get("CXX")
+    if cxx and shutil.which(cxx.split()[0]):
+        return
+    if any(shutil.which(c) for c in ("c++", "g++", "clang++")):
+        return
+    raise SystemExit(
+        "[setup.py] No C++ compiler found (checked $CXX, c++, g++, clang++).\n"
+        "           Install one: `conda install -c conda-forge cxx-compiler` (or activate the\n"
+        "           conda env that provides it), `apt install g++` (Debian/Ubuntu), or the\n"
+        "           Xcode command-line tools (macOS)."
+    )
+
+
 _DEP_CONFIGURATORS = {
     "arrow": lambda kw: _apply_arrow(kw),
     "odbc": lambda kw: _apply_odbc(kw),
@@ -284,6 +309,8 @@ def _apply_odbc(kw):
 
 FAST_ROOT = Path("src/_pygim_fast")
 ext_modules = []
+
+_require_compiler()
 
 for ext_toml in sorted(FAST_ROOT.rglob("ext.*.toml")):
     ext_cfg = tomllib.loads(ext_toml.read_text(encoding="utf-8"))["extension"]

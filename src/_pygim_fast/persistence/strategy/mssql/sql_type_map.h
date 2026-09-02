@@ -105,9 +105,7 @@ struct TypeMapping {
                 static_cast<int64_t>(sizeof(SQL_DATE_STRUCT))};
 
     case SQL_TYPE_TIMESTAMP:
-#ifdef SQL_DATETIME
-    case SQL_DATETIME:
-#endif
+    case SQL_DATETIME:  // core ODBC (value 9); if a platform lacked it the build must fail, not degrade
         return {arrow::timestamp(arrow::TimeUnit::MICRO), SQL_C_TYPE_TIMESTAMP,
                 static_cast<int64_t>(sizeof(SQL_TIMESTAMP_STRUCT))};
 
