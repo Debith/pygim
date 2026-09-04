@@ -64,7 +64,7 @@ public:
         }
     };
 
-    using RegistryType = RegistryCore<Key, Creator, CreatorHash, CreatorEq, NoHooks<Key, Creator, Product>, Product>;
+    using RegistryType = DynamicRegistryCore<Key, Creator, CreatorHash, CreatorEq, NoHooks<Key, Creator, Product>, Product>;
 
     /**
      * \brief Create a factory core with a validation policy.

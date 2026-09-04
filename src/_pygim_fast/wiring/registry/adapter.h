@@ -100,7 +100,7 @@ struct QualnameKeyPolicy {
 };
 
 template<class KeyPolicy, class Value, bool EnableHooks = false>
-using RegistryT = core::RegistryCore<
+using RegistryT = core::DynamicRegistryCore<
     typename KeyPolicy::key_type,
     Value,
     typename KeyPolicy::Hash,
