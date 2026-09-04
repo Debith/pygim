@@ -125,7 +125,7 @@ void bind_one(py::module_& m) {
     static const std::string name = std::string(E::info.name) + "file";   // == class_name<E>, as a run-time string
     static const std::string doc = std::string(E::info.doc) + " Constructing one pins the engine (" +
                                    std::string(E::info.label) + ").";
-    py::class_<typed_file<E>, file>(m, name.c_str(), py::doc(doc.c_str()))
+    py::class_<typed_file<E>, file>(m, name.c_str(), doc.c_str())
         .def(py::init([](fs::path p) { return typed_file<E>(file(std::move(p), &E::info)); }),
              py::arg("path"));
 }

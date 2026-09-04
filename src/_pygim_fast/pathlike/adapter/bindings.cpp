@@ -212,7 +212,7 @@ const std::string& path_doc() {
 PYBIND11_MODULE(pathlike, m) {
     m.doc() = "path(): an os.PathLike that reads & decodes itself with the optimal engine.";
 
-    py::class_<file>(m, "file", py::doc(file_doc().c_str()))
+    py::class_<file>(m, "file", file_doc().c_str())   // class docs take a bare const char* (py::doc is for functions)
         .def(py::init([](fs::path p, const std::optional<std::string>& engine) {
                  return file(std::move(p), engine_from_arg(engine));
              }),
