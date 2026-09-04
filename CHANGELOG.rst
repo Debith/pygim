@@ -13,6 +13,7 @@ Unreleased
 ----------
 Changed
 ~~~~~~~
+- Registry: ``RegistryCore`` is now written against a storage concept (``mapping/storage.h``, from the mapping toolkit) instead of a hard-wired ``std::unordered_map``. Two engines: ``mapping::hash_storage`` (the run-time registry — ``DynamicRegistryCore``, what ``Registry`` and ``Factory`` use; behaviour unchanged) and ``mapping::flat_storage`` (``StaticRegistryCore``: a literal type, built and deduplicated in constant evaluation and queried by ``static_assert`` and at run time alike). ``tests/static/registry_core_proofs.cpp`` carries the storage laws and the registry laws and is compiled into every build; with C++26 constexpr exceptions the duplicate rejection itself is proven.
 - Wiring: Group internal registry, factory, and IoC native modules under ``src/_pygim_fast/wiring/`` while keeping public module names stable (``pygim.registry``, ``pygim.factory``, ``pygim.ioc``).
 - Wiring: Factor shared pybind adapter validation helpers into ``src/_pygim_fast/wiring/common/`` for reuse across wiring modules.
 - Build: Move native extension ``ext.*.toml`` manifests next to their corresponding module sources and resolve manifest ``sources`` relative to each TOML file.

@@ -1,3 +1,6 @@
 [extension]
 module = "registry"
-sources = ["bindings.cpp"]
+# tests/static/registry_core_proofs.cpp holds the compile-time proof suite for
+# the storage engines and RegistryCore (wired into the sources so every build
+# proves them; it contributes no runtime code).
+sources = ["bindings.cpp", "../../../../tests/static/registry_core_proofs.cpp"]
