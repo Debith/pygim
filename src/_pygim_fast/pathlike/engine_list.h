@@ -177,6 +177,20 @@ consteval auto ext_inventory_buffer() {
 template <EngineMeta... Es>
 inline constexpr auto ext_inventory_buf = ext_inventory_buffer<Es...>();
 
+// Run-time counterparts of the inventories: plain std::string folds.
+template <EngineMeta E>
+void append_known_text(std::string& out) {
+    if (!out.empty()) out += ", ";
+    out += std::string(E::info.name) + "/" + std::string(E::info.label);
+}
+template <EngineMeta E>
+void append_ext_text(std::string& out) {
+    for (std::string_view x : E::info.exts) {
+        if (!out.empty()) out += " ";
+        out += std::string(x);
+    }
+}
+
 // "<name>file" — the Python class name of an engine's typed file, as a
 // NUL-terminated buffer with static storage (pybind11 may keep the pointer).
 template <EngineMeta E>
@@ -237,41 +251,49 @@ struct engine_list {
         return t;
     }
 
-    // ── lookups (constexpr: provable) ─────────────────────────────────────
-    // In constant evaluation the table is built transiently (a constexpr
-    // std::vector cannot outlive its evaluation); at run time it is built once
-    // per process, in a plain function so no static lives in a constexpr body.
+    // ── lookups ───────────────────────────────────────────────────────────
+    // Two entry points per table, deliberately kept apart (no `if consteval`):
+    // the constexpr ones build the table transiently and serve the proofs — a
+    // constexpr std::vector cannot outlive its evaluation — and the run-time
+    // ones build it once per process in a plain function. Both build it with
+    // the same code, so the proven table IS the served table.
     [[nodiscard]] static constexpr const engine_info* lookup(const table& t, std::string_view key) noexcept {
         const engine_info* const* hit = t.try_get_const(key);
         return hit ? *hit : nullptr;
     }
+
+    // The engine that auto-dispatches an extension (lower-case, leading dot), or nullptr.
+    [[nodiscard]] static constexpr const engine_info* for_ext(std::string_view ext) {
+        const table t = ext_table();
+        return lookup(t, ext);
+    }
     [[nodiscard]] static const engine_info* for_ext_at_runtime(std::string_view ext) {
         static const table t = ext_table();
         return lookup(t, ext);
+    }
+
+    // The engine an engine= selector names (format name, library label or alias), or nullptr.
+    [[nodiscard]] static constexpr const engine_info* from_name(std::string_view n) {
+        const table t = selector_table();
+        return lookup(t, n);
     }
     [[nodiscard]] static const engine_info* from_name_at_runtime(std::string_view n) {
         static const table t = selector_table();
         return lookup(t, n);
     }
 
-    // The engine that auto-dispatches an extension (lower-case, leading dot), or nullptr.
-    [[nodiscard]] static constexpr const engine_info* for_ext(std::string_view ext) {
-        if consteval {
-            const table t = ext_table();
-            return lookup(t, ext);
-        } else {
-            return for_ext_at_runtime(ext);
-        }
+    // The inventories as run-time strings, built by plain folds (the constexpr
+    // `known`/`ext_inventory` above serve the proofs; run-time code must not
+    // odr-use a consteval-built variable template).
+    [[nodiscard]] static std::string known_text() {
+        std::string out;
+        (detail::append_known_text<Es>(out), ...);
+        return out;
     }
-
-    // The engine an engine= selector names (format name, library label or alias), or nullptr.
-    [[nodiscard]] static constexpr const engine_info* from_name(std::string_view n) {
-        if consteval {
-            const table t = selector_table();
-            return lookup(t, n);
-        } else {
-            return from_name_at_runtime(n);
-        }
+    [[nodiscard]] static std::string ext_inventory_text() {
+        std::string out;
+        (detail::append_ext_text<Es>(out), ...);
+        return out;
     }
 
     // Position in the pack (== size when unknown).
@@ -301,20 +323,20 @@ struct engine_list {
     // ── resolution (runtime; throws with derived inventories) ─────────────
     // The engine read()/write() would use for f: the constructor pin, else the extension.
     [[nodiscard]] static const engine_info* resolved(const file& f) {
-        return f.pinned() ? f.pinned() : for_ext(f.ext_key());
+        return f.pinned() ? f.pinned() : for_ext_at_runtime(f.ext_key());
     }
 
     // Precedence: an explicit engine= wins, then the pin, then the extension.
     // Throws std::invalid_argument (Python ValueError) rather than guessing.
     [[nodiscard]] static const engine_info* resolve(const file& f, std::string_view requested) {
         if (!requested.empty()) {
-            if (const engine_info* e = from_name(requested)) return e;
+            if (const engine_info* e = from_name_at_runtime(requested)) return e;
             throw std::invalid_argument("unknown engine: '" + std::string(requested) + "' (known: " +
-                                        std::string(known) + ")");
+                                        known_text() + ")");
         }
         if (const engine_info* e = resolved(f)) return e;
         throw std::invalid_argument("no engine for extension '" + f.ext_key() + "' (known: " +
-                                    std::string(ext_inventory) +
+                                    ext_inventory_text() +
                                     ") — pass engine= at construction or read(engine=...)");
     }
 

@@ -58,21 +58,35 @@ template <class... Es>
 // the first matching engine runs and short-circuits the rest. Plain folds
 // rather than visit() with capturing generic lambdas — the construct set
 // every compiler in the matrix handles at run time (MSVC included).
+template <Engine E>
+bool load_if(const engine_info* e, const file& f, detail::KeyCache& keys, py::object& out) {
+    if (e != &E::info) return false;
+    out = E::load(f, keys);
+    return true;
+}
+
 template <Engine... Es>
 [[nodiscard]] py::object load(engine_list<Es...>, const engine_info* e, const file& f,
                               std::size_t key_cache_capacity = 256) {
     detail::KeyCache keys(key_cache_capacity);
     py::object out;
-    const bool hit = ((e == &Es::info ? (out = Es::load(f, keys), true) : false) || ...);
+    const bool hit = (load_if<Es>(e, f, keys, out) || ...);
     if (!hit) throw std::invalid_argument("no engine resolved for " + f.fspath());
     return out;
+}
+
+template <Engine E>
+bool write_if(const engine_info* e, const file& f, py::handle obj) {
+    if (e != &E::info) return false;
+    E::write(f, obj);
+    return true;
 }
 
 // Serialise `obj` to `f` with engine `e`. Each engine enforces its own format
 // constraints (TOML: mapping root, no null; JSONL: list root; ...).
 template <Engine... Es>
 void write(engine_list<Es...>, const engine_info* e, const file& f, py::handle obj) {
-    const bool hit = ((e == &Es::info ? (Es::write(f, obj), true) : false) || ...);
+    const bool hit = (write_if<Es>(e, f, obj) || ...);
     if (!hit) throw std::invalid_argument("no engine resolved for " + f.fspath());
 }
 
@@ -86,12 +100,19 @@ struct typed_file : file {
     explicit typed_file(file f) : file(std::move(f)) {}
 };
 
+template <Engine E>
+bool wrap_if(const engine_info* e, const file& f, py::object& out) {
+    if (e != &E::info) return false;
+    out = py::cast(typed_file<E>(f));
+    return true;
+}
+
 // Cast a file as the typed subclass of its resolved engine (plain file if none).
 template <Engine... Es>
 [[nodiscard]] py::object wrap(engine_list<Es...>, file f) {
     const engine_info* e = engine_list<Es...>::resolved(f);
     py::object out;
-    const bool hit = ((e == &Es::info ? (out = py::cast(typed_file<Es>(f)), true) : false) || ...);
+    const bool hit = (wrap_if<Es>(e, f, out) || ...);
     return hit ? out : py::cast(std::move(f));
 }
 
@@ -101,9 +122,10 @@ template <Engine... Es>
 // generic lambda's template parameter from a lambda nested inside it.)
 template <Engine E>
 void bind_one(py::module_& m) {
+    static const std::string name = std::string(E::info.name) + "file";   // == class_name<E>, as a run-time string
     static const std::string doc = std::string(E::info.doc) + " Constructing one pins the engine (" +
                                    std::string(E::info.label) + ").";
-    py::class_<typed_file<E>, file>(m, detail::class_name_buf<E>.data(), doc.c_str())
+    py::class_<typed_file<E>, file>(m, name.c_str(), doc.c_str())
         .def(py::init([](fs::path p) { return typed_file<E>(file(std::move(p), &E::info)); }),
              py::arg("path"));
 }

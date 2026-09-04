@@ -67,8 +67,8 @@ namespace {
 // None or "" -> auto (nullptr); a known selector -> its engine; else throws.
 const engine_info* engine_from_arg(const std::optional<std::string>& name) {
     if (!name || name->empty()) return nullptr;
-    if (const engine_info* e = Engines::from_name(*name)) return e;
-    throw std::invalid_argument("unknown engine: '" + *name + "' (known: " + std::string(Engines::known) + ")");
+    if (const engine_info* e = Engines::from_name_at_runtime(*name)) return e;
+    throw std::invalid_argument("unknown engine: '" + *name + "' (known: " + Engines::known_text() + ")");
 }
 
 std::string_view requested(const std::optional<std::string>& engine) {
@@ -201,7 +201,7 @@ const std::string& path_doc() {
         "Wrap a path in a self-reading, self-decoding file() — typed as the engine's ``<name>file`` "
         "class when an engine resolves. Pass engine= to pin the decoder (" + names_list() +
         ", a library label, or an alias); default resolves from the extension. Known engines: " +
-        std::string(Engines::known) + ".";
+        Engines::known_text() + ".";
     return s;
 }
 
