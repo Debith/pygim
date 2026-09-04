@@ -43,6 +43,16 @@ def show_support():
     GimmicksCliApp().show_support()
 
 
+@cli.command()
+@flag_opt("--check", help="Report whether the stub is current instead of rewriting it (exit 1 if stale).")
+def stubs(check):
+    """Regenerate the engine block of pygim/pathlike.pyi from the built module.
+
+    pathlike's engines are discovered by the build (one header each), so the
+    stub's Engine literal and <name>file classes are derived, not hand-written."""
+    GimmicksCliApp().stubs(check=check)
+
+
 @click.command()
 @click.argument("text", type=str, nargs=1)
 def cli_oo(text):

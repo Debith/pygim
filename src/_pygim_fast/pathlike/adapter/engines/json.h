@@ -1,17 +1,22 @@
 #pragma once
-// pathlike/engine_json.h — the simdjson engine: strict, SIMD-accelerated JSON
-// reads. JSON writing goes through the shared ryml tree (see engine_yaml.h),
+// pathlike/adapter/engines/json.h — the simdjson engine: strict, SIMD-accelerated
+// JSON reads. JSON writing goes through the shared ryml tree (see yaml.h),
 // which emits JSON text directly.
+//
+// One file IS one engine: the descriptor at the bottom is what the build
+// discovers into the registry (see ../../registry.h).
 
+#include <array>
 #include <string>
 #include <string_view>
 
 #include <pybind11/pybind11.h>
 
-#include "third_party/simdjson/simdjson.h"
-#include "common.h"
-#include "../core.h"
-#include "materialize.h"
+#include "../third_party/simdjson/simdjson.h"
+#include "../../core.h"
+#include "../common.h"
+#include "../materialize.h"
+#include "yaml.h"   // the shared ryml JSON emitter (write side)
 
 namespace pygim::pathlike::detail {
 
@@ -64,3 +69,23 @@ namespace pygim::pathlike::detail {
 }
 
 }  // namespace pygim::pathlike::detail
+
+// ── Registry entry ─────────────────────────────────────────────────────────
+namespace pygim::pathlike::engines {
+
+struct json {
+    static constexpr std::array<std::string_view, 1> exts{".json"};
+    static constexpr std::array<std::string_view, 0> aliases{};
+    static constexpr engine_info info{
+        .name = "json",
+        .label = "simdjson",
+        .doc = "JSON via simdjson (strict, SIMD-accelerated); writes real JSON and rejects non-finite floats.",
+        .exts = exts,
+        .aliases = aliases,
+    };
+
+    static py::object load(const file& f, detail::KeyCache& keys) { return detail::load_json(f, keys); }
+    static void write(const file& f, py::handle obj) { detail::write_ryml(f, obj, /*json_mode=*/true); }
+};
+
+}  // namespace pygim::pathlike::engines

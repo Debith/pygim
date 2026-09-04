@@ -5,7 +5,6 @@
 // extension needs it; today the UTF-8 validator rides on simdjson, which is
 // vendored inside pathlike, so it lives here.
 
-#include <fstream>
 #include <string>
 #include <string_view>
 
@@ -36,11 +35,6 @@ inline void require_utf8(const std::string& bytes, const std::string& fspath) {
     }
 }
 
-inline void write_text_file(const file& f, std::string_view text) {
-    std::ofstream ofs(f.path(), std::ios::binary | std::ios::trunc);
-    if (!ofs) throw std::runtime_error("cannot open file for writing: " + f.fspath());
-    ofs.write(text.data(), static_cast<std::streamsize>(text.size()));
-    if (!ofs) throw std::runtime_error("write failed: " + f.fspath());
-}
+inline void write_text_file(const file& f, std::string_view text) { f.write_bytes(text); }
 
 }  // namespace pygim::pathlike::detail

@@ -1,6 +1,9 @@
 #pragma once
-// pathlike/engine_yaml.h — the rapidyaml engine: YAML read, and the shared
-// ryml-tree write path (rapidyaml emits both YAML and JSON text).
+// pathlike/adapter/engines/yaml.h — the rapidyaml engine: YAML read, and the
+// shared ryml-tree write path (rapidyaml emits both YAML and JSON text).
+//
+// One file IS one engine: the descriptor at the bottom is what the build
+// discovers into the registry (see ../../registry.h).
 //
 // rapidyaml aborts the process on a parse error by default; we install a
 // throwing error callback so malformed input surfaces as a Python exception.
@@ -12,15 +15,16 @@
 // is done and the declaration lands.
 
 #include <cmath>
+#include <array>
 #include <string>
 #include <string_view>
 
 #include <pybind11/pybind11.h>
 
-#include "third_party/rapidyaml/ryml_all.hpp"
-#include "common.h"
-#include "../core.h"
-#include "materialize.h"
+#include "../third_party/rapidyaml/ryml_all.hpp"
+#include "../../core.h"
+#include "../common.h"
+#include "../materialize.h"
 
 namespace pygim::pathlike::detail {
 
@@ -195,3 +199,28 @@ inline void write_ryml(const file& f, py::handle obj, bool json_mode) {
 }
 
 }  // namespace pygim::pathlike::detail
+
+// ── Registry entry ─────────────────────────────────────────────────────────
+// Discovered by the build from this file's location (adapter/engines/*.h); the
+// struct name must equal the file stem. Everything Python-facing — the
+// `yamlfile` class, `.engine == "rapidyaml"`, `engine="yaml"|"yml"|"rapidyaml"`,
+// the error inventories and docstrings — is derived from `info`.
+namespace pygim::pathlike::engines {
+
+struct yaml {
+    static constexpr std::array<std::string_view, 2> exts{".yaml", ".yml"};
+    static constexpr std::array<std::string_view, 1> aliases{"yml"};
+    static constexpr engine_info info{
+        .name = "yaml",
+        .label = "rapidyaml",
+        .doc = "YAML 1.2 (core schema) via rapidyaml: anchors, aliases and merge keys are resolved; "
+               "strings that would read back typed are quoted on write.",
+        .exts = exts,
+        .aliases = aliases,
+    };
+
+    static py::object load(const file& f, detail::KeyCache& keys) { return detail::load_yaml(f, keys); }
+    static void write(const file& f, py::handle obj) { detail::write_ryml(f, obj, /*json_mode=*/false); }
+};
+
+}  // namespace pygim::pathlike::engines

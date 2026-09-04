@@ -13,6 +13,8 @@ Unreleased
 ----------
 Changed
 ~~~~~~~
+- PathLike: The engine registry is now OPEN. Every engine is one header in ``src/_pygim_fast/pathlike/adapter/engines/`` (a struct with a constexpr ``engine_info`` plus static ``load``/``write``); the build discovers the directory into a generated type list (``[extension.typelist]`` in ``ext.pathlike.toml``, ``setup.py::_apply_typelist``), and extension/name lookup, error inventories, the ``<name>file`` typed classes, docstrings and the new ``pathlike.ENGINES`` record are all folds over it. ``enum class Engine`` and the hand-maintained tables are gone (the extension and selector tables are ``StaticRegistryCore`` instances built from the pack); the compile-time proofs are generic over the pack (positive and negative, ``tests/static/pathlike_core_proofs.cpp``) and asserted on the real pack in every build, with a C++26 ``static_assert`` message naming the offending engine where the compiler supports it. With P2996 reflection (GCC 16, ``-freflection``, passed via the new ``flags_if_supported`` manifest key when the compiler accepts it) the build additionally proves that the generated list equals the engine structs the compiler sees and that every engine is named after its struct. Adding a format is adding a file. See ``docs/design/pathlike_engine_registry.md``.
+- Build: Every header an extension reaches through quoted includes is a build dependency (``setup.py::_header_dependencies``), so a header-only edit — including one in another extension's directory — rebuilds exactly the extensions that include it.
 - Registry: ``RegistryCore`` is now written against a storage concept (``mapping/storage.h``, from the mapping toolkit) instead of a hard-wired ``std::unordered_map``. Two engines: ``mapping::hash_storage`` (the run-time registry — ``DynamicRegistryCore``, what ``Registry`` and ``Factory`` use; behaviour unchanged) and ``mapping::flat_storage`` (``StaticRegistryCore``: a literal type, built and deduplicated in constant evaluation and queried by ``static_assert`` and at run time alike). ``tests/static/registry_core_proofs.cpp`` carries the storage laws and the registry laws and is compiled into every build; with C++26 constexpr exceptions the duplicate rejection itself is proven.
 - Wiring: Group internal registry, factory, and IoC native modules under ``src/_pygim_fast/wiring/`` while keeping public module names stable (``pygim.registry``, ``pygim.factory``, ``pygim.ioc``).
 - Wiring: Factor shared pybind adapter validation helpers into ``src/_pygim_fast/wiring/common/`` for reuse across wiring modules.
@@ -63,6 +65,9 @@ Removed
 
 Added
 ~~~~~
+- PathLike: Add a JSON Lines engine — ``.jsonl``/``.ndjson`` (or ``engine="jsonl"``) read as a list, one item per document, via simdjson's document stream, and write one compact JSON document per line from a list root; ``pygim.pathlike.jsonlfile`` is the typed class and ``.engine`` reports ``simdjson-ndjson``. Parse errors name the file and line.
+- PathLike: Add ``file.write_bytes(data)`` and ``file.mkdir(parents=, exist_ok=)`` (pathlib parity).
+- CLI: Add ``pygim stubs [--check]`` — regenerates the engine block of ``pygim/pathlike.pyi`` from the built module (a test keeps it current).
 - IoC: Add ``pygim.ioc.Container`` with transient/singleton lifecycles, named registrations, decorator application, and strict override semantics implemented with the same core/adapter/bindings pattern as registry and factory.
 - Examples: Add runnable IoC container example under ``docs/examples/ioc/``.
 - Examples: Add runnable IoC autowiring example under ``docs/examples/ioc/``.

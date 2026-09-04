@@ -69,6 +69,19 @@ class GimmicksCliApp:
     def ai(self, text):
         print("AI is not implemented yet!")
 
+    def stubs(self, *, check: bool = False) -> None:
+        """Regenerate (or verify) the generated block of pygim/pathlike.pyi."""
+        from pygim import _stubs
+
+        stale = _stubs.update(check=check)
+        path = _stubs.stub_path()
+        if check:
+            click.echo(f"{path}: {'STALE — run `pygim stubs`' if stale else 'up to date'}")
+            if stale:
+                sys.exit(1)
+        else:
+            click.echo(f"{path}: {'rewritten' if stale else 'already up to date'}")
+
     def show_support(self):
         rows = []
         try:

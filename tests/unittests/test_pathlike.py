@@ -853,3 +853,210 @@ def test_direct_subclass_construction_pins(temp_dir):
     assert p.engine == "rapidyaml" and isinstance(p, yamlfile)
     assert p.read() == {"k": 1}
     assert isinstance(p.with_name("other.dat"), yamlfile)  # pin travels, type too
+
+
+# --------------------------------------------------------------------------- #
+# JSONL engine (simdjson document stream): one document per line <-> a list
+# --------------------------------------------------------------------------- #
+@pytest.mark.parametrize("text", [
+    '{"a": 1}\n{"b": [1, 2]}\n',
+    '{"a": 1}\r\n{"b": 2}\r\n',                      # CRLF
+    '{"a": 1}\n\n\n{"b": 2}',                        # blank lines, no trailing newline
+    '1\n"two"\nnull\ntrue\n2.5\n[]\n{}\n',           # scalar documents
+    '{"s": "line\\nbreak", "u": "\\u00e9"}\n',
+])
+def test_jsonl_read_matches_stdlib_per_line(temp_dir, text):
+    import json
+
+    f = _write(temp_dir, "rows.jsonl", text)
+    expected = [json.loads(line) for line in text.splitlines() if line.strip()]
+    assert pygim.path(f).read() == expected
+
+
+def test_jsonl_empty_and_whitespace_only_read_as_empty_list(temp_dir):
+    assert pygim.path(_write(temp_dir, "empty.jsonl", "")).read() == []
+    assert pygim.path(_write(temp_dir, "blank.jsonl", "\n \n")).read() == []
+
+
+def test_jsonl_bom_tolerated_and_utf16_refused(temp_dir):
+    f = _write_bytes(temp_dir, "bom.jsonl", b"\xef\xbb\xbf" + b'{"k": 1}\n')
+    assert pygim.path(f).read() == [{"k": 1}]
+    g = _write_bytes(temp_dir, "u16.jsonl", '{"k": 1}\n'.encode("utf-16"))
+    with pytest.raises(RuntimeError, match="UTF-8"):
+        pygim.path(g).read()
+
+
+def test_jsonl_parse_error_names_file_and_line(temp_dir):
+    f = _write(temp_dir, "bad.jsonl", '{"a": 1}\n{"b": 2}\nnot json\n{"c": 3}\n')
+    with pytest.raises(RuntimeError, match=r"bad\.jsonl, line 3"):
+        pygim.path(f).read()
+
+
+@pytest.mark.parametrize("rows", [
+    [],
+    [{"a": 1}, {"b": [1, 2, {"c": None}]}],
+    [1, "two", None, True, 2.5, [], {}],
+    [{"s": "multi\nline", "q": 'quo"te', "t": "true"}],
+])
+def test_jsonl_write_read_roundtrip_one_document_per_line(temp_dir, rows):
+    import json
+
+    p = pygim.path(temp_dir / "out.jsonl")
+    p.write(rows)
+    text = (temp_dir / "out.jsonl").read_text(encoding="utf-8")
+    lines = text.splitlines()
+    assert len(lines) == len(rows) and (text == "" or text.endswith("\n"))
+    assert [json.loads(line) for line in lines] == rows     # every line is a JSON document
+    assert p.read() == rows
+
+
+def test_jsonl_write_requires_a_list_root(temp_dir):
+    p = pygim.path(temp_dir / "out.jsonl")
+    with pytest.raises(ValueError, match="list or tuple"):
+        p.write({"a": 1})
+    p.write(({"a": 1},))                                    # tuples are sequences too
+    assert p.read() == [{"a": 1}]
+
+
+def test_jsonl_engine_resolution_and_typed_class(temp_dir):
+    from pygim.pathlike import jsonfile, jsonlfile
+
+    assert isinstance(pygim.path("a.jsonl"), jsonlfile)
+    assert isinstance(pygim.path("a.ndjson"), jsonlfile)
+    assert not isinstance(pygim.path("a.json"), jsonlfile)
+    assert not isinstance(pygim.path("a.jsonl"), jsonfile)
+    assert pygim.path("a.jsonl").engine == "simdjson-ndjson"
+    assert pygim.path("a.JSONL").engine == "simdjson-ndjson"
+    f = _write(temp_dir, "rows.dat", '{"k": 1}\n')
+    assert pygim.path(f, engine="jsonl").read() == [{"k": 1}]
+    assert pygim.path(f).read(engine="ndjson") == [{"k": 1}]
+    assert jsonlfile(f).read() == [{"k": 1}]
+    assert pygim.path(f, engine="simdjson-ndjson").engine == "simdjson-ndjson"   # label round-trips
+
+
+# --------------------------------------------------------------------------- #
+# write_bytes / mkdir (pathlib parity)
+# --------------------------------------------------------------------------- #
+def test_write_bytes_roundtrips_raw(temp_dir):
+    p = pygim.path(temp_dir / "blob.bin")
+    p.write_bytes(b"\x00\xff\r\n")
+    assert p.read_bytes() == b"\x00\xff\r\n"
+    assert (temp_dir / "blob.bin").read_bytes() == b"\x00\xff\r\n"
+
+
+def test_write_bytes_into_missing_directory_fails_loudly(temp_dir):
+    with pytest.raises(RuntimeError, match="cannot open file for writing"):
+        pygim.path(temp_dir / "missing" / "blob.bin").write_bytes(b"x")
+
+
+def test_mkdir_semantics_match_pathlib(temp_dir):
+    d = pygim.path(temp_dir / "a" / "b")
+    with pytest.raises(RuntimeError):
+        d.mkdir()                                            # parent missing
+    d.mkdir(parents=True)
+    assert d.is_dir()
+    with pytest.raises(RuntimeError, match="exists"):
+        d.mkdir()
+    d.mkdir(exist_ok=True)                                   # idempotent
+    d.mkdir(parents=True, exist_ok=True)
+    (temp_dir / "file").write_text("x")
+    with pytest.raises(RuntimeError, match="not a directory"):
+        pygim.path(temp_dir / "file").mkdir(exist_ok=True)
+
+
+# --------------------------------------------------------------------------- #
+# The OPEN engine registry: one header per engine, discovered by the build.
+# These tests are written once against pathlike.ENGINES, so a new engine is
+# covered without new test code — and cannot land half-wired.
+# --------------------------------------------------------------------------- #
+def _engines():
+    from pygim import pathlike
+
+    return pathlike.ENGINES
+
+
+def test_engines_record_shape():
+    from pygim import pathlike
+
+    names = [e.name for e in pathlike.ENGINES]
+    assert names == sorted(names) and len(set(names)) == len(names)   # pack order = sorted stems
+    for e in pathlike.ENGINES:
+        assert e.name and e.label and e.doc and e.extensions
+        assert all(x.startswith(".") and x == x.lower() for x in e.extensions)
+        assert all(a == a.lower() for a in e.aliases)
+
+
+@pytest.mark.parametrize("engine", _engines(), ids=lambda e: e.name)
+def test_every_engine_is_fully_wired(engine, temp_dir):
+    from pygim import pathlike
+
+    cls = getattr(pathlike, engine.name + "file")           # the typed class exists...
+    assert issubclass(cls, pathlike.file) and cls is not pathlike.file
+    for ext in engine.extensions:                            # ...its extensions dispatch to it...
+        p = pygim.path("x" + ext)
+        assert isinstance(p, cls) and p.engine == engine.label
+        assert pygim.path("x" + ext.upper()).engine == engine.label   # case-folded
+    for selector in (engine.name, engine.label, *engine.aliases):   # ...every selector pins it...
+        p = pygim.path("x.dat", engine=selector)
+        assert isinstance(p, cls) and p.engine == engine.label
+        assert pygim.path("x.dat", engine=engine.label).engine == engine.label   # label round-trips
+    direct = cls(temp_dir / "x.dat")                         # ...and direct construction pins it
+    assert isinstance(direct, cls) and direct.engine == engine.label
+    assert isinstance(direct.with_name("y.dat"), cls)
+    assert repr(direct).endswith(f'engine={engine.label})')
+
+
+def test_unknown_engine_error_lists_every_engine():
+    with pytest.raises(ValueError, match="unknown engine: 'xml'") as info:
+        pygim.path("a.yaml", engine="xml")
+    for e in _engines():
+        assert f"{e.name}/{e.label}" in str(info.value)
+    with pytest.raises(ValueError, match="unknown engine: 'xml'"):
+        pygim.path("a.yaml").read(engine="xml")
+
+
+def test_unknown_extension_error_lists_every_extension(temp_dir):
+    f = _write(temp_dir, "mystery.weird", "k: v\n")
+    with pytest.raises(ValueError, match="no engine for extension '.weird'") as info:
+        pygim.path(f).read()
+    for e in _engines():
+        for ext in e.extensions:
+            assert ext in str(info.value)
+
+
+def test_typed_classes_are_exactly_the_registry():
+    from pygim import pathlike
+
+    typed = {name for name, obj in vars(pathlike).items()
+             if isinstance(obj, type) and issubclass(obj, pathlike.file) and obj is not pathlike.file}
+    assert typed == {e.name + "file" for e in pathlike.ENGINES}
+
+
+def test_registry_matches_source_tree():
+    """A header added to adapter/engines/ without a rebuild (or a generator that
+    missed one) shows up here, not as a silent gap."""
+    engines_dir = pathlib.Path(__file__).parents[2] / "src" / "_pygim_fast" / "pathlike" / "adapter" / "engines"
+    if not engines_dir.is_dir():
+        pytest.skip("source tree not present (installed wheel)")
+    assert sorted(h.stem for h in engines_dir.glob("*.h")) == [e.name for e in _engines()]
+
+
+def test_docstrings_are_derived_from_the_registry():
+    from pygim import pathlike
+
+    for e in pathlike.ENGINES:
+        assert e.label in pathlike.file.__doc__ and e.name in pathlike.path.__doc__
+        assert e.doc in getattr(pathlike, e.name + "file").__doc__
+        assert e.doc in pathlike.file.write.__doc__
+
+
+def test_stub_engine_block_is_current():
+    """src/pygim/pathlike.pyi's generated block must match the built module
+    (regenerate with `pygim stubs`)."""
+    from pygim import _stubs
+
+    text = _stubs.stub_path().read_text(encoding="utf-8")
+    assert _stubs.render(text) == text, "stale stub: run `pygim stubs`"
+    block = _stubs.engine_block()
+    for e in _engines():
+        assert f"class {e.name}file(file):" in block and f'"{e.label}"' in block
