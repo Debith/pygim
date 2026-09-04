@@ -94,7 +94,11 @@ py::str fspath_str(const file& f) {
 
 py::object wrap(file f) { return pygim::pathlike::wrap(Engines{}, std::move(f)); }
 
-// TEMPORARY (bisect variant 9): path() as a named function instead of a lambda.
+// path(): a NAMED function, deliberately. MSVC 14.51 (VS 18) crashes with an
+// internal compiler error (C1001, msc1.cpp) on a lambda passed to a
+// module-level def whose body calls wrap() — bisected on CI: the same body as
+// a named function compiles and passes the suite, and a lambda without wrap()
+// compiles too. The class-level defs above are unaffected.
 py::object path_factory(fs::path p, const std::optional<std::string>& engine) {
     return wrap(file(std::move(p), engine_from_arg(engine)));
 }
@@ -326,44 +330,13 @@ PYBIND11_MODULE(pathlike, m) {
              "The glob results as a pygim.pathset.PathSet, for set algebra and "
              "Filter queries.");
 
-// TEMPORARY (PR #21 MSVC C1001 bisect) — variants of the block below, one per
-// Windows CI job (PYGIM_ICE_VARIANT = Python minor version); 12 is the control.
-#ifndef PYGIM_ICE_VARIANT
-#define PYGIM_ICE_VARIANT 12
-#endif
-#if PYGIM_ICE_VARIANT != 14
     // One typed subclass per engine ("<name>file"); constructing one pins its engine.
     bind_typed(Engines{}, m);
-#endif
 
-#if PYGIM_ICE_VARIANT == 9
     m.def("path", &path_factory, py::arg("path"), py::arg("engine") = py::none(), py::doc(path_doc().c_str()));
-#elif PYGIM_ICE_VARIANT == 10
-    m.def("path",
-          [](fs::path p, const std::optional<std::string>& engine) {
-              return py::cast(file(std::move(p), engine_from_arg(engine)));   // no wrap()
-          },
-          py::arg("path"), py::arg("engine") = py::none(), py::doc(path_doc().c_str()));
-#elif PYGIM_ICE_VARIANT == 11
-    m.def("path",
-          [](fs::path p, const std::optional<std::string>&) {
-              return wrap(file(std::move(p)));   // no engine_from_arg()
-          },
-          py::arg("path"), py::arg("engine") = py::none(), py::doc(path_doc().c_str()));
-#elif PYGIM_ICE_VARIANT == 13
-    // no path() at all
-#else
-    m.def("path",
-          [](fs::path p, const std::optional<std::string>& engine) {
-              return wrap(file(std::move(p), engine_from_arg(engine)));
-          },
-          py::arg("path"), py::arg("engine") = py::none(), py::doc(path_doc().c_str()));
-#endif
 
-#if PYGIM_ICE_VARIANT != 14
     // The registry, introspectable: a tuple of EngineInfo(name, label, extensions, aliases, doc).
     m.attr("ENGINES") = engines_record(Engines{});
-#endif
 
 #ifndef VERSION_INFO
 #error "VERSION_INFO must be defined by the build system (setup.py base_macros)"
