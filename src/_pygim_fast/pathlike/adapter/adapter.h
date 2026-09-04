@@ -93,17 +93,32 @@ template <Engine... Es>
     return R::visit(i, [&]<class E>() { return py::cast(typed_file<E>(std::move(f))); });
 }
 
-// Register every typed subclass: "<name>file", documented from the engine's
-// own sentence. Docs live in function-local statics (pybind11 keeps pointers).
+// Register one typed subclass: "<name>file", documented from the engine's own
+// sentence. The doc lives in a function-local static (pybind11 keeps pointers).
+// (A plain function template, folded over below: MSVC cannot see an enclosing
+// generic lambda's template parameter from a lambda nested inside it.)
+template <Engine E>
+void bind_one(py::module_& m) {
+    static const std::string doc = std::string(E::info.doc) + " Constructing one pins the engine (" +
+                                   std::string(E::info.label) + ").";
+    py::class_<typed_file<E>, file>(m, detail::class_name_buf<E>.data(), doc.c_str())
+        .def(py::init([](fs::path p) { return typed_file<E>(file(std::move(p), &E::info)); }),
+             py::arg("path"));
+}
+
+// Register every typed subclass, in pack order.
 template <Engine... Es>
 void bind_typed(engine_list<Es...>, py::module_& m) {
-    engine_list<Es...>::for_each([&]<class E>() {
-        static const std::string doc = std::string(E::info.doc) + " Constructing one pins the engine (" +
-                                       std::string(E::info.label) + ").";
-        py::class_<typed_file<E>, file>(m, detail::class_name_buf<E>.data(), doc.c_str())
-            .def(py::init([](fs::path p) { return typed_file<E>(file(std::move(p), &E::info)); }),
-                 py::arg("path"));
-    });
+    (bind_one<Es>(m), ...);
+}
+
+template <Engine E>
+void record_one(const py::object& record, py::list& out) {
+    py::list exts, aliases;
+    for (std::string_view x : E::info.exts) exts.append(std::string(x));
+    for (std::string_view a : E::info.aliases) aliases.append(std::string(a));
+    out.append(record(std::string(E::info.name), std::string(E::info.label), py::tuple(exts),
+                      py::tuple(aliases), std::string(E::info.doc)));
 }
 
 // The module-level ENGINES record: an immutable, introspectable view of the
@@ -113,13 +128,7 @@ template <Engine... Es>
     py::object record = py::module_::import("collections")
                             .attr("namedtuple")("EngineInfo", "name label extensions aliases doc");
     py::list out;
-    engine_list<Es...>::for_each([&]<class E>() {
-        py::list exts, aliases;
-        for (std::string_view x : E::info.exts) exts.append(std::string(x));
-        for (std::string_view a : E::info.aliases) aliases.append(std::string(a));
-        out.append(record(std::string(E::info.name), std::string(E::info.label), py::tuple(exts),
-                          py::tuple(aliases), std::string(E::info.doc)));
-    });
+    (record_one<Es>(record, out), ...);
     return py::tuple(out);
 }
 

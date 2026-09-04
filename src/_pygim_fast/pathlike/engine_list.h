@@ -103,20 +103,40 @@ struct report {
 // every "unknown engine" error. Sized by one fold, filled by another, at
 // compile time; namespace-scope variable templates so engine_list can
 // initialise its members from them without in-class ordering hazards.
+// A cursor into a fixed buffer: the fold helpers below append through it.
+// (Plain function templates rather than lambdas inside fold expressions —
+// the portable subset every compiler in the matrix handles.)
+struct cursor {
+    char* at;
+    std::size_t words = 0;   // items written so far (for separators)
+    constexpr void put(std::string_view s) { for (char c : s) *at++ = c; }
+};
+
+template <EngineMeta E>
+consteval std::size_t known_length_of(bool first) {
+    return (first ? 0 : 2) + E::info.name.size() + 1 + E::info.label.size();
+}
+
+template <EngineMeta E>
+constexpr void put_known(cursor& c) {
+    if (c.words++) c.put(", ");
+    c.put(E::info.name);
+    c.put("/");
+    c.put(E::info.label);
+}
+
 template <EngineMeta... Es>
 consteval std::size_t known_length() {
-    std::size_t n = 0;
-    [[maybe_unused]] std::size_t i = 0;
-    ((n += (i++ ? 2 : 0) + Es::info.name.size() + 1 + Es::info.label.size()), ...);
+    std::size_t n = 0, i = 0;
+    ((n += known_length_of<Es>(i++ == 0)), ...);
     return n;
 }
 
 template <EngineMeta... Es>
 consteval auto known_buffer() {
     std::array<char, known_length<Es...>() + 1> out{};
-    [[maybe_unused]] std::size_t p = 0, i = 0;
-    [[maybe_unused]] auto put = [&](std::string_view s) { for (char c : s) out[p++] = c; };
-    (((i++ ? put(", ") : void()), put(Es::info.name), put("/"), put(Es::info.label)), ...);
+    [[maybe_unused]] cursor c{out.data()};
+    (put_known<Es>(c), ...);
     return out;
 }
 
@@ -125,20 +145,32 @@ inline constexpr auto known_buf = known_buffer<Es...>();
 
 // ".json .jsonl .ndjson .toml .yaml .yml" — the extension inventory quoted by
 // every "no engine for extension" error.
+template <EngineMeta E>
+consteval std::size_t ext_inventory_length_of() {
+    std::size_t n = 0;
+    for (std::string_view x : E::info.exts) n += 1 + x.size();   // one separator per item
+    return n;
+}
+
+template <EngineMeta E>
+constexpr void put_exts(cursor& c) {
+    for (std::string_view x : E::info.exts) {
+        if (c.words++) c.put(" ");
+        c.put(x);
+    }
+}
+
 template <EngineMeta... Es>
 consteval std::size_t ext_inventory_length() {
-    std::size_t n = 0;
-    [[maybe_unused]] std::size_t i = 0;
-    ([&] { for (std::string_view x : Es::info.exts) n += (i++ ? 1 : 0) + x.size(); }(), ...);
-    return n;
+    std::size_t n = (ext_inventory_length_of<Es>() + ... + 0);
+    return n ? n - 1 : 0;   // no separator before the first item
 }
 
 template <EngineMeta... Es>
 consteval auto ext_inventory_buffer() {
     std::array<char, ext_inventory_length<Es...>() + 1> out{};
-    [[maybe_unused]] std::size_t p = 0, i = 0;
-    [[maybe_unused]] auto put = [&](std::string_view s) { for (char c : s) out[p++] = c; };
-    ([&] { for (std::string_view x : Es::info.exts) { if (i++) put(" "); put(x); } }(), ...);
+    [[maybe_unused]] cursor c{out.data()};
+    (put_exts<Es>(c), ...);
     return out;
 }
 
@@ -182,33 +214,53 @@ struct engine_list {
     // evaluation) and the process (built once, on first use).
     using table = core::StaticRegistryCore<std::string_view, const engine_info*>;
 
+    template <EngineMeta E>
+    static constexpr void add_exts(table& t) {
+        for (std::string_view x : E::info.exts) t.register_or_override(x, &E::info, false);
+    }
+    template <EngineMeta E>
+    static constexpr void add_selectors(table& t) {
+        t.register_or_override(E::info.name, &E::info, false);
+        t.register_or_override(E::info.label, &E::info, false);
+        for (std::string_view a : E::info.aliases) t.register_or_override(a, &E::info, false);
+    }
+
     [[nodiscard]] static constexpr table ext_table() {
         table t;
-        (([&] { for (std::string_view x : Es::info.exts) t.register_or_override(x, &Es::info, false); }()), ...);
+        (add_exts<Es>(t), ...);
         return t;
     }
 
     [[nodiscard]] static constexpr table selector_table() {
         table t;
-        (([&] {
-            t.register_or_override(Es::info.name, &Es::info, false);
-            t.register_or_override(Es::info.label, &Es::info, false);
-            for (std::string_view a : Es::info.aliases) t.register_or_override(a, &Es::info, false);
-        }()), ...);
+        (add_selectors<Es>(t), ...);
         return t;
     }
 
     // ── lookups (constexpr: provable) ─────────────────────────────────────
+    // In constant evaluation the table is built transiently (a constexpr
+    // std::vector cannot outlive its evaluation); at run time it is built once
+    // per process, in a plain function so no static lives in a constexpr body.
+    [[nodiscard]] static constexpr const engine_info* lookup(const table& t, std::string_view key) noexcept {
+        const engine_info* const* hit = t.try_get_const(key);
+        return hit ? *hit : nullptr;
+    }
+    [[nodiscard]] static const engine_info* for_ext_at_runtime(std::string_view ext) {
+        static const table t = ext_table();
+        return lookup(t, ext);
+    }
+    [[nodiscard]] static const engine_info* from_name_at_runtime(std::string_view n) {
+        static const table t = selector_table();
+        return lookup(t, n);
+    }
+
     // The engine that auto-dispatches an extension (lower-case, leading dot), or nullptr.
     [[nodiscard]] static constexpr const engine_info* for_ext(std::string_view ext) {
         if consteval {
             const table t = ext_table();
-            const engine_info* const* hit = t.try_get_const(ext);
-            return hit ? *hit : nullptr;
+            return lookup(t, ext);
         } else {
-            static const table t = ext_table();   // built once per process (C++23: static in constexpr fn)
-            const engine_info* const* hit = t.try_get_const(ext);
-            return hit ? *hit : nullptr;
+            return for_ext_at_runtime(ext);
         }
     }
 
@@ -216,12 +268,9 @@ struct engine_list {
     [[nodiscard]] static constexpr const engine_info* from_name(std::string_view n) {
         if consteval {
             const table t = selector_table();
-            const engine_info* const* hit = t.try_get_const(n);
-            return hit ? *hit : nullptr;
+            return lookup(t, n);
         } else {
-            static const table t = selector_table();
-            const engine_info* const* hit = t.try_get_const(n);
-            return hit ? *hit : nullptr;
+            return from_name_at_runtime(n);
         }
     }
 
