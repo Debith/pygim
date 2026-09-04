@@ -110,54 +110,55 @@ std::string join_exts(const engine_info& e, std::string_view sep) {
     return s;
 }
 
+// The docstring fragments are folds over the pack through plain function
+// templates (the same portable construct set as adapter.h: no capturing
+// generic lambdas at run time).
+template <class E>
+void append_dispatch(std::string& out) {
+    if (!out.empty()) out += "; ";
+    out += join_exts(E::info, "/") + " -> " + std::string(E::info.name) + " (" + std::string(E::info.label) + ")";
+}
+template <class E>
+void append_label(std::string& out) {
+    if (!out.empty()) out += "/";
+    out += "'" + std::string(E::info.label) + "'";
+}
+template <class E>
+void append_name(std::string& out) {
+    if (!out.empty()) out += "/";
+    out += std::string(E::info.name);
+}
+template <class E>
+void append_note(std::string& out) {
+    out += "\n- " + std::string(E::info.name) + ": " + std::string(E::info.doc);
+}
+
+template <class... Es> std::string dispatch_sentence_of(engine_list<Es...>) { std::string out; (append_dispatch<Es>(out), ...); return out; }
+template <class... Es> std::string labels_list_of(engine_list<Es...>) { std::string out; (append_label<Es>(out), ...); return out; }
+template <class... Es> std::string names_list_of(engine_list<Es...>) { std::string out; (append_name<Es>(out), ...); return out; }
+template <class... Es> std::string engine_notes_of(engine_list<Es...>) { std::string out; (append_note<Es>(out), ...); return out; }
+
 // "``.json`` -> json (simdjson); ``.jsonl``/``.ndjson`` -> jsonl (simdjson-ndjson); ..."
 const std::string& dispatch_sentence() {
-    static const std::string s = [] {
-        std::string out;
-        Engines::for_each([&]<class E>() {
-            if (!out.empty()) out += "; ";
-            out += join_exts(E::info, "/") + " -> " + std::string(E::info.name) + " (" + std::string(E::info.label) + ")";
-        });
-        return out;
-    }();
+    static const std::string s = dispatch_sentence_of(Engines{});
     return s;
 }
 
 // "'rapidyaml'/'simdjson'/..." — every label, in pack order.
 const std::string& labels_list() {
-    static const std::string s = [] {
-        std::string out;
-        Engines::for_each([&]<class E>() {
-            if (!out.empty()) out += "/";
-            out += "'" + std::string(E::info.label) + "'";
-        });
-        return out;
-    }();
+    static const std::string s = labels_list_of(Engines{});
     return s;
 }
 
 // "yaml/json/toml/jsonl" — every format name, in pack order.
 const std::string& names_list() {
-    static const std::string s = [] {
-        std::string out;
-        Engines::for_each([&]<class E>() {
-            if (!out.empty()) out += "/";
-            out += std::string(E::info.name);
-        });
-        return out;
-    }();
+    static const std::string s = names_list_of(Engines{});
     return s;
 }
 
 // "- json: <doc>\n- jsonl: <doc>\n..." — every engine's own sentence.
 const std::string& engine_notes() {
-    static const std::string s = [] {
-        std::string out;
-        Engines::for_each([&]<class E>() {
-            out += "\n- " + std::string(E::info.name) + ": " + std::string(E::info.doc);
-        });
-        return out;
-    }();
+    static const std::string s = engine_notes_of(Engines{});
     return s;
 }
 

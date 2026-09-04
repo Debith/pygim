@@ -54,24 +54,26 @@ template <class... Es>
 
 // Read `f` with engine `e` (from engine_list::resolve), all native C++;
 // `key_cache_capacity` bounds the per-read key-interning cache (0 disables it).
+// Dispatch is an or-fold on the engine's identity (the address of its info):
+// the first matching engine runs and short-circuits the rest. Plain folds
+// rather than visit() with capturing generic lambdas — the construct set
+// every compiler in the matrix handles at run time (MSVC included).
 template <Engine... Es>
 [[nodiscard]] py::object load(engine_list<Es...>, const engine_info* e, const file& f,
                               std::size_t key_cache_capacity = 256) {
-    using R = engine_list<Es...>;
-    const std::size_t i = R::index_of(e);
-    if (i == R::size) throw std::invalid_argument("no engine resolved for " + f.fspath());
     detail::KeyCache keys(key_cache_capacity);
-    return R::visit(i, [&]<class E>() { return E::load(f, keys); });
+    py::object out;
+    const bool hit = ((e == &Es::info ? (out = Es::load(f, keys), true) : false) || ...);
+    if (!hit) throw std::invalid_argument("no engine resolved for " + f.fspath());
+    return out;
 }
 
 // Serialise `obj` to `f` with engine `e`. Each engine enforces its own format
 // constraints (TOML: mapping root, no null; JSONL: list root; ...).
 template <Engine... Es>
 void write(engine_list<Es...>, const engine_info* e, const file& f, py::handle obj) {
-    using R = engine_list<Es...>;
-    const std::size_t i = R::index_of(e);
-    if (i == R::size) throw std::invalid_argument("no engine resolved for " + f.fspath());
-    R::visit(i, [&]<class E>() { E::write(f, obj); });
+    const bool hit = ((e == &Es::info ? (Es::write(f, obj), true) : false) || ...);
+    if (!hit) throw std::invalid_argument("no engine resolved for " + f.fspath());
 }
 
 // ── Typed file classes ─────────────────────────────────────────────────────
@@ -87,10 +89,10 @@ struct typed_file : file {
 // Cast a file as the typed subclass of its resolved engine (plain file if none).
 template <Engine... Es>
 [[nodiscard]] py::object wrap(engine_list<Es...>, file f) {
-    using R = engine_list<Es...>;
-    const std::size_t i = R::index_of(R::resolved(f));
-    if (i == R::size) return py::cast(std::move(f));
-    return R::visit(i, [&]<class E>() { return py::cast(typed_file<E>(std::move(f))); });
+    const engine_info* e = engine_list<Es...>::resolved(f);
+    py::object out;
+    const bool hit = ((e == &Es::info ? (out = py::cast(typed_file<Es>(f)), true) : false) || ...);
+    return hit ? out : py::cast(std::move(f));
 }
 
 // Register one typed subclass: "<name>file", documented from the engine's own
