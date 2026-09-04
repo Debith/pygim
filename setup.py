@@ -28,6 +28,12 @@ base_macros = [("VERSION_INFO", repr(scm_version))]
 if os.environ.get("PYGIM_BCP_PROFILING", "").strip() == "1":
     base_macros.append(("PYGIM_BCP_PROFILING", "1"))
 
+# TEMPORARY (PR #21 MSVC C1001 bisect): each Windows CI job builds one variant
+# of the pathlike bindings, selected by the Python minor version. Reverted
+# before merge.
+if sys.platform == "win32":
+    base_macros.append(("PYGIM_ICE_VARIANT", str(sys.version_info.minor)))
+
 
 # Ensure macOS deployment target is high enough for C++23 library features
 # (std::format with floating-point and std::to_chars require macOS 13.3+).
