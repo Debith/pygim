@@ -12,3 +12,19 @@ sources = [
 # The path/file class is written against C++26 (constexpr dispatch, etc.); the
 # global default is C++23, so this extension overrides just its own -std flag.
 std = "c++26"
+# P2996 static reflection (GCC 16: -freflection) is used as a proof layer only
+# (engine_list.h, bindings.cpp): the glob-generated engine list must equal the
+# engine structs the compiler sees, and every engine must be named after its
+# struct. Compilers without the flag build the same code without those proofs.
+flags_if_supported = ["-freflection"]
+
+# The engine registry is OPEN: every header in adapter/engines/ is one engine.
+# The build globs the directory into build/gen/pathlike/pathlike_engines.gen.h
+# (includes + `using Engines = engine_list<engines::json, ...>`), which
+# bindings.cpp consumes. Adding a format = adding a header here. See engine_list.h.
+[extension.typelist]
+glob = "adapter/engines/*.h"
+header = "pathlike_engines.gen.h"
+namespace = "pygim::pathlike::engines"
+template = "pygim::pathlike::engine_list"
+alias = "pygim::pathlike::Engines"

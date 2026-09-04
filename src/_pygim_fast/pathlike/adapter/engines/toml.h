@@ -1,21 +1,27 @@
 #pragma once
-// pathlike/engine_toml.h — the toml++ engine, both directions. Dates and times
+// pathlike/adapter/engines/toml.h — the toml++ engine, both directions.
+//
+// One file IS one engine: the descriptor at the bottom is what the build
+// discovers into the registry (see ../../registry.h). The implementation stays
+// in namespace detail: inside `struct engines::toml` the injected class name
+// would hide the toml++ namespace, so the descriptor only forwards. Dates and times
 // materialise as datetime.date / time / datetime — matching what the stdlib's
 // tomllib produces, so the two are drop-in comparable — and convert back on
 // write. TOML's own constraints are enforced loudly: documents are tables
 // (mapping root), there is no null, integers are int64.
 
 #include <sstream>
+#include <array>
 #include <string>
 #include <string_view>
 
 #include <pybind11/pybind11.h>
 
 #define TOML_EXCEPTIONS 0   // error-code API (toml::parse_result), no throw across nogil
-#include "third_party/tomlplusplus/toml.hpp"
-#include "common.h"
-#include "../core.h"
-#include "materialize.h"
+#include "../third_party/tomlplusplus/toml.hpp"
+#include "../../core.h"
+#include "../common.h"
+#include "../materialize.h"
 
 namespace pygim::pathlike::detail {
 
@@ -177,3 +183,24 @@ inline void write_toml(const file& f, py::handle obj) {
 }
 
 }  // namespace pygim::pathlike::detail
+
+// ── Registry entry ─────────────────────────────────────────────────────────
+namespace pygim::pathlike::engines {
+
+struct toml {
+    static constexpr std::array<std::string_view, 1> exts{".toml"};
+    static constexpr std::array<std::string_view, 1> aliases{"tomlplusplus"};
+    static constexpr engine_info info{
+        .name = "toml",
+        .label = "toml++",
+        .doc = "TOML via toml++: documents are tables (mapping root), there is no null, "
+               "and dates and times are datetime objects (tomllib parity).",
+        .exts = exts,
+        .aliases = aliases,
+    };
+
+    static py::object load(const file& f, detail::KeyCache& keys) { return detail::load_toml(f, keys); }
+    static void write(const file& f, py::handle obj) { detail::write_toml(f, obj); }
+};
+
+}  // namespace pygim::pathlike::engines

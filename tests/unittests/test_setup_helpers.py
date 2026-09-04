@@ -168,3 +168,84 @@ def test_no_availability_conditional_compilation():
             if banned in text:
                 offenders.append(f"{f.relative_to(fast)}: {banned}")
     assert not offenders, offenders
+
+
+# ─── Open type lists, probed flags, header dependencies ──────────────────────
+
+
+def _fake_compiler_requiring(tmp_path, std, flag):
+    """A stand-in c++ that accepts *flag* only together with -std=<std>."""
+    script = tmp_path / "fakexx2"
+    script.write_text(
+        "#!/bin/sh\n"
+        f'case " $* " in\n'
+        f'  *" {flag} "*) case " $* " in *" -std={std} "*) exit 0 ;; *) exit 1 ;; esac ;;\n'
+        "  *) exit 0 ;;\nesac\n"
+    )
+    script.chmod(script.stat().st_mode | stat.S_IEXEC)
+    return str(script)
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="probe is POSIX-only")
+def test_optional_flags_are_probed_with_the_extension_std(tmp_path, monkeypatch):
+    # GCC 16 accepts -freflection only under -std=c++26: the probe must pass the std along.
+    ns = _extract("_supported_flags")
+    monkeypatch.setenv("CXX", _fake_compiler_requiring(tmp_path, "c++26", "-freflection"))
+    assert ns["_supported_flags"](["-freflection"], "-std=c++26") == ["-freflection"]
+    assert ns["_supported_flags"](["-freflection"], "-std=c++23") == []
+    assert ns["_supported_flags"](["-fnothing-special"], "-std=c++23") == ["-fnothing-special"]
+
+
+def test_typelist_generates_sorted_includes_and_alias(tmp_path):
+    ns = _extract("_apply_typelist")
+    ns["Path"] = pathlib.Path
+    ns["ROOT"] = tmp_path
+    manifest_dir = tmp_path / "src" / "fast" / "ext"
+    for stem in ["zeta", "alpha", "mid"]:
+        (manifest_dir / "plugins").mkdir(parents=True, exist_ok=True)
+        (manifest_dir / "plugins" / f"{stem}.h").write_text("#pragma once\n")
+    ext_toml = manifest_dir / "ext.ext.toml"
+    ext_toml.write_text("")
+    cfg = {"module": "ext", "typelist": {"glob": "plugins/*.h", "header": "ext_plugins.gen.h",
+                                        "namespace": "ns::plugins", "template": "ns::type_list", "alias": "ns::Plugins"}}
+    kwargs = {}
+    out = pathlib.Path(ns["_apply_typelist"](ext_toml, cfg, kwargs, gen_root=tmp_path / "gen"))
+    text = out.read_text()
+    assert out == tmp_path / "gen" / "ext" / "ext_plugins.gen.h"
+    assert text.index('#include "plugins/alpha.h"') < text.index('#include "plugins/mid.h"') < text.index('#include "plugins/zeta.h"')
+    assert "using Plugins = ns::type_list<ns::plugins::alpha, ns::plugins::mid, ns::plugins::zeta>;" in text
+    assert "namespace ns {" in text and str(out.parent) in kwargs["include_dirs"] and str(manifest_dir) in kwargs["include_dirs"]
+    # Idempotent: an unchanged plug-in set leaves the file untouched (content-compared, not blindly rewritten).
+    before = out.stat().st_mtime_ns
+    ns["_apply_typelist"](ext_toml, cfg, {}, gen_root=tmp_path / "gen")
+    assert out.stat().st_mtime_ns == before
+
+
+def test_typelist_with_no_plugins_is_a_build_error(tmp_path):
+    ns = _extract("_apply_typelist")
+    ns["Path"] = pathlib.Path
+    ns["ROOT"] = tmp_path
+    manifest_dir = tmp_path / "ext"
+    manifest_dir.mkdir()
+    ext_toml = manifest_dir / "ext.ext.toml"
+    ext_toml.write_text("")
+    cfg = {"module": "ext", "typelist": {"glob": "plugins/*.h", "header": "x.h", "namespace": "n", "template": "t", "alias": "n::A"}}
+    with pytest.raises(SystemExit):
+        ns["_apply_typelist"](ext_toml, cfg, {}, gen_root=tmp_path / "gen")
+
+
+def test_header_dependencies_follow_quoted_includes_across_directories(tmp_path):
+    ns = _extract("_header_dependencies")
+    ns["Path"] = pathlib.Path
+    ext = tmp_path / "ext"
+    shared = tmp_path / "shared"
+    gen = tmp_path / "gen"
+    for d in (ext, shared, gen):
+        d.mkdir()
+    (ext / "bindings.cpp").write_text('#include <vector>\n#include "local.h"\n#include "generated.h"\n#include "missing.h"\n')
+    (ext / "local.h").write_text('#include "../shared/core.h"\n#include "local.h"\n')          # self-include: no loop
+    (shared / "core.h").write_text('#include <string>\n#include "storage.h"\n')
+    (shared / "storage.h").write_text("#pragma once\n")
+    (gen / "generated.h").write_text('#include "local.h"\n')                                 # resolvable via a search dir only
+    deps = ns["_header_dependencies"]([str(ext / "bindings.cpp")], [ext, gen])
+    assert deps == sorted(str(p.resolve()) for p in [ext / "local.h", shared / "core.h", shared / "storage.h", gen / "generated.h"])

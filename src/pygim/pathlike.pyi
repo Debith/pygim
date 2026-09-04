@@ -2,13 +2,16 @@
 
 The compiled extension is untyped at runtime; this stub documents the stable
 public contract of ``pygim.path(...)`` / ``pathlike.file``.
+
+The engine set is OPEN (one C++ header per engine, discovered by the build), so
+everything engine-dependent — the ``Engine`` selector literal, the
+``<name>file`` typed classes and ``ENGINES`` — lives in the generated block at
+the end, rendered from the built module by ``pygim stubs`` and kept current by
+a test.
 """
 
 import os
-from typing import Any, Literal
-
-# Selection accepts FORMAT names and LIBRARY names; .engine reports the library.
-Engine = Literal["yaml", "yml", "json", "toml", "rapidyaml", "simdjson", "toml++"]
+from typing import Any, Literal, NamedTuple
 
 def path(path: str | os.PathLike[str], engine: Engine | None = None) -> file:
     """Wrap a path in a self-reading, self-decoding file().
@@ -24,27 +27,27 @@ class file(os.PathLike[str]):
     def read(self, engine: Engine | None = None, key_cache: int = 256) -> Any:
         """Decode the file to native Python objects (GIL released during I/O
         and parsing). ``key_cache`` bounds key interning: 0 off, -1 unbounded."""
-
     def write(self, obj: Any, engine: Engine | None = None) -> None:
-        """Serialise obj with the resolved engine. YAML/JSON accept
-        dict/list/str/int/float/bool/None roots; TOML requires a mapping
-        root, has no null, and additionally supports datetime values."""
-
+        """Serialise ``obj`` with the resolved engine. Strings that would read
+        back typed are quoted, so write/read round-trips. Format constraints are
+        the engine's own (see each ``<name>file`` docstring)."""
     def read_bytes(self) -> bytes: ...
+    def write_bytes(self, data: bytes) -> None:
+        """Replace the file's contents with *data*, byte for byte."""
+    def mkdir(self, parents: bool = False, exist_ok: bool = False) -> None:
+        """Create this directory, with pathlib's parents/exist_ok semantics."""
 
-    # -- engine -------------------------------------------------------------
     @property
     def engine(self) -> str | None:
-        """The engine (library) read()/write() will use — the constructor pin,
-        else the extension ('rapidyaml'/'simdjson'/'toml++') — or None when
-        neither resolves."""
+        """The library label read()/write() will use ('rapidyaml', 'simdjson', ...):
+        the constructor pin, else the extension — or None when neither resolves."""
 
-    # -- os.PathLike / identity ----------------------------------------------
+    # -- os.PathLike / identity ---------------------------------------------
     def __fspath__(self) -> str: ...
     def __eq__(self, other: object) -> bool: ...
     def __hash__(self) -> int: ...
 
-    # -- name components (pathlib parity) -------------------------------------
+    # -- name components (pathlib parity) -----------------------------------
     @property
     def uri(self) -> str: ...
     @property
@@ -58,7 +61,7 @@ class file(os.PathLike[str]):
     @property
     def parts(self) -> list[str]: ...
 
-    # -- composition ----------------------------------------------------------
+    # -- composition / derived paths (results inherit the engine pin) -------
     def __truediv__(self, other: str | os.PathLike[str]) -> file: ...
     def __rtruediv__(self, other: str | os.PathLike[str]) -> file: ...
     def joinpath(self, *parts: str | os.PathLike[str]) -> file: ...
@@ -72,7 +75,7 @@ class file(os.PathLike[str]):
     def absolute(self) -> file: ...
     def resolve(self) -> file: ...
 
-    # -- filesystem status ------------------------------------------------------
+    # -- filesystem status --------------------------------------------------
     def is_absolute(self) -> bool: ...
     def exists(self) -> bool: ...
     def is_file(self) -> bool: ...
@@ -80,22 +83,45 @@ class file(os.PathLike[str]):
     def is_symlink(self) -> bool: ...
     def size(self) -> int: ...
 
-    # -- directory traversal (results inherit the engine pin) --------------------
+    # -- directory traversal ------------------------------------------------
     def iterdir(self) -> list[file]: ...
     def glob(self, pattern: str) -> list[file]: ...
     def rglob(self, pattern: str) -> list[file]: ...
     def pathset(self, pattern: str = "*") -> Any:
-        """The glob results as a pygim.pathset.PathSet."""
+        """The glob results as a ``pygim.pathset.PathSet``."""
 
+class EngineInfo(NamedTuple):
+    """One entry of ``ENGINES``: the registry as data."""
+    name: str
+    label: str
+    extensions: tuple[str, ...]
+    aliases: tuple[str, ...]
+    doc: str
 
-class yamlfile(file):
-    """A file whose resolved engine is YAML; constructing one pins it."""
-    def __init__(self, path: str | os.PathLike[str]) -> None: ...
+# --- generated: engines (regenerate with `pygim stubs`) ---
+# Selection accepts FORMAT names, LIBRARY labels and aliases; .engine reports the label.
+Engine = Literal[
+    "json", "simdjson",
+    "jsonl", "simdjson-ndjson", "ndjson",
+    "toml", "toml++", "tomlplusplus",
+    "yaml", "rapidyaml", "yml",
+]
 
 class jsonfile(file):
-    """A file whose resolved engine is JSON; constructing one pins it."""
+    """JSON via simdjson (strict, SIMD-accelerated); writes real JSON and rejects non-finite floats. Constructing one pins the engine (simdjson)."""
+    def __init__(self, path: str | os.PathLike[str]) -> None: ...
+
+class jsonlfile(file):
+    """JSON Lines (ndjson) via simdjson's document stream: reads as a list, one item per document, and writes one compact document per line from a list root. Constructing one pins the engine (simdjson-ndjson)."""
     def __init__(self, path: str | os.PathLike[str]) -> None: ...
 
 class tomlfile(file):
-    """A file whose resolved engine is TOML; constructing one pins it."""
+    """TOML via toml++: documents are tables (mapping root), there is no null, and dates and times are datetime objects (tomllib parity). Constructing one pins the engine (toml++)."""
     def __init__(self, path: str | os.PathLike[str]) -> None: ...
+
+class yamlfile(file):
+    """YAML 1.2 (core schema) via rapidyaml: anchors, aliases and merge keys are resolved; strings that would read back typed are quoted on write. Constructing one pins the engine (rapidyaml)."""
+    def __init__(self, path: str | os.PathLike[str]) -> None: ...
+
+ENGINES: tuple[EngineInfo, ...]
+# --- end generated ---
