@@ -100,7 +100,9 @@ py::list wrap_all(std::vector<file> files) {
     return out;
 }
 
-// ── Docstrings derived from the registry (static storage: pybind11 keeps pointers) ──
+// ── Docstrings derived from the registry (static storage: pybind11 keeps pointers).
+// Passed as py::doc(...) rather than a bare const char*: a dynamic docstring as
+// a bare pointer in module_::def's extras pack crashed MSVC (C1001).
 std::string join_exts(const engine_info& e, std::string_view sep) {
     std::string s;
     for (std::string_view x : e.exts) {
@@ -210,7 +212,7 @@ const std::string& path_doc() {
 PYBIND11_MODULE(pathlike, m) {
     m.doc() = "path(): an os.PathLike that reads & decodes itself with the optimal engine.";
 
-    py::class_<file>(m, "file", file_doc().c_str())
+    py::class_<file>(m, "file", py::doc(file_doc().c_str()))
         .def(py::init([](fs::path p, const std::optional<std::string>& engine) {
                  return file(std::move(p), engine_from_arg(engine));
              }),
@@ -222,7 +224,7 @@ PYBIND11_MODULE(pathlike, m) {
                 if (!e) return py::none();
                 return py::str(std::string(e->label));
             },
-            engine_doc().c_str())
+            py::doc(engine_doc().c_str()))
         // Decode the NATIVE path representation (wstring on Windows — lossless;
         // bytes via the filesystem encoding on POSIX). fs::path::string() would
         // narrow through the ACP on Windows and can mangle non-ASCII paths.
@@ -293,12 +295,12 @@ PYBIND11_MODULE(pathlike, m) {
                  return load(Engines{}, Engines::resolve(f, requested(engine)), f,
                              cache_capacity_from_arg(key_cache));
              },
-             py::arg("engine") = py::none(), py::arg("key_cache") = 256, read_doc().c_str())
+             py::arg("engine") = py::none(), py::arg("key_cache") = 256, py::doc(read_doc().c_str()))
         .def("write",
              [](const file& f, py::handle obj, const std::optional<std::string>& engine) {
                  write(Engines{}, Engines::resolve(f, requested(engine)), f, obj);
              },
-             py::arg("obj"), py::arg("engine") = py::none(), write_doc().c_str())
+             py::arg("obj"), py::arg("engine") = py::none(), py::doc(write_doc().c_str()))
         // -- directory traversal (results inherit the engine pin) --
         .def("iterdir", [](const file& f) { return wrap_all(f.iterdir()); },
              "The directory's children, sorted.")
@@ -326,7 +328,7 @@ PYBIND11_MODULE(pathlike, m) {
           [](fs::path p, const std::optional<std::string>& engine) {
               return wrap(file(std::move(p), engine_from_arg(engine)));
           },
-          py::arg("path"), py::arg("engine") = py::none(), path_doc().c_str());
+          py::arg("path"), py::arg("engine") = py::none(), py::doc(path_doc().c_str()));
 
     // The registry, introspectable: a tuple of EngineInfo(name, label, extensions, aliases, doc).
     m.attr("ENGINES") = engines_record(Engines{});
