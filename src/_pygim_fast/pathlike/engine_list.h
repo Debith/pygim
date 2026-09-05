@@ -99,37 +99,56 @@ struct report {
     [[nodiscard]] constexpr std::string_view view() const noexcept { return {buf.data(), len}; }
 };
 
-// "json/simdjson, jsonl/simdjson-ndjson, ..." — the engine= inventory quoted by
-// every "unknown engine" error. Sized by one fold, filled by another, at
-// compile time; namespace-scope variable templates so engine_list can
-// initialise its members from them without in-class ordering hazards.
-// A cursor into a fixed buffer: the fold helpers below append through it.
-// (Plain function templates rather than lambdas inside fold expressions —
-// the portable subset every compiler in the matrix handles.)
+// The inventories quoted by the error messages — "json/simdjson, jsonl/..."
+// for engine= and ".json .jsonl .ndjson ..." for extensions — are formatted
+// ONCE each, through a sink: a counter sizes the compile-time buffer, a cursor
+// fills it, and a text sink builds the run-time std::string from the same
+// put_known/put_exts folds. (Plain function templates rather than lambdas
+// inside fold expressions — the portable subset every compiler in the matrix
+// handles.) Namespace-scope variable templates hold the buffers so engine_list
+// can initialise its members from them without in-class ordering hazards.
+struct counter {
+    std::size_t n = 0;
+    std::size_t words = 0;
+    constexpr void put(std::string_view s) noexcept { n += s.size(); }
+};
 struct cursor {
     char* at;
-    std::size_t words = 0;   // items written so far (for separators)
+    std::size_t words = 0;
     constexpr void put(std::string_view s) { for (char c : s) *at++ = c; }
 };
-
-template <EngineMeta E>
-consteval std::size_t known_length_of(bool first) {
-    return (first ? 0 : 2) + E::info.name.size() + 1 + E::info.label.size();
+struct text {
+    std::string out;
+    std::size_t words = 0;
+    constexpr void put(std::string_view s) { out += s; }
+};
+// Writes `sep` before every item but the first.
+template <class Sink>
+constexpr void separate(Sink& s, std::string_view sep) {
+    if (s.words++) s.put(sep);
 }
 
-template <EngineMeta E>
-constexpr void put_known(cursor& c) {
-    if (c.words++) c.put(", ");
-    c.put(E::info.name);
-    c.put("/");
-    c.put(E::info.label);
+template <EngineMeta E, class Sink>
+constexpr void put_known(Sink& s) {
+    separate(s, ", ");
+    s.put(E::info.name);
+    s.put("/");
+    s.put(E::info.label);
+}
+
+template <EngineMeta E, class Sink>
+constexpr void put_exts(Sink& s) {
+    for (std::string_view x : E::info.exts) {
+        separate(s, " ");
+        s.put(x);
+    }
 }
 
 template <EngineMeta... Es>
 consteval std::size_t known_length() {
-    std::size_t n = 0, i = 0;
-    ((n += known_length_of<Es>(i++ == 0)), ...);
-    return n;
+    counter c;
+    (put_known<Es>(c), ...);
+    return c.n;
 }
 
 template <EngineMeta... Es>
@@ -143,27 +162,11 @@ consteval auto known_buffer() {
 template <EngineMeta... Es>
 inline constexpr auto known_buf = known_buffer<Es...>();
 
-// ".json .jsonl .ndjson .toml .yaml .yml" — the extension inventory quoted by
-// every "no engine for extension" error.
-template <EngineMeta E>
-consteval std::size_t ext_inventory_length_of() {
-    std::size_t n = 0;
-    for (std::string_view x : E::info.exts) n += 1 + x.size();   // one separator per item
-    return n;
-}
-
-template <EngineMeta E>
-constexpr void put_exts(cursor& c) {
-    for (std::string_view x : E::info.exts) {
-        if (c.words++) c.put(" ");
-        c.put(x);
-    }
-}
-
 template <EngineMeta... Es>
 consteval std::size_t ext_inventory_length() {
-    std::size_t n = (ext_inventory_length_of<Es>() + ... + 0);
-    return n ? n - 1 : 0;   // no separator before the first item
+    counter c;
+    (put_exts<Es>(c), ...);
+    return c.n;
 }
 
 template <EngineMeta... Es>
@@ -176,20 +179,6 @@ consteval auto ext_inventory_buffer() {
 
 template <EngineMeta... Es>
 inline constexpr auto ext_inventory_buf = ext_inventory_buffer<Es...>();
-
-// Run-time counterparts of the inventories: plain std::string folds.
-template <EngineMeta E>
-void append_known_text(std::string& out) {
-    if (!out.empty()) out += ", ";
-    out += std::string(E::info.name) + "/" + std::string(E::info.label);
-}
-template <EngineMeta E>
-void append_ext_text(std::string& out) {
-    for (std::string_view x : E::info.exts) {
-        if (!out.empty()) out += " ";
-        out += std::string(x);
-    }
-}
 
 // "<name>file" — the Python class name of an engine's typed file, as a
 // NUL-terminated buffer with static storage (pybind11 may keep the pointer).
@@ -282,18 +271,18 @@ struct engine_list {
         return lookup(t, n);
     }
 
-    // The inventories as run-time strings, built by plain folds (the constexpr
-    // `known`/`ext_inventory` above serve the proofs; run-time code must not
-    // odr-use a consteval-built variable template).
+    // The inventories as run-time strings, from the same folds through a text
+    // sink (the constexpr `known`/`ext_inventory` above serve the proofs;
+    // run-time code must not odr-use a consteval-built variable template).
     [[nodiscard]] static std::string known_text() {
-        std::string out;
-        (detail::append_known_text<Es>(out), ...);
-        return out;
+        detail::text t;
+        (detail::put_known<Es>(t), ...);
+        return std::move(t.out);
     }
     [[nodiscard]] static std::string ext_inventory_text() {
-        std::string out;
-        (detail::append_ext_text<Es>(out), ...);
-        return out;
+        detail::text t;
+        (detail::put_exts<Es>(t), ...);
+        return std::move(t.out);
     }
 
     // Position in the pack (== size when unknown).
@@ -325,6 +314,11 @@ struct engine_list {
     [[nodiscard]] static const engine_info* resolved(const file& f) {
         return f.pinned() ? f.pinned() : for_ext_at_runtime(f.ext_key());
     }
+    // The same, in constant evaluation (transient table) — for the proofs:
+    // `file` is a literal type, so a path can be resolved at compile time.
+    [[nodiscard]] static constexpr const engine_info* resolved_ct(const file& f) {
+        return f.pinned() ? f.pinned() : for_ext(f.ext_key());
+    }
 
     // Precedence: an explicit engine= wins, then the pin, then the extension.
     // Throws std::invalid_argument (Python ValueError) rather than guessing.
@@ -343,6 +337,8 @@ struct engine_list {
     // ── proofs (constexpr predicates; every build asserts holds()) ────────
     // Written once, they sweep whatever pack the build assembled — a new engine
     // is proven on its first compile, and a broken one produces no binary.
+    // Each predicate names its first violation into `r` when one is given, so
+    // holds() and conflict_report() run the SAME scan: no check exists twice.
 
     // [a-z][a-z0-9_]*: the name becomes the Python class "<name>file".
     [[nodiscard]] static constexpr bool ident_ok(std::string_view s) noexcept {
@@ -373,35 +369,47 @@ struct engine_list {
         return true;
     }
 
-    [[nodiscard]] static constexpr bool names_wellformed() noexcept {
+    // False — after writing `parts` into the report, when there is one.
+    template <class... Parts>
+    static constexpr bool fail(detail::report* r, Parts... parts) noexcept {
+        if (r) (r->put(parts), ...);
+        return false;
+    }
+
+    [[nodiscard]] static constexpr bool names_wellformed(detail::report* r = nullptr) noexcept {
         for (const engine_info* e : infos) {
-            if (!ident_ok(e->name) || !selector_ok(e->label) || e->doc.empty() || e->exts.empty()) return false;
+            if (!ident_ok(e->name)) {
+                return fail(r, "engine name '", e->name, "' must match [a-z][a-z0-9_]* (it becomes the Python class '<name>file')");
+            }
+            if (!selector_ok(e->label) || e->doc.empty() || e->exts.empty()) {
+                return fail(r, "engine '", e->name, "': label must be lower-case with no blanks, doc must be non-empty, exts must be non-empty");
+            }
             for (std::string_view a : e->aliases) {
-                if (!selector_ok(a)) return false;
+                if (!selector_ok(a)) return fail(r, "engine '", e->name, "': alias '", a, "' must be lower-case with no blanks or leading dot");
             }
         }
         return true;
     }
 
-    [[nodiscard]] static constexpr bool exts_wellformed() noexcept {
+    [[nodiscard]] static constexpr bool exts_wellformed(detail::report* r = nullptr) noexcept {
         for (const engine_info* e : infos) {
             for (std::string_view x : e->exts) {
-                if (!ext_ok(x)) return false;
+                if (!ext_ok(x)) return fail(r, "engine '", e->name, "': extension '", x, "' must be lower-case with one leading dot and no blanks");
             }
         }
         return true;
     }
 
     // Every extension belongs to exactly one engine (and is listed once).
-    [[nodiscard]] static constexpr bool no_duplicate_exts() noexcept {
+    [[nodiscard]] static constexpr bool no_duplicate_exts(detail::report* r = nullptr) noexcept {
         for (std::size_t i = 0; i < size; ++i) {
             for (std::size_t a = 0; a < infos[i]->exts.size(); ++a) {
                 const std::string_view x = infos[i]->exts.begin()[a];
                 for (std::size_t b = a + 1; b < infos[i]->exts.size(); ++b) {
-                    if (infos[i]->exts.begin()[b] == x) return false;
+                    if (infos[i]->exts.begin()[b] == x) return fail(r, "engine '", infos[i]->name, "' lists extension '", x, "' twice");
                 }
                 for (std::size_t j = i + 1; j < size; ++j) {
-                    if (infos[j]->owns(x)) return false;
+                    if (infos[j]->owns(x)) return fail(r, "'", x, "' is claimed by both '", infos[i]->name, "' and '", infos[j]->name, "'");
                 }
             }
         }
@@ -410,40 +418,43 @@ struct engine_list {
 
     // Every engine= selector belongs to exactly one engine — so from_name is
     // unambiguous — and an engine does not repeat its own name/label as an alias.
-    [[nodiscard]] static constexpr bool no_duplicate_selectors() noexcept {
+    [[nodiscard]] static constexpr bool no_duplicate_selectors(detail::report* r = nullptr) noexcept {
         for (std::size_t i = 0; i < size; ++i) {
             const engine_info* e = infos[i];
-            if (e->name == e->label || e->aliases.contains(e->name) || e->aliases.contains(e->label)) return false;
+            if (e->name == e->label || e->aliases.contains(e->name) || e->aliases.contains(e->label)) {
+                return fail(r, "engine '", e->name, "': its name, label and aliases must be distinct selectors");
+            }
             for (std::size_t a = 0; a < e->aliases.size(); ++a) {
                 for (std::size_t b = a + 1; b < e->aliases.size(); ++b) {
-                    if (e->aliases.begin()[a] == e->aliases.begin()[b]) return false;
+                    if (e->aliases.begin()[a] == e->aliases.begin()[b]) return fail(r, "engine '", e->name, "' lists alias '", e->aliases.begin()[a], "' twice");
                 }
             }
             for (std::size_t j = i + 1; j < size; ++j) {
                 const engine_info* o = infos[j];
-                if (o->selects(e->name) || o->selects(e->label)) return false;
-                for (std::string_view a : e->aliases) {
-                    if (o->selects(a)) return false;
-                }
+                std::string_view clash{};
+                if (o->selects(e->name)) clash = e->name;
+                else if (o->selects(e->label)) clash = e->label;
+                else for (std::string_view a : e->aliases) { if (o->selects(a)) { clash = a; break; } }
+                if (!clash.empty()) return fail(r, "selector '", clash, "' is claimed by both '", e->name, "' and '", o->name, "'");
             }
         }
         return true;
     }
 
-    [[nodiscard]] static constexpr bool every_ext_resolves() noexcept {
+    [[nodiscard]] static constexpr bool every_ext_resolves(detail::report* r = nullptr) noexcept {
         for (const engine_info* e : infos) {
             for (std::string_view x : e->exts) {
-                if (for_ext(x) != e) return false;
+                if (for_ext(x) != e) return fail(r, "extension '", x, "' does not resolve to its engine '", e->name, "'");
             }
         }
         return true;
     }
 
-    [[nodiscard]] static constexpr bool every_selector_resolves() noexcept {
+    [[nodiscard]] static constexpr bool every_selector_resolves(detail::report* r = nullptr) noexcept {
         for (const engine_info* e : infos) {
-            if (from_name(e->name) != e || from_name(e->label) != e) return false;
+            if (from_name(e->name) != e || from_name(e->label) != e) return fail(r, "engine '", e->name, "' is not selected by its own name and label");
             for (std::string_view a : e->aliases) {
-                if (from_name(a) != e) return false;
+                if (from_name(a) != e) return fail(r, "alias '", a, "' does not select its engine '", e->name, "'");
             }
         }
         return true;
@@ -451,84 +462,41 @@ struct engine_list {
 
     // The fold-then-lookup chain used at run time, and the near-misses that
     // must stay unknown — generated from the table, not hand-listed.
-    [[nodiscard]] static constexpr bool case_folding_is_exact() {
+    [[nodiscard]] static constexpr bool case_folding_is_exact(detail::report* r = nullptr) {
         for (const engine_info* e : infos) {
             for (std::string_view x : e->exts) {
-                if (for_ext(detail::ascii_lower(detail::ascii_upper(x))) != e) return false;
-                if (detail::ascii_upper(x) != x && for_ext(detail::ascii_upper(x)) != nullptr) return false;
-                if (for_ext(x.substr(1)) != nullptr) return false;                 // "yaml"
-                if (for_ext(std::string(x) + " ") != nullptr) return false;        // ".yaml "
+                const bool exact = for_ext(uri::ascii_lower(uri::ascii_upper(x))) == e &&
+                                   (uri::ascii_upper(x) == x || for_ext(uri::ascii_upper(x)) == nullptr) &&
+                                   for_ext(x.substr(1)) == nullptr &&                  // "yaml"
+                                   for_ext(std::string(x) + " ") == nullptr;           // ".yaml "
+                if (!exact) return fail(r, "extension '", x, "' of engine '", e->name, "' is not matched exactly (case-folded, undotted or padded forms leak)");
             }
-            if (detail::ascii_upper(e->name) != e->name && from_name(detail::ascii_upper(e->name)) != nullptr) return false;
-            if (from_name("." + std::string(e->name)) != nullptr) return false;   // ".yaml" is not a selector
+            const bool exact = (uri::ascii_upper(e->name) == e->name || from_name(uri::ascii_upper(e->name)) == nullptr) &&
+                               from_name("." + std::string(e->name)) == nullptr;       // ".yaml" is not a selector
+            if (!exact) return fail(r, "engine '", e->name, "' is selected by a spelling other than its exact name");
         }
-        return for_ext("") == nullptr && for_ext(".") == nullptr && from_name("") == nullptr;
+        if (for_ext("") != nullptr || for_ext(".") != nullptr || from_name("") != nullptr) return fail(r, "an empty extension or selector resolves to an engine");
+        return true;
     }
 
     // Order matters: the well-formedness and duplicate predicates come first and
-    // short-circuit, so a conflict is reported by conflict_report() by name
-    // rather than surfacing as a failed constant evaluation of ext_table().
+    // short-circuit, so a conflict is reported by name rather than surfacing as
+    // a failed constant evaluation of ext_table().
     [[nodiscard]] static constexpr bool holds() {
         return names_wellformed() && exts_wellformed() && no_duplicate_exts() && no_duplicate_selectors() &&
                every_ext_resolves() && every_selector_resolves() && case_folding_is_exact();
     }
 
     // The first violated invariant, named: "'.json' is claimed by both 'json'
-    // and 'csv'". Under C++26 this IS the static_assert message; older
-    // dialects get a fixed message and the same proof.
+    // and 'csv'" — the same predicates as holds(), writing into a report. Under
+    // C++26 this IS the static_assert message; older dialects get a fixed
+    // message and the same proof.
     [[nodiscard]] static constexpr detail::report conflict_report() {
         detail::report r;
-        if (holds()) {
+        if (names_wellformed(&r) && exts_wellformed(&r) && no_duplicate_exts(&r) && no_duplicate_selectors(&r) &&
+            every_ext_resolves(&r) && every_selector_resolves(&r) && case_folding_is_exact(&r)) {
             r.put("pathlike engine registry: all invariants hold");
-            return r;
         }
-        for (const engine_info* e : infos) {
-            if (!ident_ok(e->name)) {
-                r.put("engine name '"); r.put(e->name); r.put("' must match [a-z][a-z0-9_]* (it becomes the Python class '<name>file')");
-                return r;
-            }
-            if (!selector_ok(e->label) || e->doc.empty() || e->exts.empty()) {
-                r.put("engine '"); r.put(e->name); r.put("': label must be lower-case with no blanks, doc must be non-empty, exts must be non-empty");
-                return r;
-            }
-            for (std::string_view a : e->aliases) {
-                if (!selector_ok(a)) {
-                    r.put("engine '"); r.put(e->name); r.put("': alias '"); r.put(a); r.put("' must be lower-case with no blanks or leading dot");
-                    return r;
-                }
-            }
-            for (std::string_view x : e->exts) {
-                if (!ext_ok(x)) {
-                    r.put("engine '"); r.put(e->name); r.put("': extension '"); r.put(x); r.put("' must be lower-case with one leading dot and no blanks");
-                    return r;
-                }
-            }
-        }
-        for (std::size_t i = 0; i < size; ++i) {
-            for (std::string_view x : infos[i]->exts) {
-                for (std::size_t j = i + 1; j < size; ++j) {
-                    if (infos[j]->owns(x)) {
-                        r.put("'"); r.put(x); r.put("' is claimed by both '"); r.put(infos[i]->name); r.put("' and '"); r.put(infos[j]->name); r.put("'");
-                        return r;
-                    }
-                }
-            }
-        }
-        for (std::size_t i = 0; i < size; ++i) {
-            const engine_info* e = infos[i];
-            for (std::size_t j = i + 1; j < size; ++j) {
-                const engine_info* o = infos[j];
-                std::string_view clash{};
-                if (o->selects(e->name)) clash = e->name;
-                else if (o->selects(e->label)) clash = e->label;
-                else for (std::string_view a : e->aliases) { if (o->selects(a)) { clash = a; break; } }
-                if (!clash.empty()) {
-                    r.put("selector '"); r.put(clash); r.put("' is claimed by both '"); r.put(e->name); r.put("' and '"); r.put(o->name); r.put("'");
-                    return r;
-                }
-            }
-        }
-        r.put("pathlike engine registry invariants violated (duplicate alias within one engine, or a name/label/alias clash)");
         return r;
     }
 

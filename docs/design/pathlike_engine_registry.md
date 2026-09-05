@@ -38,11 +38,62 @@ the parametrised tests in `tests/unittests/test_pathlike.py` exercise it.
 `pygim stubs` then refreshes the generated block of `pathlike.pyi` (a test
 fails until it is run).
 
+## The path value: an RFC 3986 URI behind a pathlib-shaped API
+
+`file` holds a `uri` (`uri.h`): scheme, authority, root flag, and a list of
+decoded segments — RFC 3986 decomposed as in Appendix B, recomposed as in
+§5.3, normalised as in §6.2 only when asked. A **strategy** policy maps native
+path text onto that value and back, the way pathlib's `PurePosixPath` and
+`PureWindowsPath` do (pathlib calls this a *flavour*; here it is a strategy): `posix_strategy` ("/" separates, "//" is a preserved
+root), `windows_strategy` (both separators; a drive is the first segment as in
+`file:///C:/x`, a UNC host is the authority as in `file://srv/share/x`).
+`file` is `basic_file<native_strategy>`; both strategies are stateless policy
+types, so the Windows rules are provable on any host.
+
+Consequences that are visible from Python:
+
+- `str()` / `os.fspath()` return pathlib's normalised spelling (`a//b/` ->
+  `a/b`, `./x` -> `x`, `""` -> `.`); equality and hashing compare the value.
+- `pygim.path()` accepts `file://` URIs (decoded like `Path.from_uri`:
+  `file:///abs/x`, `file://localhost/abs/x`; `file://host/share/x` is a UNC
+  path on Windows and a ValueError on POSIX, as in pathlib 3.14); a relative
+  file URI or any other `scheme://` raises ValueError.
+- `.uri` renders an absolute path per RFC 3986 with percent-encoding of every
+  non-pchar byte (`file:///a%20b`, `file://host/share/x`); a relative path
+  keeps the `file://<path>` spelling.
+- `with_name` / `with_suffix` validate their arguments like pathlib.
+
+Where the RFC and pathlib disagree, pathlib wins for the path algebra and the
+RFC governs only the text form: empty segments are collapsed and `..` is kept
+when parsing *paths* (RFC `remove_dot_segments` is an explicit
+`uri::normalized()`), `join` appends segments (RFC reference resolution would
+replace the last one), and percent-encoding applies only when rendering or
+parsing a URI.
+
+The whole algebra — `name`, `stem`, `suffix`, `suffixes`, `parts`, `parent`,
+`parents`, `joined`, `with_*`, `is_absolute`, `as_uri`, `repr`, `ext_key` —
+is `constexpr`; only the filesystem half (`exists`, `read_bytes`, `glob`,
+`mkdir`, `absolute`, `resolve`, ...) touches `std::filesystem`, at the OS
+boundary. `tests/static/pathlike_parity_proofs.cpp` is **generated from
+pathlib** (`gen_pathlike_parity_proofs.py`): one `static_assert` per fact
+`PurePosixPath` / `PureWindowsPath` reports for the corpus, replayed against
+both strategies at compile time in every build; a test asserts the committed
+file matches the interpreter's pathlib. `pathlike_core_proofs.cpp` pins the
+RFC parser/renderer/normaliser and the URI mapping rules.
+
+**Compiler note.** The libstdc++ of GCC 13 and 14 cannot constant-evaluate a
+short `std::string` that escapes a function into the assertion expression,
+nor a string-holding struct returned by value straight into a member, nor
+vector comparisons of temporaries. The code therefore builds values in place
+(`parse_into`, `join_into`) and every proof helper returns a `bool` computed
+inside a `consteval` function on a local object. With that discipline the
+same proofs pass on GCC 13.4, GCC 14.3 and GCC 16 (verified).
+
 ## Mechanism
 
 | Layer | File | Role |
 |---|---|---|
-| vocabulary | `pathlike/core.h` | pybind-free: `engine_info` (name, label, doc, extensions, aliases), `sv_list`, `file` (pins `const engine_info*`) |
+| vocabulary | `pathlike/uri.h`, `pathlike/core.h` | pybind-free: the RFC 3986 `uri` value; `engine_info` (name, label, doc, extensions, aliases), `sv_list`; the strategies and `basic_file<Strategy>` (pins `const engine_info*`) |
 | registry | `pathlike/engine_list.h` | pybind-free: `EngineMeta` concept, `engine_list<Es...>` (the extension and selector tables as `StaticRegistryCore` over `flat_storage`, inventories, `visit`/`for_each`, `resolve`, the proofs, `conflict_report`) |
 | discovery | `setup.py::_apply_typelist` + `[extension.typelist]` in `ext.pathlike.toml` | globs `adapter/engines/*.h` (sorted by stem) into `build/gen/pathlike/pathlike_engines.gen.h`: the includes and `using Engines = engine_list<engines::json, ...>` |
 | dispatch | `adapter/adapter.h` | `Engine` concept (adds `load`/`write`), `load()`, `write()`, `wrap()`, `bind_typed()`, `engines_record()` — every one a fold over the pack |

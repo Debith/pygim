@@ -16,8 +16,13 @@ from typing import Any, Literal, NamedTuple
 def path(path: str | os.PathLike[str], engine: Engine | None = None) -> file:
     """Wrap a path in a self-reading, self-decoding file().
 
-    ``engine=`` pins the decoder for this object (inherited by derived paths);
-    the default resolves from the file extension at read/write time.
+    ``path`` is native path text (str, bytes or os.PathLike) or a ``file://`` URI
+    (RFC 8089, decoded like ``pathlib.Path.from_uri``: ``file:///abs/x``,
+    ``file://localhost/abs/x``; ``file://host/share/x`` is a UNC path on Windows
+    and a ValueError on POSIX, as in pathlib); a relative file URI or any other
+    scheme raises ValueError. ``engine=`` pins the decoder for this
+    object (inherited by derived paths); the default resolves from the file
+    extension at read/write time.
     """
 
 class file(os.PathLike[str]):
@@ -43,13 +48,16 @@ class file(os.PathLike[str]):
         the constructor pin, else the extension — or None when neither resolves."""
 
     # -- os.PathLike / identity ---------------------------------------------
-    def __fspath__(self) -> str: ...
+    def __fspath__(self) -> str:
+        """The native path text in pathlib's normalised spelling ('a//b/' -> 'a/b')."""
     def __eq__(self, other: object) -> bool: ...
     def __hash__(self) -> int: ...
 
     # -- name components (pathlib parity) -----------------------------------
     @property
-    def uri(self) -> str: ...
+    def uri(self) -> str:
+        """An absolute path as an RFC 3986 file URI (percent-encoded: 'file:///a%20b',
+        'file://host/share/x'); a relative path keeps the 'file://<path>' spelling."""
     @property
     def name(self) -> str: ...
     @property

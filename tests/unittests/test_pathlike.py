@@ -159,7 +159,7 @@ def test_joinpath_appends_many_components():
 
 def test_absolute_component_replaces():
     # std::filesystem / pathlib semantics: an absolute right-hand side wins.
-    assert os.fspath(pygim.path("a/b") / "/etc/x.yaml") == "/etc/x.yaml"
+    assert os.fspath(pygim.path("a/b") / "/etc/x.yaml") == str(pathlib.PurePath("/etc/x.yaml"))   # '\\etc\\x.yaml' on Windows
 
 
 def test_parent_name_stem_and_flags():
@@ -199,13 +199,14 @@ def test_suffixes_and_parts():
 
 
 def test_parents_closest_first():
-    assert [os.fspath(x) for x in pygim.path("a/b/c.yaml").parents] == ["a/b", "a"]
+    assert [os.fspath(x) for x in pygim.path("a/b/c.yaml").parents] == [str(pathlib.PurePath(s)) for s in ("a/b", "a")]
 
 
 def test_with_suffix_name_stem():
-    assert os.fspath(pygim.path("a/b.yaml").with_suffix(".json")) == "a/b.json"
-    assert os.fspath(pygim.path("a/b.yaml").with_name("c.txt")) == "a/c.txt"
-    assert os.fspath(pygim.path("a/b.yaml").with_stem("z")) == "a/z.yaml"
+    # spelled as pathlib spells them on this platform (backslashes on Windows)
+    assert os.fspath(pygim.path("a/b.yaml").with_suffix(".json")) == str(pathlib.PurePath("a/b.json"))
+    assert os.fspath(pygim.path("a/b.yaml").with_name("c.txt")) == str(pathlib.PurePath("a/c.txt"))
+    assert os.fspath(pygim.path("a/b.yaml").with_stem("z")) == str(pathlib.PurePath("a/z.yaml"))
 
 
 def test_resolve_collapses_dotdot():
@@ -692,7 +693,7 @@ def test_name_components_match_pathlib(s):
     assert p.stem == ref.stem, f"stem({s!r})"
     assert p.suffix == ref.suffix, f"suffix({s!r})"
     assert p.suffixes == list(ref.suffixes), f"suffixes({s!r})"
-    # parts: the root component is "/" vs "\\" depending on platform flavour;
+    # parts: the root component is "/" vs "\\" depending on platform strategy;
     # compare separator-normalised.
     ours = [x.replace("\\", "/") for x in p.parts]
     theirs = [x.replace("\\", "/") for x in ref.parts]
@@ -1060,3 +1061,213 @@ def test_stub_engine_block_is_current():
     block = _stubs.engine_block()
     for e in _engines():
         assert f"class {e.name}file(file):" in block and f'"{e.label}"' in block
+
+
+# --------------------------------------------------------------------------- #
+# The path VALUE is a URI (RFC 3986) behind a pathlib-shaped API: normalised
+# spelling, file:// URIs in, RFC rendering out.
+# --------------------------------------------------------------------------- #
+@pytest.mark.parametrize("text,expected", [
+    ("a/b/", "a/b"), ("a//b", "a/b"), ("./rel", "rel"), ("", "."), ("a/./b", "a/b"), ("/x/y/", "/x/y"),
+    ("a/../b", "a/../b"),          # pathlib keeps ".." — RFC dot-segment removal is never implicit
+])
+def test_fspath_is_pathlib_normalised(text, expected):
+    if os.name == "nt":
+        expected = expected.replace("/", "\\")
+    assert os.fspath(pygim.path(text)) == expected
+    assert os.fspath(pygim.path(text)) == str(pathlib.PurePath(text))   # pathlib is the oracle
+
+
+def test_equality_is_value_equality_not_spelling():
+    assert pygim.path("a/b/") == pygim.path("a//b") == pygim.path("./a/b")
+    assert hash(pygim.path("a/b/")) == hash(pygim.path("a/b"))
+    assert pygim.path("a/b") != pygim.path("a/c")
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX URI forms")
+def test_uri_renders_absolute_paths_per_rfc_3986():
+    assert pygim.path("/tmp/a b/é.yaml").uri == "file:///tmp/a%20b/%C3%A9.yaml"
+    assert pygim.path("/x/../y.json").uri == "file:///x/../y.json"          # ".." kept, like pathlib.as_uri
+    assert pygim.path("/a#b?c").uri == "file:///a%23b%3Fc"                   # reserved characters encoded
+    assert pygim.path("/a:b@c").uri == "file:///a:b@c"                       # ':' and '@' are pchars (RFC), unencoded
+    assert pygim.path("some.yaml").uri == "file://some.yaml"                 # relative: legacy spelling kept
+
+
+# Our file-URI decisions (pathlib 3.14's rules; 3.13 differs on the scheme case
+# and on 'file:///', so the interpreter-oracle test below covers only the stable cases).
+@pytest.mark.skipif(os.name == "nt", reason="POSIX URI forms")
+@pytest.mark.parametrize("uri,expected", [
+    ("file:///tmp/a%20b/x.yaml", "/tmp/a b/x.yaml"),
+    ("file://localhost/tmp/x.yaml", "/tmp/x.yaml"),        # 'localhost' authority is dropped
+    ("FILE:///tmp/x.yaml", "/tmp/x.yaml"),                 # scheme is case-insensitive (RFC 3986; pathlib 3.14)
+    ("file:/tmp/x.yaml", "/tmp/x.yaml"),                   # RFC 8089 minimal form
+    ("file:///tmp//a/./b/", "/tmp/a/b"),                   # decoded, then parsed like any path
+    ("file:///", "/"),                                     # the root (pathlib 3.14)
+    ("file:///tmp/%C3%A9.yaml", "/tmp/é.yaml"),
+])
+def test_file_uris_are_accepted_as_input(uri, expected):
+    p = pygim.path(uri)
+    assert os.fspath(p) == expected
+    assert p.is_absolute()
+
+
+@pytest.mark.skipif(os.name == "nt", reason="a remote host is a UNC path on Windows")
+def test_remote_host_file_uri_is_rejected_on_posix():
+    # pathlib.Path.from_uri (3.14) refuses it: a host other than localhost has no local meaning on POSIX.
+    with pytest.raises(ValueError, match="remote host 'server'"):
+        pygim.path("file://server/share/x.toml")
+
+
+def test_file_uri_input_dispatches_by_extension_and_round_trips(temp_dir):
+    uri = pathlib.Path(temp_dir, "notes", "config.yaml").as_uri()   # absolute on every platform
+    p = pygim.path(uri)
+    assert p.engine == "rapidyaml" and isinstance(p, pathlike.yamlfile)
+    assert p.uri == uri
+    assert pygim.path(p.uri) == p
+
+
+@pytest.mark.parametrize("bad", ["file:x.yaml", "file://", "file:"])
+def test_relative_file_uris_are_rejected(bad):
+    with pytest.raises(ValueError, match="URI is not absolute"):
+        pygim.path(bad)
+
+
+def test_other_schemes_are_rejected_not_silently_treated_as_paths():
+    with pytest.raises(ValueError, match="unsupported URI scheme 's3'"):
+        pygim.path("s3://bucket/x.yaml")
+    with pytest.raises(ValueError, match="unsupported URI scheme 'https'"):
+        pygim.path("https://example.org/x.json")
+    assert os.fspath(pygim.path("note:x.yaml")) == "note:x.yaml"   # a colon alone is not a URL
+
+
+def test_uri_input_reads_through_the_engine(temp_dir):
+    f = _write(temp_dir, "cfg.toml", "k = 1\n")
+    p = pygim.path(pathlib.Path(f).as_uri())
+    assert p.read() == {"k": 1} and p.engine == "toml++"
+
+
+def test_with_name_and_with_suffix_validate_like_pathlib():
+    with pytest.raises(ValueError):
+        pygim.path("a/b.yaml").with_name("")
+    with pytest.raises(ValueError):
+        pygim.path("a/b.yaml").with_name("x/y")
+    with pytest.raises(ValueError):
+        pygim.path("a/b.yaml").with_suffix("json")          # no leading dot
+    with pytest.raises(ValueError):
+        pygim.path("/").with_name("x")                       # the anchor has no name
+    assert os.fspath(pygim.path("a/b.tar.gz").with_suffix(".bz2")) == str(pathlib.PurePath("a/b.tar.bz2"))
+    assert os.fspath(pygim.path("a/b.tar.gz").with_suffix("")) == str(pathlib.PurePath("a/b.tar"))
+
+
+def test_parity_proofs_are_current():
+    """tests/static/pathlike_parity_proofs.cpp is generated from pathlib
+    (gen_pathlike_parity_proofs.py); it must match this interpreter's pathlib."""
+    static = pathlib.Path(__file__).parents[1] / "static"
+    if not static.is_dir():
+        pytest.skip("source tree not present (installed wheel)")
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("gen_parity", static / "gen_pathlike_parity_proofs.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    assert mod.render() == (static / "pathlike_parity_proofs.cpp").read_text(encoding="utf-8"), \
+        "stale: run tests/static/gen_pathlike_parity_proofs.py"
+
+
+# --------------------------------------------------------------------------- #
+# pathlib is the oracle for the whole path ALGEBRA of the native strategy:
+# str(), parent/parents, joining, with_*, equality, as_uri, from_uri.
+# (The C++ parity proofs cover both strategies at compile time; these assert the
+# Python-facing behaviour against the interpreter's own pathlib at run time.)
+# --------------------------------------------------------------------------- #
+ALGEBRA_CORPUS = PATH_CORPUS + [
+    "", "a/b/c.yaml", "/a/b/c", "dir/", "/x/y/", "a/../b", "sub/.hidden.tar.gz", "//net/share/x",
+    "spa ce/f.yaml", "x.Y.z", "a b/c d.e",
+]
+
+
+@pytest.mark.parametrize("s", ALGEBRA_CORPUS)
+def test_str_parent_and_parents_match_pathlib(s):
+    p, ref = pygim.path(s), pathlib.PurePath(s)
+    assert os.fspath(p) == str(ref), f"str({s!r})"
+    assert os.fspath(p.parent) == str(ref.parent), f"parent({s!r})"
+    # parents(): ours lists ancestors up to the anchor; pathlib additionally ends
+    # a relative path's list with "." — documented divergence, everything else equal.
+    ours = [os.fspath(x) for x in p.parents]
+    theirs = [str(x) for x in ref.parents if str(x) != "."]
+    assert ours == theirs, f"parents({s!r})"
+
+
+@pytest.mark.parametrize("base,other", [
+    ("a/b", "c"), ("a/b", "/x"), ("/a/b", "c/d"), ("", "x"), ("a", "b/c/"), ("/", "x"), ("a/b", ""),
+    ("a/b", "."), ("a/b", ".."), ("a//b", "c//d"), ("/a", "/"), ("x", "y/../z"), ("spa ce", "f g"),
+])
+def test_joining_matches_pathlib(base, other):
+    assert os.fspath(pygim.path(base) / other) == str(pathlib.PurePath(base) / other)
+    assert os.fspath(other / pygim.path(base)) == str(other / pathlib.PurePath(base))
+    assert os.fspath(pygim.path(base).joinpath(other, "z")) == str(pathlib.PurePath(base).joinpath(other, "z"))
+
+
+@pytest.mark.parametrize("s", ["a/b.yaml", "a/b.tar.gz", ".bashrc", "no_ext", "/", "a/b/", "x", "/abs/x.yml", "dir/"])
+@pytest.mark.parametrize("method,arg", [
+    ("with_name", "z.txt"), ("with_name", ".."), ("with_name", ""), ("with_name", "."), ("with_name", "a/b"),
+    ("with_suffix", ".json"), ("with_suffix", ""), ("with_suffix", "json"),
+    ("with_stem", "q"),
+    # Not asserted, because pathlib itself changed them in 3.14: with_suffix(".")
+    # and with_stem("") next to a suffix are accepted by 3.12 and rejected by 3.14.
+])
+def test_with_name_suffix_stem_match_pathlib_including_errors(s, method, arg):
+    try:
+        expected = str(getattr(pathlib.PurePath(s), method)(arg))
+    except ValueError:
+        expected = ValueError
+    if expected is ValueError:
+        with pytest.raises(ValueError):
+            getattr(pygim.path(s), method)(arg)
+    else:
+        assert os.fspath(getattr(pygim.path(s), method)(arg)) == expected, f"{method}({s!r}, {arg!r})"
+
+
+@pytest.mark.skipif(os.name == "nt", reason="PureWindowsPath compares case-insensitively; ours is case-sensitive by decision")
+@pytest.mark.parametrize("a", ALGEBRA_CORPUS)
+@pytest.mark.parametrize("b", ["a/b", "a//b/", "./a/b", "a/B", "/a/b", ".", "", "a.yaml", "a/../b"])
+def test_equality_and_hash_match_pathlib(a, b):
+    same = pathlib.PurePath(a) == pathlib.PurePath(b)
+    assert (pygim.path(a) == pygim.path(b)) == same, f"{a!r} == {b!r}"
+    if same:
+        assert hash(pygim.path(a)) == hash(pygim.path(b))
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX URI forms")
+@pytest.mark.parametrize("s", ["/abs/x.yml", "/tmp/a b/é.yaml", "/x/../y.json", "/a/b/", "/", "/dir/.hidden.tar.gz"])
+def test_uri_of_absolute_paths_matches_pathlib_as_uri(s):
+    # Where the RFC pchar set and pathlib's quote() agree (no ':' '@' or sub-delims in the path).
+    assert pygim.path(s).uri == pathlib.PurePath(s).as_uri()
+
+
+@pytest.mark.parametrize("s", ["a/b.yaml", "rel", ".", ""])
+def test_uri_of_relative_paths_is_a_decision_not_an_error(s):
+    with pytest.raises(ValueError):
+        pathlib.PurePath(s).as_uri()          # pathlib refuses
+    assert pygim.path(s).uri.startswith("file://")   # ours keeps the legacy spelling (user decision)
+
+
+@pytest.mark.skipif(not hasattr(pathlib.Path, "from_uri"), reason="pathlib.Path.from_uri is Python 3.13+")
+@pytest.mark.skipif(os.name == "nt", reason="POSIX URI forms")
+# Only what 3.13 and 3.14 agree on: pathlib itself changed 'FILE:', 'file:///',
+# bare 'file://' and a remote host between them (those are decisions, tested above).
+@pytest.mark.parametrize("uri", [
+    "file:///tmp/a%20b/x.yaml", "file://localhost/tmp/x.yaml", "file:/tmp/x.yaml", "file:///tmp//a/./b/",
+    "file:///tmp/%C3%A9.yaml", "file:///a/../b",
+])
+def test_file_uri_input_matches_pathlib_from_uri(uri):
+    assert os.fspath(pygim.path(uri)) == str(pathlib.Path.from_uri(uri))
+
+
+@pytest.mark.skipif(not hasattr(pathlib.Path, "from_uri"), reason="pathlib.Path.from_uri is Python 3.13+")
+@pytest.mark.parametrize("bad", ["file:x.yaml", "file:"])   # 'file://' is accepted by 3.13 and refused by 3.14: not asserted
+def test_relative_file_uri_rejection_matches_pathlib(bad):
+    with pytest.raises(ValueError):
+        pathlib.Path.from_uri(bad)
+    with pytest.raises(ValueError):
+        pygim.path(bad)
