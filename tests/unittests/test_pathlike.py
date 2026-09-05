@@ -1203,8 +1203,10 @@ def test_joining_matches_pathlib(base, other):
 @pytest.mark.parametrize("s", ["a/b.yaml", "a/b.tar.gz", ".bashrc", "no_ext", "/", "a/b/", "x", "/abs/x.yml", "dir/"])
 @pytest.mark.parametrize("method,arg", [
     ("with_name", "z.txt"), ("with_name", ".."), ("with_name", ""), ("with_name", "."), ("with_name", "a/b"),
-    ("with_suffix", ".json"), ("with_suffix", ""), ("with_suffix", "json"), ("with_suffix", "."),
-    ("with_stem", "q"),   # with_stem("") is version-dependent in pathlib (3.14 rejects it next to a suffix): not asserted
+    ("with_suffix", ".json"), ("with_suffix", ""), ("with_suffix", "json"),
+    ("with_stem", "q"),
+    # Not asserted, because pathlib itself changed them in 3.14: with_suffix(".")
+    # and with_stem("") next to a suffix are accepted by 3.12 and rejected by 3.14.
 ])
 def test_with_name_suffix_stem_match_pathlib_including_errors(s, method, arg):
     try:
