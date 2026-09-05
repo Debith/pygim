@@ -262,8 +262,10 @@ using namespace strategy_proofs;
 
 // file:// URIs in (pathlib.Path.from_uri rules), RFC URIs out.
 static_assert(px_is("file:///tmp/a%20b/x.yaml", "/tmp/a b/x.yaml") && px_is("file://localhost/etc/hosts", "/etc/hosts") &&
-              px_is("FILE:///tmp/x", "/tmp/x") && px_is("file:/tmp/x", "/tmp/x") && px_is("file:///tmp//a/./b/", "/tmp/a/b") &&
-              px_is("file://srv/share/x", "//srv/share/x"));
+              px_is("FILE:///tmp/x", "/tmp/x") && px_is("file:/tmp/x", "/tmp/x") && px_is("file:///tmp//a/./b/", "/tmp/a/b"));
+// A remote host has no local meaning on POSIX (pathlib.Path.from_uri refuses it); on Windows it is the UNC share.
+static_assert(px_problem("file://srv/share/x",
+                         "file URI names a remote host 'srv' in 'file://srv/share/x' (only localhost is supported on POSIX, as pathlib.Path.from_uri)"));
 static_assert(wx_is("file:///C:/Users/x.yaml", "C:\\Users\\x.yaml") && wx_is("file:///C|/x", "C:\\x") &&
               wx_is("file://srv/share/x.toml", "\\\\srv\\share\\x.toml") && wx_is("file://localhost/C:/x", "C:\\x"));
 static_assert(px_uri("/tmp/a b/x.yaml", "file:///tmp/a%20b/x.yaml") && px_uri("//srv/share/x", "file:////srv/share/x") &&

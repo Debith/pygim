@@ -55,8 +55,9 @@ Consequences that are visible from Python:
 - `str()` / `os.fspath()` return pathlib's normalised spelling (`a//b/` ->
   `a/b`, `./x` -> `x`, `""` -> `.`); equality and hashing compare the value.
 - `pygim.path()` accepts `file://` URIs (decoded like `Path.from_uri`:
-  `file:///abs/x`, `file://localhost/abs/x`, `file://host/share/x`); a
-  relative file URI or any other `scheme://` raises ValueError.
+  `file:///abs/x`, `file://localhost/abs/x`; `file://host/share/x` is a UNC
+  path on Windows and a ValueError on POSIX, as in pathlib 3.14); a relative
+  file URI or any other `scheme://` raises ValueError.
 - `.uri` renders an absolute path per RFC 3986 with percent-encoding of every
   non-pchar byte (`file:///a%20b`, `file://host/share/x`); a relative path
   keeps the `file://<path>` spelling.

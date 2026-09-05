@@ -18,8 +18,9 @@ def path(path: str | os.PathLike[str], engine: Engine | None = None) -> file:
 
     ``path`` is native path text (str, bytes or os.PathLike) or a ``file://`` URI
     (RFC 8089, decoded like ``pathlib.Path.from_uri``: ``file:///abs/x``,
-    ``file://localhost/abs/x``, ``file://host/share/x``); a relative file URI or
-    any other scheme raises ValueError. ``engine=`` pins the decoder for this
+    ``file://localhost/abs/x``; ``file://host/share/x`` is a UNC path on Windows
+    and a ValueError on POSIX, as in pathlib); a relative file URI or any other
+    scheme raises ValueError. ``engine=`` pins the decoder for this
     object (inherited by derived paths); the default resolves from the file
     extension at read/write time.
     """

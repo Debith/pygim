@@ -248,9 +248,9 @@ const std::string& path_doc() {
         "Wrap a path in a self-reading, self-decoding file() — typed as the engine's ``<name>file`` "
         "class when an engine resolves. Pass engine= to pin the decoder (" + names_list() +
         ", a library label, or an alias); default resolves from the extension. Accepts a native path "
-        "(str, bytes or os.PathLike) or a file:// URI (file:///abs/x, file://localhost/abs/x, "
-        "file://host/share/x — a UNC path on Windows); a relative file URI or any other scheme "
-        "is a ValueError. Known engines: " + Engines::known_text() + ".";
+        "(str, bytes or os.PathLike) or a file:// URI (file:///abs/x, file://localhost/abs/x; "
+        "file://host/share/x is a UNC path on Windows and a ValueError on POSIX, as in pathlib); "
+        "a relative file URI or any other scheme is a ValueError. Known engines: " + Engines::known_text() + ".";
     return s;
 }
 

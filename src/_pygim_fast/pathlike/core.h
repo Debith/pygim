@@ -192,6 +192,7 @@ struct strategy_base {
 struct posix_strategy : strategy_base<posix_strategy> {
     static constexpr std::string_view name = "posix";
     static constexpr char sep = '/';
+    static constexpr bool remote_hosts = false;   // file://host/x has no local meaning: rejected, as pathlib.Path.from_uri (3.14) does
     [[nodiscard]] static constexpr bool is_sep(char c) noexcept { return c == '/'; }
 
     // Fills `u` in place. (Constant evaluation on GCC 13/14 mishandles a
@@ -231,12 +232,8 @@ struct posix_strategy : strategy_base<posix_strategy> {
     }
 
     // RFC 8089 -> native text (pathlib.Path.from_uri): an empty or "localhost"
-    // authority is dropped; any other host becomes the "//host" root form.
-    [[nodiscard]] static constexpr std::string from_uri_text(const uri& u) {
-        std::string text;
-        if (const std::string_view host = detail::remote_host(u); !host.empty()) text = "//" + std::string(host);
-        return text + u.path();
-    }
+    // authority is dropped; a remote host was refused by problem() before this.
+    [[nodiscard]] static constexpr std::string from_uri_text(const uri& u) { return u.path(); }
 };
 
 // Windows: "\" and "/" both separate. The anchor is a drive ("C:") or a UNC
@@ -246,6 +243,7 @@ struct posix_strategy : strategy_base<posix_strategy> {
 struct windows_strategy : strategy_base<windows_strategy> {
     static constexpr std::string_view name = "windows";
     static constexpr char sep = '\\';
+    static constexpr bool remote_hosts = true;   // file://host/share/x is the UNC path \\host\share\x
     [[nodiscard]] static constexpr bool is_sep(char c) noexcept { return c == '\\' || c == '/'; }
     [[nodiscard]] static constexpr bool is_drive(std::string_view seg) noexcept {
         return seg.size() == 2 && uri::is_alpha(seg[0]) && seg[1] == ':';
@@ -386,6 +384,13 @@ public:
         const std::string_view sch = uri::scheme_of(text);
         if (sch.empty()) return "";
         if (is_file_scheme(sch)) {
+            if (!Strategy::remote_hosts) {
+                const uri parsed = uri::parse(text);
+                if (const std::string_view host = detail::remote_host(parsed); !host.empty()) {
+                    return "file URI names a remote host '" + std::string(host) + "' in '" + std::string(text) +
+                           "' (only localhost is supported on POSIX, as pathlib.Path.from_uri)";
+                }
+            }
             uri mapped;
             file_uri_into(mapped, text);
             if (!Strategy::is_absolute(mapped)) return "URI is not absolute: '" + std::string(text) + "'";
