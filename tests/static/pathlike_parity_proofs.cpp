@@ -30,6 +30,11 @@ struct probe {
     static consteval bool suffix_is(std::string_view s, std::string_view want) { B f(s); return f.suffix() == want; }
     static consteval bool parent_is(std::string_view s, std::string_view want) { B f(s); B p = f.parent(); return p.fspath() == want; }
     static consteval bool is_absolute(std::string_view s) { B f(s); return f.is_absolute(); }
+    static consteval bool joined_is(std::string_view a, std::string_view b, std::string_view want) { B f(a); B j = f.joined(b); return j.fspath() == want; }
+    static consteval bool rjoined_is(std::string_view a, std::string_view b, std::string_view want) { B f(a); B j = f.rjoined(b); return j.fspath() == want; }
+    static consteval bool with_name_is(std::string_view s, std::string_view n, std::string_view want) { B f(s); B r = f.with_name(n); return r.fspath() == want; }
+    static consteval bool with_suffix_is(std::string_view s, std::string_view x, std::string_view want) { B f(s); B r = f.with_suffix(x); return r.fspath() == want; }
+    static consteval bool with_stem_is(std::string_view s, std::string_view x, std::string_view want) { B f(s); B r = f.with_stem(x); return r.fspath() == want; }
     static consteval bool same(const std::vector<std::string>& got, std::initializer_list<std::string_view> want) {
         if (got.size() != want.size()) return false;
         std::size_t i = 0;
@@ -245,15 +250,6 @@ static_assert(px::suffixes_are("/a/b/c", {}));
 static_assert(px::parts_are("/a/b/c", {"/", "a", "b", "c"}));
 static_assert(px::parent_is("/a/b/c", "/a/b"));
 static_assert(px::is_absolute("/a/b/c") == true);
-// '///triple'
-static_assert(px::str_is("///triple", "/triple"));
-static_assert(px::name_is("///triple", "triple"));
-static_assert(px::stem_is("///triple", "triple"));
-static_assert(px::suffix_is("///triple", ""));
-static_assert(px::suffixes_are("///triple", {}));
-static_assert(px::parts_are("///triple", {"/", "triple"}));
-static_assert(px::parent_is("///triple", "/"));
-static_assert(px::is_absolute("///triple") == true);
 // 'a/../b'
 static_assert(px::str_is("a/../b", "a/../b"));
 static_assert(px::name_is("a/../b", "b"));
@@ -308,6 +304,52 @@ static_assert(px::suffixes_are("C:/not/a/drive", {}));
 static_assert(px::parts_are("C:/not/a/drive", {"C:", "not", "a", "drive"}));
 static_assert(px::parent_is("C:/not/a/drive", "C:/not/a"));
 static_assert(px::is_absolute("C:/not/a/drive") == false);
+// '///triple'
+static_assert(px::str_is("///triple", "/triple"));
+static_assert(px::name_is("///triple", "triple"));
+static_assert(px::stem_is("///triple", "triple"));
+static_assert(px::suffix_is("///triple", ""));
+static_assert(px::suffixes_are("///triple", {}));
+static_assert(px::parts_are("///triple", {"/", "triple"}));
+static_assert(px::parent_is("///triple", "/"));
+static_assert(px::is_absolute("///triple") == true);
+// joining
+static_assert(px::joined_is("a/b", "c", "a/b/c"));
+static_assert(px::rjoined_is("a/b", "c", "c/a/b"));
+static_assert(px::joined_is("a/b", "/x", "/x"));
+static_assert(px::rjoined_is("a/b", "/x", "/x/a/b"));
+static_assert(px::joined_is("/a/b", "c/d", "/a/b/c/d"));
+static_assert(px::rjoined_is("/a/b", "c/d", "/a/b"));
+static_assert(px::joined_is("", "x", "x"));
+static_assert(px::rjoined_is("", "x", "x"));
+static_assert(px::joined_is("a", "b/c/", "a/b/c"));
+static_assert(px::rjoined_is("a", "b/c/", "b/c/a"));
+static_assert(px::joined_is("/", "x", "/x"));
+static_assert(px::rjoined_is("/", "x", "/"));
+static_assert(px::joined_is("a/b", "", "a/b"));
+static_assert(px::rjoined_is("a/b", "", "a/b"));
+static_assert(px::joined_is("a/b", ".", "a/b"));
+static_assert(px::rjoined_is("a/b", ".", "a/b"));
+static_assert(px::joined_is("a/b", "..", "a/b/.."));
+static_assert(px::rjoined_is("a/b", "..", "../a/b"));
+static_assert(px::joined_is("a//b", "c//d", "a/b/c/d"));
+static_assert(px::rjoined_is("a//b", "c//d", "c/d/a/b"));
+static_assert(px::joined_is("/a", "/", "/"));
+static_assert(px::rjoined_is("/a", "/", "/a"));
+static_assert(px::joined_is("x", "y/../z", "x/y/../z"));
+static_assert(px::rjoined_is("x", "y/../z", "y/../z/x"));
+static_assert(px::joined_is("spa ce", "f g", "spa ce/f g"));
+static_assert(px::rjoined_is("spa ce", "f g", "f g/spa ce"));
+// with_name / with_suffix / with_stem
+static_assert(px::with_name_is("a/b.yaml", "z.txt", "a/z.txt"));
+static_assert(px::with_name_is("a/b.yaml", "..", "a/.."));
+static_assert(px::with_name_is("x", "y.z", "y.z"));
+static_assert(px::with_suffix_is("a/b.yaml", ".json", "a/b.json"));
+static_assert(px::with_suffix_is("a/b.tar.gz", ".bz2", "a/b.tar.bz2"));
+static_assert(px::with_suffix_is("a/b.tar.gz", "", "a/b.tar"));
+static_assert(px::with_suffix_is("no_ext", ".txt", "no_ext.txt"));
+static_assert(px::with_stem_is("a/b.yaml", "q", "a/q.yaml"));
+static_assert(px::with_stem_is("a/b.tar.gz", "q", "a/q.gz"));
 
 // ── PureWindowsPath ────────────────────────────────────────────────────────
 // 'a.yaml'
@@ -508,15 +550,6 @@ static_assert(wx::suffixes_are("/a/b/c", {}));
 static_assert(wx::parts_are("/a/b/c", {"\\", "a", "b", "c"}));
 static_assert(wx::parent_is("/a/b/c", "\\a\\b"));
 static_assert(wx::is_absolute("/a/b/c") == false);
-// '///triple'
-static_assert(wx::str_is("///triple", "\\\\\\triple"));
-static_assert(wx::name_is("///triple", ""));
-static_assert(wx::stem_is("///triple", ""));
-static_assert(wx::suffix_is("///triple", ""));
-static_assert(wx::suffixes_are("///triple", {}));
-static_assert(wx::parts_are("///triple", {"\\\\\\triple"}));
-static_assert(wx::parent_is("///triple", "\\\\\\triple"));
-static_assert(wx::is_absolute("///triple") == false);
 // 'a/../b'
 static_assert(wx::str_is("a/../b", "a\\..\\b"));
 static_assert(wx::name_is("a/../b", "b"));
@@ -661,6 +694,65 @@ static_assert(wx::suffixes_are("C://x", {}));
 static_assert(wx::parts_are("C://x", {"C:\\", "x"}));
 static_assert(wx::parent_is("C://x", "C:\\"));
 static_assert(wx::is_absolute("C://x") == true);
+// joining
+static_assert(wx::joined_is("a/b", "c", "a\\b\\c"));
+static_assert(wx::rjoined_is("a/b", "c", "c\\a\\b"));
+static_assert(wx::joined_is("a/b", "/x", "\\x"));
+static_assert(wx::rjoined_is("a/b", "/x", "\\x\\a\\b"));
+static_assert(wx::joined_is("/a/b", "c/d", "\\a\\b\\c\\d"));
+static_assert(wx::rjoined_is("/a/b", "c/d", "\\a\\b"));
+static_assert(wx::joined_is("", "x", "x"));
+static_assert(wx::rjoined_is("", "x", "x"));
+static_assert(wx::joined_is("a", "b/c/", "a\\b\\c"));
+static_assert(wx::rjoined_is("a", "b/c/", "b\\c\\a"));
+static_assert(wx::joined_is("/", "x", "\\x"));
+static_assert(wx::rjoined_is("/", "x", "\\"));
+static_assert(wx::joined_is("a/b", "", "a\\b"));
+static_assert(wx::rjoined_is("a/b", "", "a\\b"));
+static_assert(wx::joined_is("a/b", ".", "a\\b"));
+static_assert(wx::rjoined_is("a/b", ".", "a\\b"));
+static_assert(wx::joined_is("a/b", "..", "a\\b\\.."));
+static_assert(wx::rjoined_is("a/b", "..", "..\\a\\b"));
+static_assert(wx::joined_is("a//b", "c//d", "a\\b\\c\\d"));
+static_assert(wx::rjoined_is("a//b", "c//d", "c\\d\\a\\b"));
+static_assert(wx::joined_is("/a", "/", "\\"));
+static_assert(wx::rjoined_is("/a", "/", "\\a"));
+static_assert(wx::joined_is("x", "y/../z", "x\\y\\..\\z"));
+static_assert(wx::rjoined_is("x", "y/../z", "y\\..\\z\\x"));
+static_assert(wx::joined_is("spa ce", "f g", "spa ce\\f g"));
+static_assert(wx::rjoined_is("spa ce", "f g", "f g\\spa ce"));
+static_assert(wx::joined_is("C:\\a", "b", "C:\\a\\b"));
+static_assert(wx::rjoined_is("C:\\a", "b", "C:\\a"));
+static_assert(wx::joined_is("C:\\a", "\\x", "C:\\x"));
+static_assert(wx::rjoined_is("C:\\a", "\\x", "C:\\a"));
+static_assert(wx::joined_is("C:\\a", "D:x", "D:x"));
+static_assert(wx::rjoined_is("C:\\a", "D:x", "C:\\a"));
+static_assert(wx::joined_is("C:\\a", "C:x", "C:\\a\\x"));
+static_assert(wx::rjoined_is("C:\\a", "C:x", "C:\\a"));
+static_assert(wx::joined_is("C:\\a", "\\\\srv\\s\\y", "\\\\srv\\s\\y"));
+static_assert(wx::rjoined_is("C:\\a", "\\\\srv\\s\\y", "C:\\a"));
+static_assert(wx::joined_is("a", "b", "a\\b"));
+static_assert(wx::rjoined_is("a", "b", "b\\a"));
+static_assert(wx::joined_is("C:\\a", "D:/x", "D:\\x"));
+static_assert(wx::rjoined_is("C:\\a", "D:/x", "C:\\a"));
+static_assert(wx::joined_is("\\\\srv\\share\\x", "y", "\\\\srv\\share\\x\\y"));
+static_assert(wx::rjoined_is("\\\\srv\\share\\x", "y", "\\\\srv\\share\\x"));
+static_assert(wx::joined_is("\\\\srv\\share\\x", "\\y", "\\\\srv\\share\\y"));
+static_assert(wx::rjoined_is("\\\\srv\\share\\x", "\\y", "\\\\srv\\share\\x"));
+static_assert(wx::joined_is("C:", "x", "C:x"));
+static_assert(wx::rjoined_is("C:", "x", "C:"));
+static_assert(wx::joined_is("C:\\", "x", "C:\\x"));
+static_assert(wx::rjoined_is("C:\\", "x", "C:\\"));
+// with_name / with_suffix / with_stem
+static_assert(wx::with_name_is("a/b.yaml", "z.txt", "a\\z.txt"));
+static_assert(wx::with_name_is("a/b.yaml", "..", "a\\.."));
+static_assert(wx::with_name_is("x", "y.z", "y.z"));
+static_assert(wx::with_suffix_is("a/b.yaml", ".json", "a\\b.json"));
+static_assert(wx::with_suffix_is("a/b.tar.gz", ".bz2", "a\\b.tar.bz2"));
+static_assert(wx::with_suffix_is("a/b.tar.gz", "", "a\\b.tar"));
+static_assert(wx::with_suffix_is("no_ext", ".txt", "no_ext.txt"));
+static_assert(wx::with_stem_is("a/b.yaml", "q", "a\\q.yaml"));
+static_assert(wx::with_stem_is("a/b.tar.gz", "q", "a\\q.gz"));
 
 [[maybe_unused]] constexpr bool kParityProofsCompiled = true;
 

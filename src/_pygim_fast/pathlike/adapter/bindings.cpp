@@ -69,7 +69,7 @@ template <class E>
 consteval bool dispatches_to() {
     for (std::string_view x : E::info.exts) {
         const file native("dir/name" + std::string(x));
-        const file via_uri("file:///dir/name" + std::string(x));
+        const file via_uri("file:///C:/dir/name" + std::string(x));   // absolute under both strategies (a drive on Windows)
         if (Engines::for_ext(native.ext_key()) != &E::info || Engines::resolved_ct(via_uri) != &E::info) return false;
     }
     return true;

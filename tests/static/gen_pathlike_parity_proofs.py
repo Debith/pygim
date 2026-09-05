@@ -26,9 +26,12 @@ COMMON = [
     "a.yaml", "a..b", ".bashrc", ".bashrc.swp", "..", ".", "", "a/b/", "/",
     "a//b", "archive.tar.gz", "a.b.c.d", "no_ext", "/abs/x.yml", "./rel",
     "spa ce/f.yaml", "...", "a...gz", "a/./b", "x.YAML", "a/b/c.yaml",
-    "/a/b/c", "///triple", "a/../b", "dir/", "/x/y/",
+    "/a/b/c", "a/../b", "dir/", "/x/y/",
 ]
-POSIX_ONLY = ["//net/share/x", "//", "C:/not/a/drive"]
+# "///triple" is POSIX-only: PureWindowsPath's reading of it changed in 3.12
+# (rooted -> UNC drive with an empty host) and again in 3.14 (absolute), so it
+# is not a stable oracle fact for the Windows strategy.
+POSIX_ONLY = ["//net/share/x", "//", "C:/not/a/drive", "///triple"]
 WINDOWS_ONLY = [
     r"C:\x\y.yaml", "C:/x/y.yaml", r"c:\X", "C:", "C:x", r"C:\\", r"\x\y", r"\\srv\share\x.toml",
     r"\\srv\share", "//srv/share/x", r"D:\a\b\..\c", r"C:\a b\c.json", "C://x",
@@ -41,6 +44,41 @@ def cpp_str(s: str) -> str:
 
 def cpp_list(items) -> str:
     return "{" + ", ".join(cpp_str(x) for x in items) + "}"
+
+
+# Joining: (base, other) pairs whose pathlib result is stable across versions.
+JOIN_PAIRS = [
+    ("a/b", "c"), ("a/b", "/x"), ("/a/b", "c/d"), ("", "x"), ("a", "b/c/"), ("/", "x"), ("a/b", ""),
+    ("a/b", "."), ("a/b", ".."), ("a//b", "c//d"), ("/a", "/"), ("x", "y/../z"), ("spa ce", "f g"),
+]
+WINDOWS_JOIN_PAIRS = [
+    ("C:\\a", "b"), ("C:\\a", "\\x"), ("C:\\a", "D:x"), ("C:\\a", "C:x"), ("C:\\a", "\\\\srv\\s\\y"), ("a", "b"),
+    ("C:\\a", "D:/x"), ("\\\\srv\\share\\x", "y"), ("\\\\srv\\share\\x", "\\y"), ("C:", "x"), ("C:\\", "x"),
+]
+# with_name / with_suffix / with_stem: (path, argument) pairs that do NOT raise.
+WITH_CASES = [
+    ("with_name", "a/b.yaml", "z.txt"), ("with_name", "a/b.yaml", ".."), ("with_name", "x", "y.z"),
+    ("with_suffix", "a/b.yaml", ".json"), ("with_suffix", "a/b.tar.gz", ".bz2"), ("with_suffix", "a/b.tar.gz", ""),
+    ("with_suffix", "no_ext", ".txt"), ("with_stem", "a/b.yaml", "q"), ("with_stem", "a/b.tar.gz", "q"),
+    # ("with_stem", "a/b.txt", "") is deliberately absent: pathlib 3.14 rejects an
+    # empty stem next to a suffix, 3.12 allows it — not a stable oracle fact.
+]
+
+
+def join_facts(kind: str, cls, pairs) -> list[str]:
+    out = []
+    for base, other in pairs:
+        out.append(f"static_assert({kind}::joined_is({cpp_str(base)}, {cpp_str(other)}, {cpp_str(str(cls(base) / other))}));")
+        out.append(f"static_assert({kind}::rjoined_is({cpp_str(base)}, {cpp_str(other)}, {cpp_str(str(cls(other) / base))}));")
+    return out
+
+
+def with_facts(kind: str, cls) -> list[str]:
+    out = []
+    for method, s, arg in WITH_CASES:
+        want = str(getattr(cls(s), method)(arg))
+        out.append(f"static_assert({kind}::{method}_is({cpp_str(s)}, {cpp_str(arg)}, {cpp_str(want)}));")
+    return out
 
 
 def facts(kind: str, cls, s: str) -> list[str]:
@@ -92,6 +130,11 @@ def render() -> str:
         "    static consteval bool suffix_is(std::string_view s, std::string_view want) { B f(s); return f.suffix() == want; }",
         "    static consteval bool parent_is(std::string_view s, std::string_view want) { B f(s); B p = f.parent(); return p.fspath() == want; }",
         "    static consteval bool is_absolute(std::string_view s) { B f(s); return f.is_absolute(); }",
+        "    static consteval bool joined_is(std::string_view a, std::string_view b, std::string_view want) { B f(a); B j = f.joined(b); return j.fspath() == want; }",
+        "    static consteval bool rjoined_is(std::string_view a, std::string_view b, std::string_view want) { B f(a); B j = f.rjoined(b); return j.fspath() == want; }",
+        "    static consteval bool with_name_is(std::string_view s, std::string_view n, std::string_view want) { B f(s); B r = f.with_name(n); return r.fspath() == want; }",
+        "    static consteval bool with_suffix_is(std::string_view s, std::string_view x, std::string_view want) { B f(s); B r = f.with_suffix(x); return r.fspath() == want; }",
+        "    static consteval bool with_stem_is(std::string_view s, std::string_view x, std::string_view want) { B f(s); B r = f.with_stem(x); return r.fspath() == want; }",
         "    static consteval bool same(const std::vector<std::string>& got, std::initializer_list<std::string_view> want) {",
         "        if (got.size() != want.size()) return false;",
         "        std::size_t i = 0;",
@@ -112,9 +155,11 @@ def render() -> str:
     ]
     for s in COMMON + POSIX_ONLY:
         lines += [f"// {s!r}", *facts("px", PurePosixPath, s)]
+    lines += ["// joining", *join_facts("px", PurePosixPath, JOIN_PAIRS), "// with_name / with_suffix / with_stem", *with_facts("px", PurePosixPath)]
     lines += ["", "// ── PureWindowsPath ────────────────────────────────────────────────────────"]
     for s in COMMON + WINDOWS_ONLY:
         lines += [f"// {s!r}", *facts("wx", PureWindowsPath, s)]
+    lines += ["// joining", *join_facts("wx", PureWindowsPath, JOIN_PAIRS + WINDOWS_JOIN_PAIRS), "// with_name / with_suffix / with_stem", *with_facts("wx", PureWindowsPath)]
     lines += ["", "[[maybe_unused]] constexpr bool kParityProofsCompiled = true;", "", "}  // namespace", ""]
     return "\n".join(lines)
 
