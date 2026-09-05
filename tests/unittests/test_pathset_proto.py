@@ -75,7 +75,7 @@ def test_name_components_match_file(strs, ps):
     for s, v in zip(strs, ps):
         f = pygim.path(s)
         assert (v.name, v.stem, v.suffix) == (f.name, f.stem, f.suffix)
-        assert v.depth == len(f.parts) - (1 if f.is_absolute() else 0)
+        assert v.depth == len(P(s).parts) - (1 if P(s).anchor else 0)   # named components below the anchor
 
 
 def test_parent_is_a_view_in_the_same_table(ps):

@@ -88,7 +88,7 @@ public:
         return where([&](std::uint32_t r) { return detail::glob_match(glob, m_table->name(r)); });
     }
     [[nodiscard]] PathSet filter_absolute() const {
-        return where([&](std::uint32_t r) { return m_table->anchor(r).absolute; });
+        return where([&](std::uint32_t r) { return m_table->is_absolute<native_strategy>(r); });
     }
 
     // ── set algebra (bitmap when the tables are shared, chain lookup otherwise) ──
@@ -446,7 +446,7 @@ void bind_pathset(engine_list<Es...>, py::module_& m) {
             if (!e) return py::none();
             return py::str(std::string(e->label));
         })
-        .def("is_absolute", [](const fileview& v) { return v.table->anchor(v.row).absolute && v.to_file().is_absolute(); })
+        .def("is_absolute", [](const fileview& v) { return v.table->is_absolute<native_strategy>(v.row); })
         .def("to_file", [](const fileview& v) { return wrap(Engines_{}, v.to_file()); },
              "The owning file (typed by its engine) with the same value.")
         .def("__fspath__", [](const fileview& v) { return str_from_text(v.fspath()); })

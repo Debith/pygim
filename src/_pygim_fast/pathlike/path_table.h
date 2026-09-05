@@ -214,9 +214,10 @@ public:
     [[nodiscard]] std::uint32_t name_id(std::uint32_t r) const noexcept { return m_rows[r].name & ~anchor_bit; }
     // pathlib's parent: the anchor (or ".") is its own parent.
     [[nodiscard]] std::uint32_t parent(std::uint32_t r) const noexcept { return has_name(r) ? m_rows[r].parent : r; }
+    // Named components below the anchor (a drive or share row is part of the anchor).
     [[nodiscard]] std::uint32_t depth(std::uint32_t r) const noexcept {
         std::uint32_t d = 0;
-        for (; !is_anchor(r); r = m_rows[r].parent) ++d;
+        for (; !is_anchor(r); r = m_rows[r].parent) d += (m_rows[r].name & anchor_bit) ? 0u : 1u;
         return d;
     }
     [[nodiscard]] std::uint32_t anchor_of(std::uint32_t r) const noexcept {
@@ -280,6 +281,24 @@ public:
         for_chain(r, mix);
         return h;
     }
+
+    // The anchor as a uri holding only the anchor-part segments: what a
+    // strategy's anchor()/is_absolute()/is_anchored() look at (nothing further).
+    [[nodiscard]] uri head_of(std::uint32_t r) const {
+        const anchor_info a = anchor(r);
+        uri head;
+        head.absolute = a.absolute;
+        head.has_authority = a.has_authority;
+        head.authority = std::string(a.authority);
+        auto put = [&](std::uint32_t row) {
+            if (!is_anchor(row) && (m_rows[row].name & anchor_bit)) head.segments.emplace_back(m_segments[m_rows[row].name & ~anchor_bit]);
+        };
+        for_chain(r, put);
+        return head;
+    }
+    // pathlib's is_absolute(): rooted on POSIX; rooted AND on a drive or share on Windows.
+    template <class Strategy>
+    [[nodiscard]] bool is_absolute(std::uint32_t r) const { return Strategy::is_absolute(head_of(r)); }
 
     // pathlib's str() of a row — Strategy::render()'s rule (the anchor, then
     // the components joined; "." when empty) without building the value: the
