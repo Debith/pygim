@@ -243,12 +243,12 @@ static_assert(normalizes("file:///a/b/../", "file:///a/"));
 static_assert(normalizes("file:///a/..", "file:///"));
 static_assert(normalizes("x://[::1]:80/p", "x://[::1]:80/p"));
 
-// ── flavours: native text <-> uri, the Windows rules provable on any host ─
+// ── strategies: native text <-> uri, the Windows rules provable on any host ─
 // (Exhaustive pathlib parity lives in pathlike_parity_proofs.cpp, generated
 // from pathlib itself; these pin the mechanics and the URI mapping.)
-namespace flavour_proofs {
-using px = basic_file<posix_flavour>;
-using wx = basic_file<windows_flavour>;
+namespace strategy_proofs {
+using px = basic_file<posix_strategy>;
+using wx = basic_file<windows_strategy>;
 consteval bool px_is(std::string_view text, std::string_view want) { px f(text); return f.fspath() == want; }
 consteval bool wx_is(std::string_view text, std::string_view want) { wx f(text); return f.fspath() == want; }
 consteval bool px_uri(std::string_view text, std::string_view want) { px f(text); return f.as_uri() == want; }
@@ -259,8 +259,8 @@ consteval bool px_problem(std::string_view text, std::string_view want) { return
 consteval bool px_repr(std::string_view text, std::string_view want) { px f(text); return f.repr() == want; }
 consteval bool px_equal(std::string_view a, std::string_view b) { px f(a); px g(b); return f == g; }
 consteval std::size_t px_parents(std::string_view text) { px f(text); return f.parents().size(); }
-}  // namespace flavour_proofs
-using namespace flavour_proofs;
+}  // namespace strategy_proofs
+using namespace strategy_proofs;
 
 // file:// URIs in (pathlib.Path.from_uri rules), RFC URIs out.
 static_assert(px_is("file:///tmp/a%20b/x.yaml", "/tmp/a b/x.yaml") && px_is("file://localhost/etc/hosts", "/etc/hosts") &&
@@ -277,7 +277,7 @@ static_assert(px_problem("file:x.yaml", "URI is not absolute: 'file:x.yaml'") &&
               px_problem("note:x.yaml", "") && px_problem("/plain/path", "") && px_problem("file:///ok", ""));
 static_assert(px_repr("x.dat", "file(\"file://x.dat\")"));
 
-// pathlib's join rules per flavour.
+// pathlib's join rules per strategy.
 static_assert(px_join("/a/b", "c", "/a/b/c") && px_join("/a/b", "/x", "/x") && px_join("a", "b/c/", "a/b/c") && px_join("", "x", "x"));
 static_assert(wx_join("C:\\a", "b", "C:\\a\\b") && wx_join("C:\\a", "\\x", "C:\\x") && wx_join("C:\\a", "D:x", "D:x") &&
               wx_join("C:\\a", "C:x", "C:\\a\\x") && wx_join("C:\\a", "\\\\srv\\s\\y", "\\\\srv\\s\\y") && wx_join("a", "b", "a\\b"));

@@ -692,7 +692,7 @@ def test_name_components_match_pathlib(s):
     assert p.stem == ref.stem, f"stem({s!r})"
     assert p.suffix == ref.suffix, f"suffix({s!r})"
     assert p.suffixes == list(ref.suffixes), f"suffixes({s!r})"
-    # parts: the root component is "/" vs "\\" depending on platform flavour;
+    # parts: the root component is "/" vs "\\" depending on platform strategy;
     # compare separator-normalised.
     ours = [x.replace("\\", "/") for x in p.parts]
     theirs = [x.replace("\\", "/") for x in ref.parts]
@@ -1166,9 +1166,9 @@ def test_parity_proofs_are_current():
 
 
 # --------------------------------------------------------------------------- #
-# pathlib is the oracle for the whole path ALGEBRA of the native flavour:
+# pathlib is the oracle for the whole path ALGEBRA of the native strategy:
 # str(), parent/parents, joining, with_*, equality, as_uri, from_uri.
-# (The C++ parity proofs cover both flavours at compile time; these assert the
+# (The C++ parity proofs cover both strategies at compile time; these assert the
 # Python-facing behaviour against the interpreter's own pathlib at run time.)
 # --------------------------------------------------------------------------- #
 ALGEBRA_CORPUS = PATH_CORPUS + [

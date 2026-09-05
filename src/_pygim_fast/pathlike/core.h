@@ -2,10 +2,10 @@
 // pathlike/core.h — the pybind-free heart of `pygim.path`.
 //
 // A `file` is a path that knows how to read and decode itself. Its VALUE is a
-// `uri` (uri.h): a list of segments plus authority and root flag. A FLAVOUR
-// (posix_flavour / windows_flavour) says how native path text maps onto that
+// `uri` (uri.h): a list of segments plus authority and root flag. A STRATEGY
+// (posix_strategy / windows_strategy) says how native path text maps onto that
 // value and back — separators, drives, UNC hosts, roots — the way pathlib's
-// PurePosixPath and PureWindowsPath do. Both flavours are pure policy types, so
+// PurePosixPath and PureWindowsPath do. Both strategies are pure policy types, so
 // the Windows rules are provable on any host (tests/static/*proofs.cpp).
 //
 // The path ALGEBRA (name, stem, suffix, parts, parent, join, ...) is constexpr
@@ -158,8 +158,8 @@ constexpr void append_components(uri& u, std::string_view s, IsSep is_sep) {
 }
 }  // namespace detail
 
-// ── Flavours: native text <-> uri value, pathlib's rules ───────────────────
-// A flavour is a stateless policy: parse() maps a native path string onto the
+// ── Strategies: native text <-> uri value, pathlib's rules ───────────────────
+// A strategy is a stateless policy: parse() maps a native path string onto the
 // uri model, render() maps it back (pathlib's str()), and the anchor helpers
 // say which leading segments are the drive/share that name() and parent()
 // must never consume. from_uri_text() applies pathlib.Path.from_uri's rules
@@ -170,14 +170,14 @@ constexpr void append_components(uri& u, std::string_view s, IsSep is_sep) {
 // leading slashes; three or more collapse to "/"). Represented as the
 // absolute flag plus a leading EMPTY segment, which is also what RFC 3986
 // says the path "//x" is.
-struct posix_flavour {
+struct posix_strategy {
     static constexpr std::string_view name = "posix";
     static constexpr char sep = '/';
     [[nodiscard]] static constexpr bool is_sep(char c) noexcept { return c == '/'; }
 
     // Fills `u` in place. (Constant evaluation on GCC 13/14 mishandles a
     // string-holding struct returned by value straight into a member, so every
-    // flavour operation mutates in place; parse() is the by-value convenience.)
+    // strategy operation mutates in place; parse() is the by-value convenience.)
     static constexpr void parse_into(uri& u, std::string_view s) {
         u = uri{};
         u.scheme = "file";
@@ -248,7 +248,7 @@ struct posix_flavour {
 // share ("\\server\share") plus the root "\". A drive is stored as the first
 // segment ("C:", as RFC 8089 writes file:///C:/x) and a UNC host as the
 // authority (file://server/share/x); the share is the first segment.
-struct windows_flavour {
+struct windows_strategy {
     static constexpr std::string_view name = "windows";
     static constexpr char sep = '\\';
     [[nodiscard]] static constexpr bool is_sep(char c) noexcept { return c == '\\' || c == '/'; }
@@ -385,9 +385,9 @@ struct windows_flavour {
 };
 
 #ifdef _WIN32
-using native_flavour = windows_flavour;
+using native_strategy = windows_strategy;
 #else
-using native_flavour = posix_flavour;
+using native_strategy = posix_strategy;
 #endif
 
 // A path that reads and decodes itself. Models os.PathLike (it exposes
@@ -395,10 +395,10 @@ using native_flavour = posix_flavour;
 // etc. An engine may be pinned at construction (nullptr = auto by extension);
 // derived paths (parent(), with_suffix(), ...) inherit the pin. Resolution
 // itself lives in the registry (registry.h: engine_list::resolve).
-template <class Flavour>
+template <class Strategy>
 class basic_file {
 public:
-    using flavour = Flavour;
+    using strategy = Strategy;
 
     constexpr basic_file() = default;   // "."
 
@@ -420,11 +420,11 @@ public:
         if (is_file_scheme(sch)) {
             uri mapped;
             file_uri_into(mapped, text);
-            if (!Flavour::is_absolute(mapped)) return "URI is not absolute: '" + std::string(text) + "'";
+            if (!Strategy::is_absolute(mapped)) return "URI is not absolute: '" + std::string(text) + "'";
             return "";
         }
         const std::string_view rest = text.substr(sch.size() + 1);
-        const bool drive_letter = Flavour::name == "windows" && sch.size() == 1;
+        const bool drive_letter = Strategy::name == "windows" && sch.size() == 1;
         if (rest.starts_with("//") && !drive_letter) {
             return "unsupported URI scheme '" + std::string(sch) + "' in '" + std::string(text) +
                    "' (only file:// URIs are accepted)";
@@ -435,8 +435,8 @@ public:
     // Decode a file URI (RFC 8089) into `u` as a native path value.
     static constexpr void file_uri_into(uri& u, std::string_view text) {
         const uri parsed = uri::parse(text);
-        const std::string native = Flavour::from_uri_text(parsed);
-        Flavour::parse_into(u, native);
+        const std::string native = Strategy::from_uri_text(parsed);
+        Strategy::parse_into(u, native);
     }
 
     // Assign path text or a file URI to `u`; throws std::invalid_argument (ValueError) when rejected.
@@ -447,7 +447,7 @@ public:
         if (!sch.empty() && is_file_scheme(sch)) {
             file_uri_into(u, text);
         } else {
-            Flavour::parse_into(u, text);
+            Strategy::parse_into(u, text);
         }
     }
 
@@ -456,7 +456,7 @@ public:
     [[nodiscard]] constexpr const engine_info* pinned() const noexcept { return m_pin; }
 
     // os.PathLike: the native path text, in pathlib's normalised spelling.
-    [[nodiscard]] constexpr std::string fspath() const { return Flavour::render(m_uri); }
+    [[nodiscard]] constexpr std::string fspath() const { return Strategy::render(m_uri); }
 
     // Value equality (the pin does not take part); ordering is element-wise.
     [[nodiscard]] constexpr bool operator==(const basic_file& o) const noexcept { return m_uri == o.m_uri; }
@@ -507,12 +507,12 @@ public:
     // pathlib's parts: the anchor ("/", "C:\", "\\server\share\"), then the components.
     [[nodiscard]] constexpr std::vector<std::string> parts() const {
         std::vector<std::string> out;
-        if (const std::string a = Flavour::anchor(m_uri); !a.empty()) out.push_back(a);
+        if (const std::string a = Strategy::anchor(m_uri); !a.empty()) out.push_back(a);
         for (std::size_t i = anchor_count(); i < m_uri.segments.size(); ++i) out.push_back(m_uri.segments[i]);
         return out;
     }
 
-    [[nodiscard]] constexpr bool is_absolute() const noexcept { return Flavour::is_absolute(m_uri); }
+    [[nodiscard]] constexpr bool is_absolute() const noexcept { return Strategy::is_absolute(m_uri); }
 
     // ── URI form ───────────────────────────────────────────────────────────
     // An absolute path renders per RFC 3986/8089 (file:///a%20b, file://host/share/x).
@@ -520,7 +520,7 @@ public:
     [[nodiscard]] constexpr std::string as_uri() const {
         if (is_absolute()) {
             uri u = m_uri;
-            Flavour::make_file_uri(u);
+            Strategy::make_file_uri(u);
             return u.render();
         }
         std::string out = "file://";
@@ -540,13 +540,13 @@ public:
     // ── composition (pathlib-style) ────────────────────────────────────────
     [[nodiscard]] constexpr basic_file joined(std::string_view other) const {
         basic_file out = *this;
-        const uri rhs = Flavour::parse(other);
-        Flavour::join_into(out.m_uri, rhs);
+        const uri rhs = Strategy::parse(other);
+        Strategy::join_into(out.m_uri, rhs);
         return out;
     }
     [[nodiscard]] constexpr basic_file rjoined(std::string_view other) const {   // other / self
         basic_file out(other, m_pin);
-        Flavour::join_into(out.m_uri, m_uri);
+        Strategy::join_into(out.m_uri, m_uri);
         return out;
     }
 
@@ -564,7 +564,7 @@ public:
         basic_file cur = *this;
         while (cur.has_name()) {
             cur.m_uri.segments.pop_back();
-            if (!cur.has_name() && !Flavour::is_anchored(cur.m_uri)) break;
+            if (!cur.has_name() && !Strategy::is_anchored(cur.m_uri)) break;
             out.push_back(cur);
         }
         return out;
@@ -575,7 +575,7 @@ public:
     [[nodiscard]] constexpr basic_file with_name(std::string_view n) const {
         if (n.empty() || n == ".") throw std::invalid_argument("invalid name: '" + std::string(n) + "'");
         for (char c : n) {
-            if (Flavour::is_sep(c)) throw std::invalid_argument("invalid name: '" + std::string(n) + "'");
+            if (Strategy::is_sep(c)) throw std::invalid_argument("invalid name: '" + std::string(n) + "'");
         }
         if (!has_name()) throw std::invalid_argument("'" + fspath() + "' has an empty name");
         basic_file out = *this;
@@ -680,12 +680,12 @@ public:
     }
 
 private:
-    [[nodiscard]] constexpr std::size_t anchor_count() const noexcept { return Flavour::anchor_segments(m_uri); }
+    [[nodiscard]] constexpr std::size_t anchor_count() const noexcept { return Strategy::anchor_segments(m_uri); }
 
     [[nodiscard]] basic_file from_fs(const fs::path& p) const {
         basic_file out;
         out.m_pin = m_pin;
-        Flavour::parse_into(out.m_uri, detail::text_from_fs(p));
+        Strategy::parse_into(out.m_uri, detail::text_from_fs(p));
         return out;
     }
 
@@ -727,6 +727,6 @@ private:
     const engine_info* m_pin{nullptr};   // pinned at construction; nullptr = auto by extension
 };
 
-using file = basic_file<native_flavour>;
+using file = basic_file<native_strategy>;
 
 }  // namespace pygim::pathlike

@@ -2,9 +2,9 @@
 //
 // pathlib is the oracle for path semantics: every assertion below is a fact
 // PurePosixPath / PureWindowsPath reported for the corpus, replayed against
-// basic_file<posix_flavour> / basic_file<windows_flavour> at compile time.
+// basic_file<posix_strategy> / basic_file<windows_strategy> at compile time.
 // Compiled into every build (ext.pathlike.toml): a parity regression in either
-// flavour, on any host, produces no binary. Contributes no runtime code.
+// strategy, on any host, produces no binary. Contributes no runtime code.
 
 #include "../../src/_pygim_fast/pathlike/core.h"
 
@@ -21,9 +21,9 @@ using namespace pygim::pathlike;
 // the libstdc++ of GCC 13/14 cannot constant-evaluate a short std::string
 // that escapes into the assertion expression, nor compare vectors of
 // temporaries there. (GCC 15+, libc++ and MSVC have no such limits.)
-template <class Flavour>
+template <class Strategy>
 struct probe {
-    using B = basic_file<Flavour>;
+    using B = basic_file<Strategy>;
     static consteval bool str_is(std::string_view s, std::string_view want) { B f(s); return f.fspath() == want; }
     static consteval bool name_is(std::string_view s, std::string_view want) { B f(s); return f.name() == want; }
     static consteval bool stem_is(std::string_view s, std::string_view want) { B f(s); return f.stem() == want; }
@@ -43,8 +43,8 @@ struct probe {
         B f(s); const std::vector<std::string> got = f.parts(); return same(got, want);
     }
 };
-using px = probe<posix_flavour>;
-using wx = probe<windows_flavour>;
+using px = probe<posix_strategy>;
+using wx = probe<windows_strategy>;
 
 // ── PurePosixPath ──────────────────────────────────────────────────────────
 // 'a.yaml'

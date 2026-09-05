@@ -42,12 +42,12 @@ fails until it is run).
 
 `file` holds a `uri` (`uri.h`): scheme, authority, root flag, and a list of
 decoded segments — RFC 3986 decomposed as in Appendix B, recomposed as in
-§5.3, normalised as in §6.2 only when asked. A **flavour** policy maps native
+§5.3, normalised as in §6.2 only when asked. A **strategy** policy maps native
 path text onto that value and back, the way pathlib's `PurePosixPath` and
-`PureWindowsPath` do: `posix_flavour` ("/" separates, "//" is a preserved
-root), `windows_flavour` (both separators; a drive is the first segment as in
+`PureWindowsPath` do (pathlib calls this a *flavour*; here it is a strategy): `posix_strategy` ("/" separates, "//" is a preserved
+root), `windows_strategy` (both separators; a drive is the first segment as in
 `file:///C:/x`, a UNC host is the authority as in `file://srv/share/x`).
-`file` is `basic_file<native_flavour>`; both flavours are stateless policy
+`file` is `basic_file<native_strategy>`; both strategies are stateless policy
 types, so the Windows rules are provable on any host.
 
 Consequences that are visible from Python:
@@ -76,7 +76,7 @@ is `constexpr`; only the filesystem half (`exists`, `read_bytes`, `glob`,
 boundary. `tests/static/pathlike_parity_proofs.cpp` is **generated from
 pathlib** (`gen_pathlike_parity_proofs.py`): one `static_assert` per fact
 `PurePosixPath` / `PureWindowsPath` reports for the corpus, replayed against
-both flavours at compile time in every build; a test asserts the committed
+both strategies at compile time in every build; a test asserts the committed
 file matches the interpreter's pathlib. `pathlike_core_proofs.cpp` pins the
 RFC parser/renderer/normaliser and the URI mapping rules.
 
@@ -92,7 +92,7 @@ same proofs pass on GCC 13.4, GCC 14.3 and GCC 16 (verified).
 
 | Layer | File | Role |
 |---|---|---|
-| vocabulary | `pathlike/uri.h`, `pathlike/core.h` | pybind-free: the RFC 3986 `uri` value; `engine_info` (name, label, doc, extensions, aliases), `sv_list`; the flavours and `basic_file<Flavour>` (pins `const engine_info*`) |
+| vocabulary | `pathlike/uri.h`, `pathlike/core.h` | pybind-free: the RFC 3986 `uri` value; `engine_info` (name, label, doc, extensions, aliases), `sv_list`; the strategies and `basic_file<Strategy>` (pins `const engine_info*`) |
 | registry | `pathlike/engine_list.h` | pybind-free: `EngineMeta` concept, `engine_list<Es...>` (the extension and selector tables as `StaticRegistryCore` over `flat_storage`, inventories, `visit`/`for_each`, `resolve`, the proofs, `conflict_report`) |
 | discovery | `setup.py::_apply_typelist` + `[extension.typelist]` in `ext.pathlike.toml` | globs `adapter/engines/*.h` (sorted by stem) into `build/gen/pathlike/pathlike_engines.gen.h`: the includes and `using Engines = engine_list<engines::json, ...>` |
 | dispatch | `adapter/adapter.h` | `Engine` concept (adds `load`/`write`), `load()`, `write()`, `wrap()`, `bind_typed()`, `engines_record()` — every one a fold over the pack |
