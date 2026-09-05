@@ -24,8 +24,6 @@
 namespace {
 
 using namespace pygim::pathlike;
-using pygim::pathlike::detail::ascii_lower;
-using pygim::pathlike::detail::ascii_upper;
 using pygim::pathlike::detail::glob_match;
 
 // ── Synthetic descriptors (metadata only: the registry never needs load/write) ──
@@ -185,7 +183,7 @@ static_assert(!engine_list<label_is_name>::no_duplicate_selectors());
 
 // ── The case-fold chain, generated from the table ──────────────────────────
 static_assert(Good::case_folding_is_exact());
-static_assert(Good::for_ext(ascii_lower(".AA")) == &alpha::info && Good::for_ext(".AA") == nullptr &&
+static_assert(Good::for_ext(uri::ascii_lower(".AA")) == &alpha::info && Good::for_ext(".AA") == nullptr &&
               Good::for_ext("aa") == nullptr && Good::for_ext(".aa ") == nullptr &&
               Good::from_name("ALPHA") == nullptr && Good::from_name(".alpha") == nullptr);
 
@@ -287,7 +285,7 @@ static_assert(px_equal("a/b/", "a//b") && px_equal("./a/b", "a/b") && !px_equal(
 static_assert(px_parents("a/b/c") == 2 && px_parents("/a/b") == 2 && px_parents("a") == 0 && px_parents("/") == 0);
 
 // ── core.h helpers ─────────────────────────────────────────────────────────
-static_assert(ascii_lower(".YAML") == ".yaml" && ascii_upper(".yaml") == ".YAML" && ascii_lower("") == "");
+static_assert(uri::ascii_lower(".YAML") == ".yaml" && uri::ascii_upper(".yaml") == ".YAML" && uri::ascii_lower("") == "");
 static_assert(sv_list{}.empty() && !alpha::info.exts.empty() && alpha::info.exts.size() == 2 &&
               alpha::info.owns(".aa") && !alpha::info.owns(".b") && alpha::info.selects("al") &&
               !alpha::info.selects("beta"));

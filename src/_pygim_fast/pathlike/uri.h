@@ -81,7 +81,7 @@ struct uri {
     [[nodiscard]] static constexpr std::string percent_decode(std::string_view s) {
         std::string out;
         for (std::size_t i = 0; i < s.size(); ++i) {
-            if (s[i] == '%' && i + 2 < s.size() + 0 && i + 2 <= s.size() - 1) {
+            if (s[i] == '%' && i + 2 < s.size()) {
                 const int hi = hex_value(s[i + 1]), lo = hex_value(s[i + 2]);
                 if (hi >= 0 && lo >= 0) {
                     out += static_cast<char>(hi * 16 + lo);
@@ -106,11 +106,21 @@ struct uri {
         return {};
     }
 
+    // ASCII case folding — the only case folding a URI (or a path key) needs.
+    [[nodiscard]] static constexpr char to_lower(char c) noexcept {
+        return (c >= 'A' && c <= 'Z') ? static_cast<char>(c - 'A' + 'a') : c;
+    }
+    [[nodiscard]] static constexpr char to_upper(char c) noexcept {
+        return (c >= 'a' && c <= 'z') ? static_cast<char>(c - 'a' + 'A') : c;
+    }
     [[nodiscard]] static constexpr std::string ascii_lower(std::string_view s) {
         std::string out(s);
-        for (char& c : out) {
-            if (c >= 'A' && c <= 'Z') c = static_cast<char>(c - 'A' + 'a');
-        }
+        for (char& c : out) c = to_lower(c);
+        return out;
+    }
+    [[nodiscard]] static constexpr std::string ascii_upper(std::string_view s) {
+        std::string out(s);
+        for (char& c : out) c = to_upper(c);
         return out;
     }
 
@@ -155,15 +165,23 @@ struct uri {
         return u;
     }
 
+    // Appends segments[from..] to `out`, `sep`-joined, percent-encoded when
+    // `encode` — the one segment-joining loop behind path(), render() and the
+    // strategies' native rendering (core.h).
+    constexpr void append_segments(std::string& out, std::size_t from, char sep, bool encode) const {
+        for (std::size_t i = from; i < segments.size(); ++i) {
+            if (i > from) out += sep;
+            if (encode) out += percent_encode(segments[i]);
+            else out += segments[i];
+        }
+    }
+
     // The decoded path text: "/" + segments joined by "/" (or without the
     // leading "/" for a relative path).
     [[nodiscard]] constexpr std::string path() const {
         std::string out;
         if (absolute) out += '/';
-        for (std::size_t i = 0; i < segments.size(); ++i) {
-            if (i) out += '/';
-            out += segments[i];
-        }
+        append_segments(out, 0, '/', false);
         return out;
     }
 
@@ -179,10 +197,7 @@ struct uri {
             out += authority;
         }
         if (absolute) out += '/';
-        for (std::size_t i = 0; i < segments.size(); ++i) {
-            if (i) out += '/';
-            out += percent_encode(segments[i]);
-        }
+        append_segments(out, 0, '/', true);
         if (has_query) {
             out += '?';
             out += query;
@@ -230,10 +245,7 @@ struct uri {
                 const std::size_t colon = u.authority.find(':', host_start);
                 if (colon != std::string::npos) host_end = colon;
             }
-            for (std::size_t i = host_start; i < host_end; ++i) {
-                char& c = u.authority[i];
-                if (c >= 'A' && c <= 'Z') c = static_cast<char>(c - 'A' + 'a');
-            }
+            for (std::size_t i = host_start; i < host_end; ++i) u.authority[i] = to_lower(u.authority[i]);
         }
         u.segments = remove_dot_segments(u.segments);
         return u;

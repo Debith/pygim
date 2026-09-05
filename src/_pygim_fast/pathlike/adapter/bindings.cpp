@@ -134,41 +134,53 @@ py::list wrap_all(std::vector<file> files) {
 // Passed as py::doc(...) rather than a bare const char*: a dynamic docstring as
 // a bare pointer in module_::def's extras pack crashed MSVC (C1001).
 std::string join_exts(const engine_info& e, std::string_view sep) {
-    std::string s;
+    detail::text t;
     for (std::string_view x : e.exts) {
-        if (!s.empty()) s += sep;
-        s += "``" + std::string(x) + "``";
+        detail::separate(t, sep);
+        t.put("``");
+        t.put(x);
+        t.put("``");
     }
-    return s;
+    return std::move(t.out);
 }
 
 // The docstring fragments are folds over the pack through plain function
 // templates (the same portable construct set as adapter.h: no capturing
-// generic lambdas at run time).
+// generic lambdas at run time), writing into engine_list.h's text sink.
 template <class E>
-void append_dispatch(std::string& out) {
-    if (!out.empty()) out += "; ";
-    out += join_exts(E::info, "/") + " -> " + std::string(E::info.name) + " (" + std::string(E::info.label) + ")";
+void append_dispatch(detail::text& t) {
+    detail::separate(t, "; ");
+    t.put(join_exts(E::info, "/"));
+    t.put(" -> ");
+    t.put(E::info.name);
+    t.put(" (");
+    t.put(E::info.label);
+    t.put(")");
 }
 template <class E>
-void append_label(std::string& out) {
-    if (!out.empty()) out += "/";
-    out += "'" + std::string(E::info.label) + "'";
+void append_label(detail::text& t) {
+    detail::separate(t, "/");
+    t.put("'");
+    t.put(E::info.label);
+    t.put("'");
 }
 template <class E>
-void append_name(std::string& out) {
-    if (!out.empty()) out += "/";
-    out += std::string(E::info.name);
+void append_name(detail::text& t) {
+    detail::separate(t, "/");
+    t.put(E::info.name);
 }
 template <class E>
-void append_note(std::string& out) {
-    out += "\n- " + std::string(E::info.name) + ": " + std::string(E::info.doc);
+void append_note(detail::text& t) {
+    t.put("\n- ");
+    t.put(E::info.name);
+    t.put(": ");
+    t.put(E::info.doc);
 }
 
-template <class... Es> std::string dispatch_sentence_of(engine_list<Es...>) { std::string out; (append_dispatch<Es>(out), ...); return out; }
-template <class... Es> std::string labels_list_of(engine_list<Es...>) { std::string out; (append_label<Es>(out), ...); return out; }
-template <class... Es> std::string names_list_of(engine_list<Es...>) { std::string out; (append_name<Es>(out), ...); return out; }
-template <class... Es> std::string engine_notes_of(engine_list<Es...>) { std::string out; (append_note<Es>(out), ...); return out; }
+template <class... Es> std::string dispatch_sentence_of(engine_list<Es...>) { detail::text t; (append_dispatch<Es>(t), ...); return std::move(t.out); }
+template <class... Es> std::string labels_list_of(engine_list<Es...>) { detail::text t; (append_label<Es>(t), ...); return std::move(t.out); }
+template <class... Es> std::string names_list_of(engine_list<Es...>) { detail::text t; (append_name<Es>(t), ...); return std::move(t.out); }
+template <class... Es> std::string engine_notes_of(engine_list<Es...>) { detail::text t; (append_note<Es>(t), ...); return std::move(t.out); }
 
 // "``.json`` -> json (simdjson); ``.jsonl``/``.ndjson`` -> jsonl (simdjson-ndjson); ..."
 const std::string& dispatch_sentence() {

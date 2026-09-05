@@ -81,24 +81,6 @@ struct engine_info {
 };
 
 namespace detail {
-// ASCII case folding of a short extension, so ".YAML" resolves like ".yaml".
-// constexpr so the fold-then-lookup chain is provable at compile time.
-[[nodiscard]] constexpr std::string ascii_lower(std::string_view s) {
-    std::string out(s);
-    for (char& c : out) {
-        if (c >= 'A' && c <= 'Z') c = static_cast<char>(c - 'A' + 'a');
-    }
-    return out;
-}
-
-[[nodiscard]] constexpr std::string ascii_upper(std::string_view s) {
-    std::string out(s);
-    for (char& c : out) {
-        if (c >= 'a' && c <= 'z') c = static_cast<char>(c - 'a' + 'A');
-    }
-    return out;
-}
-
 // One glob *segment* against one path component: `*` and `?`, never crossing
 // a directory separator (the walk in file::glob() handles `/` and `**`).
 [[nodiscard]] constexpr bool glob_match(std::string_view pattern, std::string_view name) noexcept {
@@ -156,7 +138,44 @@ constexpr void append_components(uri& u, std::string_view s, IsSep is_sep) {
         start = end + 1;
     }
 }
+
+// The host of a file URI that names a remote machine: pathlib.Path.from_uri
+// treats an empty authority and "localhost" as the local machine.
+[[nodiscard]] constexpr std::string_view remote_host(const uri& u) noexcept {
+    if (!u.has_authority || u.authority.empty() || u.authority == "localhost") return {};
+    return u.authority;
+}
 }  // namespace detail
+
+// What every strategy shares, expressed once over the strategy's own
+// anchor()/anchor_segments()/sep/parse_into(): the by-value parse, pathlib's
+// str() rendering, and the RFC file-URI form. (A strategy is stateless, so
+// this is CRTP over static members only.)
+template <class Strategy>
+struct strategy_base {
+    [[nodiscard]] static constexpr uri parse(std::string_view s) {
+        uri u;
+        Strategy::parse_into(u, s);
+        return u;
+    }
+
+    // pathlib's str(): the anchor, then the components joined; "." when empty.
+    [[nodiscard]] static constexpr std::string render(const uri& u) {
+        std::string out = Strategy::anchor(u);
+        u.append_segments(out, Strategy::anchor_segments(u), Strategy::sep, false);
+        return out.empty() ? std::string(".") : out;
+    }
+
+    // The RFC form of an absolute path, in place: file:///a/b — an authority is
+    // present (empty unless the path already names a host, as a UNC share does).
+    static constexpr void make_file_uri(uri& u) {
+        u.scheme = "file";
+        if (!u.has_authority) {
+            u.has_authority = true;
+            u.authority.clear();
+        }
+    }
+};
 
 // ── Strategies: native text <-> uri value, pathlib's rules ───────────────────
 // A strategy is a stateless policy: parse() maps a native path string onto the
@@ -170,7 +189,7 @@ constexpr void append_components(uri& u, std::string_view s, IsSep is_sep) {
 // leading slashes; three or more collapse to "/"). Represented as the
 // absolute flag plus a leading EMPTY segment, which is also what RFC 3986
 // says the path "//x" is.
-struct posix_strategy {
+struct posix_strategy : strategy_base<posix_strategy> {
     static constexpr std::string_view name = "posix";
     static constexpr char sep = '/';
     [[nodiscard]] static constexpr bool is_sep(char c) noexcept { return c == '/'; }
@@ -190,11 +209,6 @@ struct posix_strategy {
         }
         detail::append_components(u, s, is_sep);
     }
-    [[nodiscard]] static constexpr uri parse(std::string_view s) {
-        uri u;
-        parse_into(u, s);
-        return u;
-    }
 
     // Leading segments that belong to the anchor (the "//" root's empty segment).
     [[nodiscard]] static constexpr std::size_t anchor_segments(const uri& u) noexcept {
@@ -206,18 +220,6 @@ struct posix_strategy {
     }
     [[nodiscard]] static constexpr bool is_absolute(const uri& u) noexcept { return u.absolute; }
     [[nodiscard]] static constexpr bool is_anchored(const uri& u) noexcept { return u.absolute; }
-
-    // pathlib's str(): the anchor, then the components joined; "." when empty.
-    [[nodiscard]] static constexpr std::string render(const uri& u) {
-        std::string out = anchor(u);
-        bool first = true;
-        for (std::size_t i = anchor_segments(u); i < u.segments.size(); ++i) {
-            if (!first) out += '/';
-            first = false;
-            out += u.segments[i];
-        }
-        return out.empty() ? std::string(".") : out;
-    }
 
     // pathlib's join, in place: an absolute `other` replaces the whole path.
     static constexpr void join_into(uri& base, const uri& other) {
@@ -232,15 +234,8 @@ struct posix_strategy {
     // authority is dropped; any other host becomes the "//host" root form.
     [[nodiscard]] static constexpr std::string from_uri_text(const uri& u) {
         std::string text;
-        if (u.has_authority && !u.authority.empty() && u.authority != "localhost") text = "//" + u.authority;
+        if (const std::string_view host = detail::remote_host(u); !host.empty()) text = "//" + std::string(host);
         return text + u.path();
-    }
-
-    // The RFC form of an absolute path, in place: file:///a/b — authority present, empty.
-    static constexpr void make_file_uri(uri& u) {
-        u.scheme = "file";
-        u.has_authority = true;
-        u.authority.clear();
     }
 };
 
@@ -248,7 +243,7 @@ struct posix_strategy {
 // share ("\\server\share") plus the root "\". A drive is stored as the first
 // segment ("C:", as RFC 8089 writes file:///C:/x) and a UNC host as the
 // authority (file://server/share/x); the share is the first segment.
-struct windows_strategy {
+struct windows_strategy : strategy_base<windows_strategy> {
     static constexpr std::string_view name = "windows";
     static constexpr char sep = '\\';
     [[nodiscard]] static constexpr bool is_sep(char c) noexcept { return c == '\\' || c == '/'; }
@@ -289,11 +284,6 @@ struct windows_strategy {
         while (!s.empty() && is_sep(s.front())) s.remove_prefix(1);
         detail::append_components(u, s, is_sep);
     }
-    [[nodiscard]] static constexpr uri parse(std::string_view s) {
-        uri u;
-        parse_into(u, s);
-        return u;
-    }
 
     [[nodiscard]] static constexpr bool has_drive(const uri& u) noexcept {
         return !u.has_authority && !u.segments.empty() && is_drive(u.segments.front());
@@ -319,23 +309,9 @@ struct windows_strategy {
         return u.absolute || u.has_authority || has_drive(u);
     }
 
-    [[nodiscard]] static constexpr std::string render(const uri& u) {
-        std::string out = anchor(u);
-        bool first = true;
-        for (std::size_t i = anchor_segments(u); i < u.segments.size(); ++i) {
-            if (!first) out += '\\';
-            first = false;
-            out += u.segments[i];
-        }
-        return out.empty() ? std::string(".") : out;
-    }
-
     [[nodiscard]] static constexpr bool same_drive(const uri& a, const uri& b) noexcept {
         if (!has_drive(a) || !has_drive(b)) return false;
-        const char x = a.segments.front()[0], y = b.segments.front()[0];
-        const char lx = (x >= 'A' && x <= 'Z') ? static_cast<char>(x - 'A' + 'a') : x;
-        const char ly = (y >= 'A' && y <= 'Z') ? static_cast<char>(y - 'A' + 'a') : y;
-        return lx == ly;
+        return uri::to_lower(a.segments.front()[0]) == uri::to_lower(b.segments.front()[0]);
     }
 
     // pathlib's join, in place: a UNC or foreign-drive `other` replaces; a
@@ -366,21 +342,13 @@ struct windows_strategy {
     // legacy "C|" drive spelling becomes "C:".
     [[nodiscard]] static constexpr std::string from_uri_text(const uri& u) {
         std::string text;
-        if (u.has_authority && !u.authority.empty() && u.authority != "localhost") text = "\\\\" + u.authority;
+        if (const std::string_view host = detail::remote_host(u); !host.empty()) text = "\\\\" + std::string(host);
         std::string p = u.path();
         if (text.empty() && p.size() >= 3 && p[0] == '/' && uri::is_alpha(p[1]) && (p[2] == ':' || p[2] == '|')) {
             p = p.substr(1);
             p[1] = ':';
         }
         return text + p;
-    }
-
-    static constexpr void make_file_uri(uri& u) {
-        u.scheme = "file";
-        if (!u.has_authority) {
-            u.has_authority = true;
-            u.authority.clear();
-        }
     }
 };
 
@@ -502,7 +470,7 @@ public:
     }
 
     // The lower-cased extension the registry dispatches on (".yaml").
-    [[nodiscard]] constexpr std::string ext_key() const { return detail::ascii_lower(suffix()); }
+    [[nodiscard]] constexpr std::string ext_key() const { return uri::ascii_lower(suffix()); }
 
     // pathlib's parts: the anchor ("/", "C:\", "\\server\share\"), then the components.
     [[nodiscard]] constexpr std::vector<std::string> parts() const {
