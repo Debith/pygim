@@ -81,6 +81,37 @@ struct engine_info {
 };
 
 namespace detail {
+// FNV-1a: the value hash of basic_file and path_table (one definition).
+inline constexpr std::uint64_t fnv_basis = 14695981039346656037ull;
+inline constexpr std::uint64_t fnv_prime = 1099511628211ull;
+[[nodiscard]] constexpr std::uint64_t fnv1a(std::string_view s, std::uint64_t h = fnv_basis) noexcept {
+    for (const unsigned char c : s) {
+        h ^= c;
+        h *= fnv_prime;
+    }
+    return h;
+}
+// One string of a composite value: its bytes, then a terminator so that
+// ("ab","c") and ("a","bc") differ.
+[[nodiscard]] constexpr std::uint64_t mix_string(std::uint64_t h, std::string_view s) noexcept {
+    h = fnv1a(s, h);
+    h ^= 0xffu;
+    h *= fnv_prime;
+    return h;
+}
+
+// pathlib's stem and suffix of a final component: the last dot splits them
+// unless it is the first or the last character (".bashrc", "a." have no suffix).
+[[nodiscard]] constexpr std::string_view suffix_of(std::string_view n) noexcept {
+    const std::size_t dot = n.rfind('.');
+    if (dot == std::string_view::npos || dot == 0 || dot == n.size() - 1) return {};
+    return n.substr(dot);
+}
+[[nodiscard]] constexpr std::string_view stem_of(std::string_view n) noexcept {
+    const std::size_t dot = n.rfind('.');
+    if (dot == std::string_view::npos || dot == 0 || dot == n.size() - 1) return n;
+    return n.substr(0, dot);
+}
 // One glob *segment* against one path component: `*` and `?`, never crossing
 // a directory separator (the walk in file::glob() handles `/` and `**`).
 [[nodiscard]] constexpr bool glob_match(std::string_view pattern, std::string_view name) noexcept {
@@ -175,6 +206,19 @@ struct strategy_base {
             u.authority.clear();
         }
     }
+
+    // The parse as a stream: sink.anchor(absolute, has_authority, authority,
+    // anchor_segments) once, then sink.segment(text) per segment — exactly
+    // what parse_into() yields, without building a uri when a strategy
+    // provides a direct tokeniser (posix_strategy does; this generic one
+    // serves the rest). path_table.h consumes it.
+    template <class Sink>
+    static constexpr void tokenise(std::string_view s, Sink& sink) {
+        uri u;
+        Strategy::parse_into(u, s);
+        sink.anchor(u.absolute, u.has_authority, u.authority, Strategy::anchor_segments(u));
+        for (const std::string& seg : u.segments) sink.segment(seg);
+    }
 };
 
 // ── Strategies: native text <-> uri value, pathlib's rules ───────────────────
@@ -209,6 +253,26 @@ struct posix_strategy : strategy_base<posix_strategy> {
             s.remove_prefix(slashes);
         }
         detail::append_components(u, s, is_sep);
+    }
+
+    // parse_into() as a stream, allocation-free (proven equal to parse_into
+    // in tests/static/pathlike_core_proofs.cpp).
+    template <class Sink>
+    static constexpr void tokenise(std::string_view s, Sink& sink) {
+        std::size_t slashes = 0;
+        while (slashes < s.size() && s[slashes] == '/') ++slashes;
+        sink.anchor(slashes > 0, false, std::string_view{}, slashes == 2 ? 1 : 0);
+        if (slashes == 2) sink.segment(std::string_view{});   // the "//" root
+        s.remove_prefix(slashes);
+        std::size_t start = 0;
+        while (start <= s.size()) {
+            std::size_t end = start;
+            while (end < s.size() && s[end] != '/') ++end;
+            const std::string_view seg = s.substr(start, end - start);
+            if (!seg.empty() && seg != ".") sink.segment(seg);
+            if (end == s.size()) break;
+            start = end + 1;
+        }
     }
 
     // Leading segments that belong to the anchor (the "//" root's empty segment).
@@ -368,6 +432,9 @@ public:
 
     constexpr basic_file() = default;   // "."
 
+    // From a value already in the model (a path_table row, a parsed uri).
+    constexpr explicit basic_file(uri value, const engine_info* pin = nullptr) : m_uri(std::move(value)), m_pin(pin) {}
+
     // From native path text — or a file:// URI (RFC 8089, decoded as
     // pathlib.Path.from_uri does). Any other "scheme://" text is rejected.
     constexpr explicit basic_file(std::string_view text, const engine_info* pin = nullptr) : m_pin(pin) {
@@ -436,19 +503,11 @@ public:
     // A hash of exactly what operator== compares (FNV-1a over the value), so
     // equal files hash equal without rendering the path text.
     [[nodiscard]] constexpr std::uint64_t hash_value() const noexcept {
-        std::uint64_t h = 14695981039346656037ull;
-        const auto mix = [&h](std::string_view s) {
-            for (const unsigned char c : s) {
-                h ^= c;
-                h *= 1099511628211ull;
-            }
-            h ^= 0xffu;   // a terminator, so ("ab","c") and ("a","bc") differ
-            h *= 1099511628211ull;
-        };
-        if (m_uri.has_authority) mix(m_uri.authority);
+        std::uint64_t h = detail::fnv_basis;
+        if (m_uri.has_authority) h = detail::mix_string(h, m_uri.authority);
         h ^= (m_uri.has_authority ? 2u : 0u) | (m_uri.absolute ? 1u : 0u);
-        h *= 1099511628211ull;
-        for (const std::string& s : m_uri.segments) mix(s);
+        h *= detail::fnv_prime;
+        for (const std::string& s : m_uri.segments) h = detail::mix_string(h, s);
         return h;
     }
     [[nodiscard]] constexpr bool operator<(const basic_file& o) const noexcept {
@@ -462,18 +521,14 @@ public:
 
     [[nodiscard]] constexpr std::string stem() const {
         const std::string n = name();
-        const std::size_t dot = n.rfind('.');
-        if (dot == std::string::npos || dot == 0 || dot == n.size() - 1) return n;
-        return n.substr(0, dot);
+        return std::string(detail::stem_of(n));
     }
 
     // Final extension including the dot (".gz"); "" if none. A leading-dot
     // name (".bashrc") and a trailing dot ("a.") have no suffix, as in pathlib.
     [[nodiscard]] constexpr std::string suffix() const {
         const std::string n = name();
-        const std::size_t dot = n.rfind('.');
-        if (dot == std::string::npos || dot == 0 || dot == n.size() - 1) return "";
-        return n.substr(dot);
+        return std::string(detail::suffix_of(n));
     }
 
     // Every extension of the final component: "a.tar.gz" -> [".tar", ".gz"].

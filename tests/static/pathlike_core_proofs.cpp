@@ -272,6 +272,39 @@ static_assert(px_uri("/tmp/a b/x.yaml", "file:///tmp/a%20b/x.yaml") && px_uri("/
               px_uri("some.yaml", "file://some.yaml") && px_uri("a b/c", "file://a%20b/c"));
 static_assert(wx_uri("C:\\a b\\c.json", "file:///C:/a%20b/c.json") && wx_uri("\\\\srv\\share\\x", "file://srv/share/x") &&
               wx_uri("C:x", "file://C:/x"));
+// A strategy's tokenise() streams exactly what parse_into() builds (the POSIX
+// tokeniser is allocation-free and hand-written; the generic one is derived).
+struct collected {
+    bool absolute = false, has_authority = false;
+    std::string authority;
+    std::size_t anchor_segs = 0;
+    std::vector<std::string> segments;
+    constexpr void anchor(bool a, bool h, std::string_view au, std::size_t n) {
+        absolute = a; has_authority = h; authority = std::string(au); anchor_segs = n;
+    }
+    constexpr void segment(std::string_view s) { segments.emplace_back(s); }
+};
+template <class S>
+consteval bool tokenise_matches_parse(std::string_view text) {
+    collected c;
+    S::tokenise(text, c);
+    uri u;
+    S::parse_into(u, text);
+    return c.absolute == u.absolute && c.has_authority == u.has_authority && c.authority == u.authority &&
+           c.anchor_segs == S::anchor_segments(u) && c.segments == u.segments;
+}
+static_assert(tokenise_matches_parse<posix_strategy>("") && tokenise_matches_parse<posix_strategy>(".") &&
+              tokenise_matches_parse<posix_strategy>("/") && tokenise_matches_parse<posix_strategy>("//") &&
+              tokenise_matches_parse<posix_strategy>("///x") && tokenise_matches_parse<posix_strategy>("//x/y") &&
+              tokenise_matches_parse<posix_strategy>("a//b/./c/") && tokenise_matches_parse<posix_strategy>("/a/b.yaml") &&
+              tokenise_matches_parse<posix_strategy>("a/../b") && tokenise_matches_parse<posix_strategy>("./a") &&
+              tokenise_matches_parse<posix_strategy>("spa ce/f g"));
+static_assert(tokenise_matches_parse<windows_strategy>("C:\\a\\b") && tokenise_matches_parse<windows_strategy>("\\\\srv\\share\\x") &&
+              tokenise_matches_parse<windows_strategy>("a/b") && tokenise_matches_parse<windows_strategy>(""));
+static_assert(pygim::pathlike::detail::suffix_of("a.tar.gz") == ".gz" && pygim::pathlike::detail::suffix_of(".bashrc") == "" &&
+              pygim::pathlike::detail::suffix_of("a.") == "" && pygim::pathlike::detail::stem_of("a.tar.gz") == "a.tar" &&
+              pygim::pathlike::detail::stem_of(".bashrc") == ".bashrc" && pygim::pathlike::detail::suffix_of("") == "");
+
 // Hashing is a function of the value: normalised spellings hash alike.
 static_assert(px("a/b").hash_value() == px("a//b/").hash_value() && px("a/b").hash_value() != px("a/c").hash_value() &&
               px("/a/b").hash_value() != px("a/b").hash_value() && px("").hash_value() == px(".").hash_value());
