@@ -28,7 +28,9 @@ def __getattr__(name):
         raise AttributeError(f"module {__name__!r} has no attribute {name!r}") from None
     import importlib
 
-    return getattr(importlib.import_module(module_name), attr)
+    value = getattr(importlib.import_module(module_name), attr)
+    globals()[name] = value   # resolved once: from now on a plain attribute (PEP 562 only fires on a miss)
+    return value
 
 
 def create_df(

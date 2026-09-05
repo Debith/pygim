@@ -100,10 +100,12 @@ struct typed_file : file {
     explicit typed_file(file f) : file(std::move(f)) {}
 };
 
+// Moves `f` into the typed object: the or-fold in wrap() stops at the first
+// hit, so `f` is moved from at most once and never read afterwards.
 template <Engine E>
-bool wrap_if(const engine_info* e, const file& f, py::object& out) {
+bool wrap_if(const engine_info* e, file& f, py::object& out) {
     if (e != &E::info) return false;
-    out = py::cast(typed_file<E>(f));
+    out = py::cast(typed_file<E>(std::move(f)));
     return true;
 }
 
@@ -116,6 +118,35 @@ template <Engine... Es>
     return hit ? out : py::cast(std::move(f));
 }
 
+// Python str / bytes / os.PathLike -> the internal path text, without the
+// fs::path round trip pybind11's caster would take: str is encoded with the
+// filesystem encoding on POSIX (os.fsencode, so non-UTF-8 names round-trip)
+// and as UTF-8 on Windows (what text_from_fs yields there); bytes are taken as
+// they are; anything else goes through os.fspath (TypeError when it cannot).
+inline std::string text_from_arg(py::handle obj) {
+    const py::object p = py::reinterpret_steal<py::object>(PyOS_FSPath(obj.ptr()));   // str or bytes
+    if (!p) throw py::error_already_set();
+    if (PyBytes_Check(p.ptr())) {
+        char* s = nullptr;
+        py::ssize_t n = 0;
+        if (PyBytes_AsStringAndSize(p.ptr(), &s, &n) < 0) throw py::error_already_set();
+        return std::string(s, static_cast<std::size_t>(n));
+    }
+#ifdef _WIN32
+    py::ssize_t n = 0;
+    const char* s = PyUnicode_AsUTF8AndSize(p.ptr(), &n);
+    if (!s) throw py::error_already_set();
+    return std::string(s, static_cast<std::size_t>(n));
+#else
+    const py::object b = py::reinterpret_steal<py::object>(PyUnicode_EncodeFSDefault(p.ptr()));
+    if (!b) throw py::error_already_set();
+    char* s = nullptr;
+    py::ssize_t n = 0;
+    if (PyBytes_AsStringAndSize(b.ptr(), &s, &n) < 0) throw py::error_already_set();
+    return std::string(s, static_cast<std::size_t>(n));
+#endif
+}
+
 // Register one typed subclass: "<name>file", documented from the engine's own
 // sentence. The doc lives in a function-local static (pybind11 keeps pointers).
 // (A plain function template, folded over below: MSVC cannot see an enclosing
@@ -126,7 +157,7 @@ void bind_one(py::module_& m) {
     static const std::string doc = std::string(E::info.doc) + " Constructing one pins the engine (" +
                                    std::string(E::info.label) + ").";
     py::class_<typed_file<E>, file>(m, name.c_str(), doc.c_str())
-        .def(py::init([](const fs::path& p) { return typed_file<E>(file(detail::text_from_fs(p), &E::info)); }),
+        .def(py::init([](py::handle p) { return typed_file<E>(file(text_from_arg(p), &E::info)); }),
              py::arg("path"));
 }
 

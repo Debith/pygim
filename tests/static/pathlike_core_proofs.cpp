@@ -272,6 +272,9 @@ static_assert(px_uri("/tmp/a b/x.yaml", "file:///tmp/a%20b/x.yaml") && px_uri("/
               px_uri("some.yaml", "file://some.yaml") && px_uri("a b/c", "file://a%20b/c"));
 static_assert(wx_uri("C:\\a b\\c.json", "file:///C:/a%20b/c.json") && wx_uri("\\\\srv\\share\\x", "file://srv/share/x") &&
               wx_uri("C:x", "file://C:/x"));
+// Hashing is a function of the value: normalised spellings hash alike.
+static_assert(px("a/b").hash_value() == px("a//b/").hash_value() && px("a/b").hash_value() != px("a/c").hash_value() &&
+              px("/a/b").hash_value() != px("a/b").hash_value() && px("").hash_value() == px(".").hash_value());
 static_assert(px_problem("file:x.yaml", "URI is not absolute: 'file:x.yaml'") && px_problem("file://", "URI is not absolute: 'file://'") &&
               px_problem("s3://b/x", "unsupported URI scheme 's3' in 's3://b/x' (only file:// URIs are accepted)") &&
               px_problem("note:x.yaml", "") && px_problem("/plain/path", "") && px_problem("file:///ok", ""));
