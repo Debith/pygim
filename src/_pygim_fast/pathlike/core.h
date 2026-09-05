@@ -379,21 +379,26 @@ public:
         return uri::ascii_lower(sch) == "file";
     }
 
-    // "" when `text` is a plain path or a valid file URI; otherwise the reason it is rejected.
-    [[nodiscard]] static constexpr std::string problem(std::string_view text) {
+    // Parse path text or a file URI (RFC 8089) into `u`, in ONE pass: "" on
+    // success, otherwise the reason `text` is rejected (`u` is then unspecified).
+    // The single source of the acceptance rules — problem() and assign_text()
+    // are views of it.
+    [[nodiscard]] static constexpr std::string parse_or_problem(uri& u, std::string_view text) {
         const std::string_view sch = uri::scheme_of(text);
-        if (sch.empty()) return "";
+        if (sch.empty()) {
+            Strategy::parse_into(u, text);
+            return "";
+        }
         if (is_file_scheme(sch)) {
+            const uri parsed = uri::parse(text);
             if (!Strategy::remote_hosts) {
-                const uri parsed = uri::parse(text);
                 if (const std::string_view host = detail::remote_host(parsed); !host.empty()) {
                     return "file URI names a remote host '" + std::string(host) + "' in '" + std::string(text) +
                            "' (only localhost is supported on POSIX, as pathlib.Path.from_uri)";
                 }
             }
-            uri mapped;
-            file_uri_into(mapped, text);
-            if (!Strategy::is_absolute(mapped)) return "URI is not absolute: '" + std::string(text) + "'";
+            Strategy::parse_into(u, Strategy::from_uri_text(parsed));
+            if (!Strategy::is_absolute(u)) return "URI is not absolute: '" + std::string(text) + "'";
             return "";
         }
         const std::string_view rest = text.substr(sch.size() + 1);
@@ -402,26 +407,20 @@ public:
             return "unsupported URI scheme '" + std::string(sch) + "' in '" + std::string(text) +
                    "' (only file:// URIs are accepted)";
         }
+        Strategy::parse_into(u, text);   // "note:x.yaml": a colon alone is not a URL
         return "";
     }
 
-    // Decode a file URI (RFC 8089) into `u` as a native path value.
-    static constexpr void file_uri_into(uri& u, std::string_view text) {
-        const uri parsed = uri::parse(text);
-        const std::string native = Strategy::from_uri_text(parsed);
-        Strategy::parse_into(u, native);
+    // "" when `text` is a plain path or a valid file URI; otherwise the reason it is rejected.
+    [[nodiscard]] static constexpr std::string problem(std::string_view text) {
+        uri scratch;
+        return parse_or_problem(scratch, text);
     }
 
     // Assign path text or a file URI to `u`; throws std::invalid_argument (ValueError) when rejected.
     static constexpr void assign_text(uri& u, std::string_view text) {
-        const std::string why = problem(text);
+        const std::string why = parse_or_problem(u, text);
         if (!why.empty()) throw std::invalid_argument(why);
-        const std::string_view sch = uri::scheme_of(text);
-        if (!sch.empty() && is_file_scheme(sch)) {
-            file_uri_into(u, text);
-        } else {
-            Strategy::parse_into(u, text);
-        }
     }
 
     // ── value ──────────────────────────────────────────────────────────────
@@ -433,6 +432,25 @@ public:
 
     // Value equality (the pin does not take part); ordering is element-wise.
     [[nodiscard]] constexpr bool operator==(const basic_file& o) const noexcept { return m_uri == o.m_uri; }
+
+    // A hash of exactly what operator== compares (FNV-1a over the value), so
+    // equal files hash equal without rendering the path text.
+    [[nodiscard]] constexpr std::uint64_t hash_value() const noexcept {
+        std::uint64_t h = 14695981039346656037ull;
+        const auto mix = [&h](std::string_view s) {
+            for (const unsigned char c : s) {
+                h ^= c;
+                h *= 1099511628211ull;
+            }
+            h ^= 0xffu;   // a terminator, so ("ab","c") and ("a","bc") differ
+            h *= 1099511628211ull;
+        };
+        if (m_uri.has_authority) mix(m_uri.authority);
+        h ^= (m_uri.has_authority ? 2u : 0u) | (m_uri.absolute ? 1u : 0u);
+        h *= 1099511628211ull;
+        for (const std::string& s : m_uri.segments) mix(s);
+        return h;
+    }
     [[nodiscard]] constexpr bool operator<(const basic_file& o) const noexcept {
         return std::tie(m_uri.has_authority, m_uri.authority, m_uri.absolute, m_uri.segments) <
                std::tie(o.m_uri.has_authority, o.m_uri.authority, o.m_uri.absolute, o.m_uri.segments);

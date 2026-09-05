@@ -81,10 +81,22 @@ static_assert(paths_dispatch_to_their_engines(Engines{}));
 namespace {
 
 // None or "" -> auto (nullptr); a known selector -> its engine; else throws.
+const engine_info* engine_from_arg(std::string_view name) {
+    if (name.empty()) return nullptr;
+    if (const engine_info* e = Engines::from_name_at_runtime(name)) return e;
+    throw std::invalid_argument("unknown engine: '" + std::string(name) + "' (known: " + Engines::known_text() + ")");
+}
 const engine_info* engine_from_arg(const std::optional<std::string>& name) {
-    if (!name || name->empty()) return nullptr;
-    if (const engine_info* e = Engines::from_name_at_runtime(*name)) return e;
-    throw std::invalid_argument("unknown engine: '" + *name + "' (known: " + Engines::known_text() + ")");
+    return engine_from_arg(name ? std::string_view(*name) : std::string_view{});
+}
+// The constructor's engine= as a raw handle (no std::optional<std::string> caster on the hot path).
+const engine_info* engine_from_arg(py::handle name) {
+    if (name.is_none()) return nullptr;
+    if (!PyUnicode_Check(name.ptr())) throw py::type_error("engine must be a str or None");
+    py::ssize_t n = 0;
+    const char* s = PyUnicode_AsUTF8AndSize(name.ptr(), &n);
+    if (!s) throw py::error_already_set();
+    return engine_from_arg(std::string_view(s, static_cast<std::size_t>(n)));
 }
 
 std::string_view requested(const std::optional<std::string>& engine) {
@@ -110,9 +122,6 @@ py::str fspath_str(const file& f) {
 #endif
 }
 
-// Python str/bytes/os.PathLike (via pybind11's fs::path caster) -> internal text.
-std::string text_of(const fs::path& p) { return detail::text_from_fs(p); }
-
 py::object wrap(file f) { return pygim::pathlike::wrap(Engines{}, std::move(f)); }
 
 // path(): a NAMED function, deliberately. MSVC 14.51 (VS 18) crashes with an
@@ -120,8 +129,8 @@ py::object wrap(file f) { return pygim::pathlike::wrap(Engines{}, std::move(f));
 // module-level def whose body calls wrap() — bisected on CI: the same body as
 // a named function compiles and passes the suite, and a lambda without wrap()
 // compiles too. The class-level defs above are unaffected.
-py::object path_factory(const fs::path& p, const std::optional<std::string>& engine) {
-    return wrap(file(text_of(p), engine_from_arg(engine)));
+py::object path_factory(py::handle p, py::handle engine) {
+    return wrap(file(text_from_arg(p), engine_from_arg(engine)));
 }
 
 py::list wrap_all(std::vector<file> files) {
@@ -260,8 +269,8 @@ PYBIND11_MODULE(pathlike, m) {
     m.doc() = "path(): an os.PathLike that reads & decodes itself with the optimal engine.";
 
     py::class_<file>(m, "file", file_doc().c_str())   // class docs take a bare const char* (py::doc is for functions)
-        .def(py::init([](const fs::path& p, const std::optional<std::string>& engine) {
-                 return file(text_of(p), engine_from_arg(engine));
+        .def(py::init([](py::handle p, py::handle engine) {
+                 return file(text_from_arg(p), engine_from_arg(engine));
              }),
              py::arg("path"), py::arg("engine") = py::none())
         .def_property_readonly(
@@ -280,7 +289,10 @@ PYBIND11_MODULE(pathlike, m) {
         .def("__repr__", &file::repr)
         .def("__str__", [](const file& f) { return fspath_str(f); })
         .def("__eq__", [](const file& a, const file& b) { return a == b; }, py::is_operator())
-        .def("__hash__", [](const file& f) { return py::hash(py::cast(f.fspath())); })
+        .def("__hash__", [](const file& f) {
+                 const auto h = static_cast<py::ssize_t>(f.hash_value());   // consistent with __eq__; no str round trip
+                 return h == -1 ? py::ssize_t(-2) : h;                      // -1 is CPython's error sentinel
+             })
         .def_property_readonly("uri", &file::as_uri,
                                "The RFC 3986 file URI of an absolute path (percent-encoded: "
                                "file:///a%20b, file://host/share/x); a relative path keeps the "
@@ -293,14 +305,14 @@ PYBIND11_MODULE(pathlike, m) {
                                "All extensions of the final component ('.tar.gz' -> ['.tar','.gz']).")
         .def_property_readonly("parts", &file::parts, "The path components as a list.")
         // -- composition: path / "sub" / "file.yaml" --
-        .def("__truediv__", [](const file& f, const fs::path& other) { return wrap(f.joined(text_of(other))); },
+        .def("__truediv__", [](const file& f, py::handle other) { return wrap(f.joined(text_from_arg(other))); },
              py::is_operator())
-        .def("__rtruediv__", [](const file& f, const fs::path& other) { return wrap(f.rjoined(text_of(other))); },
+        .def("__rtruediv__", [](const file& f, py::handle other) { return wrap(f.rjoined(text_from_arg(other))); },
              py::is_operator())
         .def("joinpath",
              [](const file& f, const py::args& parts) {
                  file out = f;
-                 for (const py::handle& part : parts) out = out.joined(text_of(part.cast<fs::path>()));
+                 for (const py::handle& part : parts) out = out.joined(text_from_arg(part));
                  return wrap(std::move(out));
              },
              "Append one or more path components, like pathlib's joinpath().")
