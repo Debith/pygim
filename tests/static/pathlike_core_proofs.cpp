@@ -18,6 +18,7 @@
 #include "../../src/_pygim_fast/pathlike/engine_list.h"
 
 #include <array>
+#include <initializer_list>
 #include <string_view>
 
 namespace {
@@ -187,6 +188,103 @@ static_assert(Good::case_folding_is_exact());
 static_assert(Good::for_ext(ascii_lower(".AA")) == &alpha::info && Good::for_ext(".AA") == nullptr &&
               Good::for_ext("aa") == nullptr && Good::for_ext(".aa ") == nullptr &&
               Good::from_name("ALPHA") == nullptr && Good::from_name(".alpha") == nullptr);
+
+// ── uri.h: RFC 3986 as constexpr values ────────────────────────────────────
+// (Every probe returns a bool computed inside: the libstdc++ of GCC 13/14
+// cannot constant-evaluate a short std::string that escapes into the
+// assertion expression.)
+namespace uri_proofs {
+consteval bool parses(std::string_view text, std::string_view scheme, bool has_auth, std::string_view auth,
+                      bool absolute, std::initializer_list<std::string_view> segs,
+                      bool has_query = false, std::string_view query = {}, bool has_frag = false, std::string_view frag = {}) {
+    const uri u = uri::parse(text);
+    if (u.scheme != scheme || u.has_authority != has_auth || u.authority != auth || u.absolute != absolute) return false;
+    if (u.has_query != has_query || u.query != query || u.has_fragment != has_frag || u.fragment != frag) return false;
+    if (u.segments.size() != segs.size()) return false;
+    std::size_t i = 0;
+    for (std::string_view want : segs) { if (u.segments[i++] != want) return false; }
+    return true;
+}
+consteval bool round_trips(std::string_view text) { const uri u = uri::parse(text); return u.render() == text; }
+consteval bool renders(std::string_view text, std::string_view want) { const uri u = uri::parse(text); return u.render() == want; }
+consteval bool normalizes(std::string_view text, std::string_view want) { const uri u = uri::parse(text); const uri n = u.normalized(); return n.render() == want; }
+consteval bool encodes(std::string_view raw, std::string_view want) { return uri::percent_encode(raw) == want; }
+consteval bool decodes(std::string_view enc, std::string_view want) { return uri::percent_decode(enc) == want; }
+consteval bool path_is(std::string_view text, std::string_view want) { const uri u = uri::parse(text); return u.path() == want; }
+}  // namespace uri_proofs
+using namespace uri_proofs;
+
+// Appendix B decomposition, with decoded segments and empties/dots kept as written.
+static_assert(parses("file:///tmp/a%20b/x.yaml", "file", true, "", true, {"tmp", "a b", "x.yaml"}));
+static_assert(parses("file://localhost/etc/hosts", "file", true, "localhost", true, {"etc", "hosts"}));
+static_assert(parses("file://srv/share/x", "file", true, "srv", true, {"share", "x"}));
+static_assert(parses("file:/tmp/x", "file", false, "", true, {"tmp", "x"}));                 // RFC 8089 minimal form
+static_assert(parses("file:x.yaml", "file", false, "", false, {"x.yaml"}));                   // relative reference
+static_assert(parses("s3://bucket/k?v=1#frag", "s3", true, "bucket", true, {"k"}, true, "v=1", true, "frag"));
+static_assert(parses("/a//b/./c/../", "", false, "", true, {"a", "", "b", ".", "c", "..", ""}));   // nothing removed
+static_assert(parses("", "", false, "", false, {}));
+static_assert(parses("/", "", false, "", true, {}));
+static_assert(parses("a:b", "a", false, "", false, {"b"}));                                   // "a" is a valid scheme
+static_assert(parses("1a:b", "", false, "", false, {"1a:b"}));                                // schemes start with ALPHA
+static_assert(path_is("file:///tmp/a%20b", "/tmp/a b") && path_is("file:x/y", "x/y"));
+
+// §5.3 recomposition round-trips canonical text; §2.1 encoding is exactly the non-pchar set.
+static_assert(round_trips("file:///tmp/a%20b/x.yaml") && round_trips("s3://bucket/k?v=1#frag") && round_trips("/a//b/") &&
+              round_trips("file://srv/share/x"));
+static_assert(renders("file:///a%2Fb", "file:///a%2Fb"));                                      // "/" inside a segment stays encoded
+static_assert(encodes("a b/c#d?e", "a%20b%2Fc%23d%3Fe") && encodes("a:b@c!$&'()*+,;=-._~", "a:b@c!$&'()*+,;=-._~") &&
+              encodes("\xC3\xA9", "%C3%A9"));
+static_assert(decodes("a%20b%2Fc", "a b/c") && decodes("%C3%A9", "\xC3\xA9") && decodes("100%", "100%") &&
+              decodes("%zz%4", "%zz%4"));                                                       // malformed escapes kept
+
+// §6.2.2 normalisation is explicit: scheme and host fold, userinfo/port do not, dot-segments go.
+static_assert(normalizes("HTTP://User@Example.COM:8080/a/./b/../c", "http://User@example.com:8080/a/c"));
+static_assert(normalizes("file:///a/b/../", "file:///a/"));
+static_assert(normalizes("file:///a/..", "file:///"));
+static_assert(normalizes("x://[::1]:80/p", "x://[::1]:80/p"));
+
+// ── flavours: native text <-> uri, the Windows rules provable on any host ─
+// (Exhaustive pathlib parity lives in pathlike_parity_proofs.cpp, generated
+// from pathlib itself; these pin the mechanics and the URI mapping.)
+namespace flavour_proofs {
+using px = basic_file<posix_flavour>;
+using wx = basic_file<windows_flavour>;
+consteval bool px_is(std::string_view text, std::string_view want) { px f(text); return f.fspath() == want; }
+consteval bool wx_is(std::string_view text, std::string_view want) { wx f(text); return f.fspath() == want; }
+consteval bool px_uri(std::string_view text, std::string_view want) { px f(text); return f.as_uri() == want; }
+consteval bool wx_uri(std::string_view text, std::string_view want) { wx f(text); return f.as_uri() == want; }
+consteval bool px_join(std::string_view a, std::string_view b, std::string_view want) { px f(a); px j = f.joined(b); return j.fspath() == want; }
+consteval bool wx_join(std::string_view a, std::string_view b, std::string_view want) { wx f(a); wx j = f.joined(b); return j.fspath() == want; }
+consteval bool px_problem(std::string_view text, std::string_view want) { return px::problem(text) == want; }
+consteval bool px_repr(std::string_view text, std::string_view want) { px f(text); return f.repr() == want; }
+consteval bool px_equal(std::string_view a, std::string_view b) { px f(a); px g(b); return f == g; }
+consteval std::size_t px_parents(std::string_view text) { px f(text); return f.parents().size(); }
+}  // namespace flavour_proofs
+using namespace flavour_proofs;
+
+// file:// URIs in (pathlib.Path.from_uri rules), RFC URIs out.
+static_assert(px_is("file:///tmp/a%20b/x.yaml", "/tmp/a b/x.yaml") && px_is("file://localhost/etc/hosts", "/etc/hosts") &&
+              px_is("FILE:///tmp/x", "/tmp/x") && px_is("file:/tmp/x", "/tmp/x") && px_is("file:///tmp//a/./b/", "/tmp/a/b") &&
+              px_is("file://srv/share/x", "//srv/share/x"));
+static_assert(wx_is("file:///C:/Users/x.yaml", "C:\\Users\\x.yaml") && wx_is("file:///C|/x", "C:\\x") &&
+              wx_is("file://srv/share/x.toml", "\\\\srv\\share\\x.toml") && wx_is("file://localhost/C:/x", "C:\\x"));
+static_assert(px_uri("/tmp/a b/x.yaml", "file:///tmp/a%20b/x.yaml") && px_uri("//srv/share/x", "file:////srv/share/x") &&
+              px_uri("some.yaml", "file://some.yaml") && px_uri("a b/c", "file://a%20b/c"));
+static_assert(wx_uri("C:\\a b\\c.json", "file:///C:/a%20b/c.json") && wx_uri("\\\\srv\\share\\x", "file://srv/share/x") &&
+              wx_uri("C:x", "file://C:/x"));
+static_assert(px_problem("file:x.yaml", "URI is not absolute: 'file:x.yaml'") && px_problem("file://", "URI is not absolute: 'file://'") &&
+              px_problem("s3://b/x", "unsupported URI scheme 's3' in 's3://b/x' (only file:// URIs are accepted)") &&
+              px_problem("note:x.yaml", "") && px_problem("/plain/path", "") && px_problem("file:///ok", ""));
+static_assert(px_repr("x.dat", "file(\"file://x.dat\")"));
+
+// pathlib's join rules per flavour.
+static_assert(px_join("/a/b", "c", "/a/b/c") && px_join("/a/b", "/x", "/x") && px_join("a", "b/c/", "a/b/c") && px_join("", "x", "x"));
+static_assert(wx_join("C:\\a", "b", "C:\\a\\b") && wx_join("C:\\a", "\\x", "C:\\x") && wx_join("C:\\a", "D:x", "D:x") &&
+              wx_join("C:\\a", "C:x", "C:\\a\\x") && wx_join("C:\\a", "\\\\srv\\s\\y", "\\\\srv\\s\\y") && wx_join("a", "b", "a\\b"));
+
+// Value equality is spelling-independent; parents stop at the anchor (the "." parent is not listed).
+static_assert(px_equal("a/b/", "a//b") && px_equal("./a/b", "a/b") && !px_equal("a/b", "a/c") && px_equal("", "."));
+static_assert(px_parents("a/b/c") == 2 && px_parents("/a/b") == 2 && px_parents("a") == 0 && px_parents("/") == 0);
 
 // ── core.h helpers ─────────────────────────────────────────────────────────
 static_assert(ascii_lower(".YAML") == ".yaml" && ascii_upper(".yaml") == ".YAML" && ascii_lower("") == "");

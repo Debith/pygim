@@ -62,6 +62,22 @@ static_assert(names_match_identifiers(Engines{}),
               "every engine's info.name must equal its struct name (== its file stem)");
 #endif
 
+// End to end, at compile time: a path named with each engine's extension —
+// given as native text and as a file URI — dispatches to that engine
+// (`file` is a literal type; the tables are built transiently).
+template <class E>
+consteval bool dispatches_to() {
+    for (std::string_view x : E::info.exts) {
+        const file native("dir/name" + std::string(x));
+        const file via_uri("file:///dir/name" + std::string(x));
+        if (Engines::for_ext(native.ext_key()) != &E::info || Engines::resolved_ct(via_uri) != &E::info) return false;
+    }
+    return true;
+}
+template <class... Es>
+consteval bool paths_dispatch_to_their_engines(engine_list<Es...>) { return (dispatches_to<Es>() && ... && true); }
+static_assert(paths_dispatch_to_their_engines(Engines{}));
+
 namespace {
 
 // None or "" -> auto (nullptr); a known selector -> its engine; else throws.
@@ -81,16 +97,21 @@ std::size_t cache_capacity_from_arg(py::ssize_t key_cache) {
     return static_cast<std::size_t>(key_cache);
 }
 
-// The path as a Python str, decoded from the NATIVE representation.
+// The path as a Python str. The internal text is UTF-8 on Windows (lossless)
+// and the native byte string on POSIX, decoded with the filesystem encoding
+// like os.fsdecode — so non-UTF-8 file names still round-trip.
 py::str fspath_str(const file& f) {
+    const std::string text = f.fspath();
 #ifdef _WIN32
-    return py::cast(f.path().native());   // std::wstring -> str, lossless
+    return py::str(text);
 #else
-    const std::string& n = f.path().native();
     return py::reinterpret_steal<py::str>(
-        PyUnicode_DecodeFSDefaultAndSize(n.data(), static_cast<py::ssize_t>(n.size())));
+        PyUnicode_DecodeFSDefaultAndSize(text.data(), static_cast<py::ssize_t>(text.size())));
 #endif
 }
+
+// Python str/bytes/os.PathLike (via pybind11's fs::path caster) -> internal text.
+std::string text_of(const fs::path& p) { return detail::text_from_fs(p); }
 
 py::object wrap(file f) { return pygim::pathlike::wrap(Engines{}, std::move(f)); }
 
@@ -99,8 +120,8 @@ py::object wrap(file f) { return pygim::pathlike::wrap(Engines{}, std::move(f));
 // module-level def whose body calls wrap() — bisected on CI: the same body as
 // a named function compiles and passes the suite, and a lambda without wrap()
 // compiles too. The class-level defs above are unaffected.
-py::object path_factory(fs::path p, const std::optional<std::string>& engine) {
-    return wrap(file(std::move(p), engine_from_arg(engine)));
+py::object path_factory(const fs::path& p, const std::optional<std::string>& engine) {
+    return wrap(file(text_of(p), engine_from_arg(engine)));
 }
 
 py::list wrap_all(std::vector<file> files) {
@@ -180,6 +201,9 @@ const std::string& file_doc() {
         "at compile time from the extension (" + dispatch_sentence() + "); pin one with\n"
         "``engine=`` at construction, or override per call with ``read(engine=...)``.\n"
         "Implements ``os.PathLike``, so it drops into ``open()``, ``Path()``, etc.\n\n"
+        "Path semantics follow pathlib (str() is the normalised spelling: ``a//b/`` -> ``a/b``);\n"
+        "``file://`` URIs are accepted as input (RFC 8089, decoded like ``Path.from_uri``) and\n"
+        "``.uri`` renders an absolute path per RFC 3986 (``file:///a%20b``).\n\n"
         "Engines (one header each under adapter/engines/, discovered by the build):" + engine_notes() + "\n";
     return s;
 }
@@ -211,8 +235,10 @@ const std::string& path_doc() {
     static const std::string s =
         "Wrap a path in a self-reading, self-decoding file() — typed as the engine's ``<name>file`` "
         "class when an engine resolves. Pass engine= to pin the decoder (" + names_list() +
-        ", a library label, or an alias); default resolves from the extension. Known engines: " +
-        Engines::known_text() + ".";
+        ", a library label, or an alias); default resolves from the extension. Accepts a native path "
+        "(str, bytes or os.PathLike) or a file:// URI (file:///abs/x, file://localhost/abs/x, "
+        "file://host/share/x — a UNC path on Windows); a relative file URI or any other scheme "
+        "is a ValueError. Known engines: " + Engines::known_text() + ".";
     return s;
 }
 
@@ -222,8 +248,8 @@ PYBIND11_MODULE(pathlike, m) {
     m.doc() = "path(): an os.PathLike that reads & decodes itself with the optimal engine.";
 
     py::class_<file>(m, "file", file_doc().c_str())   // class docs take a bare const char* (py::doc is for functions)
-        .def(py::init([](fs::path p, const std::optional<std::string>& engine) {
-                 return file(std::move(p), engine_from_arg(engine));
+        .def(py::init([](const fs::path& p, const std::optional<std::string>& engine) {
+                 return file(text_of(p), engine_from_arg(engine));
              }),
              py::arg("path"), py::arg("engine") = py::none())
         .def_property_readonly(
@@ -241,11 +267,12 @@ PYBIND11_MODULE(pathlike, m) {
              "os.PathLike protocol: the plain path string.")
         .def("__repr__", &file::repr)
         .def("__str__", [](const file& f) { return fspath_str(f); })
-        .def("__eq__",
-             [](const file& a, const file& b) { return a.path() == b.path(); },
-             py::is_operator())
+        .def("__eq__", [](const file& a, const file& b) { return a == b; }, py::is_operator())
         .def("__hash__", [](const file& f) { return py::hash(py::cast(f.fspath())); })
-        .def_property_readonly("uri", &file::uri, "The 'file://<path>' URI form.")
+        .def_property_readonly("uri", &file::as_uri,
+                               "The RFC 3986 file URI of an absolute path (percent-encoded: "
+                               "file:///a%20b, file://host/share/x); a relative path keeps the "
+                               "'file://<path>' spelling.")
         // -- name components (case preserved, like pathlib) --
         .def_property_readonly("name", &file::name, "The final path component.")
         .def_property_readonly("stem", &file::stem, "The final component without its suffix.")
@@ -254,14 +281,14 @@ PYBIND11_MODULE(pathlike, m) {
                                "All extensions of the final component ('.tar.gz' -> ['.tar','.gz']).")
         .def_property_readonly("parts", &file::parts, "The path components as a list.")
         // -- composition: path / "sub" / "file.yaml" --
-        .def("__truediv__", [](const file& f, const fs::path& other) { return wrap(f.joined(other)); },
+        .def("__truediv__", [](const file& f, const fs::path& other) { return wrap(f.joined(text_of(other))); },
              py::is_operator())
-        .def("__rtruediv__", [](const file& f, const fs::path& other) { return wrap(f.rjoined(other)); },
+        .def("__rtruediv__", [](const file& f, const fs::path& other) { return wrap(f.rjoined(text_of(other))); },
              py::is_operator())
         .def("joinpath",
              [](const file& f, const py::args& parts) {
                  file out = f;
-                 for (const py::handle& part : parts) out = out.joined(part.cast<fs::path>());
+                 for (const py::handle& part : parts) out = out.joined(text_of(part.cast<fs::path>()));
                  return wrap(std::move(out));
              },
              "Append one or more path components, like pathlib's joinpath().")

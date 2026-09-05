@@ -325,6 +325,11 @@ struct engine_list {
     [[nodiscard]] static const engine_info* resolved(const file& f) {
         return f.pinned() ? f.pinned() : for_ext_at_runtime(f.ext_key());
     }
+    // The same, in constant evaluation (transient table) — for the proofs:
+    // `file` is a literal type, so a path can be resolved at compile time.
+    [[nodiscard]] static constexpr const engine_info* resolved_ct(const file& f) {
+        return f.pinned() ? f.pinned() : for_ext(f.ext_key());
+    }
 
     // Precedence: an explicit engine= wins, then the pin, then the extension.
     // Throws std::invalid_argument (Python ValueError) rather than guessing.
