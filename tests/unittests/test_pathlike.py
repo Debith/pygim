@@ -602,10 +602,11 @@ def test_glob_on_missing_directory_is_empty(temp_dir):
 
 
 def test_pathset_bridge(tree):
-    from pygim.pathset import PathSet
+    from pygim.pathlike import PathSet
 
     ps = pygim.path(tree).pathset("**/*.yaml")
     assert isinstance(ps, PathSet) and len(ps) == 3
+    assert all(v.to_file() is pygim.path(os.fspath(v)) for v in ps)   # over the current store's table
 
 
 # --------------------------------------------------------------------------- #

@@ -3,4 +3,12 @@ module = "registry"
 # tests/static/registry_core_proofs.cpp holds the compile-time proof suite for
 # the storage engines and RegistryCore (wired into the sources so every build
 # proves them; it contributes no runtime code).
-sources = ["bindings.cpp", "../../../../tests/static/registry_core_proofs.cpp"]
+# tests/static/mapping_proofs.cpp proves the interner (both engines), trie and
+# id_set laws of the mapping toolkit the same way.
+sources = [
+  "bindings.cpp",
+  "../../../../tests/static/registry_core_proofs.cpp",
+  "../../../../tests/static/mapping_proofs.cpp",
+]
+# id_set counts are one POPCNT per word when the compiler may emit it (every x86-64 since 2008; ignored elsewhere).
+flags_if_supported = ["-mpopcnt"]
