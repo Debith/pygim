@@ -127,8 +127,12 @@ def test_filter_on_empty_pathset():
 
 
 def test_filters_read_the_table_not_the_filesystem():
-    ps = PathSet(["/etc/a.yaml", "rel/b.yaml", "rel/c.json"])
-    assert ps.filter(absolute()).to_list() == ["/etc/a.yaml"]
+    import pathlib
+
+    # pathlib's is_absolute() needs a drive on Windows: anchor the path on the current one.
+    absp = str(pathlib.PurePath(pathlib.Path.cwd().anchor, "etc", "a.yaml"))
+    ps = PathSet([absp, "rel/b.yaml", "rel/c.json"])              # none of these exist on disk
+    assert ps.filter(absolute()).to_list() == [absp]
     assert len(ps & ext(".yaml") & ~absolute()) == 1
     assert ps.filter(name("?.json")) == PathSet("rel/c.json")
 
