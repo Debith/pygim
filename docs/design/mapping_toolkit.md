@@ -69,6 +69,48 @@ Those are the facts `PathSet` (views compare and hash like files) and the
 flyweight store (`parent` and `/` by row) rely on. Before this they were
 comments in `path_table.h`; now a build that breaks one does not link.
 
+## `basic_id_set` by example
+
+The set keeps two views of one membership: the members in the order they
+were noted (what iteration yields) and a bitmap (what makes `has` one load
+and the algebra a pass over bits). For the default `id_set`, id 70 is bit 6
+of word 1; a word one side does not have is treated as all zeros.
+
+```cpp
+using pygim::mapping::id_set;
+
+id_set s;                    // {}
+s.note(5);   s.note(70);     // {5, 70}    note() -> true, true; s.note(5) again -> false
+id_set o;
+o.note(70);  o.note(200);    // {70, 200}
+
+s.has(70);                   // true       one load, one bit test
+s.has(6);                    // false      an id past the bitmap is simply absent
+s.size();  s[1];             // 2, 70      members in insertion order
+
+s.where([](auto id) { return id > 10; });   // [70]         a PathSet filter is this, with the predicate reading the table
+s.united(o);                 // [5, 70, 200]   "mine, then theirs" — o.united(s) is [70, 200, 5]
+s.intersected(o);            // [70]           my order, kept if o has it
+s.subtracted(o);             // [5]            my order, kept if o lacks it
+
+s.count_united(o);           // 3     no set built: popcount(mine | theirs) per word, then the longer tail
+s.count_intersected(o);      // 1     popcount(mine & theirs) over the words both have
+s.count_subtracted(o);       // 1     popcount(mine & ~theirs), plus my tail beyond o's width
+
+id_set out = s.sibling();    // {} with the bitmap pre-sized to s's width: the start of any subset of s
+s.bytes();                   // exact: members capacity * sizeof(id) + words * sizeof(word)
+```
+
+Combining two sets only makes sense when their ids mean the same thing —
+rows of one table. The type cannot know that; the caller checks it
+(`adapter/pathset.h` compares table pointers first and maps rows across
+tables otherwise).
+
+Other instantiations: `basic_id_set<std::uint16_t, std::uint32_t>` for a
+registry of a few dozen entries (16-bit members, word boundaries at 32),
+`basic_id_set<std::uint64_t>` when a table hands out 64-bit ids. The proofs
+run the same laws over all three.
+
 ## Laws (what `mapping_proofs.cpp` asserts)
 
 **interner**, over both engines: ids are dense and in insertion order;
