@@ -32,7 +32,6 @@ for f in docs/examples/*/example_*.py; do python "$f" || break; done
 | factory | [example_01_basic_factory.py](factory/example_01_basic_factory.py) | Name-to-creator mapping, decorator registration, creation with arguments, override semantics, `use_module` plugin loading |
 | factory | [example_02_interface_enforcement.py](factory/example_02_interface_enforcement.py) | Factories that validate every product against an interface at creation time |
 | each | [example_01_broadcasting.py](each/example_01_broadcasting.py) | Broadcasting attribute reads and method calls over any iterable, argument forwarding, the dunder guard rail |
-| pathset | [example_01_path_collections.py](pathset/example_01_path_collections.py) | Set semantics over filesystem paths, removal and cloning, bulk file reading, glob-style matching |
 | pathlike | [example_01_read_a_config.py](pathlike/example_01_read_a_config.py) | One call from a path to native Python objects |
 | pathlike | [example_02_typed_files.py](pathlike/example_02_typed_files.py) | `.engine` naming the decoding library (rapidyaml/simdjson/toml++); `yamlfile`/`jsonfile`/`tomlfile` types mirroring it through pins and derived paths |
 | pathlike | [example_03_pathlib_parity.py](pathlike/example_03_pathlib_parity.py) | os.PathLike integration, name components, `/` composition |
@@ -42,6 +41,7 @@ for f in docs/examples/*/example_*.py; do python "$f" || break; done
 | pathlike | [example_07_writing.py](pathlike/example_07_writing.py) | write() round-trips for all three formats, trap-string quoting, non-finite float policies, TOML mapping roots |
 | pathlike | [example_08_traversal.py](pathlike/example_08_traversal.py) | glob/rglob/iterdir, sorted+deduplicated results, pin inheritance, the PathSet bridge |
 | pathlike | [example_09_parallel_and_key_cache.py](pathlike/example_09_parallel_and_key_cache.py) | GIL-released parallel reads, key_cache interning semantics and proof |
+| pathlike | [example_11_path_collections.py](pathlike/example_11_path_collections.py) | `PathSet` as one table: set semantics, `+`/`-` with paths or sets, `clone`, Filters (`ext`/`name`/`absolute`, `& | ~`) and lazy Queries, `read_all_files`, `match_pattern`, counting without building |
 | persistence | [arrow_bcp_quickstart.md](arrow_bcp_quickstart.md) | Quickstart for the Arrow/BCP persistence layer (prose walkthrough, requires a database) |
 
 ## Conventions

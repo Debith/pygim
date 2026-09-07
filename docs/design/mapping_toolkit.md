@@ -161,7 +161,9 @@ the instruction on their own.
   then goes away.
 - The `each` module's `WeakKeyDictionary` flyweight and a current-container
   scope for `ioc` are the second consumers of `weak_slots` and `ambient`
-  respectively; both are migrations, not new design.
+  respectively; both are migrations, not new design. (The former
+  `pygim.pathset` module was folded into the pathlike `PathSet` on 2026-09-08;
+  its `Filter`/`Query` vocabulary is now predicates over table rows.)
 - A flyweight policy (`basic_file<Strategy, Token>` with an empty token, a
   `no_flyweight` adapter) is the next thing the rule above asks for
   (`pathlike_flyweight.md`).

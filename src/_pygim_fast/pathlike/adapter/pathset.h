@@ -31,6 +31,18 @@
 //
 // From Python: PathSet(["a/b.yaml", "a/c.json", "/d"]); ps[1].name == "c.json";
 // [v.name for v in ps.scan()]; ps & other; ps.count_union(other); ps.to_list().
+//
+// Filters and queries (the vocabulary the former pygim.pathset module had,
+// now over rows): a `Filter` is a predicate on (table, row) with &, | and ~;
+// `ps & f` is a lazy `Query` that chains more filters and evaluates to a set
+// over the same table.
+//
+//     rst = ext(".rst")                     Filter: suffix == ".rst"
+//     (ps & rst).eval()                     -> the .rst members            (ps.filter(rst) is the same)
+//     (ps & ~rst).eval()                    -> everything else
+//     (ps & rst | ext(".txt")).eval()       -> .rst or .txt                 (Query | Filter widens)
+//     (ps & (rst & ext(".txt"))).eval()     -> nothing: no name has both
+//     for v in ps & name("read*"): ...      iterating a Query evaluates it
 
 #include <cstddef>
 #include <cstdint>
@@ -42,6 +54,8 @@
 #include <vector>
 
 #include <pybind11/pybind11.h>
+
+#include <functional>
 
 #include "../../mapping/id_set.h"
 #include "../path_table.h"
@@ -78,6 +92,47 @@ struct fileview {
         return table->find(*o.table, o.row) == row;
     }
 };
+
+/// A predicate over a row of a table, with boolean algebra. Python's
+/// `pathlike.Filter`: made by ext(), name(), absolute(), combined with &, |
+/// and ~, applied by `ps & f` (a Query) or `ps.filter(f)`. It reads the
+/// table (a name, a suffix, the anchor), never the filesystem, so a filter
+/// is pure and a query over a million rows is a table pass.
+///
+///     row_filter rst = ext_filter(".rst");        rst(table, row_of("x.rst")) -> true
+///     (rst & name_filter("read*"))(table, row_of("readme.rst")) -> true
+///     (!rst)(table, row_of("x.rst")) -> false
+struct row_filter {
+    std::function<bool(const path_table&, std::uint32_t)> pred;
+
+    [[nodiscard]] bool operator()(const path_table& t, std::uint32_t r) const { return pred(t, r); }
+
+    /// Both hold.
+    friend row_filter operator&(row_filter a, row_filter b) {
+        return {[a = std::move(a), b = std::move(b)](const path_table& t, std::uint32_t r) { return a(t, r) && b(t, r); }};
+    }
+    /// Either holds.
+    friend row_filter operator|(row_filter a, row_filter b) {
+        return {[a = std::move(a), b = std::move(b)](const path_table& t, std::uint32_t r) { return a(t, r) || b(t, r); }};
+    }
+    /// Does not hold.
+    friend row_filter operator!(row_filter a) {
+        return {[a = std::move(a)](const path_table& t, std::uint32_t r) { return !a(t, r); }};
+    }
+};
+
+/// pathlib's final suffix equals `s` (case-sensitive).          ext_filter(".rst")
+[[nodiscard]] inline row_filter ext_filter(std::string s) {
+    return {[s = std::move(s)](const path_table& t, std::uint32_t r) { return detail::suffix_of(t.name(r)) == s; }};
+}
+/// The name matches a glob (`*`, `?` within the component).       name_filter("read*")
+[[nodiscard]] inline row_filter name_filter(std::string glob) {
+    return {[g = std::move(glob)](const path_table& t, std::uint32_t r) { return detail::glob_match(g, t.name(r)); }};
+}
+/// pathlib's is_absolute().                                         absolute_filter()
+[[nodiscard]] inline row_filter absolute_filter() {
+    return {[](const path_table& t, std::uint32_t r) { return t.is_absolute<native_strategy>(r); }};
+}
 
 class PathSet {
 public:
@@ -252,6 +307,48 @@ public:
         return size() - count_intersection(o);
     }
 
+    // ── the set-like surface (what pygim.pathset had) ─────────────────────
+
+    /// The members satisfying a row_filter, as a set over the same table:
+    /// what `(ps & f).eval()` and `ps.filter(f)` return.
+    ///
+    ///     ps.filter(ext_filter(".yaml"))   -> [2]
+    [[nodiscard]] PathSet filter(const row_filter& f) const {
+        return where([&](std::uint32_t r) { return f(*m_table, r); });
+    }
+    /// Same members? Same table: same size and every one of mine is in `o`.
+    /// Two tables: my rows looked up in `o`'s table. Insertion order does not
+    /// matter — sets compare as sets.                     ps.equals(ps.clone()) -> true
+    [[nodiscard]] bool equals(const PathSet& o) const {
+        if (size() != o.size()) return false;
+        if (o.m_table.get() == m_table.get()) {
+            for (const std::uint32_t r : m_ids.members()) {
+                if (!o.has_row(r)) return false;
+            }
+            return true;
+        }
+        path_table::row_map in_o(*o.m_table, *m_table);
+        for (const std::uint32_t r : m_ids.members()) {
+            if (!o.has_row(in_o(r))) return false;
+        }
+        return true;
+    }
+    /// A distinct set object with the same members over the same table
+    /// (sets are never edited in place, so this is cheap and only needed
+    /// for identity: `ps.clone() is not ps`).
+    [[nodiscard]] PathSet clone() const {
+        PathSet out(m_table);
+        out.m_ids = m_ids;
+        return out;
+    }
+    /// The set holding the current working directory (pygim.pathset's
+    /// PathSet.cwd()), over a fresh table.
+    [[nodiscard]] static PathSet cwd() {
+        PathSet out;
+        out.add_value(file().absolute().value());
+        return out;
+    }
+
     /// The bytes the members and bitmap hold (PathSet.stats()["member_bytes"]).
     [[nodiscard]] std::size_t member_bytes() const noexcept { return m_ids.bytes(); }
 
@@ -284,6 +381,14 @@ inline void add_one(PathSet& ps, py::handle item) {
     const text_arg t = text_view_of_arg(item);
     ps.add_text(t.view);
 }
+/// Whether a Python object is ONE path rather than an iterable of them: str,
+/// bytes, anything with __fspath__ (pathlib.Path), a file or a fileview. A
+/// str is a path, never a sequence of characters — `PathSet("a/b")` is one
+/// member.
+[[nodiscard]] inline bool is_single_path(py::handle item) {
+    return PyUnicode_Check(item.ptr()) || PyBytes_Check(item.ptr()) || py::isinstance<file>(item) ||
+           py::isinstance<fileview>(item) || py::hasattr(item, "__fspath__");
+}
 /// Adds every item of an iterable; a sized one (list, tuple, set, dict, ...)
 /// reserves the table first.
 inline void extend(PathSet& ps, py::handle iterable) {
@@ -293,6 +398,42 @@ inline void extend(PathSet& ps, py::handle iterable) {
         else ps.reserve(static_cast<std::size_t>(n));
     }
     for (const py::handle item : py::iter(iterable)) add_one(ps, item);
+}
+/// One path or an iterable of paths, added.
+inline void add_any(PathSet& ps, py::handle items) {
+    if (is_single_path(items)) add_one(ps, items);
+    else extend(ps, items);
+}
+/// The right-hand side of `ps + x` / `ps - x` when `x` is not a PathSet: a
+/// set over ps's table holding the given path(s). For a union the paths are
+/// added to the table (they become members); for a difference they are only
+/// looked up (a path the table does not know cannot be a member anyway).
+[[nodiscard]] inline PathSet operand_over(const PathSet& base, py::handle items, bool insert) {
+    PathSet out(base.table());
+    if (insert) {
+        add_any(out, items);
+        return out;
+    }
+    auto note_found = [&](py::handle item) {
+        if (PyUnicode_Check(item.ptr()) || PyBytes_Check(item.ptr()) || py::hasattr(item, "__fspath__")) {
+            const text_arg t = text_view_of_arg(item);
+            const std::uint32_t r = base.table()->find<native_strategy>(t.view);
+            if (r != path_table::none) out.add_text(t.view);
+        } else if (py::isinstance<fileview>(item)) {
+            const auto& v = py::cast<const fileview&>(item);
+            const std::uint32_t r = v.table.get() == base.table().get() ? v.row : base.table()->find(*v.table, v.row);
+            if (r != path_table::none) out.add_view(v);
+        } else if (py::isinstance<file>(item)) {
+            const uri& u = py::cast<const file&>(item).value();
+            if (base.table()->find<native_strategy>(u) != path_table::none) out.add_value(u);
+        } else {
+            const text_arg t = text_view_of_arg(item);
+            if (base.table()->find<native_strategy>(t.view) != path_table::none) out.add_text(t.view);
+        }
+    };
+    if (is_single_path(items)) note_found(items);
+    else for (const py::handle item : py::iter(items)) note_found(item);
+    return out;
 }
 /// `item in ps` for the same four kinds of item as add_one.
 inline bool contains(const PathSet& ps, py::handle item) {
@@ -320,7 +461,25 @@ struct pathset_iter {
     pathset_iter(py::object o, const PathSet* s, bool r) : owner(std::move(o)), set(s), reuse(r) {}
 };
 
-/// Binds fileview, the iterator and PathSet into the pathlike module. Every
+/// A lazy filter over a set: `ps & f`. Holds the set's Python object (so the
+/// set and its table outlive the query however it is chained) and the
+/// combined predicate; `& g` / `| g` return a new query with the predicate
+/// narrowed / widened; eval() runs it once, as a set over the same table.
+///
+///     path_query q{owner, &ps, ext_filter(".rst")};
+///     q.eval()                                -> the .rst members
+///     (q | name_filter("*.txt")).eval()       -> .rst or *.txt
+struct path_query {
+    py::object owner;      // keeps the source set alive
+    const PathSet* set;
+    row_filter f;
+
+    [[nodiscard]] PathSet eval() const { return set->filter(f); }
+    [[nodiscard]] path_query narrowed(const row_filter& g) const { return {owner, set, f & g}; }
+    [[nodiscard]] path_query widened(const row_filter& g) const { return {owner, set, f | g}; }
+};
+
+/// Binds fileview, the iterator, Filter, Query and PathSet into the pathlike module. Every
 /// fileview property reads the table by row; `to_file()` hands the row to the
 /// current PathStore, so a view of a set over the store's table becomes the
 /// store's object without re-interning (a slot read), and any other view is
@@ -387,25 +546,59 @@ void bind_pathset(engine_list<Es...>, py::module_& m) {
             return it.current;
         });
 
+    py::class_<row_filter>(m, "Filter",
+        "A predicate over the paths of a PathSet — made by ext(), name(), absolute() — with & (both), "
+        "| (either) and ~ (not). Apply it with `ps & f` (a lazy Query) or ps.filter(f). Filters read the "
+        "table, never the filesystem.")
+        .def("__and__", [](const row_filter& a, const row_filter& b) { return a & b; }, py::is_operator())
+        .def("__or__", [](const row_filter& a, const row_filter& b) { return a | b; }, py::is_operator())
+        .def("__invert__", [](const row_filter& a) { return !a; }, py::is_operator());
+
+    py::class_<path_query>(m, "Query",
+        "A lazy filter over a PathSet: `ps & f`. `& g` narrows, `| g` widens; eval() returns the matching "
+        "members as a PathSet over the same table; iterating or len() evaluates it. The query keeps its "
+        "source set alive.")
+        .def("__and__", [](const path_query& q, const row_filter& g) { return q.narrowed(g); }, py::is_operator())
+        .def("__or__", [](const path_query& q, const row_filter& g) { return q.widened(g); }, py::is_operator())
+        .def("eval", &path_query::eval, "The matching members as a PathSet over the same table.")
+        .def("__len__", [](const path_query& q) { return q.eval().size(); })
+        .def("__iter__", [](const path_query& q) { return py::cast(q.eval()).attr("__iter__")(); });
+
+    m.def("ext", [](std::string s) { return ext_filter(std::move(s)); }, py::arg("suffix"),
+          "Filter: pathlib's final suffix equals `suffix` ('.yaml'; case-sensitive).");
+    m.def("name", [](std::string g) { return name_filter(std::move(g)); }, py::arg("glob"),
+          "Filter: the final component matches the glob (`*` and `?`).");
+    m.def("absolute", []() { return absolute_filter(); }, "Filter: pathlib's is_absolute().");
+    m.def("match_pattern", [](std::string_view pattern, std::string_view text) { return detail::glob_match(pattern, text); },
+          py::arg("pattern"), py::arg("string"), "Whether `string` matches the glob `pattern` (`*` and `?`).");
+
     py::class_<PathSet>(m, "PathSet",
         "Many paths as ONE table: every distinct path component is stored once and every path is "
         "a row (parent, name) in a hash-consed trie, so a path costs a few bytes plus its share of "
         "the unique names. Iterating yields fileviews (nothing copied); scan() reuses one view "
         "object per pass. filter_suffix()/filter_name() and |, &, - work on rows and return sets "
-        "sharing the table; to_list() renders the members. PathSet(paths, store=s) shares the store's "
-        "table, so its views and s.path() objects meet without re-interning. Prototype: insertion "
-        "order, append-only.")
+        "sharing the table; `ps & Filter` is a lazy Query; + and - take a PathSet or path(s); == compares "
+        "as sets; to_list() renders the members. PathSet(paths, store=s) shares the store's table, so its "
+        "views and s.path() objects meet without re-interning. Sets are built, never edited: `ps -= x` "
+        "rebinds the name to a new set. Insertion order, append-only.")
         .def(py::init([](py::object paths, py::object store) {
                  PathSet ps = store.is_none() ? PathSet() : PathSet(as_store(store).table());
-                 if (!paths.is_none()) extend(ps, paths);
+                 if (!paths.is_none()) add_any(ps, paths);
                  return ps;
-             }), py::arg("paths") = py::none(), py::kw_only(), py::arg("store") = py::none())
+             }), py::arg("paths") = py::none(), py::kw_only(), py::arg("store") = py::none(),
+             "PathSet(paths=None, *, store=None): `paths` is one path (str, bytes, os.PathLike, file, fileview) "
+             "or an iterable of them.")
+        .def_static("cwd", &PathSet::cwd, "The set holding the current working directory.")
         .def("add", [](PathSet& ps, py::handle p) { add_one(ps, p); }, py::arg("path"))
         .def("extend", [](PathSet& ps, py::handle it) { extend(ps, it); }, py::arg("paths"))
         .def("reserve", &PathSet::reserve, py::arg("n"),
              "Size the table for `n` more paths up front (what a sized iterable already does).")
         .def("__len__", &PathSet::size)
+        .def("__bool__", [](const PathSet& ps) { return ps.size() != 0; })
         .def("__contains__", [](const PathSet& ps, py::handle p) { return contains(ps, p); })
+        .def("__eq__", [](const PathSet& a, const PathSet& b) { return a.equals(b); }, py::is_operator())
+        .def("__ne__", [](const PathSet& a, const PathSet& b) { return !a.equals(b); }, py::is_operator())
+        .def("clone", &PathSet::clone, "A distinct set object with the same members over the same table.")
         .def("__iter__", [](py::object self) {
             return pathset_iter(self, &py::cast<const PathSet&>(self), false);
         })
@@ -424,9 +617,30 @@ void bind_pathset(engine_list<Es...>, py::module_& m) {
         .def("filter_name", [](const PathSet& ps, std::string_view g) { return ps.filter_name(g); }, py::arg("glob"),
              "The members whose name matches the glob (`*` and `?`).")
         .def("filter_absolute", &PathSet::filter_absolute)
+        .def("filter", &PathSet::filter, py::arg("filter"), "The members a Filter accepts, as a set over the same table.")
+        // `ps & Filter` / `ps | Filter` start a lazy Query; with a PathSet they are the set algebra.
+        .def("__and__", [](py::object self, const row_filter& f) {
+                 return path_query{self, &py::cast<const PathSet&>(self), f};
+             }, py::is_operator())
+        .def("__or__", [](py::object self, const row_filter& f) {
+                 return path_query{self, &py::cast<const PathSet&>(self), f};
+             }, py::is_operator())
         .def("__or__", &PathSet::union_with, py::is_operator())
         .def("__and__", &PathSet::intersection, py::is_operator())
         .def("__sub__", &PathSet::difference, py::is_operator())
+        // + and - also take one path or an iterable of paths (pygim.pathset's spelling).
+        .def("__add__", &PathSet::union_with, py::is_operator())
+        .def("__add__", [](const PathSet& ps, py::handle items) { return ps.union_with(operand_over(ps, items, true)); }, py::is_operator())
+        .def("__sub__", [](const PathSet& ps, py::handle items) { return ps.difference(operand_over(ps, items, false)); }, py::is_operator())
+        .def("read_all_files", [](const PathSet& ps) {
+                 py::list out;
+                 for (const std::uint32_t r : ps.members()) {
+                     const file f(ps.table()->value(r));
+                     if (f.is_file()) out.append(py::str(f.read_bytes()));
+                 }
+                 return out;
+             }, "The text of every member that is a regular file (UTF-8), one str per file, in member order; "
+                "directories and missing paths are skipped.")
         .def("count_union", &PathSet::count_union, py::arg("other"),
              "len(self | other) without building the set: a popcount over the bitmaps when the tables are shared.")
         .def("count_intersection", &PathSet::count_intersection, py::arg("other"),

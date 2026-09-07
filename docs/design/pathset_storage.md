@@ -141,11 +141,12 @@ The effort Arrow would have taken goes to the two gaps the benchmark found:
 
 1. **A native filter vocabulary.** Without an expression engine on the far
    side of a boundary, the table must answer the questions people actually
-   ask: suffix, name glob, absolute/relative (present), plus depth, "under
-   this directory" (a parent-row test, cheap in a trie), and a regular
-   expression on the name (runs once per distinct segment, not per path,
-   because names are dictionary-encoded). Each is a predicate over rows on
-   the shared table; they compose through the existing `|`, `&`, `-`.
+   ask: suffix, name glob, absolute/relative (present, and since 2026-09-08
+   composable as `Filter` predicates — `ext`, `name`, `absolute` with `&`,
+   `|`, `~` — through the lazy `Query` the old `pygim.pathset` module had),
+   plus depth, "under this directory" (a parent-row test, cheap in a trie),
+   and a regular expression on the name (runs once per distinct segment, not
+   per path, because names are dictionary-encoded).
 2. **Cross-table merge, the rest of the way.** Union now maps segment ids
    once and links rows parent-first into a copy of the larger table (see the
    A/B above). Intersection still probes the other table once per member of

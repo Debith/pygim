@@ -375,13 +375,16 @@ PYBIND11_MODULE(pathlike, m) {
              py::arg("pattern"),
              "glob('**/' + pattern): the pattern anywhere under this directory.")
         .def("pathset",
-             [](const file& f, const std::string& pattern) {
-                 std::vector<std::string> paths;
-                 for (const file& m : f.glob(pattern)) paths.push_back(m.fspath());
-                 return py::module_::import("pygim.pathset").attr("PathSet")(paths);
+             [](const file& f, std::string_view pattern) {
+                 // The glob results as rows of the CURRENT store's table: the set's
+                 // views and path() objects meet without re-interning.
+                 path_store& st = current_store();
+                 PathSet ps(st.table());
+                 for (const file& m : f.glob(pattern)) ps.add_value(m.value());
+                 return ps;
              },
-             py::arg("pattern") = std::string("*"),
-             "The glob results as a pygim.pathset.PathSet, for set algebra and "
+             py::arg("pattern") = "*",
+             "The glob results as a PathSet over the current store's table, for set algebra and "
              "Filter queries.");
 
     // One typed subclass per engine ("<name>file"); constructing one pins its engine.

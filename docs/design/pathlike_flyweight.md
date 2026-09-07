@@ -173,11 +173,10 @@ their laws proven at compile time. See `mapping_toolkit.md`.)*
    is allocated and the token stamped through a `py::cast`. Building the
    `file` from the text that is already at hand when it is text, and stamping
    without the cast, are the two obvious cuts.
-2. **The old `pygim.pathset` module.** `file.pathset()` still renders glob
-   results to strings and constructs `pygim.pathset.PathSet`; with a store
-   and `PathSet(store=)`, it should return the pathlike `PathSet` over the
-   current store's table. Folding the old `Filter`/`Query` vocabulary into the
-   native filters is the "filter vocabulary" item of `pathset_storage.md`.
+2. ~~The old `pygim.pathset` module~~ — folded (2026-09-08): `file.pathset()`
+   returns the pathlike `PathSet` over the current store's table, the old
+   module is removed, and its `Filter`/`Query` vocabulary lives on as row
+   predicates (`ext`, `name`, `absolute`; `& | ~`; `ps & f`).
 3. **A scoped lifetime in `ioc`** (child containers with disposal) would
    turn `use_store(container.resolve(PathStore))` into the container's own
    job. Independent of pathlike.

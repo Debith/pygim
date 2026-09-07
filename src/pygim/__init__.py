@@ -6,7 +6,7 @@
 # A submodule that fails to load (missing build, toolchain/libstdc++ mismatch)
 # then only breaks the callers that actually use it.
 _LAZY_EXPORTS = {
-    "PathSet": ("pygim.pathset", "PathSet"),
+    "PathSet": ("pygim.pathlike", "PathSet"),
     "path": ("pygim.pathlike", "path"),
     "file": ("pygim.pathlike", "file"),
     "Registry": ("pygim.registry", "Registry"),
