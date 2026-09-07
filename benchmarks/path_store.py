@@ -18,45 +18,17 @@ Each run appends its raw measurements + environment metadata to
 import gc
 import os
 import pathlib
-import time
 
 from tabulate import tabulate
 
 import pygim
 from pygim import pathlike
 from _results import save, wants_save
-from pathset_prototype import corpus
 
-REPS = 3
+from _bench import REPS, best, best_fresh, corpus
+
 N = 200_000
 path = pygim.path
-
-
-def best(fn, reps=REPS):
-    t_best, r = float("inf"), None
-    for _ in range(reps):
-        gc.collect()
-        gc.disable()
-        t0 = time.perf_counter()
-        r = fn()
-        t_best = min(t_best, time.perf_counter() - t0)
-        gc.enable()
-    return t_best, r
-
-
-def best_fresh(fn, reps=REPS):
-    """best() but the previous pass's objects are dropped before each timing —
-    so an interned-but-dead value is measured as such, not as warm."""
-    t_best, r = float("inf"), None
-    for _ in range(reps):
-        r = None
-        gc.collect()
-        gc.disable()
-        t0 = time.perf_counter()
-        r = fn()
-        t_best = min(t_best, time.perf_counter() - t0)
-        gc.enable()
-    return t_best, r
 
 
 def ns(seconds, n=N):
@@ -120,7 +92,7 @@ def bench_derived(strs):
 _MEM_PROBE = """
 import gc, os, sys
 sys.path.insert(0, {bench_dir!r})
-from pathset_prototype import corpus, rss_mb
+from _bench import corpus, rss_mb
 import pygim
 from pygim import pathlike
 strs = corpus({n})

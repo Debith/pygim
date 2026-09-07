@@ -5,8 +5,8 @@
 // here is a Python object per path: iteration hands out `fileview`s — a
 // (table, row) pair that copies no text — and scan() reuses ONE view object
 // for a whole pass. Value filters and set algebra work on rows; a filtered
-// set shares its parent's table, so it is a member list and a bitmap, nothing
-// more. The way out to other tools is to_list(): see
+// set shares its parent's table, so it is a mapping::id_set (members and a
+// bitmap), nothing more. The way out to other tools is to_list(): see
 // docs/design/pathset_storage.md for why there is no Arrow boundary here.
 
 #include <cstddef>
@@ -20,6 +20,7 @@
 
 #include <pybind11/pybind11.h>
 
+#include "../../mapping/id_set.h"
 #include "../path_table.h"
 #include "adapter.h"
 #include "path_store.h"
@@ -47,16 +48,16 @@ public:
     PathSet() : m_table(std::make_shared<path_table>()) {}
     explicit PathSet(table_ptr t) : m_table(std::move(t)) {}
 
-    [[nodiscard]] std::size_t size() const noexcept { return m_members.size(); }
+    [[nodiscard]] std::size_t size() const noexcept { return m_ids.size(); }
     [[nodiscard]] const table_ptr& table() const noexcept { return m_table; }
-    [[nodiscard]] const std::vector<std::uint32_t>& members() const noexcept { return m_members; }
-    [[nodiscard]] fileview view(std::size_t i) const { return {m_table, m_members[i]}; }
+    [[nodiscard]] const std::vector<std::uint32_t>& members() const noexcept { return m_ids.members(); }
+    [[nodiscard]] fileview view(std::size_t i) const { return {m_table, m_ids[i]}; }
 
     // Room for `n` more paths: sizes the table's hash tables once instead of
     // letting them double their way up (a fresh table's rows run ~2-3x the
     // path count, its distinct segments about 1x).
     void reserve(std::size_t n) {
-        m_members.reserve(m_members.size() + n);
+        m_ids.reserve(m_ids.size() + n);
         m_table->reserve(m_table->size() + 3 * n, m_table->segments().size() + n);
     }
 
@@ -68,9 +69,7 @@ public:
     }
 
     // ── membership ────────────────────────────────────────────────────────
-    [[nodiscard]] bool has_row(std::uint32_t r) const noexcept {
-        return r != path_table::none && r / 64 < m_bits.size() && ((m_bits[r / 64] >> (r % 64)) & 1u);
-    }
+    [[nodiscard]] bool has_row(std::uint32_t r) const noexcept { return r != path_table::none && m_ids.has(r); }
     [[nodiscard]] bool contains_text(std::string_view t) const { return has_row(m_table->find<native_strategy>(t)); }
     [[nodiscard]] bool contains_value(const uri& u) const { return has_row(m_table->find<native_strategy>(u)); }
     [[nodiscard]] bool contains_view(const fileview& v) const {
@@ -81,10 +80,7 @@ public:
     template <class Pred>
     [[nodiscard]] PathSet where(Pred pred) const {
         PathSet out(m_table);
-        out.m_bits.resize(m_bits.size(), 0);
-        for (const std::uint32_t r : m_members) {
-            if (pred(r)) out.note(r);
-        }
+        out.m_ids = m_ids.where(pred);
         return out;
     }
     [[nodiscard]] PathSet filter_suffix(std::string_view s) const {
@@ -97,12 +93,11 @@ public:
         return where([&](std::uint32_t r) { return m_table->is_absolute<native_strategy>(r); });
     }
 
-    // ── set algebra (bitmap when the tables are shared, chain lookup otherwise) ──
+    // ── set algebra (bitmaps when the tables are shared, row mapping otherwise) ──
     [[nodiscard]] PathSet union_with(const PathSet& o) const {
         if (o.m_table.get() == m_table.get()) {
             PathSet out(m_table);
-            for (const std::uint32_t r : m_members) out.note(r);
-            for (const std::uint32_t r : o.m_members) out.note(r);
+            out.m_ids = m_ids.united(o.m_ids);
             return out;
         }
         // Two tables: copy the larger one (a memcpy of flat arrays) and map only
@@ -111,44 +106,43 @@ public:
         const PathSet& kept = keep_mine ? *this : o;
         const PathSet& mapped = keep_mine ? o : *this;
         PathSet out(std::make_shared<path_table>(*kept.m_table));
-        out.m_bits.resize(kept.m_bits.size(), 0);
+        out.m_ids = kept.m_ids.sibling();
         path_table::row_map into(*out.m_table, *mapped.m_table, out.m_table.get());
         if (keep_mine) {
-            for (const std::uint32_t r : m_members) out.note(r);
-            for (const std::uint32_t r : o.m_members) out.note(into(r));
+            for (const std::uint32_t r : m_ids.members()) out.note(r);
+            for (const std::uint32_t r : o.m_ids.members()) out.note(into(r));
         } else {
-            for (const std::uint32_t r : m_members) out.note(into(r));
-            for (const std::uint32_t r : o.m_members) out.note(r);
+            for (const std::uint32_t r : m_ids.members()) out.note(into(r));
+            for (const std::uint32_t r : o.m_ids.members()) out.note(r);
         }
         return out;
     }
     [[nodiscard]] PathSet intersection(const PathSet& o) const {
-        if (o.m_table.get() == m_table.get()) return where([&](std::uint32_t r) { return o.has_row(r); });
+        if (o.m_table.get() == m_table.get()) {
+            PathSet out(m_table);
+            out.m_ids = m_ids.intersected(o.m_ids);
+            return out;
+        }
         path_table::row_map in_o(*o.m_table, *m_table);
         return where([&](std::uint32_t r) { return o.has_row(in_o(r)); });
     }
     [[nodiscard]] PathSet difference(const PathSet& o) const {
-        if (o.m_table.get() == m_table.get()) return where([&](std::uint32_t r) { return !o.has_row(r); });
+        if (o.m_table.get() == m_table.get()) {
+            PathSet out(m_table);
+            out.m_ids = m_ids.subtracted(o.m_ids);
+            return out;
+        }
         path_table::row_map in_o(*o.m_table, *m_table);
         return where([&](std::uint32_t r) { return !o.has_row(in_o(r)); });
     }
 
-    [[nodiscard]] std::size_t member_bytes() const noexcept {
-        return m_members.capacity() * sizeof(std::uint32_t) + m_bits.capacity() * sizeof(std::uint64_t);
-    }
+    [[nodiscard]] std::size_t member_bytes() const noexcept { return m_ids.bytes(); }
 
 private:
-    void note(std::uint32_t r) {
-        if (r / 64 >= m_bits.size()) m_bits.resize(r / 64 + 1, 0);
-        const std::uint64_t bit = std::uint64_t{1} << (r % 64);
-        if (m_bits[r / 64] & bit) return;
-        m_bits[r / 64] |= bit;
-        m_members.push_back(r);
-    }
+    void note(std::uint32_t r) { m_ids.note(r); }
 
     table_ptr m_table;
-    std::vector<std::uint32_t> m_members;   // insertion order
-    std::vector<std::uint64_t> m_bits;      // membership per table row
+    mapping::id_set m_ids;   // the members (insertion order) and their bitmap
 };
 
 // ── Python glue ─────────────────────────────────────────────────────────────

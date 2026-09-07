@@ -11,6 +11,7 @@
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 
+#include "../../utils/hash.h"
 #include "../common/adapter_validation.h"
 #include "core.h"
 
@@ -26,9 +27,7 @@ struct InterfaceKeyPolicy {
 
     struct Hash {
         std::size_t operator()(const key_type& key) const noexcept {
-            std::size_t h1 = std::hash<void*>{}(key.ptr);
-            std::size_t h2 = key.name ? std::hash<std::string>{}(*key.name) : 0;
-            return h1 ^ (h2 << 1);
+            return pygim::hash::combine(std::hash<void*>{}(key.ptr), key.name ? std::hash<std::string>{}(*key.name) : 0);
         }
     };
 

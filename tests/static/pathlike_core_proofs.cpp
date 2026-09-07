@@ -15,7 +15,9 @@
 // bindings.cpp with the same predicates (static_assert(Engines::holds())),
 // which is what makes a new engine header self-verifying on its first build.
 
+#include "../../src/_pygim_fast/mapping/intern.h"
 #include "../../src/_pygim_fast/pathlike/engine_list.h"
+#include "../../src/_pygim_fast/pathlike/path_table.h"
 
 #include <array>
 #include <initializer_list>
@@ -348,5 +350,49 @@ static_assert(engine_list<>::size == 0 && names_match_identifiers(engine_list<>{
 #endif
 
 [[maybe_unused]] constexpr bool kCoreProofsCompiled = true;
+
+
+// ── The path table's laws, in constant evaluation (over the flat interner) ──
+// value(row) is the uri file(text) holds, hash(row) is that file's hash,
+// render(row) is its fspath, text and value meet at ONE row, and the table's
+// parent is pathlib's parent — the facts adapter/pathset.h and the flyweight
+// store rely on (docs/design/pathset_storage.md, pathlike_flyweight.md).
+template <class Strategy>
+consteval bool table_agrees_with_file(std::string_view text) {
+    basic_path_table<pygim::mapping::flat_interner> t;
+    const std::uint32_t r = t.template insert<Strategy>(text);
+    const basic_file<Strategy> f(text);
+    bool ok = t.value(r) == f.value() && t.hash(r) == f.hash_value();
+    ok = ok && t.template render<Strategy>(r) == f.fspath();
+    ok = ok && t.template find<Strategy>(text) == r && t.template insert<Strategy>(f.value()) == r;
+    ok = ok && t.template find<Strategy>(f.value()) == r && t.size() >= 1;
+    const std::uint32_t p = t.parent(r);
+    ok = ok && t.value(p) == f.parent().value() && t.template is_absolute<Strategy>(r) == f.is_absolute();
+    ok = ok && t.name(r) == f.name() && t.depth(r) == f.value().segments.size() - Strategy::anchor_segments(f.value());
+    return ok;
+}
+static_assert(table_agrees_with_file<posix_strategy>("a/b/c.yaml") && table_agrees_with_file<posix_strategy>("/usr/lib") &&
+              table_agrees_with_file<posix_strategy>("//srv/share/x") && table_agrees_with_file<posix_strategy>("a//b/./c/") &&
+              table_agrees_with_file<posix_strategy>("") && table_agrees_with_file<posix_strategy>("/") &&
+              table_agrees_with_file<posix_strategy>(".bashrc") && table_agrees_with_file<posix_strategy>("a/../b"));
+static_assert(table_agrees_with_file<windows_strategy>("C:\\Users\\x.yaml") && table_agrees_with_file<windows_strategy>("\\\\srv\\share\\x") &&
+              table_agrees_with_file<windows_strategy>("a\\b") && table_agrees_with_file<windows_strategy>("C:x") &&
+              table_agrees_with_file<windows_strategy>("\\abs"));
+
+// Two spellings of one value are one row; two values are two rows; a shared
+// prefix is shared.
+consteval bool table_hash_conses() {
+    basic_path_table<pygim::mapping::flat_interner> t;
+    const std::uint32_t a = t.insert<posix_strategy>("a/b/c");
+    const std::uint32_t a2 = t.insert<posix_strategy>("./a//b/c/");
+    const std::uint32_t d = t.insert<posix_strategy>("a/b/d");
+    const std::uint32_t rows_after = static_cast<std::uint32_t>(t.size());
+    bool ok = a == a2 && d != a && t.parent(a) == t.parent(d);               // one row per value; siblings share the parent
+    ok = ok && t.template find<posix_strategy>("a/b") == t.parent(a) && rows_after == 5;   // ".", a, b, c, d
+    ok = ok && t.child_of(t.parent(a), "c") == a && t.child_of(t.parent(a), "e") == rows_after && t.size() == rows_after + 1;
+    ok = ok && t.parents(a).size() == 2 && t.parents(a)[0] == t.parent(a) && t.parents(t.parents(a)[1]).empty();
+    return ok;
+}
+static_assert(table_hash_conses());
 
 }  // namespace

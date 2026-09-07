@@ -7,12 +7,11 @@
 // path_table (path_table.h, docs/design/pathset_storage.md) and the row's
 // live Python object is handed back when there is one — so equal paths made
 // through path() are the SAME object for as long as any reference keeps it
-// alive. The per-row slot holds a weak reference: the store pins nothing,
-// objects die when their last owner drops them, and the slot is refilled on
-// the next request. Only the table grows (rows are never freed), which is why
-// a store is an ordinary Python object rather than a hidden global: hand one
-// to an IoC container as a singleton and its lifetime is the container's;
-// use_store() makes it current for a block.
+// alive. The per-row slots are the toolkit's weak_slots
+// (utils/flyweight_adapter.h: weak references, so the store pins nothing) and
+// "the current store" is an ambient service (utils/ambient_adapter.h: an
+// ordinary Python object — hand one to an IoC container as a singleton — that
+// use_store() makes current for a block). Only the table grows.
 //
 // A pinned path (engine=...) is not interned: a pin is a per-object choice,
 // not part of the value, and the slot holds the value's default wrap.
@@ -25,117 +24,51 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <string>
 #include <string_view>
 #include <utility>
-#include <vector>
 
 #include <pybind11/pybind11.h>
 
+#include "../../utils/ambient_adapter.h"
+#include "../../utils/flyweight_adapter.h"
 #include "../path_table.h"
 #include "adapter.h"
 
 namespace pygim::pathlike {
 
-namespace detail {
-// The referent of a weakref as a new reference, or a null object once it died.
-inline py::object weak_referent(PyObject* wr) {
-#if PY_VERSION_HEX >= 0x030D0000
-    PyObject* obj = nullptr;
-    const int rc = PyWeakref_GetRef(wr, &obj);   // 1 alive (new ref), 0 dead, -1 error
-    if (rc < 0) throw py::error_already_set();
-    return rc == 1 ? py::reinterpret_steal<py::object>(obj) : py::object();
-#else
-    PyObject* obj = PyWeakref_GetObject(wr);   // borrowed; Py_None once dead
-    if (!obj) throw py::error_already_set();
-    return obj == Py_None ? py::object() : py::reinterpret_borrow<py::object>(obj);
-#endif
-}
-}  // namespace detail
-
 class path_store {
 public:
-    path_store() : m_table(std::make_shared<path_table>()), m_id(next_id()) {}
+    path_store() : m_table(std::make_shared<path_table>()) {}
     path_store(const path_store&) = delete;
     path_store& operator=(const path_store&) = delete;
-    path_store(path_store&& o) noexcept : m_table(std::move(o.m_table)), m_slots(std::move(o.m_slots)), m_id(o.m_id) {}
+    path_store(path_store&&) noexcept = default;
     path_store& operator=(path_store&&) = delete;
-    ~path_store() {
-        for (PyObject* wr : m_slots) Py_XDECREF(wr);   // pybind11 destroys instances under the GIL
-    }
 
     [[nodiscard]] const std::shared_ptr<path_table>& table() const noexcept { return m_table; }
     [[nodiscard]] std::uint32_t intern(const file& f) { return m_table->insert<native_strategy>(f.value()); }
     [[nodiscard]] std::uint32_t intern(std::string_view native_text) { return m_table->insert<native_strategy>(native_text); }
 
-    // The live object for row `r` (a new reference), or null.
-    [[nodiscard]] py::object live(std::uint32_t r) const {
-        if (r >= m_slots.size() || !m_slots[r]) return py::object();
-        return detail::weak_referent(m_slots[r]);
-    }
-    void remember(std::uint32_t r, py::handle obj) {
-        if (r >= m_slots.size()) m_slots.resize(static_cast<std::size_t>(r) + 1, nullptr);
-        PyObject* wr = PyWeakref_NewRef(obj.ptr(), nullptr);
-        if (!wr) throw py::error_already_set();
-        Py_XDECREF(m_slots[r]);
-        m_slots[r] = wr;
-        py::cast<file&>(obj).set_interned({m_id, r});
-    }
-    // The row of an object THIS store handed out, validated through the slot
-    // (a copied token in another object fails the referent check); `none` otherwise.
-    [[nodiscard]] std::uint32_t row_of(py::handle obj, const file& f) const {
-        const file::intern_token t = f.interned();
-        if (t.owner != m_id || t.slot >= m_slots.size() || !m_slots[t.slot]) return path_table::none;
-        const py::object referent = detail::weak_referent(m_slots[t.slot]);
-        return referent && referent.ptr() == obj.ptr() ? t.slot : path_table::none;
-    }
+    [[nodiscard]] py::object live(std::uint32_t r) const { return m_objects.live(r); }
+    void remember(std::uint32_t r, py::handle obj) { m_objects.remember(r, obj); }
+    // The row of an object THIS store handed out (validated through the slot); `none` otherwise.
+    [[nodiscard]] std::uint32_t row_of(py::handle obj, const file& f) const { return m_objects.id_of(obj, f); }
+
     void reserve(std::size_t n) {
         m_table->reserve(m_table->size() + 3 * n, m_table->segments().size() + n);
-        m_slots.reserve(m_slots.size() + n);
+        m_objects.reserve(n);
     }
-
-    [[nodiscard]] std::size_t live_count() const {
-        std::size_t n = 0;
-        for (PyObject* wr : m_slots) {
-            if (wr && detail::weak_referent(wr)) ++n;
-        }
-        return n;
-    }
-    [[nodiscard]] std::size_t slot_bytes() const noexcept { return m_slots.capacity() * sizeof(PyObject*); }
+    [[nodiscard]] std::size_t live_count() const { return m_objects.live_count(); }
+    [[nodiscard]] std::size_t slot_bytes() const noexcept { return m_objects.bytes(); }
 
 private:
-    [[nodiscard]] static std::uint64_t next_id() noexcept {
-        static std::uint64_t n = 0;
-        return ++n;   // under the GIL
-    }
     std::shared_ptr<path_table> m_table;
-    std::vector<PyObject*> m_slots;   // per row: a weakref (owned) or nullptr
-    std::uint64_t m_id;
+    adapter::weak_slots<file> m_objects;
 };
 
-// ── the current store ───────────────────────────────────────────────────────
-// Held in a leaked py::object (never destroyed after the interpreter is gone);
-// the raw pointer beside it keeps the hot path free of a cast per call.
-struct current_store_state {
-    py::object object;
-    path_store* store = nullptr;
-};
-inline current_store_state& current_store_slot() {
-    static auto* s = new current_store_state{};
-    return *s;
-}
-inline path_store& current_store() { return *current_store_slot().store; }
-inline path_store& as_store(py::handle obj) {
-    if (!py::isinstance<path_store>(obj)) throw py::type_error("expected a pathlike.PathStore, got " + py::repr(py::type::of(obj)).cast<std::string>());
-    return py::cast<path_store&>(obj);
-}
-inline py::object set_current_store(py::object store) {
-    path_store& st = as_store(store);
-    current_store_state& s = current_store_slot();
-    py::object prev = std::move(s.object);
-    s.object = std::move(store);
-    s.store = &st;
-    return prev;
-}
+using current = adapter::ambient<path_store>;
+inline path_store& current_store() noexcept { return current::current(); }
+inline path_store& as_store(py::handle obj) { return current::as(obj); }
 
 // ── the flyweight entry points ──────────────────────────────────────────────
 // The object for row `r` of `st`: the live one, else a fresh wrap of the row's
@@ -215,12 +148,6 @@ template <class... Es>
     return make(es, st, f.joined(other));
 }
 
-// with use_store(store): ... — makes `store` current for the block.
-struct store_scope {
-    py::object store;
-    py::object previous;
-};
-
 template <class... Es>
 void bind_path_store(engine_list<Es...>, py::module_& m) {
     using Engines_ = engine_list<Es...>;
@@ -250,30 +177,16 @@ void bind_path_store(engine_list<Es...>, py::module_& m) {
             return "PathStore(rows=" + std::to_string(st.table()->size()) + ", live=" + std::to_string(st.live_count()) + ")";
         });
 
-    py::class_<store_scope>(m, "_StoreScope")
-        .def("__enter__", [](store_scope& s) {
-            s.previous = set_current_store(s.store);
-            return s.store;
-        })
-        .def("__exit__", [](store_scope& s, py::handle, py::handle, py::handle) {
-            set_current_store(std::move(s.previous));
-            return false;
-        });
-
-    m.def("store", []() { return current_store_slot().object; },
-          "The current PathStore: what path() and derived-path operations intern into.");
-    m.def("use_store", [](py::object store) {
-            as_store(store);   // validate now, not at __enter__
-            return store_scope{std::move(store), py::object()};
-        }, py::arg("store"),
-        "Context manager: `with use_store(s): ...` makes `s` the current store for the block "
-        "(nested; restores the previous one on exit). Give an IoC container a PathStore singleton "
-        "and use_store(container.resolve(PathStore)) scopes every path to that container.");
-
     // The default store: a module attribute (cleaned up by the interpreter) and the current one.
     py::object default_store = py::cast(path_store());
     m.attr("_default_store") = default_store;
-    set_current_store(default_store);
+    current::bind(m, "_StoreScope",
+                  "store", "The current PathStore: what path() and derived-path operations intern into.",
+                  "use_store",
+                  "Context manager: `with use_store(s): ...` makes `s` the current store for the block "
+                  "(nested; restores the previous one on exit). Give an IoC container a PathStore singleton "
+                  "and use_store(container.resolve(PathStore)) scopes every path to that container.",
+                  default_store);
 }
 
 }  // namespace pygim::pathlike
