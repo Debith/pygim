@@ -90,11 +90,14 @@ prototype. The `to_list()` bridge stays.
 
 ## What is kept from that work
 
-- **The column layouts.** `segment_table` is text plus int64 offsets;
-  `path_table` rows are fixed-width integers. Those are good
+- **The column layouts.** The segment interner is text plus offsets;
+  the trie's rows are fixed-width integers. Those are good
   structure-of-arrays shapes on their own merits, and they happen to be
   Arrow's `large_utf8` and dictionary layouts, so the door is not closed. Do
-  not add per-row heap objects to the table.
+  not add per-row heap objects to the table. (Since 2026-09-08 both are
+  toolkit components — `mapping/intern.h`, `mapping/trie.h`, and the set is
+  `mapping/id_set.h`: see `mapping_toolkit.md`; `path_table` is the path
+  policy over them.)
 - **Stable row identity per table.** Everything cheap — filters, algebra,
   views, membership — rests on a row number meaning the same path for the
   life of the table. Any future export or query language should carry row

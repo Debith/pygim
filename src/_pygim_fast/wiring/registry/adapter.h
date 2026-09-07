@@ -7,6 +7,7 @@
 #include <type_traits>
 #include <variant>
 
+#include "../../utils/hash.h"
 #include "core.h"
 
 namespace pygim {
@@ -30,9 +31,7 @@ struct PyIdentityKeyPolicy {
 
     struct Hash {
         size_t operator()(const key_type& key) const noexcept {
-            size_t h1 = std::hash<void*>()(key.ptr);
-            size_t h2 = std::hash<std::string>()(key.name);
-            return h1 ^ (h2 << 1);
+            return pygim::hash::combine(std::hash<void*>()(key.ptr), std::hash<std::string>()(key.name));
         }
     };
 
@@ -62,9 +61,7 @@ struct QualnameKeyPolicy {
 
     struct Hash {
         size_t operator()(const key_type& key) const noexcept {
-            size_t h1 = std::hash<std::string>()(key.id);
-            size_t h2 = std::hash<std::string>()(key.name);
-            return h1 ^ (h2 << 1);
+            return pygim::hash::combine(std::hash<std::string>()(key.id), std::hash<std::string>()(key.name));
         }
     };
 

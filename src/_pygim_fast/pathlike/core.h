@@ -32,6 +32,8 @@
 #include <utility>
 #include <vector>
 
+#include "../utils/flyweight.h"
+#include "../utils/hash.h"
 #include "uri.h"
 
 namespace pygim::pathlike {
@@ -81,24 +83,11 @@ struct engine_info {
 };
 
 namespace detail {
-// FNV-1a: the value hash of basic_file and path_table (one definition).
-inline constexpr std::uint64_t fnv_basis = 14695981039346656037ull;
-inline constexpr std::uint64_t fnv_prime = 1099511628211ull;
-[[nodiscard]] constexpr std::uint64_t fnv1a(std::string_view s, std::uint64_t h = fnv_basis) noexcept {
-    for (const unsigned char c : s) {
-        h ^= c;
-        h *= fnv_prime;
-    }
-    return h;
-}
-// One string of a composite value: its bytes, then a terminator so that
-// ("ab","c") and ("a","bc") differ.
-[[nodiscard]] constexpr std::uint64_t mix_string(std::uint64_t h, std::string_view s) noexcept {
-    h = fnv1a(s, h);
-    h ^= 0xffu;
-    h *= fnv_prime;
-    return h;
-}
+// The value hash of basic_file and path_table: one definition, in utils/hash.h.
+using pygim::hash::fnv1a;
+using pygim::hash::fnv_basis;
+using pygim::hash::fnv_prime;
+using pygim::hash::mix_string;
 
 // pathlib's stem and suffix of a final component: the last dot splits them
 // unless it is the first or the last character (".bashrc", "a." have no suffix).
@@ -494,14 +483,11 @@ public:
     [[nodiscard]] constexpr const uri& value() const noexcept { return m_uri; }
     [[nodiscard]] constexpr const engine_info* pinned() const noexcept { return m_pin; }
 
-    // Where this value is interned, if anywhere: an opaque (owner, slot) token
-    // stamped by whoever interned it (the adapter's path store). Not part of
-    // the value, equality or hash; a copy carries it along, so a reader must
-    // validate it against the owner before trusting it.
-    struct intern_token {
-        std::uint64_t owner = 0;
-        std::uint32_t slot = 0xFFFF'FFFFu;
-    };
+    // Where this value is interned, if anywhere: the flyweight token
+    // (utils/flyweight.h) stamped by the store that handed the object out.
+    // Not part of the value, equality or hash; a copy carries it along, so a
+    // reader validates it against the owner before trusting it.
+    using intern_token = flyweight::token;
     [[nodiscard]] constexpr intern_token interned() const noexcept { return m_intern; }
     constexpr void set_interned(intern_token t) noexcept { m_intern = t; }
 

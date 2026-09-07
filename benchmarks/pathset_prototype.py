@@ -23,9 +23,7 @@ Each run appends its raw measurements + environment metadata to
 import gc
 import os
 import pathlib
-import random
 import sys
-import time
 
 from tabulate import tabulate
 
@@ -33,44 +31,12 @@ import pygim
 from pygim import pathlike
 from _results import save, wants_save
 
-REPS = 3
+from _bench import REPS, best, corpus, ns, rss_mb
+
 path = pygim.path   # bound once: the lazy top-level export is not what is measured
 
 
-def rss_mb():
-    try:
-        with open("/proc/self/statm") as f:
-            return int(f.read().split()[1]) * os.sysconf("SC_PAGE_SIZE") / 2**20
-    except OSError:
-        return float("nan")
-
-
-def corpus(n, seed=1):
-    rng = random.Random(seed)
-    dirs = ["home", "var", "usr", "opt", "srv", "data", "projects", "tmp"]
-    exts = [".yaml", ".json", ".toml", ".jsonl", ".txt", ".md", ".yml", ""]
-    out = []
-    for i in range(n):
-        depth = rng.randint(1, 6)
-        parts = [rng.choice(dirs)] + [f"d{rng.randrange(1000)}" for _ in range(depth - 1)]
-        out.append(("/" if rng.random() < 0.5 else "") + "/".join(parts + [f"file{i}{rng.choice(exts)}"]))
-    return out
-
-
-def best(fn, reps=REPS):
-    """Best-of-N wall time in seconds and the last result."""
-    t_best, r = float("inf"), None
-    for _ in range(reps):
-        gc.collect()
-        gc.disable()
-        t0 = time.perf_counter()
-        r = fn()
-        t_best = min(t_best, time.perf_counter() - t0)
-        gc.enable()
-    return t_best, r
-
-
-def ns(seconds, n):
+def ns(seconds, n):   # noqa: F811 — the module-level n-less spelling used below
     return seconds / n * 1e9
 
 
@@ -96,10 +62,18 @@ def bench_build(sizes):
         gc.collect()
         if n <= 1_000_000:
             m0 = rss_mb()
-            t, objs = best(lambda: [path(s) for s in strs], reps=1)
+            t, objs = best(lambda: [pathlike.file(s) for s in strs], reps=1)
             f_bytes = (rss_mb() - m0) * 2**20 / n
             raw[f"file_{n}"] = {"seconds": t, "bytes_per_path": f_bytes}
-            rows.append([f"{n:,}", "[pygim.path(s)]", f"{ns(t, n):,.0f}", f"{n / t / 1e6:.2f}", f"{f_bytes:.0f} (rss)"])
+            rows.append([f"{n:,}", "[pathlike.file(s)]  (raw objects)", f"{ns(t, n):,.0f}", f"{n / t / 1e6:.2f}", f"{f_bytes:.0f} (rss)"])
+            del objs
+            gc.collect()
+            m0 = rss_mb()
+            with pathlike.use_store(pathlike.PathStore()):
+                t, objs = best(lambda: [path(s) for s in strs], reps=1)
+                p_bytes = (rss_mb() - m0) * 2**20 / n
+            raw[f"path_{n}"] = {"seconds": t, "bytes_per_path": p_bytes}
+            rows.append([f"{n:,}", "[pygim.path(s)]  (interned, cold)", f"{ns(t, n):,.0f}", f"{n / t / 1e6:.2f}", f"{p_bytes:.0f} (rss, store incl.)"])
             del objs
             gc.collect()
         del strs
@@ -191,6 +165,8 @@ def bench_algebra(strs, ps, files):
     rec("a | b  (shared table)", lambda: a | b, n)
     rec("a & b  (shared table)", lambda: a & b, n)
     rec("a - b  (shared table)", lambda: a - b, n)
+    rec("a.count_union(b)  (popcount, no set built)", lambda: a.count_union(b), n)
+    rec("a.count_intersection(b)  (popcount)", lambda: a.count_intersection(b), n)
     other = pathlike.PathSet(corpus(n, seed=2))   # another table, half overlapping names
     rec("ps | other (two tables)", lambda: ps | other, 2 * n)
     rec("ps & other (two tables)", lambda: ps & other, n)

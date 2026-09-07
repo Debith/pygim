@@ -5,9 +5,32 @@
 // here is a Python object per path: iteration hands out `fileview`s — a
 // (table, row) pair that copies no text — and scan() reuses ONE view object
 // for a whole pass. Value filters and set algebra work on rows; a filtered
-// set shares its parent's table, so it is a member list and a bitmap, nothing
-// more. The way out to other tools is to_list(): see
+// set shares its parent's table, so it is a mapping::id_set (members and a
+// bitmap), nothing more. The way out to other tools is to_list(): see
 // docs/design/pathset_storage.md for why there is no Arrow boundary here.
+//
+// A worked example (POSIX), used in the comments below. Row numbers are the
+// table's; see path_table.h for how the rows come about.
+//
+//     PathSet ps;                          // its own fresh table
+//     ps.add_text("a/b.yaml");             // rows: 0 ".", 1 a, 2 a/b.yaml       members [2]
+//     ps.add_text("a/c.json");             // row 3 a/c.json                     members [2, 3]
+//     ps.add_text("/d");                   // rows 4 "/", 5 /d                   members [2, 3, 5]
+//     ps.add_text("a//b.yaml/");           // row 2 again: the same value        members unchanged
+//     ps.size() -> 3       ps.view(1) -> fileview{table, 3}
+//
+//     yaml = ps.filter_suffix(".yaml")     // members [2]      (same table)
+//     abs  = ps.filter_absolute()          // members [5]
+//     yaml.union_with(abs)                 // [2, 5]   yaml.intersection(abs) -> []   ps.difference(yaml) -> [3, 5]
+//     ps.count_intersection(yaml) -> 1     (a popcount: no set built)
+//     ps.contains_text("a/c.json") -> true     ps.contains_text("a/q") -> false
+//
+//     PathSet other;  other.add_text("a/c.json");  other.add_text("e");   // ANOTHER table: its rows 2 and 3
+//     ps.intersection(other)               // [3]: other's rows mapped into ps's table, never rendered
+//     ps.union_with(other)                 // ps's table copied, other's rows mapped in: [2, 3, 5, 6]
+//
+// From Python: PathSet(["a/b.yaml", "a/c.json", "/d"]); ps[1].name == "c.json";
+// [v.name for v in ps.scan()]; ps & other; ps.count_union(other); ps.to_list().
 
 #include <cstddef>
 #include <cstdint>
@@ -20,6 +43,7 @@
 
 #include <pybind11/pybind11.h>
 
+#include "../../mapping/id_set.h"
 #include "../path_table.h"
 #include "adapter.h"
 #include "path_store.h"
@@ -28,14 +52,27 @@ namespace pygim::pathlike {
 
 using table_ptr = std::shared_ptr<path_table>;
 
-// A path inside a table. Copies nothing; keeps the table alive, so a view
-// outlives the set it came from.
+/// A path inside a table: (table, row). Copies nothing; keeps the table
+/// alive, so a view outlives the set it came from. Python sees it as
+/// `pathlike.fileview` — the object `for v in ps` yields — with the reading
+/// half of a file's API (name, parent, suffix, ==, hash, os.fspath) served
+/// straight from the table.
+///
+///     fileview v{table, 3};                 // a/c.json in the example
+///     v.fspath()  -> "a/c.json"             v.to_file() -> file("a/c.json")
+///     v.equals(fileview{table, 3}) -> true
+///     v.equals(fileview{other_table, 2}) -> true   (other's a/c.json: found by chain, not by row number)
 struct fileview {
     std::shared_ptr<const path_table> table;
     std::uint32_t row = 0;
 
+    /// The owning value: the row's uri wrapped as a file (path_table::value).
     [[nodiscard]] file to_file() const { return file(table->value(row)); }
+    /// pathlib's str() of the row (path_table::render).
     [[nodiscard]] std::string fspath() const { return table->render<native_strategy>(row); }
+    /// Same path? Same table: same row. Different tables: `o`'s chain looked
+    /// up in this table (path_table::find across tables) and compared by row —
+    /// so equal spellings in two tables are equal views.
     [[nodiscard]] bool equals(const fileview& o) const {
         if (table.get() == o.table.get()) return row == o.row;
         return table->find(*o.table, o.row) == row;
@@ -44,65 +81,105 @@ struct fileview {
 
 class PathSet {
 public:
+    /// An empty set over a fresh table of its own.
     PathSet() : m_table(std::make_shared<path_table>()) {}
+    /// An empty set over an existing table — a filter's result, a set over a
+    /// PathStore's table (`PathSet(paths, store=s)` in Python).
     explicit PathSet(table_ptr t) : m_table(std::move(t)) {}
 
-    [[nodiscard]] std::size_t size() const noexcept { return m_members.size(); }
+    /// How many members.                                   ps.size() -> 3
+    [[nodiscard]] std::size_t size() const noexcept { return m_ids.size(); }
+    /// The table the rows index.
     [[nodiscard]] const table_ptr& table() const noexcept { return m_table; }
-    [[nodiscard]] const std::vector<std::uint32_t>& members() const noexcept { return m_members; }
-    [[nodiscard]] fileview view(std::size_t i) const { return {m_table, m_members[i]}; }
+    /// The member rows in insertion order.                ps.members() -> [2, 3, 5]
+    [[nodiscard]] const std::vector<std::uint32_t>& members() const noexcept { return m_ids.members(); }
+    /// The i-th member as a view (no bounds check).       ps.view(1) -> fileview{table, 3}
+    [[nodiscard]] fileview view(std::size_t i) const { return {m_table, m_ids[i]}; }
 
-    // Room for `n` more paths: sizes the table's hash tables once instead of
-    // letting them double their way up (a fresh table's rows run ~2-3x the
-    // path count, its distinct segments about 1x).
+    /// Room for `n` more paths: sizes the table's hash tables once instead of
+    /// letting them double their way up (a fresh table's rows run ~2-3x the
+    /// path count, its distinct segments about 1x). A sized Python iterable
+    /// triggers this automatically (extend); measured 14% off a 1M build.
     void reserve(std::size_t n) {
-        m_members.reserve(m_members.size() + n);
+        m_ids.reserve(m_ids.size() + n);
         m_table->reserve(m_table->size() + 3 * n, m_table->segments().size() + n);
     }
 
     // ── adding (find-or-add in the table, then membership) ────────────────
+
+    /// Adds native path text: tokenised into the table, then its row noted.
+    /// A spelling of a path already present adds nothing.
+    ///
+    ///     ps.add_text("a/b.yaml")      // row 2 noted
+    ///     ps.add_text("a//b.yaml/")    // row 2 again: no change
     void add_text(std::string_view text) { note(m_table->insert<native_strategy>(text)); }
+    /// Adds a parsed value (a Python `file`): fed into the table, row noted.
     void add_value(const uri& u) { note(m_table->insert<native_strategy>(u)); }
+    /// Adds a view: its row directly when the view is over this table,
+    /// otherwise its chain copied in (path_table::insert_from).
     void add_view(const fileview& v) {
         note(v.table.get() == m_table.get() ? v.row : m_table->insert_from(*v.table, v.row));
     }
 
     // ── membership ────────────────────────────────────────────────────────
-    [[nodiscard]] bool has_row(std::uint32_t r) const noexcept {
-        return r != path_table::none && r / 64 < m_bits.size() && ((m_bits[r / 64] >> (r % 64)) & 1u);
-    }
+
+    /// Whether row `r` of this table is a member: one bit test (`none` is never
+    /// a member, so a failed lookup can be passed straight in).
+    [[nodiscard]] bool has_row(std::uint32_t r) const noexcept { return r != path_table::none && m_ids.has(r); }
+    /// `"a/c.json" in ps`: the text looked up (never added), then the bit.
+    ///
+    ///     ps.contains_text("a/c.json") -> true     ps.contains_text("a") -> false   (row 1 exists but is not a member)
     [[nodiscard]] bool contains_text(std::string_view t) const { return has_row(m_table->find<native_strategy>(t)); }
+    /// `file in ps`: the value looked up, then the bit.
     [[nodiscard]] bool contains_value(const uri& u) const { return has_row(m_table->find<native_strategy>(u)); }
+    /// `fileview in ps`: the row directly over the same table, else the view's
+    /// chain looked up here.
     [[nodiscard]] bool contains_view(const fileview& v) const {
         return has_row(v.table.get() == m_table.get() ? v.row : m_table->find(*v.table, v.row));
     }
 
     // ── value filters: a new set over the SAME table ──────────────────────
+
+    /// The members for which pred(row) holds, in order, as a set over the
+    /// same table (mapping::id_set::where). Every filter below is one of
+    /// these with a predicate that reads the table; ~10 ns per member.
     template <class Pred>
     [[nodiscard]] PathSet where(Pred pred) const {
         PathSet out(m_table);
-        out.m_bits.resize(m_bits.size(), 0);
-        for (const std::uint32_t r : m_members) {
-            if (pred(r)) out.note(r);
-        }
+        out.m_ids = m_ids.where(pred);
         return out;
     }
+    /// pathlib's rule for the final suffix, compared case-sensitively.
+    ///
+    ///     ps.filter_suffix(".yaml")   -> [2]        ps.filter_suffix("") -> [5]   ("/d" has no suffix)
     [[nodiscard]] PathSet filter_suffix(std::string_view s) const {
         return where([&](std::uint32_t r) { return detail::suffix_of(m_table->name(r)) == s; });
     }
+    /// The name matched against a glob (`*` and `?` within the component).
+    ///
+    ///     ps.filter_name("*.j*")      -> [3]
     [[nodiscard]] PathSet filter_name(std::string_view glob) const {
         return where([&](std::uint32_t r) { return detail::glob_match(glob, m_table->name(r)); });
     }
+    /// pathlib's is_absolute() per row.                    ps.filter_absolute() -> [5]
     [[nodiscard]] PathSet filter_absolute() const {
         return where([&](std::uint32_t r) { return m_table->is_absolute<native_strategy>(r); });
     }
 
-    // ── set algebra (bitmap when the tables are shared, chain lookup otherwise) ──
+    // ── set algebra (bitmaps when the tables are shared, row mapping otherwise) ──
+
+    /// this ∪ o. Shared table: a bitmap union, "mine, then theirs", ~2 ns per
+    /// element. Two tables: the larger table is COPIED (a memcpy of flat
+    /// arrays) and only the other set's rows are mapped into it once
+    /// (path_table::row_map), so the result owns a table neither operand
+    /// shares; ~300 ns per mapped element.
+    ///
+    ///     yaml.union_with(abs)     -> [2, 5]       over ps's table
+    ///     ps.union_with(other)     -> [2, 3, 5, 6] over a copy of ps's table, with other's "e" as row 6
     [[nodiscard]] PathSet union_with(const PathSet& o) const {
         if (o.m_table.get() == m_table.get()) {
             PathSet out(m_table);
-            for (const std::uint32_t r : m_members) out.note(r);
-            for (const std::uint32_t r : o.m_members) out.note(r);
+            out.m_ids = m_ids.united(o.m_ids);
             return out;
         }
         // Two tables: copy the larger one (a memcpy of flat arrays) and map only
@@ -111,47 +188,85 @@ public:
         const PathSet& kept = keep_mine ? *this : o;
         const PathSet& mapped = keep_mine ? o : *this;
         PathSet out(std::make_shared<path_table>(*kept.m_table));
-        out.m_bits.resize(kept.m_bits.size(), 0);
+        out.m_ids = kept.m_ids.sibling();
         path_table::row_map into(*out.m_table, *mapped.m_table, out.m_table.get());
         if (keep_mine) {
-            for (const std::uint32_t r : m_members) out.note(r);
-            for (const std::uint32_t r : o.m_members) out.note(into(r));
+            for (const std::uint32_t r : m_ids.members()) out.note(r);
+            for (const std::uint32_t r : o.m_ids.members()) out.note(into(r));
         } else {
-            for (const std::uint32_t r : m_members) out.note(into(r));
-            for (const std::uint32_t r : o.m_members) out.note(r);
+            for (const std::uint32_t r : m_ids.members()) out.note(into(r));
+            for (const std::uint32_t r : o.m_ids.members()) out.note(r);
         }
         return out;
     }
+    /// this ∩ o, in this set's order. Shared table: a bitmap pass. Two tables:
+    /// my rows looked up in `o`'s table (lookup only, nothing added anywhere)
+    /// and kept when `o` has them; the result is over MY table.
+    ///
+    ///     yaml.intersection(abs)   -> []         ps.intersection(other) -> [3]
     [[nodiscard]] PathSet intersection(const PathSet& o) const {
-        if (o.m_table.get() == m_table.get()) return where([&](std::uint32_t r) { return o.has_row(r); });
+        if (o.m_table.get() == m_table.get()) {
+            PathSet out(m_table);
+            out.m_ids = m_ids.intersected(o.m_ids);
+            return out;
+        }
         path_table::row_map in_o(*o.m_table, *m_table);
         return where([&](std::uint32_t r) { return o.has_row(in_o(r)); });
     }
+    /// this ∖ o, in this set's order; the two-table case as for intersection.
+    ///
+    ///     ps.difference(yaml)      -> [3, 5]     ps.difference(other) -> [2, 5]
     [[nodiscard]] PathSet difference(const PathSet& o) const {
-        if (o.m_table.get() == m_table.get()) return where([&](std::uint32_t r) { return !o.has_row(r); });
+        if (o.m_table.get() == m_table.get()) {
+            PathSet out(m_table);
+            out.m_ids = m_ids.subtracted(o.m_ids);
+            return out;
+        }
         path_table::row_map in_o(*o.m_table, *m_table);
         return where([&](std::uint32_t r) { return !o.has_row(in_o(r)); });
     }
 
-    [[nodiscard]] std::size_t member_bytes() const noexcept {
-        return m_members.capacity() * sizeof(std::uint32_t) + m_bits.capacity() * sizeof(std::uint64_t);
+    // ── counting without building ─────────────────────────────────────────
+    // |this ∪ o|, |this ∩ o|, |this ∖ o| without building the set: a popcount
+    // over the bitmaps when the tables are shared (id_set::count_united & co,
+    // 64 ids per step: 25 us against 570-2170 us for the built set at 1M
+    // paths); otherwise the other set's rows are mapped once — no table copy,
+    // no result set.
+
+    /// |this ∪ o|.                                         ps.count_union(other) -> 4
+    [[nodiscard]] std::size_t count_union(const PathSet& o) const {
+        if (o.m_table.get() == m_table.get()) return m_ids.count_united(o.m_ids);
+        return size() + o.size() - count_intersection(o);
     }
+    /// |this ∩ o|.                                         ps.count_intersection(yaml) -> 1
+    [[nodiscard]] std::size_t count_intersection(const PathSet& o) const {
+        if (o.m_table.get() == m_table.get()) return m_ids.count_intersected(o.m_ids);
+        path_table::row_map in_o(*o.m_table, *m_table);
+        std::size_t n = 0;
+        for (const std::uint32_t r : m_ids.members()) n += o.has_row(in_o(r)) ? 1u : 0u;
+        return n;
+    }
+    /// |this ∖ o|.                                         ps.count_difference(yaml) -> 2
+    [[nodiscard]] std::size_t count_difference(const PathSet& o) const {
+        if (o.m_table.get() == m_table.get()) return m_ids.count_subtracted(o.m_ids);
+        return size() - count_intersection(o);
+    }
+
+    /// The bytes the members and bitmap hold (PathSet.stats()["member_bytes"]).
+    [[nodiscard]] std::size_t member_bytes() const noexcept { return m_ids.bytes(); }
 
 private:
-    void note(std::uint32_t r) {
-        if (r / 64 >= m_bits.size()) m_bits.resize(r / 64 + 1, 0);
-        const std::uint64_t bit = std::uint64_t{1} << (r % 64);
-        if (m_bits[r / 64] & bit) return;
-        m_bits[r / 64] |= bit;
-        m_members.push_back(r);
-    }
+    /// Membership for a row of this table (a repeat is a no-op).
+    void note(std::uint32_t r) { m_ids.note(r); }
 
     table_ptr m_table;
-    std::vector<std::uint32_t> m_members;   // insertion order
-    std::vector<std::uint64_t> m_bits;      // membership per table row
+    mapping::id_set m_ids;   // the members (insertion order) and their bitmap
 };
 
 // ── Python glue ─────────────────────────────────────────────────────────────
+
+/// Adds one Python item: str/bytes as text, a fileview by row, a file by
+/// value, anything else through os.fspath (a TypeError when it cannot).
 inline void add_one(PathSet& ps, py::handle item) {
     if (PyUnicode_Check(item.ptr()) || PyBytes_Check(item.ptr())) {
         const text_arg t = text_view_of_arg(item);
@@ -169,6 +284,8 @@ inline void add_one(PathSet& ps, py::handle item) {
     const text_arg t = text_view_of_arg(item);
     ps.add_text(t.view);
 }
+/// Adds every item of an iterable; a sized one (list, tuple, set, dict, ...)
+/// reserves the table first.
 inline void extend(PathSet& ps, py::handle iterable) {
     if (PySequence_Check(iterable.ptr()) || PyAnySet_Check(iterable.ptr()) || PyDict_Check(iterable.ptr())) {
         const py::ssize_t n = PyObject_Length(iterable.ptr());
@@ -177,6 +294,7 @@ inline void extend(PathSet& ps, py::handle iterable) {
     }
     for (const py::handle item : py::iter(iterable)) add_one(ps, item);
 }
+/// `item in ps` for the same four kinds of item as add_one.
 inline bool contains(const PathSet& ps, py::handle item) {
     if (PyUnicode_Check(item.ptr()) || PyBytes_Check(item.ptr())) {
         const text_arg t = text_view_of_arg(item);
@@ -188,7 +306,10 @@ inline bool contains(const PathSet& ps, py::handle item) {
     return ps.contains_text(t.view);
 }
 
-// Iteration: fresh views by default; scan() reuses one view object.
+/// The iterator behind `for v in ps` (a fresh fileview object per element,
+/// ~200-300 ns: the pybind11 instance is the cost) and `ps.scan()` (ONE
+/// fileview object whose row advances, ~100 ns — do not keep it across
+/// iterations). `owner` keeps the set, and so the table, alive.
 struct pathset_iter {
     py::object owner;      // keeps the set (and so the table) alive
     const PathSet* set;
@@ -199,6 +320,11 @@ struct pathset_iter {
     pathset_iter(py::object o, const PathSet* s, bool r) : owner(std::move(o)), set(s), reuse(r) {}
 };
 
+/// Binds fileview, the iterator and PathSet into the pathlike module. Every
+/// fileview property reads the table by row; `to_file()` hands the row to the
+/// current PathStore, so a view of a set over the store's table becomes the
+/// store's object without re-interning (a slot read), and any other view is
+/// interned by value.
 template <class... Es>
 void bind_pathset(engine_list<Es...>, py::module_& m) {
     using Engines_ = engine_list<Es...>;
@@ -301,6 +427,12 @@ void bind_pathset(engine_list<Es...>, py::module_& m) {
         .def("__or__", &PathSet::union_with, py::is_operator())
         .def("__and__", &PathSet::intersection, py::is_operator())
         .def("__sub__", &PathSet::difference, py::is_operator())
+        .def("count_union", &PathSet::count_union, py::arg("other"),
+             "len(self | other) without building the set: a popcount over the bitmaps when the tables are shared.")
+        .def("count_intersection", &PathSet::count_intersection, py::arg("other"),
+             "len(self & other) without building the set.")
+        .def("count_difference", &PathSet::count_difference, py::arg("other"),
+             "len(self - other) without building the set.")
         .def("to_list", [](const PathSet& ps) {
             py::list out;
             for (const std::uint32_t r : ps.members()) out.append(str_from_text(ps.table()->render<native_strategy>(r)));
@@ -313,6 +445,7 @@ void bind_pathset(engine_list<Es...>, py::module_& m) {
             d["segments"] = ps.table()->segments().size();
             d["table_bytes"] = ps.table()->bytes();
             d["member_bytes"] = ps.member_bytes();
+            d["bytes"] = ps.table()->bytes() + ps.member_bytes();   // the total, the same key on every component
             return d;
         });
 }

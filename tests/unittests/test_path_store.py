@@ -202,6 +202,9 @@ def test_a_copied_token_in_a_raw_object_is_not_trusted(fresh):
 def test_stats_keys(fresh):
     held = pygim.path("k/v")
     st = fresh.stats()
-    assert set(st) == {"rows", "segments", "live", "table_bytes", "slot_bytes"}
+    assert set(st) == {"rows", "segments", "live", "table_bytes", "slot_bytes", "bytes"}
     assert st["live"] == 1 and st["slot_bytes"] >= 8
+    assert st["bytes"] == st["table_bytes"] + st["slot_bytes"]     # the same total key on every component
+    ps = pathlike.PathSet(["k/v"])
+    assert ps.stats()["bytes"] == ps.stats()["table_bytes"] + ps.stats()["member_bytes"]
     assert "PathStore(" in repr(fresh)

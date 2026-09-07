@@ -139,6 +139,11 @@ Read it as:
 
 ## What was reused, and what was not
 
+*(2026-09-08: the pieces below that were pathlike-local are now toolkit
+components — `mapping/intern.h`, `mapping/trie.h`, `mapping/id_set.h`,
+`utils/flyweight_adapter.h`, `utils/ambient_adapter.h`, `utils/hash.h` — with
+their laws proven at compile time. See `mapping_toolkit.md`.)*
+
 - `path_table` / `segment_table` as the interning structure (no new hash
   table); `path_table::row_map` untouched; `KeyCache`
   (`adapter/materialize.h`) as the precedent for a bounded interning cache.

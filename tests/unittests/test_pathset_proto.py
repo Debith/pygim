@@ -171,3 +171,14 @@ def test_stats_show_the_flyweight(strs, ps):
     # every distinct component once: far fewer segments than path components
     assert st["segments"] < sum(len(P(s).parts) for s in strs)
     assert (st["table_bytes"] + st["member_bytes"]) / len(ps) < 120
+
+
+def test_counts_agree_with_the_built_sets(strs, ps):
+    a = ps.filter_suffix(".yaml")
+    b = ps.filter_absolute()
+    assert a.count_union(b) == len(a | b) and a.count_intersection(b) == len(a & b) and a.count_difference(b) == len(a - b)
+    assert b.count_difference(a) == len(b - a) and ps.count_union(ps) == len(ps) and ps.count_intersection(a) == len(a)
+    other = pathlike.PathSet(strs[::3] + ["only/here"])            # another table: mapped, not copied
+    assert ps.count_intersection(other) == len(ps & other) == len(strs[::3])
+    assert ps.count_union(other) == len(ps | other) and other.count_difference(ps) == len(other - ps) == 1
+    assert pathlike.PathSet().count_union(ps) == len(ps) and pathlike.PathSet().count_intersection(ps) == 0
