@@ -307,6 +307,7 @@ void bind_pathset(engine_list<Es...>, py::module_& m) {
             d["segments"] = ps.table()->segments().size();
             d["table_bytes"] = ps.table()->bytes();
             d["member_bytes"] = ps.member_bytes();
+            d["bytes"] = ps.table()->bytes() + ps.member_bytes();   // the total, the same key on every component
             return d;
         });
 }

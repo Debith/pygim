@@ -171,8 +171,9 @@ void bind_path_store(engine_list<Es...>, py::module_& m) {
             d["live"] = st.live_count();
             d["table_bytes"] = st.table()->bytes();
             d["slot_bytes"] = st.slot_bytes();
+            d["bytes"] = st.table()->bytes() + st.slot_bytes();   // the total, the same key on every component
             return d;
-        }, "rows / segments in the table, live objects, and the bytes both sides hold.")
+        }, "rows / segments in the table, live objects, table_bytes + slot_bytes and their total `bytes`.")
         .def("__repr__", [](const path_store& st) {
             return "PathStore(rows=" + std::to_string(st.table()->size()) + ", live=" + std::to_string(st.live_count()) + ")";
         });

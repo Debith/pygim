@@ -46,6 +46,13 @@ def ns(seconds, n):
 
 
 def rss_mb():
+    """The process's resident set size in MiB: pygim.utils.rss_mb (one syscall,
+    every platform), with the procfs read as the fallback for an unbuilt tree."""
+    try:
+        from pygim.utils import rss_mb as _rss
+        return _rss()
+    except ImportError:
+        pass
     try:
         with open("/proc/self/statm") as f:
             return int(f.read().split()[1]) * os.sysconf("SC_PAGE_SIZE") / 2**20

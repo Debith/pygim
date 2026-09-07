@@ -7,6 +7,7 @@
 #include <unordered_map>
 #include "core_utils.h"
 #include "adapter_utils.h"
+#include "memory.h"
 #include "../mapping/dynamic_merge_map.h"
 
 namespace py = pybind11;
@@ -245,6 +246,15 @@ PYBIND11_MODULE(utils, m) {
           py::arg("bytes_per_second"),
           py::arg("precision") = 2,
           "Format a bytes-per-second value using human-readable units with configurable precision.");
+
+    // Process memory: one syscall each (utils/memory.h). Process-wide numbers —
+    // a benchmark's before/after probe, never a per-object size.
+    m.def("rss_bytes", &pygim::memory::resident_bytes,
+          "The process's resident set size in bytes (what the OS holds in physical memory now).");
+    m.def("rss_mb", &pygim::memory::resident_mb, "rss_bytes() in mebibytes.");
+    m.def("peak_rss_bytes", &pygim::memory::peak_resident_bytes,
+          "The process's peak resident set size in bytes (its high-water mark).");
+    m.def("peak_rss_mb", &pygim::memory::peak_resident_mb, "peak_rss_bytes() in mebibytes.");
 
     m.def("calculate_rate",
           &calculate_rate,
