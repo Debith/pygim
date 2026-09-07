@@ -21,6 +21,7 @@ namespace {
 
 using pygim::mapping::flat_interner;
 using pygim::mapping::hashed_interner;
+using pygim::mapping::basic_id_set;
 using pygim::mapping::id_set;
 using pygim::mapping::interner;
 using pygim::mapping::trie;
@@ -98,19 +99,20 @@ consteval bool trie_laws() {
 static_assert(trie_laws());
 
 // ── id_set laws ────────────────────────────────────────────────────────────
+template <class Set>
 consteval bool id_set_laws() {
-    id_set s;
+    Set s;
     bool ok = s.empty() && !s.has(0) && !s.has(100000);
     ok = ok && s.note(5) && s.note(70) && !s.note(5) && s.size() == 2;          // note dedups
     ok = ok && s.has(5) && s.has(70) && !s.has(6) && s[0] == 5 && s[1] == 70;    // insertion order kept
-    id_set o;
+    Set o;
     ok = ok && o.note(70) && o.note(200);
-    const id_set u = s.united(o);
-    const id_set i = s.intersected(o);
-    const id_set d = s.subtracted(o);
+    const Set u = s.united(o);
+    const Set i = s.intersected(o);
+    const Set d = s.subtracted(o);
     ok = ok && u.size() == 3 && u[0] == 5 && u[1] == 70 && u[2] == 200;         // mine, then theirs
     ok = ok && i.size() == 1 && i[0] == 70 && d.size() == 1 && d[0] == 5;
-    const id_set w = u.where([](std::uint32_t id) { return id > 10; });
+    const Set w = u.where([](typename Set::id_type id) { return id > 10; });
     ok = ok && w.size() == 2 && w[0] == 70 && w[1] == 200 && !w.has(5) && w.has(200);
     ok = ok && s.sibling().empty() && s.bytes() > 0;
     // counting without building: agrees with the built sets, including when
@@ -119,9 +121,12 @@ consteval bool id_set_laws() {
     ok = ok && s.count_united(o) == s.united(o).size() && o.count_united(s) == o.united(s).size();
     ok = ok && s.count_intersected(o) == s.intersected(o).size() && o.count_intersected(s) == 1;
     ok = ok && s.count_subtracted(o) == s.subtracted(o).size() && o.count_subtracted(s) == 2;
-    ok = ok && id_set{}.count_united(o) == 3 && o.count_intersected(id_set{}) == 0 && o.count_subtracted(id_set{}) == 3;
+    ok = ok && Set{}.count_united(o) == 3 && o.count_intersected(Set{}) == 0 && o.count_subtracted(Set{}) == 3;
     return ok;
 }
-static_assert(id_set_laws());
+static_assert(id_set_laws<id_set>());                                      // the default: 32-bit ids, 64-bit words
+static_assert(id_set_laws<basic_id_set<std::uint16_t, std::uint32_t>>());    // narrow ids, 32-bit words: the same laws, word boundaries at 32
+static_assert(id_set_laws<basic_id_set<std::uint64_t, std::uint64_t>>());    // 64-bit ids
+static_assert(id_set::word_bits == 64 && basic_id_set<std::uint16_t, std::uint32_t>::word_bits == 32);
 
 }  // namespace

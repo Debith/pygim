@@ -28,9 +28,12 @@ Two shapes of table recur across pygim and they are not the same thing:
   this is a second concept beside it rather than a storage engine.
   (`intern.h`)
 
-The rule for promoting something into this folder: it has a second consumer,
-or its laws are proven here and the first consumer's proofs become simpler
-for it. Every component below has both.
+The rule for this folder is pygim's: it is a generic library meant for
+learning advanced approaches, so a component is written as the general thing
+— a concept with engines, a template over its id, key, word or policy type —
+even while one instantiation is all that exists, and its laws are proven over
+more than one instantiation. Generality is the point, not something a second
+consumer has to earn.
 
 ## The components
 
@@ -38,7 +41,7 @@ for it. Every component below has both.
 |---|---|---|---|---|
 | `intern.h` | `interner` | `flat_interner` (sorted id index, binary search, small tables + constant evaluation), `hashed_interner` (open addressing, load <= 1/2, also constexpr-capable) | every distinct string once, dense ids in insertion order | `pathlike::basic_path_table` (segments) |
 | `trie.h` | `trie` | — | hash-consed rows of `(parent, key)`: a shared prefix is one row; `child()` is find-or-add; `with_chain()` gathers a chain leaf-first into a stack buffer; `row_map` maps rows from another trie memoised per source row through a key translator | `basic_path_table` (the directory tree) |
-| `id_set.h` | `id_set` | — | dense 32-bit ids: insertion-ordered members plus a bitmap; `where`, `united`, `intersected`, `subtracted` at a few ns per element; `count_united` & co answer the SIZE of an algebra result as a popcount over the bitmaps, 64 ids per step, no set built (20-90x the build at 1M paths) | `pathlike::PathSet` (`count_union`, `count_intersection`, `count_difference`) |
+| `id_set.h` | `basic_id_set<Id, Word>`; `id_set` = `<uint32_t, uint64_t>` | — | dense ids of any unsigned width in the machine's word: insertion-ordered members plus a bitmap; `where`, `united`, `intersected`, `subtracted` at a few ns per element; `count_united` & co answer the SIZE of an algebra result as a popcount over the bitmaps, 64 ids per step, no set built (20-90x the build at 1M paths) | `pathlike::PathSet` (`count_union`, `count_intersection`, `count_difference`) |
 | `../utils/memory.h` | `memory::resident_bytes`, `peak_resident_bytes` | — | the process's resident memory as one syscall (Linux procfs pread on a descriptor opened once, Mach task info, Windows working set): a benchmark's before/after probe, never a per-object size — components report exact `bytes()`; `pygim.utils.rss_bytes()` et al. | `benchmarks/_bench.py` |
 | `../utils/hash.h` | — | — | `fnv1a`, `mix_string`, `mix64`, `combine`, `slots_for`: one definition of every hash the tables share | core.h, intern.h, trie.h, the wiring adapters' key hashes |
 | `../utils/flyweight.h` | `flyweight::token`, `stamped` | — | the `(owner, slot)` identity a store stamps on a value; not part of equality or hash; a copy carries it, so a reader validates it | `basic_file::interned()` |
@@ -118,5 +121,8 @@ the instruction on their own.
   scope for `ioc` are the second consumers of `weak_slots` and `ambient`
   respectively; both are migrations, not new design.
 - A flyweight policy (`basic_file<Strategy, Token>` with an empty token, a
-  `no_flyweight` adapter) is deliberately not added until a consumer without
-  object identity exists (`pathlike_flyweight.md`).
+  `no_flyweight` adapter) is the next thing the rule above asks for
+  (`pathlike_flyweight.md`).
+- The trie and the interners are the remaining non-templates over their id
+  width; `basic_trie<RowId, Key>` and `basic_hashed_interner<Id>` would
+  complete the pattern `basic_id_set` set.
