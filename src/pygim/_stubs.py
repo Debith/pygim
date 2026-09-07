@@ -32,10 +32,11 @@ def engine_block() -> str:
         lines.append("    " + ", ".join(f'"{s}"' for s in (e.name, e.label, *e.aliases)) + ",")
     lines.append("]")
     for e in pathlike.ENGINES:
+        typed = getattr(pathlike, f"{e.name}file")   # its docstring is composed once, in C++ (bind_one)
         lines += [
             "",
             f"class {e.name}file(file):",
-            f'    """{e.doc} Constructing one pins the engine ({e.label})."""',
+            f'    """{typed.__doc__}"""',
             "    def __init__(self, path: str | os.PathLike[str]) -> None: ...",
         ]
     lines += ["", "ENGINES: tuple[EngineInfo, ...]", END]
