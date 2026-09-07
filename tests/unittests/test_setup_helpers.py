@@ -55,14 +55,14 @@ def _fake_compiler(tmp_path, accepted_flags):
     ([], "c++26", "c++26"),                            # nothing accepted: let the build report it
 ])
 def test_std_probe_walks_down_to_supported_flag(tmp_path, monkeypatch, accepted, requested, expected):
-    ns = _extract("_first_supported_std", "_STD_PROBE_CACHE")
+    ns = _extract("_first_supported_std", "_STD_PROBE_CACHE", "_build_cxx", "_accepts")
     monkeypatch.setenv("CXX", _fake_compiler(tmp_path, accepted))
     assert ns["_first_supported_std"](requested) == expected
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="probe is POSIX-only")
 def test_std_probe_caches_per_requested_standard(tmp_path, monkeypatch):
-    ns = _extract("_first_supported_std", "_STD_PROBE_CACHE")
+    ns = _extract("_first_supported_std", "_STD_PROBE_CACHE", "_build_cxx", "_accepts")
     monkeypatch.setenv("CXX", _fake_compiler(tmp_path, ["c++23"]))
     assert ns["_first_supported_std"]("c++26") == "c++23"
     # Second call must come from the cache: break the compiler to prove it.
@@ -189,7 +189,7 @@ def _fake_compiler_requiring(tmp_path, std, flag):
 @pytest.mark.skipif(sys.platform == "win32", reason="probe is POSIX-only")
 def test_optional_flags_are_probed_with_the_extension_std(tmp_path, monkeypatch):
     # GCC 16 accepts -freflection only under -std=c++26: the probe must pass the std along.
-    ns = _extract("_supported_flags")
+    ns = _extract("_supported_flags", "_build_cxx", "_accepts")
     monkeypatch.setenv("CXX", _fake_compiler_requiring(tmp_path, "c++26", "-freflection"))
     assert ns["_supported_flags"](["-freflection"], "-std=c++26") == ["-freflection"]
     assert ns["_supported_flags"](["-freflection"], "-std=c++23") == []

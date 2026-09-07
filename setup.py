@@ -80,6 +80,24 @@ def _base_kwargs():
     }
 
 
+def _build_cxx():
+    """The C++ compiler the build will use — ``$CXX``, else ``c++``/``g++`` on PATH — or None."""
+    import shutil
+
+    return os.environ.get("CXX") or shutil.which("c++") or shutil.which("g++")
+
+
+def _accepts(cxx, *flags):
+    """Whether *cxx* accepts *flags*: a syntax-only compile of an empty program."""
+    import subprocess
+
+    probe = subprocess.run(
+        [cxx, *flags, "-x", "c++", "-fsyntax-only", "-"],
+        input=b"int main(){}", capture_output=True, check=False,
+    )
+    return probe.returncode == 0
+
+
 _STD_PROBE_CACHE = {}
 
 
@@ -92,19 +110,12 @@ def _supported_flags(flags, std_flag):
     P2996 implementation), which the pathlike proofs use where available and
     silently do without elsewhere. Windows never reaches this.
     """
-    import shutil
-    import subprocess
-
-    cxx = os.environ.get("CXX") or shutil.which("c++") or shutil.which("g++")
+    cxx = _build_cxx()
     if not cxx:
         return []
     accepted = []
     for flag in flags:
-        probe = subprocess.run(
-            [cxx, std_flag, flag, "-x", "c++", "-fsyntax-only", "-"],
-            input=b"int main(){}", capture_output=True, check=False,
-        )
-        if probe.returncode == 0:
+        if _accepts(cxx, std_flag, flag):
             accepted.append(flag)
         else:
             print(f"[setup.py] {cxx}: {flag} unsupported, building without it")
@@ -122,19 +133,12 @@ def _first_supported_std(requested):
     """
     if requested in _STD_PROBE_CACHE:
         return _STD_PROBE_CACHE[requested]
-    import shutil
-    import subprocess
-
-    cxx = os.environ.get("CXX") or shutil.which("c++") or shutil.which("g++")
+    cxx = _build_cxx()
     fallbacks = {"c++26": ["c++2c", "c++23"], "c++2c": ["c++23"]}
     chosen = requested
     if cxx:
         for cand in [requested, *fallbacks.get(requested, [])]:
-            probe = subprocess.run(
-                [cxx, f"-std={cand}", "-x", "c++", "-fsyntax-only", "-"],
-                input=b"int main(){}", capture_output=True,
-            )
-            if probe.returncode == 0:
+            if _accepts(cxx, f"-std={cand}"):
                 chosen = cand
                 break
     if chosen != requested:
