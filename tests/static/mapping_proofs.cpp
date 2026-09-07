@@ -113,6 +113,13 @@ consteval bool id_set_laws() {
     const id_set w = u.where([](std::uint32_t id) { return id > 10; });
     ok = ok && w.size() == 2 && w[0] == 70 && w[1] == 200 && !w.has(5) && w.has(200);
     ok = ok && s.sibling().empty() && s.bytes() > 0;
+    // counting without building: agrees with the built sets, including when
+    // one bitmap is wider than the other (ids 5, 70 vs 70, 200, 500)
+    ok = ok && o.note(500);
+    ok = ok && s.count_united(o) == s.united(o).size() && o.count_united(s) == o.united(s).size();
+    ok = ok && s.count_intersected(o) == s.intersected(o).size() && o.count_intersected(s) == 1;
+    ok = ok && s.count_subtracted(o) == s.subtracted(o).size() && o.count_subtracted(s) == 2;
+    ok = ok && id_set{}.count_united(o) == 3 && o.count_intersected(id_set{}) == 0 && o.count_subtracted(id_set{}) == 3;
     return ok;
 }
 static_assert(id_set_laws());

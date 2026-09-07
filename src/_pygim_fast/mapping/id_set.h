@@ -6,8 +6,12 @@
 // indices): membership is one bit, iteration is the members vector in the
 // order they were noted, and the algebra between two sets over the SAME id
 // space is a pass over one members list against the other's bitmap — a few
-// nanoseconds per element. Ids are never removed: a set is built, not edited.
+// nanoseconds per element. Asking only for the SIZE of a union, intersection
+// or difference is cheaper still: a popcount over the two bitmaps, 64 ids per
+// step, with no result built (count_united & co). Ids are never removed: a
+// set is built, not edited.
 
+#include <bit>
 #include <cstddef>
 #include <cstdint>
 #include <vector>
@@ -66,6 +70,30 @@ public:
     }
     [[nodiscard]] constexpr id_set subtracted(const id_set& o) const {
         return where([&](id_type id) { return !o.has(id); });
+    }
+
+    // |this ∪ o|, |this ∩ o|, |this ∖ o| without building the result: one
+    // popcount per 64-bit word of the bitmaps (a missing word is all zeros).
+    [[nodiscard]] constexpr std::size_t count_united(const id_set& o) const noexcept {
+        const std::size_t common = m_bits.size() < o.m_bits.size() ? m_bits.size() : o.m_bits.size();
+        std::size_t n = 0;
+        for (std::size_t i = 0; i < common; ++i) n += static_cast<std::size_t>(std::popcount(m_bits[i] | o.m_bits[i]));
+        for (std::size_t i = common; i < m_bits.size(); ++i) n += static_cast<std::size_t>(std::popcount(m_bits[i]));
+        for (std::size_t i = common; i < o.m_bits.size(); ++i) n += static_cast<std::size_t>(std::popcount(o.m_bits[i]));
+        return n;
+    }
+    [[nodiscard]] constexpr std::size_t count_intersected(const id_set& o) const noexcept {
+        const std::size_t common = m_bits.size() < o.m_bits.size() ? m_bits.size() : o.m_bits.size();
+        std::size_t n = 0;
+        for (std::size_t i = 0; i < common; ++i) n += static_cast<std::size_t>(std::popcount(m_bits[i] & o.m_bits[i]));
+        return n;
+    }
+    [[nodiscard]] constexpr std::size_t count_subtracted(const id_set& o) const noexcept {
+        const std::size_t common = m_bits.size() < o.m_bits.size() ? m_bits.size() : o.m_bits.size();
+        std::size_t n = 0;
+        for (std::size_t i = 0; i < common; ++i) n += static_cast<std::size_t>(std::popcount(m_bits[i] & ~o.m_bits[i]));
+        for (std::size_t i = common; i < m_bits.size(); ++i) n += static_cast<std::size_t>(std::popcount(m_bits[i]));
+        return n;
     }
 
     constexpr void reserve(std::size_t members) { m_members.reserve(members); }

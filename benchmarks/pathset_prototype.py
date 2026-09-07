@@ -165,6 +165,8 @@ def bench_algebra(strs, ps, files):
     rec("a | b  (shared table)", lambda: a | b, n)
     rec("a & b  (shared table)", lambda: a & b, n)
     rec("a - b  (shared table)", lambda: a - b, n)
+    rec("a.count_union(b)  (popcount, no set built)", lambda: a.count_union(b), n)
+    rec("a.count_intersection(b)  (popcount)", lambda: a.count_intersection(b), n)
     other = pathlike.PathSet(corpus(n, seed=2))   # another table, half overlapping names
     rec("ps | other (two tables)", lambda: ps | other, 2 * n)
     rec("ps & other (two tables)", lambda: ps & other, n)

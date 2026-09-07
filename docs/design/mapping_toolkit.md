@@ -38,7 +38,7 @@ for it. Every component below has both.
 |---|---|---|---|---|
 | `intern.h` | `interner` | `flat_interner` (sorted id index, binary search, small tables + constant evaluation), `hashed_interner` (open addressing, load <= 1/2, also constexpr-capable) | every distinct string once, dense ids in insertion order | `pathlike::basic_path_table` (segments) |
 | `trie.h` | `trie` | — | hash-consed rows of `(parent, key)`: a shared prefix is one row; `child()` is find-or-add; `with_chain()` gathers a chain leaf-first into a stack buffer; `row_map` maps rows from another trie memoised per source row through a key translator | `basic_path_table` (the directory tree) |
-| `id_set.h` | `id_set` | — | dense 32-bit ids: insertion-ordered members plus a bitmap; `where`, `united`, `intersected`, `subtracted` at a few ns per element | `pathlike::PathSet` |
+| `id_set.h` | `id_set` | — | dense 32-bit ids: insertion-ordered members plus a bitmap; `where`, `united`, `intersected`, `subtracted` at a few ns per element; `count_united` & co answer the SIZE of an algebra result as a popcount over the bitmaps, 64 ids per step, no set built (20-90x the build at 1M paths) | `pathlike::PathSet` (`count_union`, `count_intersection`, `count_difference`) |
 | `../utils/memory.h` | `memory::resident_bytes`, `peak_resident_bytes` | — | the process's resident memory as one syscall (Linux procfs pread on a descriptor opened once, Mach task info, Windows working set): a benchmark's before/after probe, never a per-object size — components report exact `bytes()`; `pygim.utils.rss_bytes()` et al. | `benchmarks/_bench.py` |
 | `../utils/hash.h` | — | — | `fnv1a`, `mix_string`, `mix64`, `combine`, `slots_for`: one definition of every hash the tables share | core.h, intern.h, trie.h, the wiring adapters' key hashes |
 | `../utils/flyweight.h` | `flyweight::token`, `stamped` | — | the `(owner, slot)` identity a store stamps on a value; not part of equality or hash; a copy carries it, so a reader validates it | `basic_file::interned()` |
@@ -84,7 +84,15 @@ memoised.
 
 **id_set**: `note` deduplicates and keeps insertion order; `has`; the three
 algebra operations produce "mine, then theirs"; `where` filters; `sibling()`
-is an empty set over the same width.
+is an empty set over the same width; the three counts agree with the built
+sets at every bitmap-width mismatch, including against an empty set.
+
+On popcount: the extensions compiling the toolkit pass `-mpopcnt` when the
+compiler accepts it (`flags_if_supported`). Measured under the build's
+`-march=nocona`, `std::popcount` without it is a library call at 3.4 ns per
+word, an 8-lookup byte table 2.1 ns, the SWAR bit-parallel form 1.6 ns and the
+instruction 1.1 ns — so the flag, not a table, is the fix; MSVC and ARM pick
+the instruction on their own.
 
 ## Rules
 

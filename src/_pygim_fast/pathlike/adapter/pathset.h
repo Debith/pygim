@@ -136,6 +136,25 @@ public:
         return where([&](std::uint32_t r) { return !o.has_row(in_o(r)); });
     }
 
+    // |this ∪ o|, |this ∩ o|, |this ∖ o| without building the set: a popcount
+    // over the bitmaps when the tables are shared; otherwise the other set's
+    // rows are mapped once (no table copy, no result set).
+    [[nodiscard]] std::size_t count_union(const PathSet& o) const {
+        if (o.m_table.get() == m_table.get()) return m_ids.count_united(o.m_ids);
+        return size() + o.size() - count_intersection(o);
+    }
+    [[nodiscard]] std::size_t count_intersection(const PathSet& o) const {
+        if (o.m_table.get() == m_table.get()) return m_ids.count_intersected(o.m_ids);
+        path_table::row_map in_o(*o.m_table, *m_table);
+        std::size_t n = 0;
+        for (const std::uint32_t r : m_ids.members()) n += o.has_row(in_o(r)) ? 1u : 0u;
+        return n;
+    }
+    [[nodiscard]] std::size_t count_difference(const PathSet& o) const {
+        if (o.m_table.get() == m_table.get()) return m_ids.count_subtracted(o.m_ids);
+        return size() - count_intersection(o);
+    }
+
     [[nodiscard]] std::size_t member_bytes() const noexcept { return m_ids.bytes(); }
 
 private:
@@ -295,6 +314,12 @@ void bind_pathset(engine_list<Es...>, py::module_& m) {
         .def("__or__", &PathSet::union_with, py::is_operator())
         .def("__and__", &PathSet::intersection, py::is_operator())
         .def("__sub__", &PathSet::difference, py::is_operator())
+        .def("count_union", &PathSet::count_union, py::arg("other"),
+             "len(self | other) without building the set: a popcount over the bitmaps when the tables are shared.")
+        .def("count_intersection", &PathSet::count_intersection, py::arg("other"),
+             "len(self & other) without building the set.")
+        .def("count_difference", &PathSet::count_difference, py::arg("other"),
+             "len(self - other) without building the set.")
         .def("to_list", [](const PathSet& ps) {
             py::list out;
             for (const std::uint32_t r : ps.members()) out.append(str_from_text(ps.table()->render<native_strategy>(r)));
