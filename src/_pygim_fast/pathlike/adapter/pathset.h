@@ -22,6 +22,7 @@
 
 #include "../path_table.h"
 #include "adapter.h"
+#include "path_store.h"
 
 namespace pygim::pathlike {
 
@@ -230,8 +231,12 @@ void bind_pathset(engine_list<Es...>, py::module_& m) {
             return py::str(std::string(e->label));
         })
         .def("is_absolute", [](const fileview& v) { return v.table->is_absolute<native_strategy>(v.row); })
-        .def("to_file", [](const fileview& v) { return wrap(Engines_{}, v.to_file()); },
-             "The owning file (typed by its engine) with the same value.")
+        .def("to_file", [](const fileview& v) {
+                 path_store& st = current_store();
+                 if (v.table.get() == st.table().get()) return object_for(Engines_{}, st, v.row);   // same table: no re-intern
+                 return make(Engines_{}, st, v.to_file());
+             },
+             "The owning file (typed by its engine) with the same value, interned in the current store.")
         .def("__fspath__", [](const fileview& v) { return str_from_text(v.fspath()); })
         .def("__str__", [](const fileview& v) { return str_from_text(v.fspath()); })
         .def("__repr__", [](const fileview& v) { return "fileview(" + py::repr(str_from_text(v.fspath())).cast<std::string>() + ")"; })
@@ -261,12 +266,14 @@ void bind_pathset(engine_list<Es...>, py::module_& m) {
         "a row (parent, name) in a hash-consed trie, so a path costs a few bytes plus its share of "
         "the unique names. Iterating yields fileviews (nothing copied); scan() reuses one view "
         "object per pass. filter_suffix()/filter_name() and |, &, - work on rows and return sets "
-        "sharing the table; to_list() renders the members. Prototype: insertion order, append-only.")
-        .def(py::init([](py::object paths) {
-                 PathSet ps;
+        "sharing the table; to_list() renders the members. PathSet(paths, store=s) shares the store's "
+        "table, so its views and s.path() objects meet without re-interning. Prototype: insertion "
+        "order, append-only.")
+        .def(py::init([](py::object paths, py::object store) {
+                 PathSet ps = store.is_none() ? PathSet() : PathSet(as_store(store).table());
                  if (!paths.is_none()) extend(ps, paths);
                  return ps;
-             }), py::arg("paths") = py::none())
+             }), py::arg("paths") = py::none(), py::kw_only(), py::arg("store") = py::none())
         .def("add", [](PathSet& ps, py::handle p) { add_one(ps, p); }, py::arg("path"))
         .def("extend", [](PathSet& ps, py::handle it) { extend(ps, it); }, py::arg("paths"))
         .def("reserve", &PathSet::reserve, py::arg("n"),

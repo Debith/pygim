@@ -11,7 +11,7 @@ a test.
 """
 
 import os
-from typing import Any, Iterable, Iterator, Literal, NamedTuple
+from typing import Any, ContextManager, Iterable, Iterator, Literal, NamedTuple
 
 def path(path: str | os.PathLike[str], engine: Engine | None = None) -> file:
     """Wrap a path in a self-reading, self-decoding file().
@@ -140,7 +140,8 @@ class PathSet:
     """Many paths as ONE table (prototype): every distinct component stored once, every
     path a (parent, name) row. Iterating yields fileviews; scan() reuses one view object.
     Filters and |, &, - return sets sharing the table; to_list() renders the members."""
-    def __init__(self, paths: Iterable[str | bytes | os.PathLike[str] | file | fileview] | None = None) -> None: ...
+    def __init__(self, paths: Iterable[str | bytes | os.PathLike[str] | file | fileview] | None = None,
+                 *, store: PathStore | None = None) -> None: ...
     def add(self, path: str | bytes | os.PathLike[str] | file | fileview) -> None: ...
     def extend(self, paths: Iterable[str | bytes | os.PathLike[str] | file | fileview]) -> None: ...
     def reserve(self, n: int) -> None: ...
@@ -157,6 +158,24 @@ class PathSet:
     def __sub__(self, other: PathSet) -> PathSet: ...
     def to_list(self) -> list[str]: ...
     def stats(self) -> dict[str, int]: ...
+
+
+class PathStore:
+    """The flyweight store behind path(): a table interning every path value made through
+    path() and derived-path operations, plus one weak slot per row for the row's live
+    Python object, so equal paths are the same object while anything holds them. Rows are
+    never freed: a store lives as long as its owner (a variable, an IoC container singleton)."""
+    def __init__(self) -> None: ...
+    def path(self, path: str | bytes | os.PathLike[str]) -> file: ...
+    def reserve(self, n: int) -> None: ...
+    def stats(self) -> dict[str, int]: ...
+
+
+def store() -> PathStore:
+    """The current PathStore: what path() and derived-path operations intern into."""
+
+def use_store(store: PathStore) -> ContextManager[PathStore]:
+    """`with use_store(s): ...` makes `s` the current store for the block (nested)."""
 
 
 # --- generated: engines (regenerate with `pygim stubs`) ---

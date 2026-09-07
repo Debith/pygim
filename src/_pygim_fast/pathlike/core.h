@@ -494,6 +494,17 @@ public:
     [[nodiscard]] constexpr const uri& value() const noexcept { return m_uri; }
     [[nodiscard]] constexpr const engine_info* pinned() const noexcept { return m_pin; }
 
+    // Where this value is interned, if anywhere: an opaque (owner, slot) token
+    // stamped by whoever interned it (the adapter's path store). Not part of
+    // the value, equality or hash; a copy carries it along, so a reader must
+    // validate it against the owner before trusting it.
+    struct intern_token {
+        std::uint64_t owner = 0;
+        std::uint32_t slot = 0xFFFF'FFFFu;
+    };
+    [[nodiscard]] constexpr intern_token interned() const noexcept { return m_intern; }
+    constexpr void set_interned(intern_token t) noexcept { m_intern = t; }
+
     // os.PathLike: the native path text, in pathlib's normalised spelling.
     [[nodiscard]] constexpr std::string fspath() const { return Strategy::render(m_uri); }
 
@@ -771,6 +782,7 @@ private:
 
     uri m_uri;
     const engine_info* m_pin{nullptr};   // pinned at construction; nullptr = auto by extension
+    intern_token m_intern{};              // see interned()
 };
 
 using file = basic_file<native_strategy>;

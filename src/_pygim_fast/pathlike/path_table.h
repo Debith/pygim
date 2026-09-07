@@ -159,6 +159,11 @@ public:
         feed<Strategy>(u, in);
         return in.cur;
     }
+    // The child of row `parent` named by one plain component (never an anchor
+    // part): what `parent / name` is for a name without separators.
+    [[nodiscard]] std::uint32_t child_of(std::uint32_t parent, std::string_view name) {
+        return child(parent, m_segments.intern(name));
+    }
     [[nodiscard]] std::uint32_t insert_from(const path_table& other, std::uint32_t r) {
         const row& x = other.m_rows[r];
         const std::uint32_t parent = x.parent == none ? none : insert_from(other, x.parent);
