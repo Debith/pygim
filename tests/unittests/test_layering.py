@@ -11,6 +11,9 @@ import re
 import pytest
 
 ROOT = pathlib.Path(__file__).resolve().parents[2] / "src" / "_pygim_fast"
+# CI removes src/ before running the suite against the installed package: this
+# is a source-tree check, so it skips there rather than fail.
+pytestmark = pytest.mark.skipif(not ROOT.is_dir(), reason="source tree not present (testing the installed package)")
 CORE = sorted(ROOT.glob("mapping/*.h")) + [
     ROOT / "utils" / "hash.h",
     ROOT / "utils" / "memory.h",
@@ -27,7 +30,7 @@ def _code(header):
     return "\n".join(re.sub(r"//.*$", "", line) for line in header.read_text(encoding="utf-8").splitlines())
 
 
-@pytest.mark.parametrize("header", CORE, ids=lambda p: str(p.relative_to(ROOT)))
+@pytest.mark.parametrize("header", CORE or [ROOT], ids=lambda p: str(p.relative_to(ROOT.parent)))
 def test_core_header_is_pybind_free(header):
     text = _code(header)
     assert not PYBIND.search(text), f"{header.relative_to(ROOT)} includes pybind11: core headers must not"
