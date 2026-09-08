@@ -1,6 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Tests for the pathlike PathSet prototype: many paths as one table, views, filters
-and set algebra."""
+"""PathSet: many paths as one table — construction, members, filters and set algebra."""
 
 import os
 import pathlib
@@ -165,7 +164,7 @@ def test_algebra_across_tables():
     assert (b - a).to_list() == ["q"]
 
 
-def test_stats_show_the_flyweight(strs, ps):
+def test_stats_show_the_sharing(strs, ps):
     st = ps.stats()
     assert st["members"] == len(ps) and st["rows"] >= st["members"]
     # every distinct component once: far fewer segments than path components

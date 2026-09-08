@@ -112,7 +112,7 @@ class EngineInfo(NamedTuple):
     doc: str
 
 class PathSet:
-    """Many paths as ONE table (prototype): every distinct component stored once, every
+    """Many paths as ONE table: every distinct component stored once, every
     path a (parent, name) row. Iterating yields path objects over the table; scan() reuses one.
     Filters and |, &, - return sets sharing the table; to_list() renders the members."""
     def __init__(self, paths: PathLike | Iterable[PathLike] | None = None,

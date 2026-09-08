@@ -1,13 +1,13 @@
 #pragma once
-// pathlike/adapter/pathset.h — PathSet: many paths as one table, seen through views (prototype).
+// pathlike/adapter/pathset.h — PathSet: many paths as one table.
 //
 // PathSet owns a shared path_table (path_table.h) and a member list. Nothing
 // here is a Python object per path: iteration hands out `pathview`s — a
 // (table, row) pair that copies no text — and scan() reuses ONE view object
 // for a whole pass. Value filters and set algebra work on rows; a filtered
 // set shares its parent's table, so it is a mapping::id_set (members and a
-// bitmap), nothing more. The way out to other tools is to_list(): see
-// docs/design/pathset_storage.md for why there is no Arrow boundary here.
+// bitmap), nothing more. The way out to other tools is to_list()
+// (docs/design/pathset_storage.md).
 //
 // A worked example (POSIX), used in the comments below. Row numbers are the
 // table's; see path_table.h for how the rows come about.

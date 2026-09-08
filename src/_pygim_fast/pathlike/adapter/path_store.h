@@ -5,7 +5,7 @@
 // table is chosen ONCE, at construction — `path(text)` uses the module's
 // default table, `path(text, store=s)` uses s's — and inherited by every path
 // derived from it, so a program picks a lifetime by argument and never through
-// ambient state. A table lives as long as any handle or set over it: a server
+// global state. A table lives as long as any handle or set over it: a server
 // that makes its own store and passes it to every request drops the whole
 // table, rows and all, when it stops and the last handle is gone.
 //

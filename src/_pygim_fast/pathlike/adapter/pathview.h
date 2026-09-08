@@ -10,7 +10,7 @@
 // module's default table (path_store.h), `path(text, store=s)` into s's, and
 // every derived object inherits the table of the object it came from — so a
 // program chooses a lifetime once, by argument, and a subtree of work follows
-// it with no ambient state.
+// it, with no global state.
 //
 // Two handles on one row are equal, hash alike and are NOT promised to be the
 // same object — as CPython interns strings for storage and fast equality

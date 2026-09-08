@@ -155,7 +155,7 @@ def test_match_pattern():
     assert match_pattern("read??.txt", "readme.txt") and match_pattern("*", "anything")
 
 
-def test_file_pathset_shares_the_current_store(temp_dir, temp_files):
+def test_pathset_method_shares_the_table(temp_dir, temp_files):
     ps = pygim.path(temp_dir).pathset("*.rst")
     assert isinstance(ps, PathSet) and len(ps) == 2
     v = ps[0]

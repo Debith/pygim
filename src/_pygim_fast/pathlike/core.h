@@ -68,7 +68,7 @@ struct sv_list {
 // engine_info info`; its address is the engine's identity at run time (static
 // constexpr members are inline variables, so there is exactly one per program).
 struct engine_info {
-    std::string_view name;     // format name: engine="json"; the Python class is "<name>file"
+    std::string_view name;     // format name: engine="json"; the Python class is "<name>path"
     std::string_view label;    // LIBRARY label reported by .engine: "simdjson"
     std::string_view doc;      // one sentence, used by every derived docstring
     sv_list exts;              // auto-dispatch extensions: lower-case, leading dot

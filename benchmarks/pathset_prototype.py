@@ -1,4 +1,4 @@
-"""PathSet prototype benchmarks: many paths as one table vs. one object per path.
+"""PathSet benchmarks: many paths as one table vs. one object per path.
 
 Sections:
 

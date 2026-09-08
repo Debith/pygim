@@ -112,7 +112,7 @@ def test_glob_results_share_the_table(tmp_path):
 
 # ── the row route agrees with pathlib ──────────────────────────────────────
 def _corpus():
-    from test_pathset_proto import corpus, EDGE
+    from test_pathset_table import corpus, EDGE
     return corpus(300) + EDGE + ["a/..", "../x", "a/./b", "//net/share", "/", "x/y/z.tar.gz"]
 
 

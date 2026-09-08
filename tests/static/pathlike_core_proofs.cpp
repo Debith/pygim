@@ -59,7 +59,7 @@ static_assert(Good::index_of(&alpha::info) == 0 && Good::index_of(&beta::info) =
 static_assert(Good::id_of<alpha>() == 0 && Good::id_of<beta>() == 1);
 static_assert(Good::known == "alpha/liba, beta/lib-b");
 static_assert(Good::ext_inventory == ".a .aa .b");
-static_assert(class_name<alpha> == "alphafile" && class_name<beta> == "betafile");
+static_assert(class_name<alpha> == "alphapath" && class_name<beta> == "betapath");
 static_assert(detail::class_name_buf<alpha>[9] == '\0');   // NUL-terminated for pybind11
 static_assert(Good::visit(1, []<class E>() { return E::info.name; }) == "beta");
 static_assert(Good::conflict_report().view() == "pathlike engine registry: all invariants hold");
@@ -146,7 +146,7 @@ struct bad_name {   // would be the Python class "Bad-Namefile"
 };
 static_assert(!engine_list<bad_name>::names_wellformed() && !engine_list<bad_name>::holds());
 static_assert(engine_list<bad_name>::conflict_report().view() ==
-              "engine name 'Bad-Name' must match [a-z][a-z0-9_]* (it becomes the Python class '<name>file')");
+              "engine name 'Bad-Name' must match [a-z][a-z0-9_]* (it becomes the Python class '<name>path')");
 
 struct self_alias {   // repeats its own name as an alias
     static constexpr std::array<std::string_view, 1> exts{".f"};
@@ -355,8 +355,8 @@ static_assert(engine_list<>::size == 0 && names_match_identifiers(engine_list<>{
 // ── The path table's laws, in constant evaluation (over the flat interner) ──
 // value(row) is the uri file(text) holds, hash(row) is that file's hash,
 // render(row) is its fspath, text and value meet at ONE row, and the table's
-// parent is pathlib's parent — the facts adapter/pathset.h and the flyweight
-// store rely on (docs/design/pathset_storage.md, pathlike_flyweight.md).
+// parent is pathlib's parent — the facts adapter/pathset.h and adapter/pathview.h
+// rely on (docs/design/pathset_storage.md).
 template <class Strategy>
 consteval bool table_agrees_with_file(std::string_view text) {
     basic_path_table<pygim::mapping::flat_interner> t;
