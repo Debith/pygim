@@ -31,7 +31,7 @@ assert pygim.path("app.txt").engine is None      # nothing resolves -> no engine
 assert isinstance(pygim.path("app.yaml"), yamlpath)
 assert isinstance(pygim.path("app.toml"), tomlpath)
 assert isinstance(pygim.path("app.json"), jsonpath)
-assert isinstance(pygim.path("app.yaml"), file)  # every typed file is a file
+assert isinstance(pygim.path("app.yaml"), path)  # every typed path is a path
 assert type(pygim.path("app.txt")) is path       # unresolved stays plain
 
 # ----------------------------------------------------------------------------
