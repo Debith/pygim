@@ -120,6 +120,46 @@ class TestPages:
             thread.join(timeout=5)
 
 
+class TestMarkdown:
+    def test_markdown_page_is_rendered_with_the_commenter(self, server, site):
+        (site / "design.md").write_text("# Title\n\nSome *text*.\n\n| a | b |\n|---|---|\n| 1 | 2 |\n", encoding="utf-8")
+        status, headers, body = _get(server + "/design.md")
+        assert status == 200 and headers["Content-Type"].startswith("text/html")
+        text = body.decode("utf-8")
+        assert "<h1" in text and "<em>text</em>" in text and "<table>" in text
+        assert 'id="cmt-tab"' in text and "<title>design</title>" in text
+
+    def test_mermaid_fence_becomes_a_live_diagram(self, server, site):
+        (site / "diagram.md").write_text("```mermaid\nclassDiagram\n  A --> B\n```\n", encoding="utf-8")
+        text = _get(server + "/diagram.md")[2].decode("utf-8")
+        assert '<pre class="mermaid">' in text and "A --> B" in text and "mermaid.esm.min.mjs" in text
+
+    def test_markdown_index_stands_in_for_a_missing_index_html(self, temp_dir):
+        (temp_dir / "README.md").write_text("# Home\n", encoding="utf-8")
+        httpd = _docs_serve.make_server(temp_dir, port=0, host="127.0.0.1")
+        thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+        thread.start()
+        try:
+            base = f"http://127.0.0.1:{httpd.server_address[1]}"
+            status, headers, body = _get(base + "/", follow=False)
+            assert status == 200 and "<h1" in body.decode("utf-8") and 'id="cmt-tab"' in body.decode("utf-8")
+        finally:
+            httpd.shutdown()
+            httpd.server_close()
+            thread.join(timeout=5)
+
+    def test_pages_include_markdown(self, server, site):
+        (site / "notes.md").write_text("x", encoding="utf-8")
+        assert "/notes.md" in json.loads(_get(server + "/pages")[2])
+
+    def test_render_without_the_package_is_none(self, monkeypatch):
+        import builtins
+        real = builtins.__import__
+        monkeypatch.setattr(builtins, "__import__",
+                            lambda name, *a, **k: (_ for _ in ()).throw(ImportError()) if name == "markdown" else real(name, *a, **k))
+        assert _docs_serve.render_markdown("# x", "x") is None
+
+
 class TestRootRedirect:
     def test_root_redirects_to_site_index_when_root_has_none(self, server):
         status, headers, _ = _get(server + "/", follow=False)

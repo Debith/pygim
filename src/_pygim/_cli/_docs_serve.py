@@ -11,6 +11,10 @@ Serves a directory of HTML/CSS/JS and adds two things a plain
   (``?page=<path>`` filters); ``/comment-edit`` and ``/comment-delete`` change
   them in place. A malformed comments file is reported (HTTP 500 with the
   file and line), never silently rewritten.
+* **Markdown.** A ``.md`` page is rendered to HTML on the fly (the ``markdown``
+  package; Mermaid fences become live diagrams) and gets the same commenter,
+  so a design folder is served as it is written. ``README.md`` / ``index.md``
+  stand in for a missing ``index.html``.
 * **Image drops.** Dropping an image on a page POSTs it to
   ``/upload?path=images/<sub>/<file>`` and it is written straight into
   ``<root>/images/<sub>/<file>`` — no Downloads round-trip. Uploads land only
@@ -64,7 +68,28 @@ INDEX_CANDIDATES = (
     "build/html/index.html",
     "docs/_build/html/index.html",
     "_build/html/index.html",
+    "README.md",
+    "index.md",
+    "00_overview.md",
 )
+PAGE_SUFFIXES = (".html", ".md")
+
+MARKDOWN_STYLE = """<style>
+body{max-width:72ch;margin:2rem auto;padding:0 1rem;font:16px/1.55 system-ui,sans-serif;color:#1d242b;background:#fbfbfa}
+pre,code{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:.92em}
+pre{background:#f0f1ee;padding:.8rem 1rem;overflow-x:auto;border-radius:4px}
+code{background:#f0f1ee;padding:.1em .3em;border-radius:3px}
+pre code{background:none;padding:0}
+table{border-collapse:collapse;margin:1rem 0}
+th,td{border-bottom:1px solid #d3d7d2;padding:.35rem .6rem;text-align:left;vertical-align:top}
+th{color:#5f6a72;font-size:.85em;letter-spacing:.04em;text-transform:uppercase}
+h1,h2,h3{line-height:1.2}
+blockquote{border-left:3px solid #b06e14;margin:1rem 0;padding:.2rem 1rem;color:#5f6a72}
+.mermaid{background:none}
+</style>"""
+MERMAID_SCRIPT = ("<script type=\"module\">import mermaid from "
+                  "\"https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs\";"
+                  "mermaid.initialize({startOnLoad:true});</script>")
 
 HOST_ENV = "PYGIM_HOST"
 
@@ -95,10 +120,36 @@ def _upload_target(root, qs):
 
 
 def site_pages(root):
-    """The site's HTML pages as a PathSet over *root*'s table: every ``*.html``
-    under the root except the notes directory. Two calls on the same root are
-    two sets over one table, so they subtract and intersect at bit speed."""
-    return root.pathset("**/*.html") - root.pathset(COMMENTS_REL.split("/")[0] + "/**/*.html")
+    """The site's pages as a PathSet over *root*'s table: every ``*.html`` and
+    ``*.md`` under the root except the notes directory. Two calls on the same
+    root are two sets over one table, so they subtract and intersect at bit
+    speed."""
+    notes = COMMENTS_REL.split("/")[0]
+    pages = root.pathset("**/*.html") | root.pathset("**/*.md")
+    return pages - (root.pathset(notes + "/**/*.html") | root.pathset(notes + "/**/*.md"))
+
+
+def render_markdown(text: str, title: str) -> str | None:
+    """*text* (Markdown) as a complete HTML page, or None when the ``markdown``
+    package is not installed (the file is then served as it is). Fenced
+    ``mermaid`` blocks become ``<pre class="mermaid">`` with the Mermaid
+    script, so diagrams render in the browser."""
+    try:
+        import markdown
+    except ImportError:
+        return None
+    import html as _html
+
+    body = markdown.markdown(text, extensions=["fenced_code", "tables", "toc"])
+    mermaid = ""
+    if 'class="language-mermaid"' in body:
+        body = re.sub(
+            r'<pre><code class="language-mermaid">(.*?)</code></pre>',
+            lambda m: '<pre class="mermaid">' + _html.unescape(m.group(1)) + "</pre>",
+            body, flags=re.S)
+        mermaid = MERMAID_SCRIPT
+    return (f"<!doctype html><html><head><meta charset=\"utf-8\"><title>{_html.escape(title)}</title>"
+            f"{MARKDOWN_STYLE}</head><body>{body}{mermaid}</body></html>")
 
 
 def _relative(root, p) -> str:
@@ -119,7 +170,7 @@ def _pick_index(root, index: str | None) -> str | None:
     """The root-relative page ``/`` redirects to, or None to serve the root as-is."""
     if index:
         return index.replace("\\", "/").lstrip("/")
-    if (root / "index.html").is_file():
+    if any((root / c).is_file() for c in ("index.html", "README.md", "index.md")):
         return None
     return next((c for c in INDEX_CANDIDATES if (root / c).is_file()), None)
 
@@ -155,21 +206,28 @@ def _make_handler(root, index: str | None):
             if route == "/pages":
                 self._send_json(sorted(_relative(root, p) for p in site_pages(root)))
                 return
-            if self.path in ("/", "/index.html") and index and not (root / "index.html").is_file():
+            if self.path in ("/", "/index.html") and index and not (root / "index.html").is_file() \
+                    and not (root / "README.md").is_file() and not (root / "index.md").is_file():
                 self.send_response(302)
                 self.send_header("Location", "/" + index)
                 self.end_headers()
                 return
-            # every served HTML page gets the ✎ commenter
+            # every served HTML or Markdown page gets the ✎ commenter
             page = pygim.path(self.translate_path(parsed.path), store=store)   # a row of the server's table
             if page.is_dir():
-                page = page / "index.html"
-            if page.suffix.lower() == ".html" and page.is_file():
+                page = next((page / c for c in ("index.html", "README.md", "index.md") if (page / c).is_file()),
+                            page / "index.html")
+            if page.suffix.lower() in PAGE_SUFFIXES and page.is_file():
                 try:
                     text = page.read_bytes().decode("utf-8")
                 except (RuntimeError, UnicodeDecodeError):
                     super().do_GET()
                     return
+                if page.suffix.lower() == ".md":
+                    text = render_markdown(text, page.stem)
+                    if text is None:
+                        super().do_GET()
+                        return
                 body = _commenter.inject(text).encode("utf-8")
                 self.send_response(200)
                 self.send_header("Content-Type", "text/html; charset=utf-8")
