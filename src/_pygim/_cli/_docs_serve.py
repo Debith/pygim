@@ -165,6 +165,28 @@ def render_markdown(text: str, title: str) -> str | None:
             f"{MARKDOWN_STYLE}</head><body>{body}{mermaid}</body></html>")
 
 
+def pregenerate(root) -> int:
+    """Generate the HTML of every Markdown page under *root* that is missing or
+    stale, so no first open pays for a render (a fresh page costs two stats).
+    Also imports the renderer once. Returns how many pages were (re)generated."""
+    try:
+        import markdown  # noqa: F401  — import once here, not inside the first request
+    except ImportError:
+        return 0
+    count = 0
+    for page in site_pages(root):
+        if page.suffix != ".md":
+            continue
+        out = page.with_suffix(".html")
+        stale = not out.is_file() or os.path.getmtime(os.fspath(out)) < os.path.getmtime(os.fspath(page))
+        try:
+            if materialize_markdown(page) is not None and stale:
+                count += 1
+        except (OSError, RuntimeError, UnicodeDecodeError):
+            continue   # an unreadable page is reported when it is opened, not at startup
+    return count
+
+
 def materialize_markdown(md):
     """The HTML page for the Markdown file *md*, generated beside it as ``<stem>.html``
     when missing or older than the Markdown, and left alone when it exists without
@@ -416,6 +438,7 @@ def make_server(doc_root, *, port: int = 8000, host: str | None = None,
     root = pygim.path(doc_root, store=store or PathStore()).resolve()
     if not root.is_dir():
         raise FileNotFoundError(f"doc root not found: {root}")
+    pregenerate(root)   # every Markdown page has its HTML before the first request
 
     # Bind all interfaces by default so the page is reachable via the WSL IP even
     # when Windows→WSL localhost forwarding hiccups (a common "can't connect").

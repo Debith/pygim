@@ -192,6 +192,21 @@ class TestMarkdown:
         pages = json.loads(_get(server + "/pages")[2])
         assert "/notes.md" in pages and "/done.html" in pages and "/done.md" not in pages
 
+    def test_startup_generates_every_markdown_page(self, temp_dir):
+        (temp_dir / "a.md").write_text("# a\n", encoding="utf-8")
+        (temp_dir / "sub").mkdir()
+        (temp_dir / "sub" / "b.md").write_text("# b\n", encoding="utf-8")
+        (temp_dir / "__notes__").mkdir()
+        (temp_dir / "__notes__" / "n.md").write_text("# n\n", encoding="utf-8")
+        httpd = _docs_serve.make_server(temp_dir, port=0, host="127.0.0.1")
+        try:
+            assert (temp_dir / "a.html").is_file() and (temp_dir / "sub" / "b.html").is_file()
+            assert not (temp_dir / "__notes__" / "n.html").exists()          # notes are not pages
+            root = _docs_serve.pygim.path(temp_dir, store=PathStore())
+            assert _docs_serve.pregenerate(root) == 0                         # everything fresh: nothing rewritten
+        finally:
+            httpd.server_close()
+
     def test_render_without_the_package_is_none(self, monkeypatch):
         import builtins
         real = builtins.__import__
