@@ -3,6 +3,8 @@
 Command-Line Interface Application for Python Gimmicks.
 """
 
+from __future__ import annotations  # `str | None` in signatures on Python 3.9
+
 from subprocess import Popen, DEVNULL, run as _run
 import sys
 import shutil

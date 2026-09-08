@@ -269,7 +269,10 @@ def make_server(doc_root, *, port: int = 8000, host: str | None = None,
     # NB: PYGIM_HOST, not HOST — interactive shells often set $HOST to the machine
     # name, which would try to bind an unresolvable hostname (Errno -3).
     host = host or os.environ.get(HOST_ENV, "0.0.0.0")
-    socketserver.TCPServer.allow_reuse_address = True
+    # POSIX: reuse the address so a restart does not wait out TIME_WAIT. Windows:
+    # SO_REUSEADDR there lets a SECOND server bind the same port (no error, split
+    # traffic), so leave it off — Windows does not have the TIME_WAIT bind problem.
+    socketserver.TCPServer.allow_reuse_address = os.name != "nt"
     handler = _make_handler(root, _pick_index(root, index))
     try:
         return socketserver.TCPServer((host, port), handler)
