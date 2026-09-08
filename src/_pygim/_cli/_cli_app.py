@@ -3,7 +3,7 @@
 Command-Line Interface Application for Python Gimmicks.
 """
 
-from subprocess import Popen, DEVNULL
+from subprocess import Popen, DEVNULL, run as _run
 import sys
 import shutil
 import functools
@@ -68,6 +68,26 @@ class GimmicksCliApp:
 
     def ai(self, text):
         print("AI is not implemented yet!")
+
+    def docs_serve(self, *, port: int = 8000, directory: str | None = None,
+                   host: str | None = None, index: str | None = None,
+                   rebuild: str | None = None) -> None:
+        """Serve a docs directory locally with the ✎ commenter and image-drop endpoint.
+
+        *rebuild* is a shell command run (in *directory*) before serving; a
+        non-zero exit aborts."""
+        from _pygim._cli import _docs_serve  # local import: only needed for this verb
+
+        doc_root = Path(directory) if directory else Path.cwd()
+        if rebuild:
+            click.echo(f"rebuild: {rebuild}")
+            rc = _run(rebuild, shell=True, cwd=str(doc_root), check=False).returncode
+            if rc:
+                raise click.ClickException(f"rebuild command failed (exit {rc}): {rebuild}")
+        try:
+            _docs_serve.serve(doc_root, port=port, host=host, index=index)
+        except (FileNotFoundError, _docs_serve.ServeError) as exc:
+            raise click.ClickException(str(exc)) from exc
 
     def stubs(self, *, check: bool = False) -> None:
         """Regenerate (or verify) the generated block of pygim/pathlike.pyi."""
