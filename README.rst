@@ -77,7 +77,13 @@ Every served page gets a ✎ button (click anywhere, or select text, to leave a
 comment); comments append to ``__notes__/site-comments.jsonl`` under the served
 root, ready to be read back and acted on. Dropping an image on a page writes it
 under ``images/``. ``GET /pages`` lists the site's pages, and ``--rebuild``
-reports which pages the rebuild added and removed. ``/`` falls back to the first of ``site/``, ``docs/``,
+reports which pages the rebuild added and removed. Markdown is rendered on
+the fly (Mermaid fences become diagrams), so a design folder is served as it
+is written:
+
+.. code-block:: bash
+
+    $ oo docs serve --dir docs/design --host 127.0.0.1 ``/`` falls back to the first of ``site/``, ``docs/``,
 ``build/html/`` or ``docs/_build/html/`` that has an ``index.html`` (override
 with ``--index``). It binds all interfaces by default so the page is reachable
 via the WSL IP; set ``PYGIM_HOST`` or pass ``--host 127.0.0.1`` for
