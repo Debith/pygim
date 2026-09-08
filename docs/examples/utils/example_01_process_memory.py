@@ -27,27 +27,33 @@ assert now > 0 and peak >= now
 assert abs(utils.rss_mb() - now / 2**20) < 1.0
 
 # ----------------------------------------------------------------------------
-# 2. A before/after delta around an allocation
+# 2. A before/after delta around an allocation — on a fresh heap
 # ----------------------------------------------------------------------------
-#          ┌─ read before
-#          ▼
+# Freed memory is kept by the allocator for reuse, so in a process that has
+# already allocated and freed a block, a new block of the same size may not
+# raise the resident size at all. The honest measurement is a subprocess:
+# read before, allocate, touch every page, read after.
+import subprocess
+import sys
+
+PROBE = """
+from pygim import utils
 before = utils.rss_bytes()
-block = bytearray(64 * 2**20)                # 64 MiB, and touch every page so it is resident
-block[::4096] = b"x" * len(block[::4096])
-after = utils.rss_bytes()
+block = bytearray(64 * 2**20)                # 64 MiB
+block[::4096] = b"x" * len(block[::4096])    # touched, so it is resident
+print(before, utils.rss_bytes(), utils.peak_rss_bytes())
+"""
+before, after, peak_after = (int(x) for x in subprocess.run(
+    [sys.executable, "-c", PROBE], capture_output=True, text=True, check=True).stdout.split())
 assert after - before > 32 * 2**20           # the delta is the allocation (the OS may round)
-assert utils.peak_rss_bytes() >= after
+assert peak_after >= after
 
 # ----------------------------------------------------------------------------
 # 3. Why only the delta means anything
 # ----------------------------------------------------------------------------
-# Freed memory is kept by the allocator for reuse, so the resident size does
-# not fall back to `before` — and a second allocation of the same size may
-# not raise it at all. Measure each variant on a fresh heap (a subprocess),
-# as benchmarks/path_store.py does; never compare two measurements taken
-# one after the other in one process.
-del block
-gc.collect()
-assert utils.rss_bytes() >= before - 2**20   # not back to `before`; that is expected
+# Two measurements taken one after the other in one process compare a heap
+# that remembers everything freed before; benchmarks/path_store.py measures
+# every variant in its own subprocess for exactly this reason.
 
-print(f"process memory example OK: {utils.rss_mb():.1f} MiB now, {utils.peak_rss_mb():.1f} MiB peak")
+print(f"process memory example OK: {utils.rss_mb():.1f} MiB now, {utils.peak_rss_mb():.1f} MiB peak; "
+      f"a fresh 64 MiB block cost {(after - before) / 2**20:.0f} MiB")

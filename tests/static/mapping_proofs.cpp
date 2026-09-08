@@ -16,6 +16,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <string_view>
 
 namespace {
@@ -61,6 +62,13 @@ static_assert(interner_laws<basic_hashed_interner<std::uint16_t>>());
 static_assert(!flat_interner::hashed && hashed_interner::hashed);
 
 // ── trie laws ──────────────────────────────────────────────────────────────
+// The key translator of the row_map proof: `other`'s keys are this trie's + 10.
+template <class Key>
+struct shift_key {
+    [[nodiscard]] constexpr Key operator()(Key key) const noexcept {
+        return key == std::numeric_limits<Key>::max() ? key : static_cast<Key>(key - 10);
+    }
+};
 template <class Trie>
 consteval bool trie_laws() {
     Trie t;
@@ -94,11 +102,11 @@ consteval bool trie_laws() {
     const auto oa = other.child(oroot, 11);
     const auto ob = other.child(oa, 12);
     const auto oc = other.child(oa, 13);
-    auto shift = [](typename Trie::key_type key) { return key == Trie::no_key ? key : static_cast<typename Trie::key_type>(key - 10); };
-    typename Trie::template row_map<decltype(shift)> look(t, other, nullptr, shift);              // lookup only: absent rows map to none
+    using shift = shift_key<typename Trie::key_type>;                             // a named translator: no lambda type as a template argument (MSVC)
+    typename Trie::template row_map<shift> look(t, other, nullptr, shift{});              // lookup only: absent rows map to none
     ok = ok && look(ob) == b && look(oa) == a && look(oc) == Trie::none && look(ob) == b;
     const std::size_t before = t.size();
-    typename Trie::template row_map<decltype(shift)> add(t, other, &t, shift);                    // find-or-add: absent rows are created under the mapped parent
+    typename Trie::template row_map<shift> add(t, other, &t, shift{});                    // find-or-add: absent rows are created under the mapped parent
     const auto c = add(oc);
     ok = ok && c != Trie::none && t.size() == before + 1 && t.parent(c) == a && t.key(c) == 3 && add(ob) == b && t.size() == before + 1;
     return ok;

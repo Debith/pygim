@@ -40,6 +40,11 @@ line says so in its description and why.
   recorded through `_results.py` against the commit. An optimisation is
   justified by a same-process A/B (old and new compiled side by side), never
   by comparing runs on a machine whose load drifts.
+- **A test that reads the repository skips without it.** CI removes `src/` and
+  tests the installed package; a source-tree check (layering, stubs) must
+  `skip` when the tree is absent rather than fail. A memory or timing
+  measurement runs on a fresh heap (a subprocess), never against a heap that
+  remembers what an earlier test freed.
 - **CI is green on the full matrix** (3 OS x every supported Python) before
   the work is called done; after a push, the run is watched, not assumed.
   Compiler flags are per-extension `flags_if_supported`; there is no
