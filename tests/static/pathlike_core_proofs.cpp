@@ -313,7 +313,7 @@ static_assert(px("a/b").hash_value() == px("a//b/").hash_value() && px("a/b").ha
 static_assert(px_problem("file:x.yaml", "URI is not absolute: 'file:x.yaml'") && px_problem("file://", "URI is not absolute: 'file://'") &&
               px_problem("s3://b/x", "unsupported URI scheme 's3' in 's3://b/x' (only file:// URIs are accepted)") &&
               px_problem("note:x.yaml", "") && px_problem("/plain/path", "") && px_problem("file:///ok", ""));
-static_assert(px_repr("x.dat", "file(\"file://x.dat\")"));
+static_assert(px_repr("x.dat", "path(\"file://x.dat\")"));
 
 // pathlib's join rules per strategy.
 static_assert(px_join("/a/b", "c", "/a/b/c") && px_join("/a/b", "/x", "/x") && px_join("a", "b/c/", "a/b/c") && px_join("", "x", "x"));

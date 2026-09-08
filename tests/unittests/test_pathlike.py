@@ -24,17 +24,17 @@ def _write(temp_dir, name, text):
 # --------------------------------------------------------------------------- #
 def test_path_returns_a_pathlike_file():
     p = pygim.path("some.yaml")
-    assert isinstance(p, pathlike.file)
+    assert isinstance(p, pathlike.path)
     assert isinstance(p, os.PathLike)
     assert os.fspath(p) == "some.yaml"
-    assert repr(p) == 'file("file://some.yaml")'
+    assert repr(p) == 'path("file://some.yaml")'
     assert p.suffix == ".yaml"
     assert p.uri == "file://some.yaml"
 
 
 def test_file_is_a_registered_pathlike_subclass():
     # Explicitly registered with the ABC, not merely duck-typed.
-    assert issubclass(pathlike.file, os.PathLike)
+    assert issubclass(pathlike.path, os.PathLike)
 
 
 def test_file_integrates_with_pathlib_and_open(temp_dir):
@@ -142,7 +142,7 @@ def test_malformed_yaml_raises_not_aborts(temp_dir):
 # --------------------------------------------------------------------------- #
 def test_truediv_joins_and_returns_a_file():
     p = pygim.path("base") / "sub" / "doc.yaml"
-    assert isinstance(p, pathlike.file)
+    assert isinstance(p, pathlike.path)
     assert pathlib.PurePath(os.fspath(p)) == pathlib.PurePath("base/sub/doc.yaml")
     assert p.suffix == ".yaml"                       # still a decodable file after joining
 
@@ -165,7 +165,7 @@ def test_absolute_component_replaces():
 def test_parent_name_stem_and_flags():
     p = pygim.path("a/b/c.yaml")
     assert pathlib.PurePath(os.fspath(p.parent)) == pathlib.PurePath("a/b")
-    assert isinstance(p.parent, pathlike.file)
+    assert isinstance(p.parent, pathlike.path)
     assert p.name == "c.yaml" and p.stem == "c"
     assert p.is_absolute() is False
     # A genuinely absolute path on every platform ("/x/y" has no drive on
@@ -253,8 +253,8 @@ def test_engine_pin_propagates_to_derived_paths():
 
 
 def test_engine_pin_shown_in_repr():
-    assert repr(pygim.path("x.dat", engine="yaml")) == 'file("file://x.dat", engine=rapidyaml)'
-    assert repr(pygim.path("x.yaml")) == 'file("file://x.yaml")'   # auto: unchanged
+    assert repr(pygim.path("x.dat", engine="yaml")) == 'path("file://x.dat", engine=rapidyaml)'
+    assert repr(pygim.path("x.yaml")) == 'path("file://x.yaml")'   # auto: unchanged
 
 
 def test_read_engine_overrides_construction_pin(temp_dir):
@@ -606,7 +606,7 @@ def test_pathset_bridge(tree):
 
     ps = pygim.path(tree).pathset("**/*.yaml")
     assert isinstance(ps, PathSet) and len(ps) == 3
-    assert all(v.to_file() is pygim.path(os.fspath(v)) for v in ps)   # over the current store's table
+    assert all(v == pygim.path(os.fspath(v)) for v in ps)   # rows of the default table
 
 
 # --------------------------------------------------------------------------- #
@@ -830,31 +830,31 @@ def test_dot_edge_semantics_are_pinned():
 # Typed file classes: the type mirrors the resolved engine
 # --------------------------------------------------------------------------- #
 def test_path_returns_engine_typed_subclasses():
-    from pygim.pathlike import file, jsonfile, tomlfile, yamlfile
+    from pygim.pathlike import path, jsonpath, tomlpath, yamlpath
 
-    assert isinstance(pygim.path("a.yaml"), yamlfile)
-    assert isinstance(pygim.path("a.toml"), tomlfile)
-    assert isinstance(pygim.path("a.json"), jsonfile)
-    assert isinstance(pygim.path("a.yaml"), file)          # still a file
-    assert type(pygim.path("a.txt")) is file               # unresolved: plain file
+    assert isinstance(pygim.path("a.yaml"), yamlpath)
+    assert isinstance(pygim.path("a.toml"), tomlpath)
+    assert isinstance(pygim.path("a.json"), jsonpath)
+    assert isinstance(pygim.path("a.yaml"), path)          # still a path
+    assert type(pygim.path("a.txt")) is path               # unresolved: plain path
 
 
 def test_typed_subclass_follows_pin_and_derivation():
-    from pygim.pathlike import jsonfile, tomlfile, yamlfile
+    from pygim.pathlike import jsonpath, tomlpath, yamlpath
 
-    assert isinstance(pygim.path("a.json", engine="yaml"), yamlfile)   # pin wins
-    assert isinstance(pygim.path("a.yaml").with_suffix(".json"), jsonfile)
-    assert isinstance(pygim.path("cfg.yaml").parent / "x.toml", tomlfile)
+    assert isinstance(pygim.path("a.json", engine="yaml"), yamlpath)   # pin wins
+    assert isinstance(pygim.path("a.yaml").with_suffix(".json"), jsonpath)
+    assert isinstance(pygim.path("cfg.yaml").parent / "x.toml", tomlpath)
 
 
 def test_direct_subclass_construction_pins(temp_dir):
-    from pygim.pathlike import yamlfile
+    from pygim.pathlike import yamlpath
 
     f = _write(temp_dir, "legacy.dat", "k: 1\n")
-    p = yamlfile(f)                                        # type == pinned engine
-    assert p.engine == "rapidyaml" and isinstance(p, yamlfile)
+    p = yamlpath(f)                                        # type == pinned engine
+    assert p.engine == "rapidyaml" and isinstance(p, yamlpath)
     assert p.read() == {"k": 1}
-    assert isinstance(p.with_name("other.dat"), yamlfile)  # pin travels, type too
+    assert isinstance(p.with_name("other.dat"), yamlpath)  # pin travels, type too
 
 
 # --------------------------------------------------------------------------- #
@@ -921,18 +921,18 @@ def test_jsonl_write_requires_a_list_root(temp_dir):
 
 
 def test_jsonl_engine_resolution_and_typed_class(temp_dir):
-    from pygim.pathlike import jsonfile, jsonlfile
+    from pygim.pathlike import jsonpath, jsonlpath
 
-    assert isinstance(pygim.path("a.jsonl"), jsonlfile)
-    assert isinstance(pygim.path("a.ndjson"), jsonlfile)
-    assert not isinstance(pygim.path("a.json"), jsonlfile)
-    assert not isinstance(pygim.path("a.jsonl"), jsonfile)
+    assert isinstance(pygim.path("a.jsonl"), jsonlpath)
+    assert isinstance(pygim.path("a.ndjson"), jsonlpath)
+    assert not isinstance(pygim.path("a.json"), jsonlpath)
+    assert not isinstance(pygim.path("a.jsonl"), jsonpath)
     assert pygim.path("a.jsonl").engine == "simdjson-ndjson"
     assert pygim.path("a.JSONL").engine == "simdjson-ndjson"
     f = _write(temp_dir, "rows.dat", '{"k": 1}\n')
     assert pygim.path(f, engine="jsonl").read() == [{"k": 1}]
     assert pygim.path(f).read(engine="ndjson") == [{"k": 1}]
-    assert jsonlfile(f).read() == [{"k": 1}]
+    assert jsonlpath(f).read() == [{"k": 1}]
     assert pygim.path(f, engine="simdjson-ndjson").engine == "simdjson-ndjson"   # label round-trips
 
 
@@ -992,8 +992,8 @@ def test_engines_record_shape():
 def test_every_engine_is_fully_wired(engine, temp_dir):
     from pygim import pathlike
 
-    cls = getattr(pathlike, engine.name + "file")           # the typed class exists...
-    assert issubclass(cls, pathlike.file) and cls is not pathlike.file
+    cls = getattr(pathlike, engine.name + "path")           # the typed class exists...
+    assert issubclass(cls, pathlike.path) and cls is not pathlike.path
     for ext in engine.extensions:                            # ...its extensions dispatch to it...
         p = pygim.path("x" + ext)
         assert isinstance(p, cls) and p.engine == engine.label
@@ -1030,8 +1030,8 @@ def test_typed_classes_are_exactly_the_registry():
     from pygim import pathlike
 
     typed = {name for name, obj in vars(pathlike).items()
-             if isinstance(obj, type) and issubclass(obj, pathlike.file) and obj is not pathlike.file}
-    assert typed == {e.name + "file" for e in pathlike.ENGINES}
+             if isinstance(obj, type) and issubclass(obj, pathlike.path) and obj is not pathlike.path}
+    assert typed == {e.name + "path" for e in pathlike.ENGINES}
 
 
 def test_registry_matches_source_tree():
@@ -1047,9 +1047,9 @@ def test_docstrings_are_derived_from_the_registry():
     from pygim import pathlike
 
     for e in pathlike.ENGINES:
-        assert e.label in pathlike.file.__doc__ and e.name in pathlike.path.__doc__
-        assert e.doc in getattr(pathlike, e.name + "file").__doc__
-        assert e.doc in pathlike.file.write.__doc__
+        assert e.label in pathlike.path.__doc__ and e.name in pathlike.path.__doc__
+        assert e.doc in getattr(pathlike, e.name + "path").__doc__
+        assert e.doc in pathlike.path.write.__doc__
 
 
 def test_stub_engine_block_is_current():
@@ -1061,7 +1061,7 @@ def test_stub_engine_block_is_current():
     assert _stubs.render(text) == text, "stale stub: run `pygim stubs`"
     block = _stubs.engine_block()
     for e in _engines():
-        assert f"class {e.name}file(file):" in block and f'"{e.label}"' in block
+        assert f"class {e.name}path(path):" in block and f'"{e.label}"' in block
 
 
 # --------------------------------------------------------------------------- #
@@ -1122,7 +1122,7 @@ def test_remote_host_file_uri_is_rejected_on_posix():
 def test_file_uri_input_dispatches_by_extension_and_round_trips(temp_dir):
     uri = pathlib.Path(temp_dir, "notes", "config.yaml").as_uri()   # absolute on every platform
     p = pygim.path(uri)
-    assert p.engine == "rapidyaml" and isinstance(p, pathlike.yamlfile)
+    assert p.engine == "rapidyaml" and isinstance(p, pathlike.yamlpath)
     assert p.uri == uri
     assert pygim.path(p.uri) == p
 

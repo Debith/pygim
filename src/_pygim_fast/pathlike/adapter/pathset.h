@@ -2,7 +2,7 @@
 // pathlike/adapter/pathset.h — PathSet: many paths as one table, seen through views (prototype).
 //
 // PathSet owns a shared path_table (path_table.h) and a member list. Nothing
-// here is a Python object per path: iteration hands out `fileview`s — a
+// here is a Python object per path: iteration hands out `pathview`s — a
 // (table, row) pair that copies no text — and scan() reuses ONE view object
 // for a whole pass. Value filters and set algebra work on rows; a filtered
 // set shares its parent's table, so it is a mapping::id_set (members and a
@@ -17,7 +17,7 @@
 //     ps.add_text("a/c.json");             // row 3 a/c.json                     members [2, 3]
 //     ps.add_text("/d");                   // rows 4 "/", 5 /d                   members [2, 3, 5]
 //     ps.add_text("a//b.yaml/");           // row 2 again: the same value        members unchanged
-//     ps.size() -> 3       ps.view(1) -> fileview{table, 3}
+//     ps.size() -> 3       ps.view(1) -> pathview{table, 3}
 //
 //     yaml = ps.filter_suffix(".yaml")     // members [2]      (same table)
 //     abs  = ps.filter_absolute()          // members [5]
@@ -61,37 +61,9 @@
 #include "../path_table.h"
 #include "adapter.h"
 #include "path_store.h"
+#include "pathview.h"
 
 namespace pygim::pathlike {
-
-using table_ptr = std::shared_ptr<path_table>;
-
-/// A path inside a table: (table, row). Copies nothing; keeps the table
-/// alive, so a view outlives the set it came from. Python sees it as
-/// `pathlike.fileview` — the object `for v in ps` yields — with the reading
-/// half of a file's API (name, parent, suffix, ==, hash, os.fspath) served
-/// straight from the table.
-///
-///     fileview v{table, 3};                 // a/c.json in the example
-///     v.fspath()  -> "a/c.json"             v.to_file() -> file("a/c.json")
-///     v.equals(fileview{table, 3}) -> true
-///     v.equals(fileview{other_table, 2}) -> true   (other's a/c.json: found by chain, not by row number)
-struct fileview {
-    std::shared_ptr<const path_table> table;
-    std::uint32_t row = 0;
-
-    /// The owning value: the row's uri wrapped as a file (path_table::value).
-    [[nodiscard]] file to_file() const { return file(table->value(row)); }
-    /// pathlib's str() of the row (path_table::render).
-    [[nodiscard]] std::string fspath() const { return table->render<native_strategy>(row); }
-    /// Same path? Same table: same row. Different tables: `o`'s chain looked
-    /// up in this table (path_table::find across tables) and compared by row —
-    /// so equal spellings in two tables are equal views.
-    [[nodiscard]] bool equals(const fileview& o) const {
-        if (table.get() == o.table.get()) return row == o.row;
-        return table->find(*o.table, o.row) == row;
-    }
-};
 
 /// A predicate over a row of a table, with boolean algebra. Python's
 /// `pathlike.Filter`: made by ext(), name(), absolute(), combined with &, |
@@ -148,8 +120,8 @@ public:
     [[nodiscard]] const table_ptr& table() const noexcept { return m_table; }
     /// The member rows in insertion order.                ps.members() -> [2, 3, 5]
     [[nodiscard]] const std::vector<std::uint32_t>& members() const noexcept { return m_ids.members(); }
-    /// The i-th member as a view (no bounds check).       ps.view(1) -> fileview{table, 3}
-    [[nodiscard]] fileview view(std::size_t i) const { return {m_table, m_ids[i]}; }
+    /// The i-th member as a view (no bounds check).       ps.view(1) -> pathview{table, 3}
+    [[nodiscard]] pathview view(std::size_t i) const { return {m_table, m_ids[i], nullptr}; }
 
     /// Room for `n` more paths: sizes the table's hash tables once instead of
     /// letting them double their way up (a fresh table's rows run ~2-3x the
@@ -172,7 +144,7 @@ public:
     void add_value(const uri& u) { note(m_table->insert<native_strategy>(u)); }
     /// Adds a view: its row directly when the view is over this table,
     /// otherwise its chain copied in (path_table::insert_from).
-    void add_view(const fileview& v) {
+    void add_view(const pathview& v) {
         note(v.table.get() == m_table.get() ? v.row : m_table->insert_from(*v.table, v.row));
     }
 
@@ -187,9 +159,9 @@ public:
     [[nodiscard]] bool contains_text(std::string_view t) const { return has_row(m_table->find<native_strategy>(t)); }
     /// `file in ps`: the value looked up, then the bit.
     [[nodiscard]] bool contains_value(const uri& u) const { return has_row(m_table->find<native_strategy>(u)); }
-    /// `fileview in ps`: the row directly over the same table, else the view's
+    /// `pathview in ps`: the row directly over the same table, else the view's
     /// chain looked up here.
-    [[nodiscard]] bool contains_view(const fileview& v) const {
+    [[nodiscard]] bool contains_view(const pathview& v) const {
         return has_row(v.table.get() == m_table.get() ? v.row : m_table->find(*v.table, v.row));
     }
 
@@ -362,7 +334,7 @@ private:
 
 // ── Python glue ─────────────────────────────────────────────────────────────
 
-/// Adds one Python item: str/bytes as text, a fileview by row, a file by
+/// Adds one Python item: str/bytes as text, a pathview by row, a file by
 /// value, anything else through os.fspath (a TypeError when it cannot).
 inline void add_one(PathSet& ps, py::handle item) {
     if (PyUnicode_Check(item.ptr()) || PyBytes_Check(item.ptr())) {
@@ -370,24 +342,20 @@ inline void add_one(PathSet& ps, py::handle item) {
         ps.add_text(t.view);
         return;
     }
-    if (py::isinstance<fileview>(item)) {
-        ps.add_view(py::cast<const fileview&>(item));
-        return;
-    }
-    if (py::isinstance<file>(item)) {
-        ps.add_value(py::cast<const file&>(item).value());
+    if (py::isinstance<pathview>(item)) {
+        ps.add_view(py::cast<const pathview&>(item));
         return;
     }
     const text_arg t = text_view_of_arg(item);
     ps.add_text(t.view);
 }
 /// Whether a Python object is ONE path rather than an iterable of them: str,
-/// bytes, anything with __fspath__ (pathlib.Path), a file or a fileview. A
+/// bytes, anything with __fspath__ (pathlib.Path), a file or a pathview. A
 /// str is a path, never a sequence of characters — `PathSet("a/b")` is one
 /// member.
 [[nodiscard]] inline bool is_single_path(py::handle item) {
-    return PyUnicode_Check(item.ptr()) || PyBytes_Check(item.ptr()) || py::isinstance<file>(item) ||
-           py::isinstance<fileview>(item) || py::hasattr(item, "__fspath__");
+    return PyUnicode_Check(item.ptr()) || PyBytes_Check(item.ptr()) || py::isinstance<pathview>(item) ||
+           py::hasattr(item, "__fspath__");
 }
 /// Adds every item of an iterable; a sized one (list, tuple, set, dict, ...)
 /// reserves the table first.
@@ -419,13 +387,10 @@ inline void add_any(PathSet& ps, py::handle items) {
             const text_arg t = text_view_of_arg(item);
             const std::uint32_t r = base.table()->find<native_strategy>(t.view);
             if (r != path_table::none) out.add_text(t.view);
-        } else if (py::isinstance<fileview>(item)) {
-            const auto& v = py::cast<const fileview&>(item);
+        } else if (py::isinstance<pathview>(item)) {
+            const auto& v = py::cast<const pathview&>(item);
             const std::uint32_t r = v.table.get() == base.table().get() ? v.row : base.table()->find(*v.table, v.row);
             if (r != path_table::none) out.add_view(v);
-        } else if (py::isinstance<file>(item)) {
-            const uri& u = py::cast<const file&>(item).value();
-            if (base.table()->find<native_strategy>(u) != path_table::none) out.add_value(u);
         } else {
             const text_arg t = text_view_of_arg(item);
             if (base.table()->find<native_strategy>(t.view) != path_table::none) out.add_text(t.view);
@@ -441,15 +406,14 @@ inline bool contains(const PathSet& ps, py::handle item) {
         const text_arg t = text_view_of_arg(item);
         return ps.contains_text(t.view);
     }
-    if (py::isinstance<fileview>(item)) return ps.contains_view(py::cast<const fileview&>(item));
-    if (py::isinstance<file>(item)) return ps.contains_value(py::cast<const file&>(item).value());
+    if (py::isinstance<pathview>(item)) return ps.contains_view(py::cast<const pathview&>(item));
     const text_arg t = text_view_of_arg(item);
     return ps.contains_text(t.view);
 }
 
-/// The iterator behind `for v in ps` (a fresh fileview object per element,
+/// The iterator behind `for v in ps` (a fresh pathview object per element,
 /// ~200-300 ns: the pybind11 instance is the cost) and `ps.scan()` (ONE
-/// fileview object whose row advances, ~100 ns — do not keep it across
+/// pathview object whose row advances, ~100 ns — do not keep it across
 /// iterations). `owner` keeps the set, and so the table, alive.
 struct pathset_iter {
     py::object owner;      // keeps the set (and so the table) alive
@@ -479,69 +443,34 @@ struct path_query {
     [[nodiscard]] path_query widened(const row_filter& g) const { return {owner, set, f | g}; }
 };
 
-/// Binds fileview, the iterator, Filter, Query and PathSet into the pathlike module. Every
-/// fileview property reads the table by row; `to_file()` hands the row to the
+/// Binds pathview, the iterator, Filter, Query and PathSet into the pathlike module. Every
+/// pathview property reads the table by row; `to_file()` hands the row to the
 /// current PathStore, so a view of a set over the store's table becomes the
 /// store's object without re-interning (a slot read), and any other view is
 /// interned by value.
 template <class... Es>
-void bind_pathset(engine_list<Es...>, py::module_& m) {
+void bind_pathset(engine_list<Es...> es, py::module_& m, py::class_<pathview>& path_cls) {
     using Engines_ = engine_list<Es...>;
+    (void)Engines_{};
 
-    py::class_<fileview>(m, "fileview",
-        "A path inside a PathSet: a (table, row) pair that copies nothing. Behaves like a file "
-        "for reading the value (name, parent, parents, stem, suffix, suffixes, uri, engine, "
-        "os.fspath, ==, hash — equal to and hashing like the same path as a file); to_file() "
-        "gives the owning, typed file for everything else.")
-        .def_property_readonly("name", [](const fileview& v) { return str_from_text(v.table->name(v.row)); })
-        .def_property_readonly("stem", [](const fileview& v) { return str_from_text(detail::stem_of(v.table->name(v.row))); })
-        .def_property_readonly("suffix", [](const fileview& v) { return str_from_text(detail::suffix_of(v.table->name(v.row))); })
-        .def_property_readonly("suffixes", [](const fileview& v) {
-            py::list out;
-            for (const std::string& s : v.to_file().suffixes()) out.append(str_from_text(s));
-            return out;
-        })
-        .def_property_readonly("parent", [](const fileview& v) { return fileview{v.table, v.table->parent(v.row)}; })
-        .def_property_readonly("parents", [](const fileview& v) {
-            py::list out;
-            for (const std::uint32_t r : v.table->parents(v.row)) out.append(fileview{v.table, r});
-            return out;
-        })
-        .def_property_readonly("depth", [](const fileview& v) { return v.table->depth(v.row); })
-        .def_property_readonly("uri", [](const fileview& v) { return v.to_file().as_uri(); })
-        .def_property_readonly("engine", [](const fileview& v) -> py::object {
-            const file f = v.to_file();
-            const engine_info* e = Engines_::resolved(f);
-            if (!e) return py::none();
-            return py::str(std::string(e->label));
-        })
-        .def("is_absolute", [](const fileview& v) { return v.table->is_absolute<native_strategy>(v.row); })
-        .def("to_file", [](const fileview& v) {
-                 path_store& st = current_store();
-                 if (v.table.get() == st.table().get()) return object_for(Engines_{}, st, v.row);   // same table: no re-intern
-                 return make(Engines_{}, st, v.to_file());
-             },
-             "The owning file (typed by its engine) with the same value, interned in the current store.")
-        .def("__fspath__", [](const fileview& v) { return str_from_text(v.fspath()); })
-        .def("__str__", [](const fileview& v) { return str_from_text(v.fspath()); })
-        .def("__repr__", [](const fileview& v) { return "fileview(" + py::repr(str_from_text(v.fspath())).cast<std::string>() + ")"; })
-        .def("__eq__", [](const fileview& a, const fileview& b) { return a.equals(b); }, py::is_operator())
-        .def("__eq__", [](const fileview& a, const file& b) { return a.table->value(a.row) == b.value(); }, py::is_operator())
-        .def("__hash__", [](const fileview& v) {
-            const auto h = static_cast<py::ssize_t>(v.table->hash(v.row));
-            return h == -1 ? py::ssize_t(-2) : h;
-        });
+    // `p.pathset(pattern)`: the glob results as a set over p's own table.
+    path_cls.def("pathset", [](const pathview& v, std::string_view pattern) {
+                 PathSet ps(v.table);
+                 for (const file& m : v.value().glob(pattern)) ps.add_value(m.value());
+                 return ps;
+             }, py::arg("pattern") = "*",
+             "The glob results as a PathSet over this path's table, for set algebra and Filter queries.");
 
     py::class_<pathset_iter>(m, "_PathSetIterator")
         .def("__iter__", [](py::object self) { return self; })
-        .def("__next__", [](pathset_iter& it) -> py::object {
+        .def("__next__", [es](pathset_iter& it) -> py::object {
             if (it.i >= it.set->size()) throw py::stop_iteration();
-            fileview v = it.set->view(it.i++);
-            if (!it.reuse) return py::cast(std::move(v));
+            pathview v = it.set->view(it.i++);
+            if (!it.reuse) return wrap(es, std::move(v));
             if (!it.current) {
                 it.current = py::cast(std::move(v));
             } else {
-                py::cast<fileview&>(it.current).row = v.row;
+                py::cast<pathview&>(it.current).row = v.row;
             }
             return it.current;
         });
@@ -575,18 +504,18 @@ void bind_pathset(engine_list<Es...>, py::module_& m) {
     py::class_<PathSet>(m, "PathSet",
         "Many paths as ONE table: every distinct path component is stored once and every path is "
         "a row (parent, name) in a hash-consed trie, so a path costs a few bytes plus its share of "
-        "the unique names. Iterating yields fileviews (nothing copied); scan() reuses one view "
+        "the unique names. Iterating yields pathviews (nothing copied); scan() reuses one view "
         "object per pass. filter_suffix()/filter_name() and |, &, - work on rows and return sets "
         "sharing the table; `ps & Filter` is a lazy Query; + and - take a PathSet or path(s); == compares "
         "as sets; to_list() renders the members. PathSet(paths, store=s) shares the store's table, so its "
-        "views and s.path() objects meet without re-interning. Sets are built, never edited: `ps -= x` "
+        "members and path(text, store=s) objects are rows of one table. Sets are built, never edited: `ps -= x` "
         "rebinds the name to a new set. Insertion order, append-only.")
         .def(py::init([](py::object paths, py::object store) {
                  PathSet ps = store.is_none() ? PathSet() : PathSet(as_store(store).table());
                  if (!paths.is_none()) add_any(ps, paths);
                  return ps;
              }), py::arg("paths") = py::none(), py::kw_only(), py::arg("store") = py::none(),
-             "PathSet(paths=None, *, store=None): `paths` is one path (str, bytes, os.PathLike, file, fileview) "
+             "PathSet(paths=None, *, store=None): `paths` is one path (str, bytes, os.PathLike, file, pathview) "
              "or an iterable of them.")
         .def_static("cwd", &PathSet::cwd, "The set holding the current working directory.")
         .def("add", [](PathSet& ps, py::handle p) { add_one(ps, p); }, py::arg("path"))
@@ -604,13 +533,13 @@ void bind_pathset(engine_list<Es...>, py::module_& m) {
         })
         .def("scan", [](py::object self) {
             return pathset_iter(self, &py::cast<const PathSet&>(self), true);
-        }, "Iterate reusing ONE fileview object (its row advances): no allocation per element. "
+        }, "Iterate reusing ONE pathview object (its row advances): no allocation per element. "
            "Do not keep the yielded object across iterations.")
-        .def("__getitem__", [](const PathSet& ps, py::ssize_t i) {
+        .def("__getitem__", [es](const PathSet& ps, py::ssize_t i) {
             const auto n = static_cast<py::ssize_t>(ps.size());
             if (i < 0) i += n;
             if (i < 0 || i >= n) throw py::index_error("PathSet index out of range");
-            return ps.view(static_cast<std::size_t>(i));
+            return wrap(es, ps.view(static_cast<std::size_t>(i)));
         })
         .def("filter_suffix", [](const PathSet& ps, std::string_view s) { return ps.filter_suffix(s); }, py::arg("suffix"),
              "The members whose final suffix equals `suffix` (pathlib's rule; case-sensitive).")

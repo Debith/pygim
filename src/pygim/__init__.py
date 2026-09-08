@@ -8,7 +8,6 @@
 _LAZY_EXPORTS = {
     "PathSet": ("pygim.pathlike", "PathSet"),
     "path": ("pygim.pathlike", "path"),
-    "file": ("pygim.pathlike", "file"),
     "Registry": ("pygim.registry", "Registry"),
     "Factory": ("pygim.factory", "Factory"),
     "Container": ("pygim.ioc", "Container"),

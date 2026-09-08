@@ -3,7 +3,7 @@
 
 pathlike's engine registry is open — one header per engine, discovered by the
 build — so the engine-dependent part of ``pathlike.pyi`` (the ``Engine``
-selector literal and the ``<name>file`` typed classes) is generated from the
+selector literal and the ``<name>path`` typed classes) is generated from the
 built module's ``ENGINES`` record rather than hand-written. ``pygim stubs``
 rewrites the marked block; ``tests/unittests/test_pathlike.py`` asserts it is
 current, so a new engine cannot land with a stale stub.
@@ -32,12 +32,12 @@ def engine_block() -> str:
         lines.append("    " + ", ".join(f'"{s}"' for s in (e.name, e.label, *e.aliases)) + ",")
     lines.append("]")
     for e in pathlike.ENGINES:
-        typed = getattr(pathlike, f"{e.name}file")   # its docstring is composed once, in C++ (bind_one)
+        typed = getattr(pathlike, f"{e.name}path")   # its docstring is composed once, in C++ (bind_typed_one)
         lines += [
             "",
-            f"class {e.name}file(file):",
+            f"class {e.name}path(path):",
             f'    """{typed.__doc__}"""',
-            "    def __init__(self, path: str | os.PathLike[str]) -> None: ...",
+            "    def __init__(self, path: str | bytes | os.PathLike[str], *, store: PathStore | None = None) -> None: ...",
         ]
     lines += ["", "ENGINES: tuple[EngineInfo, ...]", END]
     return "\n".join(lines) + "\n"

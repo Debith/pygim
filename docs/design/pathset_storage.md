@@ -15,7 +15,7 @@ Evidence: `benchmarks/pathset_prototype.py`, records in
 (`segment_table`, dictionary encoding) and every distinct path as one row
 `(parent row, segment id)` — a hash-consed trie, so the directory tree is
 stored once and a file path costs eight bytes plus its share of the unique
-names. Views (`fileview`) are `(table, row)` and copy nothing; the table is
+names. Views (`path object`) are `(table, row)` and copy nothing; the table is
 append-only, so a row index never dangles. A filtered set shares its parent's
 table and is only a member list plus a bitmap.
 
@@ -153,7 +153,7 @@ The effort Arrow would have taken goes to the two gaps the benchmark found:
    this one (~170 ns/element). Both are bounded by random probes into a
    large hash table; the next step, if it matters, is a merge that walks
    both tries in parent order so the probes become sequential.
-3. **Per-element Python access.** A fresh `fileview` per element costs a
+3. **Per-element Python access.** A fresh `path object` per element costs a
    pybind11 instance (~200-300 ns). `scan()` halves it. A lighter holder,
    or a batch accessor (`names()`, `parents()` as lists in one call), is the
    remaining lever; the table itself is not the cost.

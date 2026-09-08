@@ -1,5 +1,19 @@
 # pathlike: the flyweight store behind path()
 
+> **Superseded (2026-09-08): the path object is a handle.** The design below
+> kept a full value in every object and bolted identity on with weak slots and
+> tokens. It is replaced by one class, `pygim.path`, that IS the (table, row,
+> pin) handle `fileview` used to be: the constructor interns, `store=` chooses
+> the table once and derived paths inherit it, equality and hashing are by row,
+> and object identity is not promised (as CPython interns strings without
+> promising `is`). What leaves pathlike: the weak slots, the token on the core
+> value, the ambient current store and `use_store`, `fileview` and the `file`
+> name. What stays: the table, `PathStore` as the lifetime a program chooses by
+> argument, and the row-based derivations. The toolkit's `weak_slots` and
+> `ambient` remain as components without a pathlike consumer
+> (`mapping_toolkit.md`). The rest of this note is kept as the record of why
+> identity was tried and what it cost.
+
 Why `pygim.path()` hands back the same object for the same path while anything
 holds it, where that identity lives, how it meets the IoC container, and what
 it costs.

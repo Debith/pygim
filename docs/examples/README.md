@@ -33,7 +33,7 @@ for f in docs/examples/*/example_*.py; do python "$f" || break; done
 | factory | [example_02_interface_enforcement.py](factory/example_02_interface_enforcement.py) | Factories that validate every product against an interface at creation time |
 | each | [example_01_broadcasting.py](each/example_01_broadcasting.py) | Broadcasting attribute reads and method calls over any iterable, argument forwarding, the dunder guard rail |
 | pathlike | [example_01_read_a_config.py](pathlike/example_01_read_a_config.py) | One call from a path to native Python objects |
-| pathlike | [example_02_typed_files.py](pathlike/example_02_typed_files.py) | `.engine` naming the decoding library (rapidyaml/simdjson/toml++); `yamlfile`/`jsonfile`/`tomlfile` types mirroring it through pins and derived paths |
+| pathlike | [example_02_typed_files.py](pathlike/example_02_typed_files.py) | `.engine` naming the decoding library (rapidyaml/simdjson/toml++); `yamlpath`/`jsonpath`/`tomlpath` types mirroring it through pins and derived paths |
 | pathlike | [example_03_pathlib_parity.py](pathlike/example_03_pathlib_parity.py) | os.PathLike integration, name components, `/` composition |
 | pathlike | [example_04_yaml_12_scalars.py](pathlike/example_04_yaml_12_scalars.py) | YAML 1.2 scalar typing: hex/octal/big ints, 1.1-isms staying strings, dot-form floats, quoting |
 | pathlike | [example_05_json_and_toml.py](pathlike/example_05_json_and_toml.py) | Strict JSON with filename in errors; TOML with real datetime objects |

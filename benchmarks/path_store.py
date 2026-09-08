@@ -1,14 +1,13 @@
-"""PathStore flyweight benchmarks: pygim.path() through the store vs the raw file()
-constructor, cold (every value new) and warm (the value's object is alive).
+"""pygim.path as a handle: construction into a fresh store (rows created) and into a
+store that already holds the rows, derived paths by row, and memory per object.
 
 Sections:
 
-1. **construct** — path(s) over N distinct strings, cold (fresh store) and warm
-   (a second pass while the first pass's objects are held), vs file(s) and
+1. **construct** — path(s) over N distinct strings into a fresh store (rows
+   created) and into a store already holding them (lookups only), vs
    pathlib.PurePath(s).
-2. **derived** — p.parent and p / "x" cold and warm.
-3. **memory** — the store's bytes per interned path with the objects dead, and
-   RSS per live object.
+2. **derived** — p.parent and p / "x", by row.
+3. **memory** — the table's bytes per path, and RSS per handle.
 
 Run:  python benchmarks/path_store.py [--no-save]
 Each run appends its raw measurements + environment metadata to
@@ -45,20 +44,15 @@ def bench_construct(strs):
         return r
 
     rec("pathlib.PurePath(s)", lambda: [pathlib.PurePath(s) for s in strs])
-    rec("file(s)  (raw constructor, no store)", lambda: [pathlike.file(s) for s in strs])
 
-    def cold():
-        with pathlike.use_store(pathlike.PathStore()):
-            return [path(s) for s in strs]
-    rec("path(s) cold  (fresh store: intern + grow + new objects)", cold, timer=best_fresh)
-
+    def fresh():
+        st = pathlike.PathStore()
+        return [path(s, store=st) for s in strs]
+    rec("path(s, store=fresh)  (rows created)", fresh, timer=best_fresh)
     st = pathlike.PathStore()
-    with pathlike.use_store(st):
-        held = [path(s) for s in strs]
-        rec("path(s) warm  (objects alive: lookup only)", lambda: [path(s) for s in strs])
-        del held
-        rec("path(s) cool  (rows interned, objects dead: lookup + new objects)",
-            lambda: [path(s) for s in strs], timer=best_fresh)
+    held = [path(s, store=st) for s in strs]
+    rec("path(s, store=st)  (rows present: lookups + a handle)", lambda: [path(s, store=st) for s in strs])
+    del held
     print(f"\n## 1. construct, {N:,} distinct paths (ns per path, best of {REPS})\n")
     print(tabulate(rows, headers=["construct", "ns/path"], tablefmt="github"))
     return raw
@@ -72,18 +66,15 @@ def bench_derived(strs):
         raw[label] = {"seconds": t}
         rows.append([label, f"{ns(t):,.0f}"])
 
-    raw_files = [pathlike.file(s) for s in strs]
-    rec("f.parent  (raw files, no store)", lambda: [f.parent for f in raw_files])
     st = pathlike.PathStore()
-    with pathlike.use_store(st):
-        objs = [path(s) for s in strs]
-        rec("p.parent  cool (parents interned, not alive)", lambda: [p.parent for p in objs], timer=best_fresh)
-        parents = [p.parent for p in objs]
-        rec("p.parent  warm (parents alive)", lambda: [p.parent for p in objs])
-        rec("p / 'x'   cool", lambda: [p / "x" for p in objs], timer=best_fresh)
-        kids = [p / "x" for p in objs]
-        rec("p / 'x'   warm", lambda: [p / "x" for p in objs])
-        del parents, kids
+    objs = [path(s, store=st) for s in strs]
+    pl_objs = [pathlib.PurePath(s) for s in strs]
+    rec("PurePath.parent", lambda: [p.parent for p in pl_objs])
+    rec("p.parent  (by row)", lambda: [p.parent for p in objs])
+    rec("PurePath / 'x'", lambda: [p / "x" for p in pl_objs])
+    rec("p / 'x'   (one component: child row)", lambda: [p / "x" for p in objs])
+    rec("p.with_suffix('.j')  (value route)", lambda: [p.with_suffix(".j") for p in objs])
+    rec("p.name  (a view)", lambda: [p.name for p in objs])
     print(f"\n## 2. derived paths, {N:,} paths (ns per operation, best of {REPS})\n")
     print(tabulate(rows, headers=["operation", "ns/op"], tablefmt="github"))
     return raw
@@ -98,19 +89,17 @@ from pygim import pathlike
 strs = corpus({n})
 gc.collect()
 m0 = rss_mb()
-if {variant!r} == "raw":
-    objs = [pathlike.file(s) for s in strs]
+if {variant!r} == "pathlib":
+    objs = [__import__("pathlib").PurePath(s) for s in strs]
     print((rss_mb() - m0) * 2**20 / {n})
 else:
     st = pathlike.PathStore()
-    with pathlike.use_store(st):
-        objs = [pygim.path(s) for s in strs]
-        total = (rss_mb() - m0) * 2**20 / {n}
-        s = st.stats()
-        store = (s["table_bytes"] + s["slot_bytes"]) / {n}
-        del objs
-        gc.collect()
-        print(total, store, st.stats()["live"])
+    objs = [pygim.path(s, store=st) for s in strs]
+    total = (rss_mb() - m0) * 2**20 / {n}
+    store = st.stats()["bytes"] / {n}
+    del objs
+    gc.collect()
+    print(total, store, 0)
 """
 
 
@@ -126,17 +115,15 @@ def bench_memory():
                              capture_output=True, text=True, check=True).stdout.split()
         return [float(x) for x in out]
 
-    (raw_per,) = probe("raw")
-    total, store, live = probe("store")
-    rows = [["rss per raw file() object", f"{raw_per:.0f}"],
-            ["rss per path() object, store included", f"{total:.0f}"],
-            ["  of which the store (table + slots), per interned path", f"{store:.0f}"],
-            ["  of which the live object", f"{total - store:.0f}"],
-            ["live objects after del + gc", f"{live:.0f}"]]
+    (pl_per,) = probe("pathlib")
+    total, store, _ = probe("store")
+    rows = [["rss per pathlib.PurePath object", f"{pl_per:.0f}"],
+            ["rss per path() handle, table included", f"{total:.0f}"],
+            ["  of which the table, per path", f"{store:.0f}"],
+            ["  of which the handle", f"{total - store:.0f}"]]
     print(f"\n## 3. memory, {N:,} paths (each variant in a fresh process)\n")
     print(tabulate(rows, headers=["measure", "bytes / count"], tablefmt="github"))
-    return {"rss_per_raw_file": raw_per, "rss_per_path_object_total": total, "store_bytes_per_path": store,
-            "live_after_del": live}
+    return {"rss_per_purepath": pl_per, "rss_per_handle_total": total, "table_bytes_per_path": store}
 
 
 def main():

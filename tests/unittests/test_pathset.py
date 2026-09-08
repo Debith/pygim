@@ -159,5 +159,5 @@ def test_file_pathset_shares_the_current_store(temp_dir, temp_files):
     ps = pygim.path(temp_dir).pathset("*.rst")
     assert isinstance(ps, PathSet) and len(ps) == 2
     v = ps[0]
-    assert v.to_file() is pygim.path(os.fspath(v))                 # the same table as the store: a slot read
+    assert v == pygim.path(os.fspath(v)) and v.store == pygim.path(temp_dir).store   # rows of one table
     assert pygim.path(temp_files[1]) in ps

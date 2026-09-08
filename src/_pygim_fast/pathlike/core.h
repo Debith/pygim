@@ -32,7 +32,6 @@
 #include <utility>
 #include <vector>
 
-#include "../utils/flyweight.h"
 #include "../utils/hash.h"
 #include "uri.h"
 
@@ -483,14 +482,6 @@ public:
     [[nodiscard]] constexpr const uri& value() const noexcept { return m_uri; }
     [[nodiscard]] constexpr const engine_info* pinned() const noexcept { return m_pin; }
 
-    // Where this value is interned, if anywhere: the flyweight token
-    // (utils/flyweight.h) stamped by the store that handed the object out.
-    // Not part of the value, equality or hash; a copy carries it along, so a
-    // reader validates it against the owner before trusting it.
-    using intern_token = flyweight::token;
-    [[nodiscard]] constexpr intern_token interned() const noexcept { return m_intern; }
-    constexpr void set_interned(intern_token t) noexcept { m_intern = t; }
-
     // os.PathLike: the native path text, in pathlib's normalised spelling.
     [[nodiscard]] constexpr std::string fspath() const { return Strategy::render(m_uri); }
 
@@ -575,7 +566,7 @@ public:
     }
 
     [[nodiscard]] constexpr std::string repr() const {
-        std::string out = "file(\"" + as_uri() + "\"";
+        std::string out = "path(\"" + as_uri() + "\"";
         if (m_pin) out += ", engine=" + std::string(m_pin->label);
         return out + ")";
     }
@@ -768,7 +759,6 @@ private:
 
     uri m_uri;
     const engine_info* m_pin{nullptr};   // pinned at construction; nullptr = auto by extension
-    intern_token m_intern{};              // see interned()
 };
 
 using file = basic_file<native_strategy>;
