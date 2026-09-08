@@ -11,6 +11,7 @@ import pytest
 from click.testing import CliRunner
 
 from _pygim._cli import _commenter, _docs_serve
+from pygim.pathlike import PathStore, default_store
 from _pygim._cli._cli_app import GimmicksCliApp
 from pygim.__main__ import cli_oo
 
@@ -93,6 +94,32 @@ class TestCommenterInjection:
         assert _commenter.inject("no body tag").endswith(_commenter.COMMENTER)
 
 
+class TestPages:
+    def test_pages_lists_the_sites_html(self, server, site):
+        (site / "__notes__").mkdir()
+        (site / "__notes__" / "draft.html").write_text("<p>not a page</p>", encoding="utf-8")
+        status, _, body = _get(server + "/pages")
+        assert status == 200
+        assert json.loads(body) == ["/nested/index.html", "/page.html", "/site/index.html"]
+
+    def test_requests_intern_into_the_servers_store_not_the_default(self, site):
+        rows = default_store().stats()["rows"]
+        store = PathStore()
+        httpd = _docs_serve.make_server(site, port=0, host="127.0.0.1", store=store)
+        thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+        thread.start()
+        try:
+            base = f"http://127.0.0.1:{httpd.server_address[1]}"
+            for url in ("/page.html", "/nested/", "/nope/probe.html", "/pages"):
+                _get(base + url)
+            assert default_store().stats()["rows"] == rows           # untouched by request traffic
+            assert store.stats()["rows"] > 0                          # it all went here
+        finally:
+            httpd.shutdown()
+            httpd.server_close()
+            thread.join(timeout=5)
+
+
 class TestRootRedirect:
     def test_root_redirects_to_site_index_when_root_has_none(self, server):
         status, headers, _ = _get(server + "/", follow=False)
@@ -126,6 +153,14 @@ class TestComments:
         assert json.loads(other) == []
         _, _, everything = _get(server + "/comments")
         assert len(json.loads(everything)) == 1
+
+    def test_page_query_is_compared_as_a_path(self, server):
+        _, body = _post(server + "/comment", {"page": "/nested/./index.html", "text": "here"})
+        cid = json.loads(body)["id"]
+        _, _, listing = _get(server + "/comments?page=%2Fnested%2Findex.html")
+        assert [c["id"] for c in json.loads(listing)] == [cid]        # spellings collapse to one page
+        _, _, other = _get(server + "/comments?page=%2Fnested%2F")
+        assert json.loads(other) == []
 
     def test_edit_then_delete(self, server, site):
         _, body = _post(server + "/comment", {"page": "/p", "text": "v1"})
@@ -241,6 +276,16 @@ class TestMakeServer:
             httpd.server_close()
 
 
+class TestRebuild:
+    def test_rebuild_reports_the_pages_it_added_and_removed(self, site):
+        added, removed = _docs_serve.rebuild(site, "touch new.html && rm page.html")
+        assert added == ["/new.html"] and removed == ["/page.html"]
+
+    def test_rebuild_failure_names_the_exit_code(self, site):
+        with pytest.raises(_docs_serve.ServeError, match="exit 3"):
+            _docs_serve.rebuild(site, "exit 3")
+
+
 class TestCli:
     def test_docs_serve_is_registered(self):
         result = CliRunner().invoke(cli_oo, ["docs", "serve", "--help"])
@@ -273,4 +318,6 @@ class TestCli:
         GimmicksCliApp().docs_serve(directory=str(site), port=1234, host="127.0.0.1",
                                     rebuild="touch built.marker")
         assert (site / "built.marker").exists()
-        assert calls == [(site, {"port": 1234, "host": "127.0.0.1", "index": None})]
+        [(root, kw)] = calls
+        assert root == site and kw["port"] == 1234 and kw["host"] == "127.0.0.1" and kw["index"] is None
+        assert isinstance(kw["store"], PathStore)                       # one store for rebuild and serving

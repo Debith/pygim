@@ -16,7 +16,14 @@ Serves a directory of HTML/CSS/JS and adds two things a plain
   ``<root>/images/<sub>/<file>`` — no Downloads round-trip. Uploads land only
   under an ``images`` directory and only with an image extension.
 
-File handling is pathlike (``pygim.path``); Python here is routing glue.
+File handling is pathlike (``pygim.path``); Python here is routing glue. The
+server owns a ``PathStore``: every path it makes — the root, the comments file,
+each request's translated path, the pages inventory — is a row of that one
+table, so the module's default store never sees request traffic and the whole
+table goes when the server is dropped. ``GET /pages`` lists the site's HTML
+pages (a ``PathSet`` of ``root.pathset("**/*.html")``), ``?page=`` is compared
+as a path (spellings collapse), and ``rebuild()`` reports what a rebuild added
+and removed as a set difference.
 
 LOCAL USE: binds all interfaces by default (so the page is reachable via the WSL
 IP when Windows→WSL localhost forwarding hiccups) and only ever writes under the
@@ -36,9 +43,10 @@ import socketserver
 import urllib.parse
 
 import pygim
+from pygim.pathlike import PathStore
 from _pygim._cli import _commenter
 
-__all__ = ["ServeError", "make_server", "serve"]
+__all__ = ["ServeError", "make_server", "rebuild", "serve", "site_pages"]
 
 SEG_RE = re.compile(r"^[a-z0-9][a-z0-9 ._-]*$", re.IGNORECASE)  # one path segment, no traversal (spaces ok)
 EXT_OK = (".jpg", ".jpeg", ".png", ".webp", ".gif")
@@ -86,6 +94,27 @@ def _upload_target(root, qs):
     return (dest, "/".join(segs)) if root in dest.parents else None
 
 
+def site_pages(root):
+    """The site's HTML pages as a PathSet over *root*'s table: every ``*.html``
+    under the root except the notes directory. Two calls on the same root are
+    two sets over one table, so they subtract and intersect at bit speed."""
+    return root.pathset("**/*.html") - root.pathset(COMMENTS_REL.split("/")[0] + "/**/*.html")
+
+
+def _relative(root, p) -> str:
+    """*p* as the root-relative URL path (forward slashes, leading slash)."""
+    rel = os.fspath(p)[len(os.fspath(root)):].replace("\\", "/")
+    return "/" + rel.lstrip("/")
+
+
+def _page_key(root, page: str | None):
+    """A ``?page=`` value (a URL path) as a path over *root*'s table, so
+    ``/a/./b.html`` and ``/a/b.html`` are the same page; None stays None."""
+    if page is None:
+        return None
+    return root / page.lstrip("/")
+
+
 def _pick_index(root, index: str | None) -> str | None:
     """The root-relative page ``/`` redirects to, or None to serve the root as-is."""
     if index:
@@ -96,8 +125,10 @@ def _pick_index(root, index: str | None) -> str | None:
 
 
 def _make_handler(root, index: str | None):
-    """A SimpleHTTPRequestHandler bound to *root* with the comment and upload endpoints."""
-    comments = root / COMMENTS_REL  # a pathlike jsonlfile: read() -> list, write(list)
+    """A SimpleHTTPRequestHandler bound to *root* with the comment, pages and upload endpoints.
+    *root* carries the server's store; every path made here derives from it."""
+    store = root.store
+    comments = root / COMMENTS_REL  # a pathlike jsonlpath: read() -> list, write(list)
 
     def load_comments() -> list:
         return comments.read() if comments.is_file() else []
@@ -115,10 +146,14 @@ def _make_handler(root, index: str | None):
             parsed = urllib.parse.urlparse(self.path)
             route = parsed.path.rstrip("/")
             if route == "/comments":
-                page = urllib.parse.parse_qs(parsed.query).get("page", [None])[0]
+                wanted = _page_key(root, urllib.parse.parse_qs(parsed.query).get("page", [None])[0])
                 self._guarded(lambda: self._send_json([
                     c for c in load_comments()
-                    if c.get("status", "open") == "open" and (page is None or c.get("page") == page)]))
+                    if c.get("status", "open") == "open"
+                    and (wanted is None or _page_key(root, c.get("page")) == wanted)]))
+                return
+            if route == "/pages":
+                self._send_json(sorted(_relative(root, p) for p in site_pages(root)))
                 return
             if self.path in ("/", "/index.html") and index and not (root / "index.html").is_file():
                 self.send_response(302)
@@ -126,7 +161,7 @@ def _make_handler(root, index: str | None):
                 self.end_headers()
                 return
             # every served HTML page gets the ✎ commenter
-            page = pygim.path(self.translate_path(parsed.path))
+            page = pygim.path(self.translate_path(parsed.path), store=store)   # a row of the server's table
             if page.is_dir():
                 page = page / "index.html"
             if page.suffix.lower() == ".html" and page.is_file():
@@ -254,13 +289,33 @@ def _lan_ip():
     return ip
 
 
+def rebuild(doc_root, command: str, *, store=None):
+    """Run *command* in *doc_root* and report what it changed: the root-relative
+    URLs of pages added and pages removed, as two sorted lists (a set
+    difference over the site's pages before and after). Raises
+    :class:`ServeError` with the exit code when the command fails."""
+    import subprocess
+
+    root = pygim.path(doc_root, store=store or PathStore()).resolve()
+    before = site_pages(root)
+    rc = subprocess.run(command, shell=True, cwd=os.fspath(root), check=False).returncode
+    if rc:
+        raise ServeError(f"rebuild command failed (exit {rc}): {command}")
+    after = site_pages(root)
+    added = sorted(_relative(root, p) for p in after - before)
+    removed = sorted(_relative(root, p) for p in before - after)
+    return added, removed
+
+
 def make_server(doc_root, *, port: int = 8000, host: str | None = None,
-                index: str | None = None) -> socketserver.TCPServer:
+                index: str | None = None, store=None) -> socketserver.TCPServer:
     """Build (and bind) the server for *doc_root* without running it.
 
+    *store* is the PathStore every path the server makes lives in (default: a
+    fresh one, so the module's default store never sees request traffic).
     Raises :class:`ServeError` if it cannot bind, and ``FileNotFoundError`` if
     *doc_root* is not a directory. ``port=0`` picks a free port (tests)."""
-    root = pygim.path(doc_root).resolve()
+    root = pygim.path(doc_root, store=store or PathStore()).resolve()
     if not root.is_dir():
         raise FileNotFoundError(f"doc root not found: {root}")
 
@@ -295,16 +350,17 @@ def make_server(doc_root, *, port: int = 8000, host: str | None = None,
 
 
 def serve(doc_root, *, port: int = 8000, host: str | None = None,
-          index: str | None = None) -> None:
+          index: str | None = None, store=None) -> None:
     """Serve *doc_root* on *port* until Ctrl-C. See :func:`make_server` for errors."""
-    httpd = make_server(doc_root, port=port, host=host, index=index)
+    httpd = make_server(doc_root, port=port, host=host, index=index, store=store)
     port = httpd.server_address[1]
     ip = _lan_ip()
     print("Docs are UP. Open EITHER url in your browser:")
     print(f"    http://localhost:{port}/")
     if ip:
         print(f"    http://{ip}:{port}/      (use this one if localhost won't connect)")
-    print(f"\nServing {pygim.path(doc_root).resolve()}")
+    root = pygim.path(doc_root, store=store or PathStore()).resolve()
+    print(f"\nServing {root}  ({len(site_pages(root))} pages; GET /pages lists them)")
     print(f"Comments (✎) land in {COMMENTS_REL}; image drops write under images/. Ctrl-C to stop.")
     print("(Bound on all interfaces for WSL reachability — it's LAN-visible while running.)\n")
     try:
