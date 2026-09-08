@@ -202,18 +202,49 @@ def _make_handler(root, index: str | None):
                 length = 0
             return length if 0 < length <= limit else None
 
+        def _read_body(self, length):
+            self._body_read = True
+            return self.rfile.read(length)
+
+        def _discard_body(self):
+            """Read and drop a request body nobody consumed, so the client sees our reply.
+
+            Windows resets a connection the server closes with bytes still unread, and
+            the client then reports WinError 10053 instead of our status line. Bodies
+            beyond the upload limit are not drained; the reset is the cheaper answer.
+            """
+            if getattr(self, "_body_read", True):
+                return
+            try:
+                left = int(self.headers.get("Content-Length", 0))
+            except ValueError:
+                left = 0
+            if left > MAX_BYTES:
+                return
+            while left > 0:
+                chunk = self.rfile.read(min(left, 65536))
+                if not chunk:
+                    break
+                left -= len(chunk)
+            self._body_read = True
+
+        def send_error(self, code, message=None, explain=None):
+            self._discard_body()
+            super().send_error(code, message, explain)
+
         def _read_json_body(self, limit=MAX_COMMENT):
             length = self._body_length(limit)
             if length is None:
                 return None
             try:
-                obj = json.loads(self.rfile.read(length).decode("utf-8"))
+                obj = json.loads(self._read_body(length).decode("utf-8"))
             except (ValueError, UnicodeDecodeError):
                 return None
             return obj if isinstance(obj, dict) else None
 
         # ---- POST ------------------------------------------------------
         def do_POST(self):
+            self._body_read = False
             parsed = urllib.parse.urlparse(self.path)
             route = parsed.path.rstrip("/")
             if route == "/comment":
@@ -265,7 +296,7 @@ def _make_handler(root, index: str | None):
             if length is None:
                 self.send_error(413, "bad size")
                 return
-            data = self.rfile.read(length)
+            data = self._read_body(length)
             dest.parent.mkdir(parents=True, exist_ok=True)
             dest.write_bytes(data)
             print(f"  wrote {rel}  ({len(data)} bytes)")

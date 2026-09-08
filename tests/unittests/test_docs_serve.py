@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 """Tests for ``oo docs serve`` — the static docs server with the ✎ review layer."""
 
+import io
 import json
 import threading
 import urllib.error
@@ -214,6 +215,44 @@ class TestComments:
 
     def test_unknown_post_route(self, server):
         assert _post(server + "/nope", {})[0] == 404
+
+
+class TestErrorRepliesDrainTheBody:
+    """An error reply reads the request body first; Windows resets a connection closed
+    with unread bytes and the client then sees WinError 10053 instead of our status."""
+
+    @staticmethod
+    def _handler(site, body: bytes, *, length=None):
+        httpd = _docs_serve.make_server(site, port=0, host="127.0.0.1")
+        try:
+            cls = httpd.RequestHandlerClass
+        finally:
+            httpd.server_close()
+        h = cls.__new__(cls)
+        h.headers = {"Content-Length": str(len(body) if length is None else length)}
+        h.rfile = io.BytesIO(body)
+        h._body_read = False
+        return h
+
+    def test_unread_body_is_consumed(self, site):
+        h = self._handler(site, b"x" * 70_000)
+        h._discard_body()
+        assert h.rfile.tell() == 70_000
+
+    def test_consumed_body_is_not_read_twice(self, site):
+        h = self._handler(site, b"abcde")
+        assert h._read_body(5) == b"abcde"
+        h.rfile = io.BytesIO(b"next request")
+        h._discard_body()
+        assert h.rfile.tell() == 0
+
+    def test_body_over_upload_limit_is_left_alone(self, site):
+        h = self._handler(site, b"y", length=_docs_serve.MAX_BYTES + 1)
+        h._discard_body()
+        assert h.rfile.tell() == 0
+
+    def test_unknown_route_with_large_body(self, server):
+        assert _post(server + "/nope", None, raw=b"z" * 100_000)[0] == 404
 
 
 class TestUpload:
