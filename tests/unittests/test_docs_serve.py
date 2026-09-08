@@ -121,18 +121,53 @@ class TestPages:
 
 
 class TestMarkdown:
-    def test_markdown_page_is_rendered_with_the_commenter(self, server, site):
+    def test_opening_markdown_generates_html_beside_it_and_redirects(self, server, site):
         (site / "design.md").write_text("# Title\n\nSome *text*.\n\n| a | b |\n|---|---|\n| 1 | 2 |\n", encoding="utf-8")
-        status, headers, body = _get(server + "/design.md")
-        assert status == 200 and headers["Content-Type"].startswith("text/html")
-        text = body.decode("utf-8")
-        assert "<h1" in text and "<em>text</em>" in text and "<table>" in text
-        assert 'id="cmt-tab"' in text and "<title>design</title>" in text
+        status, headers, _ = _get(server + "/design.md", follow=False)
+        assert status == 302 and headers["Location"] == "/design.html"
+        generated = (site / "design.html").read_text(encoding="utf-8")
+        assert "generated from design.md by oo docs serve" in generated
+        assert "<h1" in generated and "<em>text</em>" in generated and "<table>" in generated
+        assert 'id="cmt-tab"' not in generated                         # the commenter is injected when served, not written
+        status, headers, body = _get(server + "/design.md")            # following the redirect: the HTML page, with the commenter
+        assert status == 200 and 'id="cmt-tab"' in body.decode("utf-8") and "<title>design</title>" in body.decode("utf-8")
 
-    def test_mermaid_fence_becomes_a_live_diagram(self, server, site):
+    def test_regenerated_only_when_the_markdown_is_newer(self, site):
+        import os
+        import time
+        md = site / "note.md"
+        md.write_text("# one\n", encoding="utf-8")
+        root = _docs_serve.pygim.path(site, store=PathStore())
+        out = _docs_serve.materialize_markdown(root / "note.md")
+        first = os.fspath(out)
+        assert "<h1" in (site / "note.html").read_text(encoding="utf-8") and "one" in (site / "note.html").read_text(encoding="utf-8")
+        stamp = os.path.getmtime(first)
+        _docs_serve.materialize_markdown(root / "note.md")
+        assert os.path.getmtime(first) == stamp                        # fresh: untouched
+        time.sleep(0.05)
+        md.write_text("# two\n", encoding="utf-8")
+        os.utime(md, None)
+        _docs_serve.materialize_markdown(root / "note.md")
+        assert "two" in (site / "note.html").read_text(encoding="utf-8")   # stale: regenerated
+
+    def test_a_hand_written_html_is_never_overwritten(self, site):
+        (site / "mine.md").write_text("# from markdown\n", encoding="utf-8")
+        (site / "mine.html").write_text("<body>hand-written</body>", encoding="utf-8")
+        root = _docs_serve.pygim.path(site, store=PathStore())
+        out = _docs_serve.materialize_markdown(root / "mine.md")
+        assert out.name == "mine.html" and (site / "mine.html").read_text(encoding="utf-8") == "<body>hand-written</body>"
+
+    def test_markdown_links_point_at_generated_pages(self, site):
+        (site / "a.md").write_text("see [b](b.md#part) and [ext](https://x.y/z.md) and [raw](/abs.md)\n", encoding="utf-8")
+        root = _docs_serve.pygim.path(site, store=PathStore())
+        html = (site / _docs_serve.materialize_markdown(root / "a.md").name).read_text(encoding="utf-8")
+        assert 'href="b.html#part"' in html and 'href="https://x.y/z.md"' in html and 'href="/abs.md"' in html
+
+    def test_mermaid_fence_becomes_a_live_diagram(self, site):
         (site / "diagram.md").write_text("```mermaid\nclassDiagram\n  A --> B\n```\n", encoding="utf-8")
-        text = _get(server + "/diagram.md")[2].decode("utf-8")
-        assert '<pre class="mermaid">' in text and "A --> B" in text and "mermaid.esm.min.mjs" in text
+        root = _docs_serve.pygim.path(site, store=PathStore())
+        html = (site / _docs_serve.materialize_markdown(root / "diagram.md").name).read_text(encoding="utf-8")
+        assert '<pre class="mermaid">' in html and "A --> B" in html and "mermaid.esm.min.mjs" in html
 
     def test_markdown_index_stands_in_for_a_missing_index_html(self, temp_dir):
         (temp_dir / "README.md").write_text("# Home\n", encoding="utf-8")
@@ -141,16 +176,21 @@ class TestMarkdown:
         thread.start()
         try:
             base = f"http://127.0.0.1:{httpd.server_address[1]}"
-            status, headers, body = _get(base + "/", follow=False)
-            assert status == 200 and "<h1" in body.decode("utf-8") and 'id="cmt-tab"' in body.decode("utf-8")
+            status, headers, _ = _get(base + "/", follow=False)
+            assert status == 302 and headers["Location"] == "/README.html"
+            body = _get(base + "/")[2].decode("utf-8")
+            assert "<h1" in body and 'id="cmt-tab"' in body and (temp_dir / "README.html").is_file()
         finally:
             httpd.shutdown()
             httpd.server_close()
             thread.join(timeout=5)
 
-    def test_pages_include_markdown(self, server, site):
+    def test_pages_list_html_and_unconverted_markdown_only(self, server, site):
         (site / "notes.md").write_text("x", encoding="utf-8")
-        assert "/notes.md" in json.loads(_get(server + "/pages")[2])
+        (site / "done.md").write_text("y", encoding="utf-8")
+        assert _get(server + "/done.md", follow=False)[0] == 302          # generates done.html
+        pages = json.loads(_get(server + "/pages")[2])
+        assert "/notes.md" in pages and "/done.html" in pages and "/done.md" not in pages
 
     def test_render_without_the_package_is_none(self, monkeypatch):
         import builtins
