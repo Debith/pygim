@@ -88,6 +88,20 @@ using pygim::hash::fnv_basis;
 using pygim::hash::fnv_prime;
 using pygim::hash::mix_string;
 
+// One plain component under Strategy: no separator, not empty, not "."
+// (a join drops it), not a drive spelling. What `p / other` may answer with a
+// child row instead of the full join algebra. ".." IS a plain component, as
+// in pathlib.
+template <class Strategy>
+[[nodiscard]] constexpr bool plain_component(std::string_view s) noexcept {
+    if (s.empty() || s == ".") return false;
+    if (s.size() >= 2 && s[1] == ':') return false;
+    for (const char c : s) {
+        if (Strategy::is_sep(c)) return false;
+    }
+    return true;
+}
+
 // pathlib's stem and suffix of a final component: the last dot splits them
 // unless it is the first or the last character (".bashrc", "a." have no suffix).
 [[nodiscard]] constexpr std::string_view suffix_of(std::string_view n) noexcept {

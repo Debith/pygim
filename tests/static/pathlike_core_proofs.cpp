@@ -395,4 +395,12 @@ consteval bool table_hash_conses() {
 }
 static_assert(table_hash_conses());
 
+// The rule for `p / other` taking the row route (adapter/pathview.h): one plain component.
+using pygim::pathlike::detail::plain_component;
+static_assert(plain_component<posix_strategy>("c") && plain_component<posix_strategy>("..") && plain_component<posix_strategy>("x.yaml") &&
+              plain_component<posix_strategy>("a b") && plain_component<posix_strategy>("a\\b"));   // a backslash is plain on POSIX
+static_assert(!plain_component<posix_strategy>("") && !plain_component<posix_strategy>(".") && !plain_component<posix_strategy>("c/d") &&
+              !plain_component<posix_strategy>("/abs") && !plain_component<posix_strategy>("d:e") && !plain_component<posix_strategy>("C:"));
+static_assert(!plain_component<windows_strategy>("a\\b") && !plain_component<windows_strategy>("a/b") && plain_component<windows_strategy>("x.yaml"));
+
 }  // namespace

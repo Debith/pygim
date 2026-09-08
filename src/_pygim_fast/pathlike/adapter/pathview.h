@@ -17,6 +17,11 @@
 // without promising `is`. A handle keeps its table alive (shared_ptr), so a
 // table lives as long as any handle or set over it.
 //
+// Threading: a table is append-only with a single writer — every insert
+// happens on the thread holding the GIL (a constructor, a derived-path
+// operation, a set being built) — and reads never lock. Filesystem calls
+// (read/write/glob) release the GIL around the I/O only.
+//
 // Typed classes: `path("x.yaml")` is a `yamlpath`, `path("x.json")` a
 // `jsonpath` — one subclass per engine the build discovered (adapter.h's
 // engine list), chosen by the pin or the extension exactly as read() chooses
@@ -165,22 +170,12 @@ template <Engine... Es>
 }
 
 // ── derived paths ───────────────────────────────────────────────────────────
-/// One plain component: no separator, not empty, not "." (dropped by the join),
-/// not a Windows drive spelling. ".." IS a plain component, as in pathlib.
-[[nodiscard]] inline bool plain_component(std::string_view s) noexcept {
-    if (s.empty() || s == ".") return false;
-    if (s.size() >= 2 && s[1] == ':') return false;
-    for (const char c : s) {
-        if (native_strategy::is_sep(c)) return false;
-    }
-    return true;
-}
 /// `p / other`: one plain component is a child row (one interner lookup, one
 /// trie probe); anything else — absolute right-hand sides, several
 /// components, "." and "" — takes the core's joined() and is interned.
 template <Engine... Es>
 [[nodiscard]] py::object joined(engine_list<Es...> es, const pathview& v, std::string_view other) {
-    if (plain_component(other)) return wrap(es, v.at(v.table->child_of(v.row, other)));
+    if (detail::plain_component<native_strategy>(other)) return wrap(es, v.at(v.table->child_of(v.row, other)));
     return wrap(es, v.intern(v.value().joined(other)));
 }
 

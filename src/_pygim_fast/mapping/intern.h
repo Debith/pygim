@@ -19,7 +19,10 @@
 //                       the arena: O(1) expected, for tables that grow while
 //                       the program runs. Also usable in constant evaluation
 //                       (every piece is constexpr), so proofs may use either.
-// The laws both must satisfy are in tests/static/mapping_proofs.cpp.
+// Both are generic over the id's integer type (basic_flat_interner<Id>,
+// basic_hashed_interner<Id>); `flat_interner` and `hashed_interner` are the
+// 32-bit defaults. The laws both must satisfy are in
+// tests/static/mapping_proofs.cpp, over the default and a 16-bit id.
 //
 // A worked example, used in the comments below (either engine gives the
 // same ids — the engine only decides how a lookup finds them):
@@ -79,14 +82,15 @@ concept interner = std::movable<I> && requires(I i, const I ci, std::string_view
 /// closing one: id -> bytes is two loads (offsets[id], offsets[id + 1]) and a
 /// view into the text, never a copy. The engines add the index that finds an
 /// id from its bytes.
-class intern_arena {
+template <std::unsigned_integral Id = std::uint32_t>
+class basic_intern_arena {
 public:
-    using id_type = std::uint32_t;
+    using id_type = Id;
     /// The "absent" id (what find() answers for a string not present).
     static constexpr id_type npos = std::numeric_limits<id_type>::max();
 
     /// The empty arena: no text, the single closing offset 0.
-    constexpr intern_arena() : m_offsets{0} {}
+    constexpr basic_intern_arena() : m_offsets{0} {}
 
     /// The bytes of `id`, as a view into the arena (valid for the arena's
     /// lifetime; the arena only ever appends, so earlier views stay valid
@@ -132,11 +136,17 @@ private:
 /// and for tables of a few dozen names. Inserting a new string shifts the
 /// ids after it in the index (O(n)), which is why it is not the engine for a
 /// table that grows to millions.
-class flat_interner : public intern_arena {
+template <std::unsigned_integral Id = std::uint32_t>
+class basic_flat_interner : public basic_intern_arena<Id> {
 public:
+    using base = basic_intern_arena<Id>;
+    using id_type = typename base::id_type;
+    using base::npos;
+    using base::size;
+    using base::operator[];
     static constexpr bool hashed = false;
 
-    constexpr flat_interner() = default;
+    constexpr basic_flat_interner() = default;
 
     /// The id of `s`, adding it when new.
     ///
@@ -151,7 +161,7 @@ public:
     [[nodiscard]] constexpr id_type intern(std::string_view s) {
         const auto pos = lower_bound(s);
         if (pos != m_sorted.end() && (*this)[*pos] == s) return *pos;
-        const id_type id = append(s);
+        const id_type id = this->append(s);
         m_sorted.insert(m_sorted.begin() + (pos - m_sorted.begin()), id);
         return id;
     }
@@ -162,17 +172,17 @@ public:
     }
     /// The arena's bytes plus the sorted index.
     [[nodiscard]] constexpr std::size_t bytes() const noexcept {
-        return intern_arena::bytes() + m_sorted.capacity() * sizeof(id_type);
+        return base::bytes() + m_sorted.capacity() * sizeof(id_type);
     }
     /// Room for `ids` more strings in the arena and the index.
     constexpr void reserve(std::size_t ids, std::size_t text_bytes) {
-        intern_arena::reserve(ids, text_bytes);
+        base::reserve(ids, text_bytes);
         m_sorted.reserve(ids);
     }
 
 private:
-    using index_iter = std::vector<id_type>::iterator;
-    using index_citer = std::vector<id_type>::const_iterator;
+    using index_iter = typename std::vector<id_type>::iterator;
+    using index_citer = typename std::vector<id_type>::const_iterator;
     /// The first index position whose id's text is not less than `s`: where
     /// `s` is, or where it would be inserted.
     [[nodiscard]] constexpr index_citer lower_bound(std::string_view s) const noexcept {
@@ -194,12 +204,18 @@ private:
 /// table doubles at load factor 1/2, so probes stay short (about 1.5 on
 /// average for a hit). O(1) expected, and still constexpr: proofs may build
 /// one at compile time.
-class hashed_interner : public intern_arena {
+template <std::unsigned_integral Id = std::uint32_t>
+class basic_hashed_interner : public basic_intern_arena<Id> {
 public:
+    using base = basic_intern_arena<Id>;
+    using id_type = typename base::id_type;
+    using base::npos;
+    using base::size;
+    using base::operator[];
     static constexpr bool hashed = true;
 
     /// 64 empty slots (the minimum; grows on demand).
-    constexpr hashed_interner() : m_slots(64, 0) {}
+    constexpr basic_hashed_interner() : m_slots(64, 0) {}
 
     /// The id of `s`, adding it when new.
     ///
@@ -214,7 +230,7 @@ public:
     [[nodiscard]] constexpr id_type intern(std::string_view s) {
         const std::size_t i = probe(s);
         if (m_slots[i]) return m_slots[i] - 1;
-        const id_type id = append(s);
+        const id_type id = this->append(s);
         m_slots[i] = id + 1;
         if (size() * 2 > m_slots.size()) grow(m_slots.size() * 2);
         return id;
@@ -227,7 +243,7 @@ public:
     }
     /// The arena's bytes plus the slot table (at least twice the ids, times 4).
     [[nodiscard]] constexpr std::size_t bytes() const noexcept {
-        return intern_arena::bytes() + m_slots.capacity() * sizeof(id_type);
+        return base::bytes() + m_slots.capacity() * sizeof(id_type);
     }
     /// Room for `ids` more strings: the slot table is resized ONCE to the
     /// power of two that keeps `ids` at load <= 1/2 (hash::slots_for), so a
@@ -235,7 +251,7 @@ public:
     ///
     ///     t.reserve(1000, 4096)   -> 2048 slots; the existing ids keep their numbers
     constexpr void reserve(std::size_t ids, std::size_t text_bytes) {
-        intern_arena::reserve(ids, text_bytes);
+        base::reserve(ids, text_bytes);
         if (ids * 2 > m_slots.size()) grow(hash::slots_for(ids));
     }
 
@@ -265,7 +281,14 @@ private:
     std::vector<id_type> m_slots;   // 0 = empty, else id + 1
 };
 
+// The defaults: 32-bit ids.
+using intern_arena = basic_intern_arena<>;
+using flat_interner = basic_flat_interner<>;
+using hashed_interner = basic_hashed_interner<>;
+
 static_assert(interner<flat_interner>);
 static_assert(interner<hashed_interner>);
+static_assert(interner<basic_flat_interner<std::uint16_t>>);
+static_assert(interner<basic_hashed_interner<std::uint64_t>>);
 
 }  // namespace pygim::mapping

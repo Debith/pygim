@@ -38,11 +38,39 @@ consumer has to earn.
 
 | Component | Concept / type | Engines | What it is | First consumers |
 |---|---|---|---|---|
-| `intern.h` | `interner` | `flat_interner` (sorted id index, binary search, small tables + constant evaluation), `hashed_interner` (open addressing, load <= 1/2, also constexpr-capable) | every distinct string once, dense ids in insertion order | `pathlike::basic_path_table` (segments) |
-| `trie.h` | `trie` | — | hash-consed rows of `(parent, key)`: a shared prefix is one row; `child()` is find-or-add; `with_chain()` gathers a chain leaf-first into a stack buffer; `row_map` maps rows from another trie memoised per source row through a key translator | `basic_path_table` (the directory tree) |
+| `intern.h` | `interner` | `basic_flat_interner<Id>` (sorted id index, binary search, small tables + constant evaluation), `basic_hashed_interner<Id>` (open addressing, load <= 1/2, also constexpr-capable); `flat_interner` / `hashed_interner` are the 32-bit defaults | every distinct string once, dense ids in insertion order | `pathlike::basic_path_table` (segments) |
+| `trie.h` | `basic_trie<RowId, Key>`; `trie` = `<uint32_t, uint32_t>` | — | hash-consed rows of `(parent, key)`: a shared prefix is one row; `child()` is find-or-add; `with_chain()` gathers a chain leaf-first into a stack buffer; `row_map` maps rows from another trie memoised per source row through a key translator | `basic_path_table` (the directory tree) |
 | `id_set.h` | `basic_id_set<Id, Word>`; `id_set` = `<uint32_t, uint64_t>` | — | dense ids of any unsigned width in the machine's word: insertion-ordered members plus a bitmap; `where`, `united`, `intersected`, `subtracted` at a few ns per element; `count_united` & co answer the SIZE of an algebra result as a popcount over the bitmaps, 64 ids per step, no set built (20-90x the build at 1M paths) | `pathlike::PathSet` (`count_union`, `count_intersection`, `count_difference`) |
 | `../utils/memory.h` | `memory::resident_bytes`, `peak_resident_bytes` | — | the process's resident memory as one syscall (Linux procfs pread on a descriptor opened once, Mach task info, Windows working set): a benchmark's before/after probe, never a per-object size — components report exact `bytes()`; `pygim.utils.rss_bytes()` et al. | `benchmarks/_bench.py` |
 | `../utils/hash.h` | — | — | `fnv1a`, `mix_string`, `mix64`, `combine`, `slots_for`: one definition of every hash the tables share | core.h, intern.h, trie.h, the wiring adapters' key hashes |
+
+### How the pieces fit
+
+```mermaid
+classDiagram
+    direction LR
+    class basic_intern_arena~Id~ { text; offsets; operator[](id) string_view; size() }
+    class basic_flat_interner~Id~ { intern(sv) id; find(sv) id }
+    class basic_hashed_interner~Id~ { intern(sv) id; find(sv) id }
+    class basic_trie~RowId,Key~ { child(parent,key) row; find_child(); parent(row); with_chain(row,f); row_map }
+    class basic_id_set~Id,Word~ { note(id); has(id); where(pred); united(); count_united() }
+    class basic_path_table~Interner~ { insert(text) row; find(text) row; value(row) uri; hash(row); render(row); parents(row) }
+    class pathview { table; row; pin; value() file }
+    class PathSet { table; ids: id_set; filter(); union_with(); count_union() }
+    class path_store { table }
+    basic_flat_interner --|> basic_intern_arena
+    basic_hashed_interner --|> basic_intern_arena
+    basic_path_table *-- basic_trie
+    basic_path_table *-- basic_hashed_interner : Interner policy
+    pathview o-- basic_path_table : shared
+    PathSet o-- basic_path_table : shared
+    PathSet *-- basic_id_set
+    path_store o-- basic_path_table : shared
+```
+
+`pygim.path` is `pathview`; `pygim.PathSet` and `pygim.pathlike.PathStore`
+are the other two. Everything above the dotted line into `pathview` is
+pybind-free.
 
 ### The path table as a policy over the toolkit
 
@@ -109,19 +137,23 @@ run the same laws over all three.
 
 ## Laws (what `mapping_proofs.cpp` asserts)
 
-**interner**, over both engines: ids are dense and in insertion order;
+**interner**, over both engines and over 32- and 16-bit ids: ids are dense and in insertion order;
 `intern` is idempotent; `find` never adds and answers `npos` for an absent
 key; `operator[]` round-trips; the empty string and a prefix are distinct
 keys; `reserve` and growth (200 keys, through several rehashes / re-sorts)
 keep every earlier id.
 
-**trie**: hash-consing (a shared prefix is one row, `child` is idempotent);
+**trie**, over 32-bit and 16-bit rows and keys: hash-consing (a shared prefix is one row, `child` is idempotent);
 `parent`, `key`, `is_root`, `depth`, `root_of`; `find_child` never adds and
 `no_key` is never found; `with_chain` is leaf-first and `for_chain`
 root-first; a chain deeper than the stack buffer (100 rows) still walks;
 `reserve` keeps every row; `row_map` in lookup mode maps absent rows to
 `none` and in find-or-add mode creates them under the mapped parent, both
 memoised.
+
+**hash**: `fnv1a("")` is the basis, a continued stream equals the whole, the
+terminator tells ("ab","c") from ("a","bc"), `mix64` spreads structured keys,
+`combine` is order-sensitive and never the zero trap, `slots_for` at 0/32/33/1000.
 
 **id_set**: `note` deduplicates and keeps insertion order; `has`; the three
 algebra operations produce "mine, then theirs"; `where` filters; `sibling()`

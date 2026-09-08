@@ -11,7 +11,9 @@
 //
 // Rows are never freed within a table (docs/design/pathset_storage.md), which
 // is the whole reason a store is a plain object with an owner rather than a
-// hidden global.
+// hidden global. Inserts happen under the GIL (the single writer); a store
+// shared between threads is safe to read and to insert into from any thread
+// that holds it.
 //
 //     store = PathStore()
 //     p = path("a/b.yaml", store=store)     rows in store's table; p.store is store's table

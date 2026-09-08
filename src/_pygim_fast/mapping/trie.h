@@ -14,6 +14,11 @@
 // Storage: two flat vectors (rows, and an open-addressing index over them —
 // linear probing, load <= 1/2). No per-row heap object, ever.
 //
+// basic_trie<RowId, Key> is generic over the row id's integer type (how many
+// rows a trie may hold) and the key's (an interner id of the same width, with
+// whatever flag bits the caller packs in). `trie` is the default
+// <uint32_t, uint32_t>, the one path_table.h and id_set.h are written for.
+//
 // A worked example, used in the comments below. Keys are plain numbers here;
 // in a path table they are interned segment ids.
 //
@@ -31,6 +36,7 @@
 // Read as a tree: 7 -> 1 -> {2, 3}. Four rows for two two-segment chains,
 // because the prefix 7 -> 1 is stored once.
 
+#include <concepts>
 #include <cstddef>
 #include <cstdint>
 #include <limits>
@@ -40,10 +46,11 @@
 
 namespace pygim::mapping {
 
-class trie {
+template <std::unsigned_integral RowId = std::uint32_t, std::unsigned_integral Key = std::uint32_t>
+class basic_trie {
 public:
-    using row_id = std::uint32_t;
-    using key_type = std::uint32_t;
+    using row_id = RowId;
+    using key_type = Key;
     /// The "no row" id: a root's parent, and what a lookup answers when absent.
     static constexpr row_id none = std::numeric_limits<row_id>::max();
     /// The "no key" value: what a key translator answers when a key has no
@@ -57,7 +64,7 @@ public:
     };
 
     /// The empty trie: no rows, 64 empty index slots.
-    constexpr trie() : m_slots(64, 0) {}
+    constexpr basic_trie() : m_slots(64, 0) {}
 
     // ── find-or-add / lookup ───────────────────────────────────────────────
 
@@ -198,7 +205,7 @@ public:
     template <class KeyMap>
     class row_map {
     public:
-        constexpr row_map(const trie& in, const trie& from, trie* into, KeyMap map_key)
+        constexpr row_map(const basic_trie& in, const basic_trie& from, basic_trie* into, KeyMap map_key)
             : m_in(in), m_from(from), m_into(into), m_map_key(map_key), m_memo(from.size(), unmapped) {}
         /// The row of `r` (a row of `from`) in the target, or `none`.
         /// Recursion maps the parent first, so a chain's prefix is mapped
@@ -219,9 +226,9 @@ public:
 
     private:
         static constexpr row_id unmapped = none - 1;
-        const trie& m_in;
-        const trie& m_from;
-        trie* m_into;
+        const basic_trie& m_in;
+        const basic_trie& m_from;
+        basic_trie* m_into;
         KeyMap m_map_key;
         std::vector<row_id> m_memo;
     };
@@ -229,11 +236,12 @@ public:
 private:
     static constexpr std::size_t chain_local = 48;   // rows kept on the stack by with_chain()
 
-    /// The 64-bit key of a row: parent in the high half, key in the low,
+    /// The 64-bit key of a row: the parent shifted into the high half, the
+    /// key in the low (xor, so a key wider than 32 bits still contributes),
     /// spread by mix64 so the low bits used as a slot index do not just
     /// repeat the key.
     [[nodiscard]] static constexpr std::uint64_t key_hash(row_id parent, key_type key) noexcept {
-        return hash::mix64((static_cast<std::uint64_t>(parent) << 32) | key);
+        return hash::mix64((static_cast<std::uint64_t>(parent) << 32) ^ static_cast<std::uint64_t>(key));
     }
     /// The slot where (parent, key) is, or the empty slot where it would go:
     /// linear probing, comparing against the rows column (the index stores
@@ -264,5 +272,8 @@ private:
     std::vector<row> m_rows;
     std::vector<row_id> m_slots;   // 0 = empty, else row + 1
 };
+
+// The default: 32-bit rows and keys.
+using trie = basic_trie<>;
 
 }  // namespace pygim::mapping

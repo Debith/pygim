@@ -538,7 +538,7 @@ void bind_pathset(engine_list<Es...> es, py::module_& m, py::class_<pathview>& p
         .def("__getitem__", [es](const PathSet& ps, py::ssize_t i) {
             const auto n = static_cast<py::ssize_t>(ps.size());
             if (i < 0) i += n;
-            if (i < 0 || i >= n) throw py::index_error("PathSet index out of range");
+            if (i < 0 || i >= n) throw py::index_error("PathSet index " + std::to_string(i) + " out of range for " + std::to_string(n) + " members");
             return wrap(es, ps.view(static_cast<std::size_t>(i)));
         })
         .def("filter_suffix", [](const PathSet& ps, std::string_view s) { return ps.filter_suffix(s); }, py::arg("suffix"),
@@ -565,7 +565,14 @@ void bind_pathset(engine_list<Es...> es, py::module_& m, py::class_<pathview>& p
                  py::list out;
                  for (const std::uint32_t r : ps.members()) {
                      const file f(ps.table()->value(r));
-                     if (f.is_file()) out.append(py::str(f.read_bytes()));
+                     if (!f.is_file()) continue;
+                     const std::string bytes = f.read_bytes();
+                     PyObject* text = PyUnicode_DecodeUTF8(bytes.data(), static_cast<py::ssize_t>(bytes.size()), nullptr);
+                     if (!text) {
+                         PyErr_Clear();
+                         throw py::value_error("read_all_files: " + f.fspath() + " is not valid UTF-8");
+                     }
+                     out.append(py::reinterpret_steal<py::object>(text));
                  }
                  return out;
              }, "The text of every member that is a regular file (UTF-8), one str per file, in member order; "
