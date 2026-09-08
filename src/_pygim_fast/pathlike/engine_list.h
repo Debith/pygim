@@ -180,20 +180,20 @@ consteval auto ext_inventory_buffer() {
 template <EngineMeta... Es>
 inline constexpr auto ext_inventory_buf = ext_inventory_buffer<Es...>();
 
-// "<name>file" — the Python class name of an engine's typed file, as a
+// "<name>path" — the Python class name of an engine's typed path, as a
 // NUL-terminated buffer with static storage (pybind11 may keep the pointer).
 template <EngineMeta E>
 inline constexpr auto class_name_buf = [] {
     std::array<char, E::info.name.size() + 5> out{};
     std::size_t p = 0;
     for (char c : E::info.name) out[p++] = c;
-    for (char c : std::string_view{"file"}) out[p++] = c;
+    for (char c : std::string_view{"path"}) out[p++] = c;
     return out;
 }();
 
 }  // namespace detail
 
-// The Python class name of E's typed file: "jsonfile".
+// The Python class name of E's typed path: "jsonpath".
 template <EngineMeta E>
 inline constexpr std::string_view class_name{detail::class_name_buf<E>.data(), E::info.name.size() + 4};
 
@@ -340,7 +340,7 @@ struct engine_list {
     // Each predicate names its first violation into `r` when one is given, so
     // holds() and conflict_report() run the SAME scan: no check exists twice.
 
-    // [a-z][a-z0-9_]*: the name becomes the Python class "<name>file".
+    // [a-z][a-z0-9_]*: the name becomes the Python class "<name>path".
     [[nodiscard]] static constexpr bool ident_ok(std::string_view s) noexcept {
         if (s.empty() || !(s.front() >= 'a' && s.front() <= 'z')) return false;
         for (char c : s) {
@@ -379,7 +379,7 @@ struct engine_list {
     [[nodiscard]] static constexpr bool names_wellformed(detail::report* r = nullptr) noexcept {
         for (const engine_info* e : infos) {
             if (!ident_ok(e->name)) {
-                return fail(r, "engine name '", e->name, "' must match [a-z][a-z0-9_]* (it becomes the Python class '<name>file')");
+                return fail(r, "engine name '", e->name, "' must match [a-z][a-z0-9_]* (it becomes the Python class '<name>path')");
             }
             if (!selector_ok(e->label) || e->doc.empty() || e->exts.empty()) {
                 return fail(r, "engine '", e->name, "': label must be lower-case with no blanks, doc must be non-empty, exts must be non-empty");

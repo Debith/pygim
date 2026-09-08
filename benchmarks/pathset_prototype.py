@@ -1,11 +1,11 @@
-"""PathSet prototype benchmarks: many paths as one table vs. one object per path.
+"""PathSet benchmarks: many paths as one table vs. one object per path.
 
 Sections:
 
 1. **build** — PathSet(list) vs a list of pygim.path objects vs a list of
    pathlib.PurePath objects, at 1M and 10M paths, with memory per path.
-2. **access** — per-element cost through views (fresh views, the reusing
-   scan() cursor, .name and os.fspath on a view) vs file objects.
+2. **access** — per-element cost through a set (fresh objects, the reusing
+   scan() cursor, .name and os.fspath) vs a list of path objects.
 3. **filter** — filter_suffix / filter_name on the table vs a Python loop over
    file objects vs str.endswith vs polars over the rendered list.
 4. **membership + algebra** — `x in set`, |, &, - (shared table and across
@@ -62,19 +62,13 @@ def bench_build(sizes):
         gc.collect()
         if n <= 1_000_000:
             m0 = rss_mb()
-            t, objs = best(lambda: [pathlike.file(s) for s in strs], reps=1)
-            f_bytes = (rss_mb() - m0) * 2**20 / n
-            raw[f"file_{n}"] = {"seconds": t, "bytes_per_path": f_bytes}
-            rows.append([f"{n:,}", "[pathlike.file(s)]  (raw objects)", f"{ns(t, n):,.0f}", f"{n / t / 1e6:.2f}", f"{f_bytes:.0f} (rss)"])
-            del objs
-            gc.collect()
             m0 = rss_mb()
-            with pathlike.use_store(pathlike.PathStore()):
-                t, objs = best(lambda: [path(s) for s in strs], reps=1)
-                p_bytes = (rss_mb() - m0) * 2**20 / n
+            st = pathlike.PathStore()
+            t, objs = best(lambda: [path(s, store=st) for s in strs], reps=1)
+            p_bytes = (rss_mb() - m0) * 2**20 / n
             raw[f"path_{n}"] = {"seconds": t, "bytes_per_path": p_bytes}
-            rows.append([f"{n:,}", "[pygim.path(s)]  (interned, cold)", f"{ns(t, n):,.0f}", f"{n / t / 1e6:.2f}", f"{p_bytes:.0f} (rss, store incl.)"])
-            del objs
+            rows.append([f"{n:,}", "[pygim.path(s, store=st)]  (handles + table)", f"{ns(t, n):,.0f}", f"{n / t / 1e6:.2f}", f"{p_bytes:.0f} (rss, table incl.)"])
+            del objs, st
             gc.collect()
         del strs
         gc.collect()

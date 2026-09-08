@@ -2,9 +2,9 @@
 // pathlike/adapter/adapter.h — the engine dispatchers, generic over the registry.
 //
 // Nothing in this file names an engine. `Engine` completes the descriptor
-// contract with the Python-facing half (load/write); load(), write(), wrap(),
-// bind_typed() and engines_record() are folds over whatever engine_list the
-// build discovered (engine_list.h). Adding a format touches exactly one file:
+// contract with the Python-facing half (load/write); load(), write() and
+// engines_record() are folds over whatever engine_list the build discovered
+// (engine_list.h); the typed path classes are pathview.h's fold. Adding a format touches exactly one file:
 //
 //   adapter/engines/<name>.h — a struct `engines::<name>` with
 //       static constexpr std::array<std::string_view, K> exts{".<ext>", ...};
@@ -90,34 +90,6 @@ void write(engine_list<Es...>, const engine_info* e, const file& f, py::handle o
     if (!hit) throw std::invalid_argument("no engine resolved for " + f.fspath());
 }
 
-// ── Typed file classes ─────────────────────────────────────────────────────
-// path("x.json") returns a jsonfile, "x.yaml" a yamlfile, ...: one C++ type per
-// engine whose Python TYPE mirrors the engine the path resolves to, so
-// `isinstance(p, jsonfile)` reads naturally. They carry no state of their own;
-// constructing one directly PINS its engine.
-template <Engine E>
-struct typed_file : file {
-    explicit typed_file(file f) : file(std::move(f)) {}
-};
-
-// Moves `f` into the typed object: the or-fold in wrap() stops at the first
-// hit, so `f` is moved from at most once and never read afterwards.
-template <Engine E>
-bool wrap_if(const engine_info* e, file& f, py::object& out) {
-    if (e != &E::info) return false;
-    out = py::cast(typed_file<E>(std::move(f)));
-    return true;
-}
-
-// Cast a file as the typed subclass of its resolved engine (plain file if none).
-template <Engine... Es>
-[[nodiscard]] py::object wrap(engine_list<Es...>, file f) {
-    const engine_info* e = engine_list<Es...>::resolved(f);
-    py::object out;
-    const bool hit = (wrap_if<Es>(e, f, out) || ...);
-    return hit ? out : py::cast(std::move(f));
-}
-
 // Python str / bytes / os.PathLike -> the internal path text, without the
 // fs::path round trip pybind11's caster would take: str is encoded with the
 // filesystem encoding on POSIX (os.fsencode, so non-UTF-8 names round-trip)
@@ -183,26 +155,6 @@ inline py::str str_from_text(std::string_view text) {
     return py::reinterpret_steal<py::str>(
         PyUnicode_DecodeFSDefaultAndSize(text.data(), static_cast<py::ssize_t>(text.size())));
 #endif
-}
-
-// Register one typed subclass: "<name>file", documented from the engine's own
-// sentence. The doc lives in a function-local static (pybind11 keeps pointers).
-// (A plain function template, folded over below: MSVC cannot see an enclosing
-// generic lambda's template parameter from a lambda nested inside it.)
-template <Engine E>
-void bind_one(py::module_& m) {
-    static const std::string name = std::string(E::info.name) + "file";   // == class_name<E>, as a run-time string
-    static const std::string doc = std::string(E::info.doc) + " Constructing one pins the engine (" +
-                                   std::string(E::info.label) + ").";
-    py::class_<typed_file<E>, file>(m, name.c_str(), doc.c_str())
-        .def(py::init([](py::handle p) { return typed_file<E>(file(text_from_arg(p), &E::info)); }),
-             py::arg("path"));
-}
-
-// Register every typed subclass, in pack order.
-template <Engine... Es>
-void bind_typed(engine_list<Es...>, py::module_& m) {
-    (bind_one<Es>(m), ...);
 }
 
 template <Engine E>

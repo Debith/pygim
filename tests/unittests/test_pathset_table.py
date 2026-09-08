@@ -1,6 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Tests for the pathlike PathSet prototype: many paths as one table, views, filters
-and set algebra."""
+"""PathSet: many paths as one table — construction, members, filters and set algebra."""
 
 import os
 import pathlib
@@ -81,7 +80,7 @@ def test_name_components_match_file(strs, ps):
 def test_parent_is_a_view_in_the_same_table(ps):
     v = ps[0]
     p = v.parent
-    assert isinstance(p, pathlike.fileview)
+    assert isinstance(p, pathlike.path)
     assert os.fspath(p) == os.fspath(pygim.path(os.fspath(v)).parent)
 
 
@@ -90,15 +89,15 @@ def test_view_equality_and_hash_across_tables_and_with_file():
     b = pathlike.PathSet(["q", "x/y.yaml", "z"])
     assert a[0] == b[1] and a[1] == b[0] and a[0] != b[0]
     assert hash(a[0]) == hash(b[1]) == hash(pygim.path("x/y.yaml"))
-    assert len({a[0], b[1], pygim.path("x/y.yaml"), pathlike.file("x//y.yaml")}) == 1
+    assert len({a[0], b[1], pygim.path("x/y.yaml"), pathlike.path("x//y.yaml")}) == 1
     assert b[2] not in a and b[1] in a
 
 
-def test_to_file_is_typed_by_engine():
+def test_members_are_typed_by_engine():
     ps = pathlike.PathSet(["cfg.yaml", "data.json", "plain"])
-    assert isinstance(ps[0].to_file(), pathlike.yamlfile)
-    assert isinstance(ps[1].to_file(), pathlike.jsonfile)
-    assert type(ps[2].to_file()) is pathlike.file
+    assert isinstance(ps[0], pathlike.yamlpath)
+    assert isinstance(ps[1], pathlike.jsonpath)
+    assert type(ps[2]) is pathlike.path
     assert ps[0].engine == "rapidyaml" and ps[2].engine is None
 
 
@@ -165,7 +164,7 @@ def test_algebra_across_tables():
     assert (b - a).to_list() == ["q"]
 
 
-def test_stats_show_the_flyweight(strs, ps):
+def test_stats_show_the_sharing(strs, ps):
     st = ps.stats()
     assert st["members"] == len(ps) and st["rows"] >= st["members"]
     # every distinct component once: far fewer segments than path components

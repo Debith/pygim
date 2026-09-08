@@ -32,7 +32,6 @@
 #include <utility>
 #include <vector>
 
-#include "../utils/flyweight.h"
 #include "../utils/hash.h"
 #include "uri.h"
 
@@ -69,7 +68,7 @@ struct sv_list {
 // engine_info info`; its address is the engine's identity at run time (static
 // constexpr members are inline variables, so there is exactly one per program).
 struct engine_info {
-    std::string_view name;     // format name: engine="json"; the Python class is "<name>file"
+    std::string_view name;     // format name: engine="json"; the Python class is "<name>path"
     std::string_view label;    // LIBRARY label reported by .engine: "simdjson"
     std::string_view doc;      // one sentence, used by every derived docstring
     sv_list exts;              // auto-dispatch extensions: lower-case, leading dot
@@ -88,6 +87,20 @@ using pygim::hash::fnv1a;
 using pygim::hash::fnv_basis;
 using pygim::hash::fnv_prime;
 using pygim::hash::mix_string;
+
+// One plain component under Strategy: no separator, not empty, not "."
+// (a join drops it), not a drive spelling. What `p / other` may answer with a
+// child row instead of the full join algebra. ".." IS a plain component, as
+// in pathlib.
+template <class Strategy>
+[[nodiscard]] constexpr bool plain_component(std::string_view s) noexcept {
+    if (s.empty() || s == ".") return false;
+    if (s.size() >= 2 && s[1] == ':') return false;
+    for (const char c : s) {
+        if (Strategy::is_sep(c)) return false;
+    }
+    return true;
+}
 
 // pathlib's stem and suffix of a final component: the last dot splits them
 // unless it is the first or the last character (".bashrc", "a." have no suffix).
@@ -483,14 +496,6 @@ public:
     [[nodiscard]] constexpr const uri& value() const noexcept { return m_uri; }
     [[nodiscard]] constexpr const engine_info* pinned() const noexcept { return m_pin; }
 
-    // Where this value is interned, if anywhere: the flyweight token
-    // (utils/flyweight.h) stamped by the store that handed the object out.
-    // Not part of the value, equality or hash; a copy carries it along, so a
-    // reader validates it against the owner before trusting it.
-    using intern_token = flyweight::token;
-    [[nodiscard]] constexpr intern_token interned() const noexcept { return m_intern; }
-    constexpr void set_interned(intern_token t) noexcept { m_intern = t; }
-
     // os.PathLike: the native path text, in pathlib's normalised spelling.
     [[nodiscard]] constexpr std::string fspath() const { return Strategy::render(m_uri); }
 
@@ -575,7 +580,7 @@ public:
     }
 
     [[nodiscard]] constexpr std::string repr() const {
-        std::string out = "file(\"" + as_uri() + "\"";
+        std::string out = "path(\"" + as_uri() + "\"";
         if (m_pin) out += ", engine=" + std::string(m_pin->label);
         return out + ")";
     }
@@ -768,7 +773,6 @@ private:
 
     uri m_uri;
     const engine_info* m_pin{nullptr};   // pinned at construction; nullptr = auto by extension
-    intern_token m_intern{};              // see interned()
 };
 
 using file = basic_file<native_strategy>;

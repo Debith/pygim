@@ -30,7 +30,7 @@ struct csv {                                            // struct name == file s
 }
 ```
 
-After the next build: `pygim.path("x.csv")` is a `pathlike.csvfile`,
+After the next build: `pygim.path("x.csv")` is a `pathlike.csvpath`,
 `.engine == "fast-csv"`, `engine="csv"` and `engine="fast-csv"` both select it,
 the error text `unknown engine: 'xml' (known: csv/fast-csv, json/simdjson, ...)`
 lists it, the module docstrings describe it, `pathlike.ENGINES` reports it, and

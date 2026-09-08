@@ -40,8 +40,8 @@ try:
     # 1. Building path sets
     # ------------------------------------------------------------------------
     # One path, or an iterable mixing str, pathlib.Path and pygim files.
-    # Iteration yields fileviews: os.PathLike objects served from the table
-    # (name, suffix, parent, ==, hash) — to_file() gives the owning file.
+    # Iteration yields path objects over the set's table (name, suffix, parent,
+    # ==, hash all read by row; typed by extension like any path).
     files = PathSet([
         workdir / "readme.txt",
         str(workdir / "notes.txt"),

@@ -104,6 +104,7 @@ Concise, actionable guidance for AI agents contributing to this repo. Focus on t
 - Persistence Tests: `persistence/ext.persistence_test.toml` builds a test-only pybind11 module (`_persistence_test`) with `py::module_local()` to avoid type conflicts. Parametrize by backend when multiple backends exist. Tests requiring a live database use `test_persistence.py`; C++ unit tests via `test_bindings.cpp`.
 
 ## 7. Safe Changes Checklist (pre-commit mentally)
+- Definition of done: a change is done when every line of `docs/definition_of_done.md` holds (layers, generality, proofs, measurements, worked-example docs, runnable examples, stub, design note, changelog, error messages naming file/line/value, CI green on the matrix). A PR that cannot tick a line says so and why.
 - Imports: public modules import from `pygim.*`, internals from `_pygim.*`.
 - C++ changes: rebuild locally (e.g., `pip install -e .` triggers). Run `pytest` after rebuild to confirm ABI compatibility.
 - Preserve exception types & invariant semantics (registry duplicates, factory override rule, hook enabling gate).

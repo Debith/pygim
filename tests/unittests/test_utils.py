@@ -164,28 +164,7 @@ if __name__ == "__main__":
     pytest.main([__file__])
 
 
-# ── process memory probes (utils/memory.h) ─────────────────────────────────
-def test_rss_probes_are_positive_and_consistent():
-    from pygim import utils
-
-    rss = utils.rss_bytes()
-    assert rss > 0 and utils.peak_rss_bytes() >= rss
-    assert abs(utils.rss_mb() - rss / 2**20) < 1.0                # the same reading, a moment apart
-    assert utils.peak_rss_mb() >= utils.rss_mb() - 1.0
-
-
-def test_rss_grows_with_a_large_allocation():
-    from pygim import utils
-
-    before = utils.rss_bytes()
-    block = bytearray(64 * 2**20)                                  # 64 MiB, touched so it is resident
-    block[::4096] = b"x" * len(block[::4096])
-    after = utils.rss_bytes()
-    assert after - before > 32 * 2**20, (before, after)
-    assert utils.peak_rss_bytes() >= after
-    del block
-
-
+# ── process memory probes (utils/memory.h): the delta test lives in test_utils_memory_probe.py ──
 def test_rss_probe_is_cheap():
     import time
     from pygim import utils

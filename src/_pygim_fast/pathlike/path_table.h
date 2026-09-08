@@ -119,7 +119,7 @@ public:
         return in.cur;
     }
     /// The row for a parsed value: the same walk, fed from the uri's anchor
-    /// flags and segments. What the flyweight store uses for a `file`.
+    /// flags and segments. What a path built from a core value uses.
     ///
     ///     t.insert<posix_strategy>(file("a/b/c.yaml").value())   -> 3
     template <class Strategy>
@@ -130,7 +130,7 @@ public:
     }
     /// The child of row `parent` named by one plain component (never an
     /// anchor part): what `parent / name` is for a name without separators.
-    /// The flyweight store's `p / "e"` when p's row is known.
+    /// `p / "e"` for a path object (its row is known).
     ///
     ///     t.child_of(2, "e")   -> 7   (a/b/e, created)
     ///     t.child_of(2, "d")   -> 4   (found)
@@ -219,7 +219,7 @@ public:
     }
     /// The row here for row `r` of another table, or `none`: the chain
     /// walked from the root, each segment looked up (never interned) here.
-    /// What `fileview == fileview` uses across tables.
+    /// What `path == path` uses across tables.
     [[nodiscard]] constexpr std::uint32_t find(const basic_path_table& other, std::uint32_t r) const {
         std::uint32_t parent = none;
         if (!other.m_trie.is_root(r)) {
@@ -316,9 +316,8 @@ public:
 
     /// The value of a row: the uri file(text) holds for the same path,
     /// rebuilt from the anchor flags and the segments (one walk, one
-    /// allocation per segment). `fileview.to_file()` and the flyweight
-    /// store's cold path use it; proven equal to the parser's uri in
-    /// tests/static/pathlike_core_proofs.cpp.
+    /// allocation per segment). A path object's value-route operations use
+    /// it; proven equal to the parser's uri in tests/static/pathlike_core_proofs.cpp.
     ///
     ///     t.value(3)   -> uri{scheme "file", absolute false, segments ["a", "b", "c.yaml"]}
     ///     t.value(6)   -> uri{absolute true, segments ["x"]}
@@ -339,7 +338,7 @@ public:
     /// == basic_file::hash_value() of value(r), without building the value:
     /// the same FNV-1a stream (utils/hash.h) over the authority, the two
     /// flag bits and each segment, read straight from the arena. What lets
-    /// a view hash like a file, so `{fileview: ...}[file]` works.
+    /// a path object hash like its value, whatever table it lives in.
     ///
     ///     t.hash(3) == file("a/b/c.yaml").hash_value()   -> true (a proof)
     ///     t.hash(3) == t.hash(4)                         -> false

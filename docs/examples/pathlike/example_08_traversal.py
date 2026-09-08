@@ -67,7 +67,7 @@ from pygim.pathlike import PathSet, ext
 ps = top.pathset("**/*.yaml")
 assert isinstance(ps, PathSet) and len(ps) == 2
 assert top.glob("*.yaml")[0] in ps                                          # a file is found by value
-assert ps[0].to_file() is pygim.path(os.fspath(ps[0]))                     # the set shares the store's table
+assert ps[0] == pygim.path(os.fspath(ps[0])) and ps[0].store == top.store   # the set is rows of top's table
 assert len(ps & ext(".yaml")) == 2
 
 n_children = len(top.iterdir())
