@@ -3,6 +3,8 @@
 Command-Line Interface Application for Python Gimmicks.
 """
 
+from __future__ import annotations  # `str | None` in signatures on Python 3.9
+
 from subprocess import Popen, DEVNULL
 import sys
 import shutil
@@ -68,6 +70,28 @@ class GimmicksCliApp:
 
     def ai(self, text):
         print("AI is not implemented yet!")
+
+    def docs_serve(self, *, port: int = 8000, directory: str | None = None,
+                   host: str | None = None, index: str | None = None,
+                   rebuild: str | None = None) -> None:
+        """Serve a docs directory locally with the ✎ commenter and image-drop endpoint.
+
+        *rebuild* is a shell command run (in *directory*) before serving; a
+        non-zero exit aborts."""
+        from _pygim._cli import _docs_serve  # local import: only needed for this verb
+        from pygim.pathlike import PathStore
+
+        store = PathStore()                    # the server's table: every path it makes lives here
+        doc_root = Path(directory) if directory else Path.cwd()
+        try:
+            if rebuild:
+                click.echo(f"rebuild: {rebuild}")
+                added, removed = _docs_serve.rebuild(doc_root, rebuild, store=store)
+                click.echo(f"rebuilt: {len(added)} page(s) added, {len(removed)} removed"
+                           + "".join(f"\n  + {p}" for p in added) + "".join(f"\n  - {p}" for p in removed))
+            _docs_serve.serve(doc_root, port=port, host=host, index=index, store=store)
+        except (FileNotFoundError, _docs_serve.ServeError) as exc:
+            raise click.ClickException(str(exc)) from exc
 
     def stubs(self, *, check: bool = False) -> None:
         """Regenerate (or verify) the generated block of pygim/pathlike.pyi."""

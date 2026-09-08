@@ -53,9 +53,27 @@ def stubs(check):
     GimmicksCliApp().stubs(check=check)
 
 
-@click.command()
-@click.argument("text", type=str, nargs=1)
-def cli_oo(text):
+class _OoGroup(click.Group):
+    """`oo <verb> ...` runs a verb (``docs serve``); anything else is free text
+    for the assistant; nothing at all shows the help."""
+
+    def parse_args(self, ctx, args):
+        if args and not args[0].startswith("-") and args[0] not in self.commands:
+            ctx.meta["free_text"] = " ".join(args)
+            ctx.args = []
+            return []
+        return super().parse_args(ctx, args)
+
+    def invoke(self, ctx):
+        text = ctx.meta.get("free_text")
+        if text is not None:
+            return GimmicksCliApp().ai(text)
+        return super().invoke(ctx)
+
+
+@click.group(cls=_OoGroup, invoke_without_command=True)
+@click.pass_context
+def cli_oo(ctx):
     r"""\b
      ___        ___ _
     | _ \_  _  / __(_)\_ __
@@ -64,4 +82,28 @@ def cli_oo(text):
         |_/ AI powered Python Gimmicks
 
     """
-    GimmicksCliApp().ai(text)
+    if ctx.invoked_subcommand is None and ctx.meta.get("free_text") is None:
+        click.echo(ctx.get_help())
+
+
+@cli_oo.group()
+def docs():
+    """Documentation tools."""
+
+
+@docs.command("serve")
+@click.option("--port", type=int, default=8000, show_default=True, help="Port to listen on.")
+@click.option("--dir", "directory", type=click.Path(exists=True, file_okay=False), default=None,
+              help="The docs directory to serve (default: the current directory).")
+@click.option("--host", default=None,
+              help="Interface to bind (default: all interfaces, or $PYGIM_HOST; use 127.0.0.1 for localhost only).")
+@click.option("--index", default=None,
+              help="Root-relative page `/` redirects to (default: the root's index.html, else the first of "
+                   "site/, docs/, build/html/, docs/_build/html/ that has one).")
+@click.option("--rebuild", default=None,
+              help="A shell command run in the served directory before serving; a non-zero exit aborts.")
+def docs_serve(port, directory, host, index, rebuild):
+    """Serve a docs directory with the review layer: every HTML page gets the
+    commenter (comments land in __notes__/site-comments.jsonl under the served
+    root) and images dropped on a page are written under images/."""
+    GimmicksCliApp().docs_serve(port=port, directory=directory, host=host, index=index, rebuild=rebuild)
