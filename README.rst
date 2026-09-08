@@ -77,9 +77,11 @@ Every served page gets a ✎ button (click anywhere, or select text, to leave a
 comment); comments append to ``__notes__/site-comments.jsonl`` under the served
 root, ready to be read back and acted on. Dropping an image on a page writes it
 under ``images/``. ``GET /pages`` lists the site's pages, and ``--rebuild``
-reports which pages the rebuild added and removed. Markdown is rendered on
-the fly (Mermaid fences become diagrams), so a design folder is served as it
-is written:
+reports which pages the rebuild added and removed. Opening a Markdown page
+generates its HTML beside it (Mermaid fences become diagrams, ``.md`` links
+point at the generated pages) and serves that, so the commenter works on it
+and comments key on the HTML page — a design folder is served as it is
+written:
 
 .. code-block:: bash
 

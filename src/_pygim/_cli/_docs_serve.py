@@ -11,9 +11,12 @@ Serves a directory of HTML/CSS/JS and adds two things a plain
   (``?page=<path>`` filters); ``/comment-edit`` and ``/comment-delete`` change
   them in place. A malformed comments file is reported (HTTP 500 with the
   file and line), never silently rewritten.
-* **Markdown.** A ``.md`` page is rendered to HTML on the fly (the ``markdown``
-  package; Mermaid fences become live diagrams) and gets the same commenter,
-  so a design folder is served as it is written. ``README.md`` / ``index.md``
+* **Markdown.** Opening ``x.md`` GENERATES ``x.html`` beside it (the ``markdown``
+  package; Mermaid fences become live diagrams; ``.md`` links are rewritten to
+  their ``.html``) and redirects there, so the commenter works on the HTML page
+  and comments key on it — the same shape as a built site. The file is
+  regenerated when the Markdown is newer and carries a marker; a hand-written
+  ``x.html`` without the marker is never overwritten. ``README.md`` / ``index.md``
   stand in for a missing ``index.html``.
 * **Image drops.** Dropping an image on a page POSTs it to
   ``/upload?path=images/<sub>/<file>`` and it is written straight into
@@ -50,7 +53,7 @@ import pygim
 from pygim.pathlike import PathStore
 from _pygim._cli import _commenter
 
-__all__ = ["ServeError", "make_server", "rebuild", "serve", "site_pages"]
+__all__ = ["ServeError", "make_server", "materialize_markdown", "rebuild", "render_markdown", "serve", "site_pages"]
 
 SEG_RE = re.compile(r"^[a-z0-9][a-z0-9 ._-]*$", re.IGNORECASE)  # one path segment, no traversal (spaces ok)
 EXT_OK = (".jpg", ".jpeg", ".png", ".webp", ".gif")
@@ -87,6 +90,7 @@ h1,h2,h3{line-height:1.2}
 blockquote{border-left:3px solid #b06e14;margin:1rem 0;padding:.2rem 1rem;color:#5f6a72}
 .mermaid{background:none}
 </style>"""
+GENERATED_MARK = "<!-- generated from {src} by oo docs serve; edit the Markdown, not this file -->"
 MERMAID_SCRIPT = ("<script type=\"module\">import mermaid from "
                   "\"https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs\";"
                   "mermaid.initialize({startOnLoad:true});</script>")
@@ -129,6 +133,13 @@ def site_pages(root):
     return pages - (root.pathset(notes + "/**/*.html") | root.pathset(notes + "/**/*.md"))
 
 
+def listed_pages(root):
+    """The pages a reader can open: every HTML page, plus Markdown pages that have
+    no generated HTML yet (a bit test per page against the same set)."""
+    pages = site_pages(root)
+    return [p for p in pages if not (p.suffix == ".md" and p.with_suffix(".html") in pages)]
+
+
 def render_markdown(text: str, title: str) -> str | None:
     """*text* (Markdown) as a complete HTML page, or None when the ``markdown``
     package is not installed (the file is then served as it is). Fenced
@@ -141,6 +152,8 @@ def render_markdown(text: str, title: str) -> str | None:
     import html as _html
 
     body = markdown.markdown(text, extensions=["fenced_code", "tables", "toc"])
+    # relative links to Markdown point at the pages generated for them
+    body = re.sub(r'(href=")(?![a-z][a-z0-9+.-]*:|/|#)([^"#]+)\.md(#[^"]*)?"', lambda m: f'{m.group(1)}{m.group(2)}.html{m.group(3) or ""}"', body)
     mermaid = ""
     if 'class="language-mermaid"' in body:
         body = re.sub(
@@ -150,6 +163,30 @@ def render_markdown(text: str, title: str) -> str | None:
         mermaid = MERMAID_SCRIPT
     return (f"<!doctype html><html><head><meta charset=\"utf-8\"><title>{_html.escape(title)}</title>"
             f"{MARKDOWN_STYLE}</head><body>{body}{mermaid}</body></html>")
+
+
+def materialize_markdown(md):
+    """The HTML page for the Markdown file *md*, generated beside it as ``<stem>.html``
+    when missing or older than the Markdown, and left alone when it exists without
+    the generated marker (a hand-written page wins). Returns the HTML path, or None
+    when the ``markdown`` package is not installed."""
+    out = md.with_suffix(".html")
+    src_name = md.name
+    if out.is_file():
+        try:
+            head = out.read_bytes()[:400].decode("utf-8", "replace")
+        except RuntimeError:
+            head = ""
+        if "generated from" not in head or "oo docs serve" not in head:
+            return out                                   # not ours: never overwritten
+        if os.path.getmtime(os.fspath(out)) >= os.path.getmtime(os.fspath(md)):
+            return out                                   # fresh
+    html = render_markdown(md.read_bytes().decode("utf-8"), md.stem)
+    if html is None:
+        return None
+    mark = GENERATED_MARK.format(src=src_name)
+    out.write_bytes(html.replace("<!doctype html>", "<!doctype html>\n" + mark, 1).encode("utf-8"))
+    return out
 
 
 def _relative(root, p) -> str:
@@ -204,7 +241,7 @@ def _make_handler(root, index: str | None):
                     and (wanted is None or _page_key(root, c.get("page")) == wanted)]))
                 return
             if route == "/pages":
-                self._send_json(sorted(_relative(root, p) for p in site_pages(root)))
+                self._send_json(sorted(_relative(root, p) for p in listed_pages(root)))
                 return
             if self.path in ("/", "/index.html") and index and not (root / "index.html").is_file() \
                     and not (root / "README.md").is_file() and not (root / "index.md").is_file():
@@ -212,22 +249,25 @@ def _make_handler(root, index: str | None):
                 self.send_header("Location", "/" + index)
                 self.end_headers()
                 return
-            # every served HTML or Markdown page gets the ✎ commenter
+            # a Markdown page is generated as HTML beside its source and served from there
             page = pygim.path(self.translate_path(parsed.path), store=store)   # a row of the server's table
             if page.is_dir():
                 page = next((page / c for c in ("index.html", "README.md", "index.md") if (page / c).is_file()),
                             page / "index.html")
-            if page.suffix.lower() in PAGE_SUFFIXES and page.is_file():
+            if page.suffix.lower() == ".md" and page.is_file():
+                html = materialize_markdown(page)
+                if html is not None:
+                    self.send_response(302)
+                    self.send_header("Location", urllib.parse.quote(_relative(root, html)))
+                    self.end_headers()
+                    return
+            # every served HTML page gets the ✎ commenter
+            if page.suffix.lower() == ".html" and page.is_file():
                 try:
                     text = page.read_bytes().decode("utf-8")
                 except (RuntimeError, UnicodeDecodeError):
                     super().do_GET()
                     return
-                if page.suffix.lower() == ".md":
-                    text = render_markdown(text, page.stem)
-                    if text is None:
-                        super().do_GET()
-                        return
                 body = _commenter.inject(text).encode("utf-8")
                 self.send_response(200)
                 self.send_header("Content-Type", "text/html; charset=utf-8")
