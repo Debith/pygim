@@ -49,6 +49,7 @@ dev = [
   'pybind11',
   'pyodbc',
   'ruff',
+  'markdown',
 ]
 
 test = [
@@ -62,6 +63,13 @@ test = [
   # as a merge gate (test_differential_oracles_installed_in_ci enforces it).
   'pyyaml',
   'tomli; python_version < "3.11"',
+  # `oo docs serve` renders Markdown pages; the docs-serve tests assert the rendering.
+  'markdown',
+]
+
+# `oo docs serve`: Markdown pages rendered on the fly (Mermaid fences become diagrams).
+docs = [
+  'markdown',
 ]
 
 pandas = [
