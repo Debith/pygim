@@ -578,8 +578,9 @@ flowchart LR
     note["seen: #1 #2 — the procedure and the yardstick,<br/>neither is this decision"] -.-> call
 ```
 
-**Panel 8.** Files are canonical, so the three memories are now three text files and
-twenty-two association rows in the repository. The human meets them in a diff, later, and
+**Panel 8.** Files are canonical, so the three memories are now three content objects,
+three rows in this clone's audit file — every tag named, every memory seen named — and three
+head views a person can read (section 03 §3). The human meets the views in a diff, later, and
 leaves them.
 
 ```mermaid
@@ -587,7 +588,8 @@ flowchart LR
     s["store"] --> f0["memories/creating-a-spell.md — #1 · procedure"]
     s --> f1["memories/compare-defensive-reactions-to-shield.md — #2"]
     s --> f2["memories/frost-ward-typed-resistance.md — #3"]
-    s --> a["associations.jsonl — 22 rows · source: written"]
+    s --> a["audit/c-4f1d.jsonl — three write rows, tags by name"]
+    s --> o["objects/ — the three texts, by digest"]
     f0 --> diff["git diff, later — the human reads all three, and leaves them"]
     f1 --> diff
     f2 --> diff
@@ -737,7 +739,7 @@ flowchart LR
         m2["#3 retired"] -- "superseded by" --> m5["#6 head — 'The Ward family'"]
     end
     m6["#7 head — its own chain"]
-    m5 --> file["memories/frost-ward-typed-resistance.md — now holds #6<br/>git history holds #3"]
+    m5 --> file["memories/frost-ward-typed-resistance.md — the view now shows #6<br/>#3 stays readable in objects/"]
     m6 --> file2["memories/typed-resistance-high-tier.md"]
 ```
 

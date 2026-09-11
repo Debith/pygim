@@ -360,8 +360,8 @@ classDiagram
         rank 2
     }
     class retrieval_receipt {
-        snapshot_version 4
-        taxonomy_version 2
+        snapshot_id of v4
+        taxonomy_version of v1
     }
     class usage_record {
         id 2
