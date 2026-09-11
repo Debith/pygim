@@ -170,14 +170,23 @@ class _SiteIndex:
                 index.terms.setdefault(term, meaning)
         return index
 
-    def link(self, number: str, page: str | None):
-        """A section reference as a link into the page that defines it — this page
-        first, then the first alphabetically, which is the overview a bare reference
-        written in a later section means."""
+    def link(self, number: str, page: str | None, qualifier: str | None = None):
+        """A section reference as a link into the page that defines it. A reference
+        that names its page — "section 03 §2.1", "overview §4.8" — goes there or
+        nowhere; a bare one goes to this page first, then the first page by name,
+        which is the overview a bare reference in a later section means."""
         hits = self.sections.get(number)
         if not hits:
             return None
-        href, heading = next((hit for hit in hits if hit[0] == page), hits[0])
+        if qualifier:
+            named = [hit for hit in hits if _names_page(qualifier, hit[0])]
+            if not named and qualifier == "overview":
+                named = hits[:1]        # no page is called that: the first page is the overview
+            if not named:
+                return None
+            href, heading = named[0]
+        else:
+            href, heading = next((hit for hit in hits if hit[0] == page), hits[0])
         target = "" if href == page else posixpath.relpath(href, posixpath.dirname(page or "/"))
         return (f'<a class="xref" href="{target}#{_anchor(heading)}"'
                 f' title="{html.escape(heading, quote=True)}">&sect;{number}</a>')
@@ -226,8 +235,33 @@ def listed_pages(root):
 
 
 _TERM_RE = re.compile(r"<(code|strong)>([^<>]+)</\1>")
-_SECTION_REF_RE = re.compile(r"\u00a7(\d+(?:\.\d+)*)")
+# "§4.8", optionally preceded by the page it lives in: "overview §4.8",
+# "section 03 §2.1", "01 §3", "(02, §5.3)".
+_SECTION_REF_RE = re.compile(
+    r"(?P<q>\b(?:overview(?:'s)?|(?:section\s+)?\d{2}[a-z]?)\b,?\s+)?\u00a7(?P<n>\d+(?:\.\d+)*)")
+
+
+def _qualifier(text: str | None) -> str | None:
+    """The page a reference names, as "overview" or a two-digit prefix, or None."""
+    if not text:
+        return None
+    word = text.strip().rstrip(",").strip().lower()
+    word = word.removeprefix("section").strip()
+    return "overview" if word.startswith("overview") else word
+
+
+def _names_page(qualifier: str, href: str) -> bool:
+    name = posixpath.basename(href)
+    return "overview" in name if qualifier == "overview" else name.startswith(qualifier + "_")
 _SPLIT_TAGS_RE = re.compile(r"(<[^>]+>)")
+
+
+def _linked_reference(match, site, page: str | None) -> str:
+    """One section reference, rewritten as a link when its target is known; the
+    page qualifier in front of it is kept as text."""
+    prefix = match.group("q") or ""
+    link = site.link(match.group("n"), page, _qualifier(prefix))
+    return prefix + link if link else match.group(0)
 
 
 def _annotate(body: str, site, page: str | None) -> str:
@@ -260,8 +294,7 @@ def _annotate(body: str, site, page: str | None) -> str:
         elif skip:
             out.append(token)
         else:
-            out.append(_SECTION_REF_RE.sub(
-                lambda m: site.link(m.group(1), page) or m.group(0), token))
+            out.append(_SECTION_REF_RE.sub(lambda m: _linked_reference(m, site, page), token))
     return "".join(out)
 
 

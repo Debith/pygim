@@ -375,6 +375,30 @@ class TestCrossReferencesAndTerms:
         body = _docs_serve.render_markdown(text, "model").split("<body>")[1]
         assert "xref" not in body and 'class="term"' not in body
 
+    def test_reference_naming_its_page_goes_there(self, temp_dir):
+        (temp_dir / "00_overview.md").write_text(
+            "# Overview\n\n## 3. Top\n\n### 3.1 Overview bit\n\ntext\n", encoding="utf-8")
+        (temp_dir / "01_model.md").write_text(
+            "# Model\n\n## 3. Here\n\n### 3.1 Local\n\n"
+            "Bare \u00a73.1, section 02 \u00a73.1, (02, \u00a73.1) and overview \u00a73.1.\n",
+            encoding="utf-8")
+        (temp_dir / "02_store.md").write_text(
+            "# Store\n\n## 3. Store\n\n### 3.1 Commit\n\ntext\n", encoding="utf-8")
+        root = pygim.path(temp_dir, store=PathStore()).resolve()
+        site = _docs_serve._SiteIndex.build(root)
+        out = _docs_serve.materialize_markdown(root / "01_model.md", site=site)
+        body = (temp_dir / out.name).read_text(encoding="utf-8").split("<body>")[1]
+        assert body.count('href="#31-local"') == 1
+        assert body.count('href="02_store.html#31-commit"') == 2
+        assert body.count('href="00_overview.html#31-overview-bit"') == 1
+        assert "section 02 <a" in body     # the qualifier stays as text
+
+    def test_reference_naming_a_page_without_that_section_stays_text(self, temp_dir):
+        _, site = self._site(temp_dir)
+        html = _docs_serve.render_markdown("See section 07 \u00a72.", "x", site=site, page="/01_model.html")
+        body = html.split("<body>")[1]
+        assert "xref" not in body and "section 07 \u00a72" in body
+
     def test_unknown_reference_is_left_as_text(self, temp_dir):
         _, site = self._site(temp_dir)
         html = _docs_serve.render_markdown("See \u00a79.9 for that.", "x", site=site, page="/01_model.html")
