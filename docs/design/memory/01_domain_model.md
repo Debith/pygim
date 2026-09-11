@@ -111,11 +111,18 @@ template <class Tag, std::unsigned_integral T = std::uint32_t> class basic_id;
 Each is default-constructed to an invalid sentinel, is trivially copyable, and orders with
 `<=>`, so ids sort and hash without a helper.
 
-### 2.2 The content digest
+### 2.2 The content digest, and a memory's key
 
-A memory's identity is the hash of its content: it is what "identical content is already a
-head" compares (overview §4.5), and what a derived store rebuilds from files by (principle
-12). `basic_digest<Bits>` is `Bits / 64` lanes of `mix64`; `digest` is the 128-bit default.
+The hash of a memory's content does two jobs: it is what "identical content is already a head"
+compares (overview §4.5), and it proves a stored text is the text that was written.
+`basic_digest<Bits>` is `Bits / 64` lanes of `mix64`; `digest` is the 128-bit default. The same
+type names audit rows: a `row_id` is the digest of a row (section 03 §2.1).
+
+A memory's *identity* is not its content digest but its **key** — the `row_id` of the row that
+created it. Content can repeat: a correction reverted to the old text has the old digest and is
+still a different memory, with different lineage and a different place in its chain (section
+03 §2.2). Every file names a memory by its key; the dense `memory_id` exists only inside a
+snapshot.
 
 **Decision 2.2 — 128 bits, not 64 and not SHA-256.** Sixty-four bits gives a birthday
 collision near 1e-10 for a corpus of 100 000 — small, but the failure mode is a *silently
@@ -222,15 +229,15 @@ retrieval actually depended on.
 
 | Pinned | Type | Why it moves |
 |---|---|---|
-| the index | `snapshot_version` — monotonic, bumped by every commit | every WRITE, LEARN promotion and CURATE publishes a new snapshot |
-| the vocabulary | `taxonomy_version` | an accepted proposal adds a tag; weights and roles can be revised |
+| the index | `snapshot_id` — the id of the head row the snapshot was built at (section 03 §2.1); `snapshot_version`, the count of rows in its history, is the "v55" a person reads | every WRITE, LEARN promotion and CURATE is a row, and moves the head |
+| the vocabulary | `taxonomy_version` — the digest of the vocabulary's content (section 02 §2.4) | an accepted proposal adds a tag; weights and roles can be revised |
 | the question | the `classification` itself | the agent classifies, and a later agent may classify differently |
 
 So every retrieval leaves a receipt, and the receipt is what a rerun consumes:
 
 ```mermaid
 flowchart LR
-    q["a read happens"] --> r["retrieval_receipt<br/>query id · when · snapshot_version · taxonomy_version<br/>the classification · the ids it returned"]
+    q["a read happens"] --> r["retrieval_receipt<br/>query id · when · snapshot_id · taxonomy_version<br/>the classification · the ids it returned"]
     r --> log["query log (09)"]
     log --> replay["rerun: ask the store for that snapshot version,<br/>re-run that classification"]
     replay --> same["byte-identical context"]
@@ -305,7 +312,8 @@ classDiagram
 | Type | Field | What it is |
 |---|---|---|
 | `memory` | `slug` | the file's name, stable across a chain's versions |
-| | `content_digest` | the identity (§2.2) |
+| | `key` | the `row_id` of the row that created it — how every file names this memory (§2.2) |
+| | `content_digest` | integrity, and the identical-content check (§2.2) |
 | | `created`, `title`, `content` | written once, never edited |
 | | `cites` | the passages it leans on (§6) |
 | | `origin_of` | its `lineage` |
@@ -473,7 +481,7 @@ breaks without it, so the third column says what.
 | Score exactness | `soft_score` is the sum of the matched tags' dimension weights, whatever the order | two processes rank the same candidates differently; a rerun of yesterday's query returns a different context (§3.1) |
 | Score monotonicity | adding a tag never lowers a memory's score | LEARN becomes unsafe to run unattended: promoting a true association could push a memory *out* of the context it was useful in (G6) |
 | Rank total order | the ranking key has no ties between distinct memories | the context's order depends on the sort algorithm's stability — reproducible on one machine, not on another |
-| Head uniqueness | at most one memory in a chain has an empty `superseded_by` | a corrected memory and its correction both answer the same query, and the reader cannot tell which is current |
+| Head uniqueness | along any single line of history, at most one memory in a chain has an empty `superseded_by`; a chain forked by a git merge keeps both heads and is reported (section 03 §5) | a corrected memory and its correction both answer the same query, and the reader cannot tell which is current |
 | Chain acyclicity | `supersedes` edges form a forest | "show me the history of this memory" never terminates |
 | Digest identity | `content_digest` is the digest of `content` | the duplicate check passes on content that differs, and a derived store rebuilt from files disagrees with the canonical one |
 | Entry completeness | a `tag_id` exists only if its codebook entry is complete | a tag with no boundary sentence: two sessions file the same memory two ways, which is the classification mismatch of overview §4.7 |
@@ -551,12 +559,9 @@ concrete rather than the abstract.
 | **In the model** (drafted) | `memory{ slug = "compare-defensive-reactions-to-shield" }`, and the files store writes `memories/compare-defensive-reactions-to-shield.md` | one obvious place; a chain keeps its filename across versions, so a git diff shows a correction as an edit to the file that already existed | the model knows a filename, which no in-memory or SQL store needs; G7 says the domain model is defined without reference to any storage mechanism |
 | **In the store** | the files store keeps `memory_id → slug` beside the corpus | the model stays storage-free | every store that shares files needs the same side table, and two stores can disagree about a memory's name |
 
-### 11.2 A query's hard tags: one set, or per dimension? (04)
+### 11.2 A query's hard tags — settled
 
-| Option | Concretely | For | Against |
-|---|---|---|---|
-| **One `id_set`** (drafted) | `hard = {0, 1, 2}`; the fold calls `dimension_of` on each to group them | one shape for hard, soft and `seen`; a query is one bitmap to log and compare | grouping happens per query, and `dimension_of` is an extra indirection in the hottest loop |
-| **Array of small sets** | `hard = [ domain:{0}, artifact:{1}, task:{2} ]` | the candidate fold is a plain loop over dimensions, no lookup; "soften `artifact`" is moving one entry | a second shape to serialise, log and compare; empty dimensions must be represented |
+One `id_set`, grouped by `dimension_of` at the start of each read (section 04 §3.1).
 
 ### 11.3 The digest's width (§2.2, 11)
 
@@ -572,9 +577,7 @@ concrete rather than the abstract.
 | **Always present, zero when unused** (drafted) | `match{ soft_score = 5500, semantic_score = 0, final_score = 5500 }` | one type everywhere; the explanation always has the same shape | a field that is always zero in the default configuration, and an explanation line that says nothing |
 | **Templated on the ranker** | `basic_match<Ranker>`; the no-ranker instantiation has no such field | nothing unused is stored or explained | the context type becomes templated too, and it reaches the adapter, where the Python surface must stay one type |
 
-### 11.5 What ties a rank when scores are equal? (04, and §3.1)
+### 11.5 What ties a rank — settled
 
-| Option | Concretely | For | Against |
-|---|---|---|---|
-| **Memory id** (drafted) | `#2` before `#3` at 5500 each | reproducible forever; a rerun of any past query gives the same order | arbitrary — an older memory wins for no reason a reader can see |
-| **Usage counters** | the memory included more often wins the tie | the tie-break carries information, and the overview leans this way | counters rise on reads, which no snapshot version pins, so a rerun cannot reproduce the order unless counters are versioned too (§3.1) |
+The dense id, never usage counters: counters are not pinned by any snapshot, so a counter
+tie-break could not be rerun (section 04 §3.5).

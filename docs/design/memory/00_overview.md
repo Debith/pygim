@@ -23,9 +23,9 @@ mapping.
 | [**00a** — how a memory is made](00a_how_a_memory_is_made.md) | the whole thing as features with Given/When/Then scenarios, drawn panel by panel | draft |
 | [**01** — domain model](01_domain_model.md) | the value types, their laws, and the arithmetic every later section uses | draft |
 | [**01a** — the model, scenario by scenario](01a_model_by_scenario.md) | every scenario of 00a again, as a class diagram and a sequence diagram in 01's types | draft |
-| **02** — taxonomy and sources | loading, validating and growing the vocabulary; the study's measures; the source inventory | to write |
-| **03** — store | the persistence contract and its strategies | to write |
-| **04** — index and retrieval | the snapshot, candidate intersection, scoring, the procedure slot | to write |
+| [**02** — taxonomy and sources](02_taxonomy_and_sources.md) | the vocabulary on disk, loading and checking it, growing it, the study's measures computed, sources and locators | draft |
+| [**03** — store](03_store.md) | the audit log as the index, identity that survives git merges, committing under a lock, loading, the strategies | draft |
+| [**04** — index and retrieval](04_index_and_retrieval.md) | the snapshot, publishing without stopping readers, a read in eleven steps, rerunning a receipt | draft |
 | **05–06** — classifier, ranker | the caller-supplied default and the optional second stage | to write |
 | **07** — writing, learning, curation | `remember` and its checks, LEARN, merge and retire, audit | to write |
 | **08–09** — event bus, services | typed dispatch, transports, the threaded observers | to write |
@@ -221,8 +221,8 @@ spell design and 3 decoys from other problem spaces (programming, writing) that 
 semantic retriever tends to pull in. Each memory is a `## <slug>` heading, header lines
 `key: value[, value...]` where every key other than `title` is a taxonomy dimension, a blank
 line, and the content. This is also the plain-text form G7 asks for: a repository of
-memories is this file plus an associations file, and the prototype's demo and evaluation
-run against exactly this corpus. A corpus file is not a source (§4.9): its blocks *are*
+memories is plain text and git can merge it (section 03 §3), and the prototype's demo and
+evaluation run against exactly this corpus. A corpus file is not a source (§4.9): its blocks *are*
 memories, tagged by hand and ingested, where a source is reference text that is cited and
 stays outside the corpus.
 
@@ -581,7 +581,7 @@ ever needs can be retired, is open (§10).
    Understanding lives outside it — in the agent using the memory, in the human governing
    the vocabulary, and later in agents beside the service that call the same operations.
 11. **Every change has a cause on record.** A counter changed because of a logged query; an association exists because of an audit row; a memory exists because of a lineage entry. Nothing in the store is unexplained (G10).
-12. **Files are canonical when shared.** A repository of memories is plain text plus an associations file. Databases are derived caches rebuilt from files by content hash.
+12. **Files are canonical when shared.** A repository of memories is plain text: content objects named by their digest, one append-only audit log per clone, and the vocabulary and source files. Everything else — checkpoints, head views, databases — is derived and rebuilt from those (section 03).
 13. **One owner per mutable thing.** Each mutable resource is owned by one thread; others communicate by message. Readers use immutable snapshots and never block.
 14. **The model is the runtime.** Domain objects are used directly in memory by retrieval and by every service. Stores translate to and from the model only at load and at commit; no conversion, mapping, or serialisation runs on the read path. A store that needs a different shape keeps that shape on its own side of the contract.
 15. **Strategies behind concepts.** Backends satisfy C++ concepts and live under `strategy/`. Optional third-party dependencies live in separate extension modules, never behind `#ifdef`.
@@ -694,42 +694,39 @@ does not require the ones after it.
 
 ## 10. Open decisions
 
-Decisions deferred to their sections, listed here so they are not lost:
+### Settled in sections 02–04
 
-- Wildcard value `*` for hard dimensions versus multi-tagging (04).
-- **Scoring a soft dimension the memory does not match** (04). A candidate can stand in
-  three states towards a soft query tag: it carries the value (*match*), it carries other
-  values in that dimension but not this one (*contradiction*), or it carries no value in the
-  dimension at all (*absent*). The prototype scores match as `+weight` and the other two as
-  zero.
+| Question | Settled as | Where |
+|---|---|---|
+| Wildcard `*` for hard dimensions, or multi-tagging | a reserved `any` value, hard dimensions only, never scoring | 04 §3.2 |
+| Scoring a soft dimension the memory does not match | neutral; the miss is still recorded in the explanation | 04 §3.4 |
+| Several head procedures for one artifact and task | the earliest takes the slot, the others rank, the pair is flagged | 04 §3.6 |
+| Which parts of a codebook entry are required | brief, when, when not and example; full optional, with a warning for dimensions | 02 §2.3 |
+| Locator granularity | line and passage digest; a changed passage is reported with a suggestion of where it moved | 02 §5.3 |
+| Whether a rejection may redirect | an optional `see`, which must be an existing tag, told to the agent and never applied by the service | 02 §3.2 |
+| What a receipt pins, given git merges | the head row's id, not a counter | 03 §2.1 |
+| What identifies a memory | the row that created it; content digests may repeat | 03 §2.2 |
 
-  | Option | For | Against |
-  |---|---|---|
-  | **Neutral** — contradiction and absent both score 0 (prototype) | Simple. Monotone: adding a tag never lowers a memory's rank, so a learned association can never hurt and LEARN stays safe to run unattended (G6). Generic knowledge that carries no `tier` because it applies to every level ranks on what it does say. | Cannot tell "about something else" from "not tagged yet"; an offensive-only memory ties with an untagged one for a defensive query, and the tie falls to memory id. |
-  | **Miss** — contradiction scores `−weight` (or a fraction), absent scores 0 | Pushes memories about a *different* intent below memories that are silent on intent, which is what a reader expects in a multi-valued dimension such as `purpose`. The explanation can say "contradicts purpose=defensive". | Rank now depends on how exhaustively a memory was tagged: an offensive-and-defensive spell tagged only `offensive` is punished for incomplete tagging, not for irrelevance. Adding a tag can lower a rank, which breaks the monotonicity LEARN relies on. |
+### Still open
 
-  Leaning: neutral for v1, and break ties with usage counters (G12) instead of id once
-  they exist; revisit miss scoring only if the evaluation shows contradiction ties in the
-  top of the context.
-- How wide the look-before-writing read is (07). The write's own hard tags are exact and cheap, but a memory one task over — written under `task=design`, needed under `task=critique` — is invisible to it, which is how Scenario 5.2 of section 00a happens. Softening `task` for the look step would catch it at the cost of a longer candidate list to read.
-- Whether ingestion runs the look step on the human's behalf (03, 11). A hand-written block is never read against the store, so an ingested duplicate is found only later (Scenario 5.1). Ingestion could report likely duplicates by hard-tag overlap before landing them; the block would still land, since the human chose its tags.
-- Procedures (04, 07): whether several head procedures may coexist for one (artifact, task) — by tier, say — and how the first slot chooses between them; whether usage is recorded per step.
-- Whether *valence* — exemplary versus cautionary — is a facet of its own or stays folded into `kind=example` (02). The prototype's `quality` divided by two characteristics at once, which §4.8's first rule forbids; splitting it left the good-versus-bad distinction without a home (§4.1).
-- Which parts of a codebook entry the service refuses without (02): all six, or brief definition, when, when not and example, with the full definition optional.
-- Whether pass B of the study may be the human on a subsample instead of a second agent session, and for which dimensions (02). A human pass is the stronger measurement and the more expensive one.
-- Locator granularity (02): line numbers are exact and brittle; section headings survive edits and are coarser. The seed uses line plus passage hash, and reports a hash mismatch rather than trying to relocate.
-- Whether a rejected tag proposal may carry a redirect (*file this under X*) that the agent is expected to follow, or only a reason (02).
-- Whether `seen` must be named in the write, or the service may correlate the writer's most recent READ over the same hard tags in the same session (07). Explicit is simpler to audit; implicit is one argument fewer.
-- Where agents beside the service run when they arrive: in-process as services (09) or as separate clients over the same adapter (10).
-- Promotion rule for learned associations: raw count, decay, or review-only when the store is a shared repository (07, 11).
-- Which counters (G12) feed promotion and which are display only (07).
-- Typed memory-to-memory edges beyond `supersedes`, with one-hop expansion: in scope for v1 or deferred (04).
-- Frame format produced by the transformer for cross-process transports: JSON first, binary later (08).
-- Container teardown order for singletons that own threads (09, 10).
+- **How wide the look-before-writing read is** (07). The write's own hard tags are exact and cheap, but a memory one task over — written under `task=design`, needed under `task=critique` — is invisible to it, which is how Scenario 5.2 of section 00a happens. Softening `task` for the look step would catch it at the cost of a longer candidate list to read.
+- **Whether ingestion runs the look step on the human's behalf** (03, 11). A hand-written block is never read against the store, so an ingested duplicate is found only later (Scenario 5.1). Ingestion could report likely duplicates by hard-tag overlap before landing them; the block would still land, since the human chose its tags.
+- **Whether valence — exemplary versus cautionary — is a facet of its own** or stays folded into `kind=example` (02). The prototype's `quality` divided by two characteristics at once, which §4.8's first rule forbids; splitting it left the good-versus-bad distinction without a home (§4.1).
+- **Who makes the study's second pass** — a fresh agent session or the human on a subsample (02 §7.3).
+- **What a session is handed** — the whole vocabulary, or the base and a pack index (02 §7.1).
+- **Whether usage is recorded per procedure step**, so a step nobody needs can be retired (07).
+- **Whether `seen` must be named in the write**, or the service may correlate the writer's most recent read over the same hard tags in the same session (07). Explicit is simpler to audit; implicit is one argument fewer.
+- **Promotion rule for learned associations** — raw count, decay, or review-only when the store is a shared repository (07, 11) — and which counters feed it (07).
+- **What "admitted" records** — one usage record per candidate, or a count in the receipt (04 §7.1).
+- **Typed memory-to-memory edges beyond `supersedes`**, with one-hop expansion — drafted as not in v1 (04 §7.2).
+- **Where the repository lives, and whether head views are committed** (03 §9.1, §9.2).
+- **Where agents beside the service run** when they arrive: in-process as services (09) or as separate clients over the same adapter (10).
+- **Frame format** produced by the transformer for cross-process transports: JSON first, binary later (08).
+- **Container teardown order** for singletons that own threads (09, 10).
 
-Section [01](01_domain_model.md) carries the domain model's own: whether `slug` belongs in
-the core, whether the digest's width becomes a policy, and whether `match` is templated on
-the ranker's score type.
+Section [01](01_domain_model.md) carries the domain model's own: whether `slug` belongs in the
+core, whether the digest's width becomes a policy, and whether `match` is templated on the
+ranker's score type.
 
 ## 11. References
 
