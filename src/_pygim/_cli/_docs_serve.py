@@ -43,7 +43,9 @@ import datetime
 import errno
 import http.server
 import json
+import html
 import os
+import posixpath
 import re
 import socket
 import socketserver
@@ -89,6 +91,8 @@ th{color:#5f6a72;font-size:.85em;letter-spacing:.04em;text-transform:uppercase}
 h1,h2,h3{line-height:1.2}
 blockquote{border-left:3px solid #b06e14;margin:1rem 0;padding:.2rem 1rem;color:#5f6a72}
 .mermaid{background:none}
+code.term,abbr.term{border-bottom:1px dotted #8a9299;cursor:help}
+a.xref{color:inherit;text-decoration:none;border-bottom:1px dotted #8a9299;cursor:help}
 </style>"""
 GENERATED_MARK = "<!-- generated from {src} by oo docs serve; edit the Markdown, not this file -->"
 MERMAID_SCRIPT = ("<script type=\"module\">import mermaid from "
@@ -96,6 +100,87 @@ MERMAID_SCRIPT = ("<script type=\"module\">import mermaid from "
                   "mermaid.initialize({startOnLoad:true});</script>")
 
 HOST_ENV = "PYGIM_HOST"
+
+# A table whose first heading cell is one of these defines terms: column one is the
+# term, column two its meaning. Writing such a table is all a page does to get hover
+# text on every code span naming one of its terms, anywhere on the site.
+TERM_HEADS = ("term", "type")
+
+_HEADING_RE = re.compile(r"^#{2,4}\s+(\d+(?:\.\d+)*)\.?\s+(.+?)\s*$", re.M)
+_RULE_RE = re.compile(r"^\|[\s:|-]+\|$")
+
+
+def _md_plain(cell: str) -> str:
+    """A Markdown table cell as plain text: links, emphasis and code ticks removed."""
+    text = re.sub(r"\[([^\]]+)\]\([^)]*\)", r"\1", cell)
+    return text.replace("**", "").replace("`", "").replace("*", "").strip()
+
+
+def _anchor(heading: str) -> str:
+    """The id python-markdown's toc extension gives *heading* ("2.3 A tag" -> "23-a-tag")."""
+    text = re.sub(r"[^\w\s-]", "", heading).strip().lower()
+    return re.sub(r"[-\s]+", "-", text)
+
+
+def _terms_of(text: str) -> dict:
+    """Every term a Term/Type table in *text* defines, mapped to its meaning."""
+    terms, rows, i = {}, text.split("\n"), 0
+    while i < len(rows) - 1:
+        if rows[i].startswith("|") and _RULE_RE.match(rows[i + 1].strip()):
+            head = [c.strip() for c in rows[i].strip().strip("|").split("|")]
+            if head and _md_plain(head[0]).lower() in TERM_HEADS:
+                i += 2
+                while i < len(rows) and rows[i].startswith("|"):
+                    cells = [c.strip() for c in rows[i].strip().strip("|").split("|")]
+                    term = _md_plain(cells[0]) if cells else ""
+                    meaning = _md_plain(cells[1]) if len(cells) > 1 else ""
+                    if term and meaning:
+                        terms.setdefault(term, meaning)
+                    i += 1
+                continue
+        i += 1
+    return terms
+
+
+class _SiteIndex:
+    """What the Markdown pages under a root define between them: numbered sections
+    other pages cite as a section reference, and the terms their Term/Type tables
+    describe. Built once at startup; the renderer turns both into hover text."""
+
+    def __init__(self):
+        self.terms = {}        # term -> meaning
+        self.sections = {}     # "4.8" -> [(page href, full heading)]
+        self.pages = {}        # markdown path -> href of the HTML generated for it
+
+    @classmethod
+    def build(cls, root):
+        index = cls()
+        for page in sorted(site_pages(root), key=lambda p: p.name):
+            if page.suffix != ".md":
+                continue
+            try:
+                text = page.read_bytes().decode("utf-8")
+            except (OSError, RuntimeError, UnicodeDecodeError):
+                continue
+            href = _relative(root, page.with_suffix(".html"))
+            index.pages[os.fspath(page)] = href
+            for number, heading in _HEADING_RE.findall(text):
+                index.sections.setdefault(number, []).append((href, f"{number} {heading}".strip()))
+            for term, meaning in _terms_of(text).items():
+                index.terms.setdefault(term, meaning)
+        return index
+
+    def link(self, number: str, page: str | None):
+        """A section reference as a link into the page that defines it — this page
+        first, then the first alphabetically, which is the overview a bare reference
+        written in a later section means."""
+        hits = self.sections.get(number)
+        if not hits:
+            return None
+        href, heading = next((hit for hit in hits if hit[0] == page), hits[0])
+        target = "" if href == page else posixpath.relpath(href, posixpath.dirname(page or "/"))
+        return (f'<a class="xref" href="{target}#{_anchor(heading)}"'
+                f' title="{html.escape(heading, quote=True)}">&sect;{number}</a>')
 
 
 class ServeError(RuntimeError):
@@ -140,28 +225,69 @@ def listed_pages(root):
     return [p for p in pages if not (p.suffix == ".md" and p.with_suffix(".html") in pages)]
 
 
-def render_markdown(text: str, title: str) -> str | None:
+_TERM_RE = re.compile(r"<(code|strong)>([^<>]+)</\1>")
+_SECTION_REF_RE = re.compile(r"\u00a7(\d+(?:\.\d+)*)")
+_SPLIT_TAGS_RE = re.compile(r"(<[^>]+>)")
+
+
+def _annotate(body: str, site, page: str | None) -> str:
+    """Hover text for the two things a reader stops on: a term the site defines, named
+    the way an author names one — in a code span or in bold — and a section reference.
+    Code blocks and existing links are left alone, so nothing inside a fenced example
+    is rewritten."""
+    if site is None:
+        return body
+
+    def marked_term(match):
+        tag, text = match.group(1), match.group(2)
+        meaning = site.terms.get(html.unescape(text))
+        if not meaning:
+            return match.group(0)
+        return (f'<{tag} class="term" title="{html.escape(meaning, quote=True)}">'
+                f"{text}</{tag}>")
+
+    body = _TERM_RE.sub(marked_term, body)
+
+    out, skip = [], 0
+    for token in _SPLIT_TAGS_RE.split(body):
+        if token.startswith("<"):
+            name = token[1:].split(" ", 1)[0].rstrip("/>").lower()
+            if name in ("pre", "code", "a"):
+                skip += 1
+            elif name in ("/pre", "/code", "/a"):
+                skip = max(0, skip - 1)
+            out.append(token)
+        elif skip:
+            out.append(token)
+        else:
+            out.append(_SECTION_REF_RE.sub(
+                lambda m: site.link(m.group(1), page) or m.group(0), token))
+    return "".join(out)
+
+
+def render_markdown(text: str, title: str, *, site=None, page: str | None = None) -> str | None:
     """*text* (Markdown) as a complete HTML page, or None when the ``markdown``
     package is not installed (the file is then served as it is). Fenced
     ``mermaid`` blocks become ``<pre class="mermaid">`` with the Mermaid
-    script, so diagrams render in the browser."""
+    script, so diagrams render in the browser. Given a *site* index, a code span
+    naming one of its terms and a section reference both gain hover text."""
     try:
         import markdown
     except ImportError:
         return None
-    import html as _html
 
     body = markdown.markdown(text, extensions=["fenced_code", "tables", "toc"])
+    body = _annotate(body, site, page)
     # relative links to Markdown point at the pages generated for them
     body = re.sub(r'(href=")(?![a-z][a-z0-9+.-]*:|/|#)([^"#]+)\.md(#[^"]*)?"', lambda m: f'{m.group(1)}{m.group(2)}.html{m.group(3) or ""}"', body)
     mermaid = ""
     if 'class="language-mermaid"' in body:
         body = re.sub(
             r'<pre><code class="language-mermaid">(.*?)</code></pre>',
-            lambda m: '<pre class="mermaid">' + _html.unescape(m.group(1)) + "</pre>",
+            lambda m: '<pre class="mermaid">' + html.unescape(m.group(1)) + "</pre>",
             body, flags=re.S)
         mermaid = MERMAID_SCRIPT
-    return (f"<!doctype html><html><head><meta charset=\"utf-8\"><title>{_html.escape(title)}</title>"
+    return (f"<!doctype html><html><head><meta charset=\"utf-8\"><title>{html.escape(title)}</title>"
             f"{MARKDOWN_STYLE}</head><body>{body}{mermaid}</body></html>")
 
 
@@ -174,20 +300,21 @@ def pregenerate(root) -> int:
     except ImportError:
         return 0
     count = 0
+    site = _SiteIndex.build(root)
     for page in site_pages(root):
         if page.suffix != ".md":
             continue
         out = page.with_suffix(".html")
         stale = not out.is_file() or os.path.getmtime(os.fspath(out)) < os.path.getmtime(os.fspath(page))
         try:
-            if materialize_markdown(page) is not None and stale:
+            if materialize_markdown(page, site=site) is not None and stale:
                 count += 1
         except (OSError, RuntimeError, UnicodeDecodeError):
             continue   # an unreadable page is reported when it is opened, not at startup
     return count
 
 
-def materialize_markdown(md):
+def materialize_markdown(md, *, site=None):
     """The HTML page for the Markdown file *md*, generated beside it as ``<stem>.html``
     when missing or older than the Markdown, and left alone when it exists without
     the generated marker (a hand-written page wins). Returns the HTML path, or None
@@ -203,11 +330,12 @@ def materialize_markdown(md):
             return out                                   # not ours: never overwritten
         if os.path.getmtime(os.fspath(out)) >= os.path.getmtime(os.fspath(md)):
             return out                                   # fresh
-    html = render_markdown(md.read_bytes().decode("utf-8"), md.stem)
-    if html is None:
+    page = site.pages.get(os.fspath(md)) if site is not None else None
+    rendered = render_markdown(md.read_bytes().decode("utf-8"), md.stem, site=site, page=page)
+    if rendered is None:
         return None
     mark = GENERATED_MARK.format(src=src_name)
-    out.write_bytes(html.replace("<!doctype html>", "<!doctype html>\n" + mark, 1).encode("utf-8"))
+    out.write_bytes(rendered.replace("<!doctype html>", "<!doctype html>\n" + mark, 1).encode("utf-8"))
     return out
 
 
@@ -234,7 +362,7 @@ def _pick_index(root, index: str | None) -> str | None:
     return next((c for c in INDEX_CANDIDATES if (root / c).is_file()), None)
 
 
-def _make_handler(root, index: str | None):
+def _make_handler(root, index: str | None, site=None):
     """A SimpleHTTPRequestHandler bound to *root* with the comment, pages and upload endpoints.
     *root* carries the server's store; every path made here derives from it."""
     store = root.store
@@ -277,10 +405,10 @@ def _make_handler(root, index: str | None):
                 page = next((page / c for c in ("index.html", "README.md", "index.md") if (page / c).is_file()),
                             page / "index.html")
             if page.suffix.lower() == ".md" and page.is_file():
-                html = materialize_markdown(page)
-                if html is not None:
+                generated = materialize_markdown(page, site=site)
+                if generated is not None:
                     self.send_response(302)
-                    self.send_header("Location", urllib.parse.quote(_relative(root, html)))
+                    self.send_header("Location", urllib.parse.quote(_relative(root, generated)))
                     self.end_headers()
                     return
             # every served HTML page gets the ✎ commenter
@@ -470,6 +598,7 @@ def make_server(doc_root, *, port: int = 8000, host: str | None = None,
     if not root.is_dir():
         raise FileNotFoundError(f"doc root not found: {root}")
     pregenerate(root)   # every Markdown page has its HTML before the first request
+    site = _SiteIndex.build(root)
 
     # Bind all interfaces by default so the page is reachable via the WSL IP even
     # when Windows→WSL localhost forwarding hiccups (a common "can't connect").
@@ -480,7 +609,7 @@ def make_server(doc_root, *, port: int = 8000, host: str | None = None,
     # SO_REUSEADDR there lets a SECOND server bind the same port (no error, split
     # traffic), so leave it off — Windows does not have the TIME_WAIT bind problem.
     socketserver.TCPServer.allow_reuse_address = os.name != "nt"
-    handler = _make_handler(root, _pick_index(root, index))
+    handler = _make_handler(root, _pick_index(root, index), site)
     try:
         return socketserver.TCPServer((host, port), handler)
     except OSError as e:

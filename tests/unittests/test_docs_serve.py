@@ -8,6 +8,7 @@ import urllib.error
 import urllib.request
 
 import click
+import pygim
 import pytest
 from click.testing import CliRunner
 
@@ -310,6 +311,75 @@ class TestComments:
 
     def test_unknown_post_route(self, server):
         assert _post(server + "/nope", {})[0] == 404
+
+
+class TestCrossReferencesAndTerms:
+    """A site's Markdown pages define numbered sections and Term/Type tables; the
+    generator turns a reference to either into hover text."""
+
+    @staticmethod
+    def _site(temp_dir):
+        (temp_dir / "00_guide.md").write_text(
+            "# Guide\n\n"
+            "## 4. Knowledge\n\n"
+            "| Term | Meaning |\n|---|---|\n"
+            "| **memory** | a unit of knowledge |\n"
+            "| `tag_id` | a dense id for one tag |\n\n"
+            "### 4.8 Foundations\n\nWhat it rests on.\n",
+            encoding="utf-8")
+        (temp_dir / "01_model.md").write_text(
+            "# Model\n\n"
+            "## 2. Identity\n\n"
+            "A `tag_id` is small, see overview \u00a74.8 and \u00a72 here.\n\n"
+            "```text\nnot a link: \u00a74.8\n```\n",
+            encoding="utf-8")
+        root = pygim.path(temp_dir, store=PathStore()).resolve()
+        return root, _docs_serve._SiteIndex.build(root)
+
+    def _render(self, temp_dir, name):
+        root, site = self._site(temp_dir)
+        out = _docs_serve.materialize_markdown(root / name, site=site)
+        return (temp_dir / out.name).read_text(encoding="utf-8")
+
+    def test_index_collects_sections_and_terms(self, temp_dir):
+        _, site = self._site(temp_dir)
+        assert set(site.sections) == {"2", "4", "4.8"}
+        assert site.terms["memory"] == "a unit of knowledge"
+        assert site.terms["tag_id"] == "a dense id for one tag"
+
+    def test_reference_to_another_page_links_there(self, temp_dir):
+        html = self._render(temp_dir, "01_model.md")
+        assert '<a class="xref" href="00_guide.html#48-foundations"' in html
+        assert 'title="4.8 Foundations"' in html
+
+    def test_reference_to_this_page_stays_local(self, temp_dir):
+        html = self._render(temp_dir, "01_model.md")
+        assert '<a class="xref" href="#2-identity"' in html
+
+    def test_reference_inside_a_code_block_is_left_alone(self, temp_dir):
+        html = self._render(temp_dir, "01_model.md")
+        fenced = html.split("<pre>")[1]
+        assert "xref" not in fenced
+
+    def test_code_span_naming_a_term_gets_hover_text(self, temp_dir):
+        html = self._render(temp_dir, "01_model.md")
+        assert '<code class="term" title="a dense id for one tag">tag_id</code>' in html
+
+    def test_bold_term_gets_hover_text(self, temp_dir):
+        html = self._render(temp_dir, "00_guide.md")
+        assert '<strong class="term" title="a unit of knowledge">memory</strong>' in html
+
+    def test_no_index_means_no_annotation(self, temp_dir):
+        self._site(temp_dir)
+        text = (temp_dir / "01_model.md").read_text(encoding="utf-8")
+        body = _docs_serve.render_markdown(text, "model").split("<body>")[1]
+        assert "xref" not in body and 'class="term"' not in body
+
+    def test_unknown_reference_is_left_as_text(self, temp_dir):
+        _, site = self._site(temp_dir)
+        html = _docs_serve.render_markdown("See \u00a79.9 for that.", "x", site=site, page="/01_model.html")
+        body = html.split("<body>")[1]
+        assert "xref" not in body and "\u00a79.9" in body
 
 
 class TestErrorRepliesDrainTheBody:
