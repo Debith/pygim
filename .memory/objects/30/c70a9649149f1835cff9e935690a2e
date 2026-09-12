@@ -1,0 +1,1 @@
+Closed vocabulary, no unread write, head only, identical content: all four are checked before the lock to give a fast refusal, and then again after taking the commit lock, because another process may have appended in between. Only the second run decides. Append durably (fsync) while holding it.

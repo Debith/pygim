@@ -1,0 +1,7 @@
+---
+memory: 7aa6c44b879b6dab300ebc825fde736b
+title: "A soft dimension that only re-describes loses weight, not its place"
+origin: written
+tags: ["domain=pygim","component=memory","artifact=vocabulary","task=design","kind=decision","concern=correctness"]
+---
+The dnd study found school redundant against pillar (V 0.653) and proposed dropping it. But school is soft, so it never filters — redundancy can only double-count in ranking, which halving the weight fixes. It is also free to assign and perfectly reliable. Drop a hard dimension that double-filters; re-weight a soft one that merely re-describes.
