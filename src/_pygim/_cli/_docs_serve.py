@@ -11,13 +11,15 @@ Serves a directory of HTML/CSS/JS and adds two things a plain
   (``?page=<path>`` filters); ``/comment-edit`` and ``/comment-delete`` change
   them in place. A malformed comments file is reported (HTTP 500 with the
   file and line), never silently rewritten.
-* **Markdown.** Opening ``x.md`` GENERATES ``x.html`` beside it (the ``markdown``
-  package; Mermaid fences become live diagrams; ``.md`` links are rewritten to
-  their ``.html``) and redirects there, so the commenter works on the HTML page
-  and comments key on it — the same shape as a built site. The file is
-  regenerated when the Markdown is newer and carries a marker; a hand-written
-  ``x.html`` without the marker is never overwritten. ``README.md`` / ``index.md``
-  stand in for a missing ``index.html``.
+* **Markdown.** Opening ``x.md`` GENERATES ``x.generated.html`` beside it (the
+  ``markdown`` package; Mermaid fences become live diagrams; ``.md`` links are
+  rewritten to their generated page) and redirects there, so the commenter works
+  on the HTML page and comments key on it — the same shape as a built site. The
+  ``.generated.html`` name says the file is derived and disposable, so one glob
+  ignores every one of them. It is regenerated when the Markdown is newer and
+  carries a marker; a hand-written ``x.html`` is a page in its own right and is
+  never overwritten. ``README.md`` / ``index.md`` stand in for a missing
+  ``index.html``.
 * **Image drops.** Dropping an image on a page POSTs it to
   ``/upload?path=images/<sub>/<file>`` and it is written straight into
   ``<root>/images/<sub>/<file>`` — no Downloads round-trip. Uploads land only
@@ -92,9 +94,13 @@ h1,h2,h3{line-height:1.2}
 blockquote{border-left:3px solid #b06e14;margin:1rem 0;padding:.2rem 1rem;color:#5f6a72}
 .mermaid{background:none}
 code.term,abbr.term{border-bottom:1px dotted #8a9299;cursor:help}
+th.term{border-bottom:1px dotted #8a9299;cursor:help}
 a.xref{color:inherit;text-decoration:none;border-bottom:1px dotted #8a9299;cursor:help}
 </style>"""
 GENERATED_MARK = "<!-- generated from {src} by oo docs serve; edit the Markdown, not this file -->"
+# A generated page is named for what it is, so it reads as derived in any listing and one
+# glob ignores the lot. A hand-written ``x.html`` keeps its plain name and is never touched.
+GENERATED_SUFFIX = ".generated.html"
 MERMAID_SCRIPT = ("<script type=\"module\">import mermaid from "
                   "\"https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs\";"
                   "mermaid.initialize({startOnLoad:true});</script>")
@@ -162,7 +168,7 @@ class _SiteIndex:
                 text = page.read_bytes().decode("utf-8")
             except (OSError, RuntimeError, UnicodeDecodeError):
                 continue
-            href = _relative(root, page.with_suffix(".html"))
+            href = _relative(root, page.with_suffix(GENERATED_SUFFIX))
             index.pages[os.fspath(page)] = href
             for number, heading in _HEADING_RE.findall(text):
                 index.sections.setdefault(number, []).append((href, f"{number} {heading}".strip()))
@@ -231,10 +237,10 @@ def listed_pages(root):
     """The pages a reader can open: every HTML page, plus Markdown pages that have
     no generated HTML yet (a bit test per page against the same set)."""
     pages = site_pages(root)
-    return [p for p in pages if not (p.suffix == ".md" and p.with_suffix(".html") in pages)]
+    return [p for p in pages if not (p.suffix == ".md" and p.with_suffix(GENERATED_SUFFIX) in pages)]
 
 
-_TERM_RE = re.compile(r"<(code|strong)>([^<>]+)</\1>")
+_TERM_RE = re.compile(r"<(code|strong|th)>([^<>]+)</\1>")
 # "§4.8", optionally preceded by the page it lives in: "overview §4.8",
 # "section 03 §2.1", "01 §3", "(02, §5.3)".
 _SECTION_REF_RE = re.compile(
@@ -266,9 +272,9 @@ def _linked_reference(match, site, page: str | None) -> str:
 
 def _annotate(body: str, site, page: str | None) -> str:
     """Hover text for the two things a reader stops on: a term the site defines, named
-    the way an author names one — in a code span or in bold — and a section reference.
-    Code blocks and existing links are left alone, so nothing inside a fenced example
-    is rewritten."""
+    the way an author names one — in a code span, in bold, or as the header of the
+    column it describes — and a section reference. Code blocks and existing links are
+    left alone, so nothing inside a fenced example is rewritten."""
     if site is None:
         return body
 
@@ -302,8 +308,8 @@ def render_markdown(text: str, title: str, *, site=None, page: str | None = None
     """*text* (Markdown) as a complete HTML page, or None when the ``markdown``
     package is not installed (the file is then served as it is). Fenced
     ``mermaid`` blocks become ``<pre class="mermaid">`` with the Mermaid
-    script, so diagrams render in the browser. Given a *site* index, a code span
-    naming one of its terms and a section reference both gain hover text."""
+    script, so diagrams render in the browser. Given a *site* index, a code span or
+    table header naming one of its terms and a section reference all gain hover text."""
     try:
         import markdown
     except ImportError:
@@ -312,7 +318,8 @@ def render_markdown(text: str, title: str, *, site=None, page: str | None = None
     body = markdown.markdown(text, extensions=["fenced_code", "tables", "toc"])
     body = _annotate(body, site, page)
     # relative links to Markdown point at the pages generated for them
-    body = re.sub(r'(href=")(?![a-z][a-z0-9+.-]*:|/|#)([^"#]+)\.md(#[^"]*)?"', lambda m: f'{m.group(1)}{m.group(2)}.html{m.group(3) or ""}"', body)
+    body = re.sub(r'(href=")(?![a-z][a-z0-9+.-]*:|/|#)([^"#]+)\.md(#[^"]*)?"',
+                  lambda m: f'{m.group(1)}{m.group(2)}{GENERATED_SUFFIX}{m.group(3) or ""}"', body)
     mermaid = ""
     if 'class="language-mermaid"' in body:
         body = re.sub(
@@ -337,7 +344,7 @@ def pregenerate(root) -> int:
     for page in site_pages(root):
         if page.suffix != ".md":
             continue
-        out = page.with_suffix(".html")
+        out = page.with_suffix(GENERATED_SUFFIX)
         stale = not out.is_file() or os.path.getmtime(os.fspath(out)) < os.path.getmtime(os.fspath(page))
         try:
             if materialize_markdown(page, site=site) is not None and stale:
@@ -348,11 +355,11 @@ def pregenerate(root) -> int:
 
 
 def materialize_markdown(md, *, site=None):
-    """The HTML page for the Markdown file *md*, generated beside it as ``<stem>.html``
-    when missing or older than the Markdown, and left alone when it exists without
-    the generated marker (a hand-written page wins). Returns the HTML path, or None
-    when the ``markdown`` package is not installed."""
-    out = md.with_suffix(".html")
+    """The HTML page for the Markdown file *md*, generated beside it as
+    ``<stem>.generated.html`` when missing or older than the Markdown, and left alone
+    when it exists without the generated marker (a hand-written page wins). Returns the
+    HTML path, or None when the ``markdown`` package is not installed."""
+    out = md.with_suffix(GENERATED_SUFFIX)
     src_name = md.name
     if out.is_file():
         try:
