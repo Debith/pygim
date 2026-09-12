@@ -95,10 +95,12 @@ today's mostly in `heads`.
 
 ## 2. Publishing a snapshot
 
-Readers never wait. The current snapshot sits behind one `std::atomic<std::shared_ptr<const snapshot>>`;
-a read loads it once and uses that snapshot from its first step to its receipt, whatever is
-committed meanwhile. The service's owner thread is the only writer: it builds the next snapshot
-and swaps the pointer (principle 13).
+Readers never wait for a commit. The current snapshot is one `std::shared_ptr<const snapshot>`
+behind a mutex that guards nothing but the pointer copy; a read takes its copy once and uses that
+snapshot from its first step to its receipt, whatever is committed meanwhile. Only a commit
+builds the next snapshot and swaps the pointer (principle 13). The mutex stands where
+`std::atomic<std::shared_ptr>` would, because libc++ — the macOS standard library — does not
+implement the atomic form; the cost is one uncontended lock per read.
 
 ```mermaid
 sequenceDiagram

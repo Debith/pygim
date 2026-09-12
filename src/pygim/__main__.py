@@ -87,6 +87,45 @@ def cli_oo(ctx):
 
 
 @cli_oo.group()
+def memory():
+    """Problem-space memory: retrieval by the kind of problem being solved."""
+
+
+_ROOT = click.option("--root", default=".memory", show_default=True, type=click.Path(file_okay=False),
+                     help="The memory repository.")
+
+
+@memory.command("init")
+@_ROOT
+def memory_init(root):
+    """Create a repository with the base vocabulary."""
+    GimmicksCliApp().memory_init(root=root)
+
+
+@memory.command("mcp")
+@_ROOT
+def memory_mcp(root):
+    """Serve the repository to an agent over MCP (stdio). Register it with
+    `claude mcp add memory -- oo memory mcp --root <absolute path>`."""
+    GimmicksCliApp().memory_mcp(root=root)
+
+
+@memory.command("ingest")
+@click.argument("corpus", type=click.Path(exists=True, dir_okay=False))
+@_ROOT
+def memory_ingest(corpus, root):
+    """Ingest a hand-written corpus file, reconciled by slug and digest."""
+    GimmicksCliApp().memory_ingest(corpus=corpus, root=root)
+
+
+@memory.command("status")
+@_ROOT
+def memory_status(root):
+    """Where the store stands: its version, reviews and pending proposals."""
+    GimmicksCliApp().memory_status(root=root)
+
+
+@cli_oo.group()
 def docs():
     """Documentation tools."""
 
@@ -107,3 +146,8 @@ def docs_serve(port, directory, host, index, rebuild):
     commenter (comments land in __notes__/site-comments.jsonl under the served
     root) and images dropped on a page are written under images/."""
     GimmicksCliApp().docs_serve(port=port, directory=directory, host=host, index=index, rebuild=rebuild)
+
+
+if __name__ == "__main__":
+    # `python -m pygim` runs what the `pygim` script runs; `oo` is the other entry point.
+    cli()

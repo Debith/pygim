@@ -1,0 +1,10 @@
+[extension]
+module = "memory"
+# tests/static/memory_proofs.cpp proves the core's laws at compile time; wired
+# into the sources so every build proves them (it contributes no runtime code).
+sources = [
+  "adapter/bindings.cpp",
+  "../../../tests/static/memory_proofs.cpp",
+]
+std = "c++26"
+flags_if_supported = ["-mpopcnt"]   # id_set counts are one instruction per word
