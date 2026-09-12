@@ -126,8 +126,8 @@ class TestMarkdown:
     def test_opening_markdown_generates_html_beside_it_and_redirects(self, server, site):
         (site / "design.md").write_text("# Title\n\nSome *text*.\n\n| a | b |\n|---|---|\n| 1 | 2 |\n", encoding="utf-8")
         status, headers, _ = _get(server + "/design.md", follow=False)
-        assert status == 302 and headers["Location"] == "/design.html"
-        generated = (site / "design.html").read_text(encoding="utf-8")
+        assert status == 302 and headers["Location"] == "/design.generated.html"
+        generated = (site / "design.generated.html").read_text(encoding="utf-8")
         assert "generated from design.md by oo docs serve" in generated
         assert "<h1" in generated and "<em>text</em>" in generated and "<table>" in generated
         assert 'id="cmt-tab"' not in generated                         # the commenter is injected when served, not written
@@ -142,7 +142,8 @@ class TestMarkdown:
         root = _docs_serve.pygim.path(site, store=PathStore())
         out = _docs_serve.materialize_markdown(root / "note.md")
         first = os.fspath(out)
-        assert "<h1" in (site / "note.html").read_text(encoding="utf-8") and "one" in (site / "note.html").read_text(encoding="utf-8")
+        assert "<h1" in (site / "note.generated.html").read_text(encoding="utf-8") \
+            and "one" in (site / "note.generated.html").read_text(encoding="utf-8")
         stamp = os.path.getmtime(first)
         _docs_serve.materialize_markdown(root / "note.md")
         assert os.path.getmtime(first) == stamp                        # fresh: untouched
@@ -150,20 +151,31 @@ class TestMarkdown:
         md.write_text("# two\n", encoding="utf-8")
         os.utime(md, None)
         _docs_serve.materialize_markdown(root / "note.md")
-        assert "two" in (site / "note.html").read_text(encoding="utf-8")   # stale: regenerated
+        assert "two" in (site / "note.generated.html").read_text(encoding="utf-8")   # stale: regenerated
 
-    def test_a_hand_written_html_is_never_overwritten(self, site):
+    def test_a_generated_page_without_the_marker_is_never_overwritten(self, site):
+        (site / "mine.md").write_text("# from markdown\n", encoding="utf-8")
+        (site / "mine.generated.html").write_text("<body>hand-written</body>", encoding="utf-8")
+        root = _docs_serve.pygim.path(site, store=PathStore())
+        out = _docs_serve.materialize_markdown(root / "mine.md")
+        assert out.name == "mine.generated.html"
+        assert (site / "mine.generated.html").read_text(encoding="utf-8") == "<body>hand-written</body>"
+
+    def test_a_hand_written_html_is_left_alone_entirely(self, site):
+        """The generated name is its own place, so ``x.html`` beside ``x.md`` is a page
+        in its own right and the generator never contends with it."""
         (site / "mine.md").write_text("# from markdown\n", encoding="utf-8")
         (site / "mine.html").write_text("<body>hand-written</body>", encoding="utf-8")
         root = _docs_serve.pygim.path(site, store=PathStore())
-        out = _docs_serve.materialize_markdown(root / "mine.md")
-        assert out.name == "mine.html" and (site / "mine.html").read_text(encoding="utf-8") == "<body>hand-written</body>"
+        _docs_serve.materialize_markdown(root / "mine.md")
+        assert (site / "mine.html").read_text(encoding="utf-8") == "<body>hand-written</body>"
+        assert "from markdown" in (site / "mine.generated.html").read_text(encoding="utf-8")
 
     def test_markdown_links_point_at_generated_pages(self, site):
         (site / "a.md").write_text("see [b](b.md#part) and [ext](https://x.y/z.md) and [raw](/abs.md)\n", encoding="utf-8")
         root = _docs_serve.pygim.path(site, store=PathStore())
         html = (site / _docs_serve.materialize_markdown(root / "a.md").name).read_text(encoding="utf-8")
-        assert 'href="b.html#part"' in html and 'href="https://x.y/z.md"' in html and 'href="/abs.md"' in html
+        assert 'href="b.generated.html#part"' in html and 'href="https://x.y/z.md"' in html and 'href="/abs.md"' in html
 
     def test_mermaid_fence_becomes_a_live_diagram(self, site):
         (site / "diagram.md").write_text("```mermaid\nclassDiagram\n  A --> B\n```\n", encoding="utf-8")
@@ -179,9 +191,9 @@ class TestMarkdown:
         try:
             base = f"http://127.0.0.1:{httpd.server_address[1]}"
             status, headers, _ = _get(base + "/", follow=False)
-            assert status == 302 and headers["Location"] == "/README.html"
+            assert status == 302 and headers["Location"] == "/README.generated.html"
             body = _get(base + "/")[2].decode("utf-8")
-            assert "<h1" in body and 'id="cmt-tab"' in body and (temp_dir / "README.html").is_file()
+            assert "<h1" in body and 'id="cmt-tab"' in body and (temp_dir / "README.generated.html").is_file()
         finally:
             httpd.shutdown()
             httpd.server_close()
@@ -190,9 +202,9 @@ class TestMarkdown:
     def test_pages_list_html_and_unconverted_markdown_only(self, server, site):
         (site / "notes.md").write_text("x", encoding="utf-8")
         (site / "done.md").write_text("y", encoding="utf-8")
-        assert _get(server + "/done.md", follow=False)[0] == 302          # generates done.html
+        assert _get(server + "/done.md", follow=False)[0] == 302          # generates done.generated.html
         pages = json.loads(_get(server + "/pages")[2])
-        assert "/notes.md" in pages and "/done.html" in pages and "/done.md" not in pages
+        assert "/notes.md" in pages and "/done.generated.html" in pages and "/done.md" not in pages
 
     def test_startup_generates_every_markdown_page(self, temp_dir):
         (temp_dir / "a.md").write_text("# a\n", encoding="utf-8")
@@ -202,8 +214,8 @@ class TestMarkdown:
         (temp_dir / "__notes__" / "n.md").write_text("# n\n", encoding="utf-8")
         httpd = _docs_serve.make_server(temp_dir, port=0, host="127.0.0.1")
         try:
-            assert (temp_dir / "a.html").is_file() and (temp_dir / "sub" / "b.html").is_file()
-            assert not (temp_dir / "__notes__" / "n.html").exists()          # notes are not pages
+            assert (temp_dir / "a.generated.html").is_file() and (temp_dir / "sub" / "b.generated.html").is_file()
+            assert not (temp_dir / "__notes__" / "n.generated.html").exists()    # notes are not pages
             root = _docs_serve.pygim.path(temp_dir, store=PathStore())
             assert _docs_serve.pregenerate(root) == 0                         # everything fresh: nothing rewritten
         finally:
@@ -331,6 +343,7 @@ class TestCrossReferencesAndTerms:
             "# Model\n\n"
             "## 2. Identity\n\n"
             "A `tag_id` is small, see overview \u00a74.8 and \u00a72 here.\n\n"
+            "| memory | width |\n|---|---|\n| one | small |\n\n"
             "```text\nnot a link: \u00a74.8\n```\n",
             encoding="utf-8")
         root = pygim.path(temp_dir, store=PathStore()).resolve()
@@ -349,7 +362,7 @@ class TestCrossReferencesAndTerms:
 
     def test_reference_to_another_page_links_there(self, temp_dir):
         html = self._render(temp_dir, "01_model.md")
-        assert '<a class="xref" href="00_guide.html#48-foundations"' in html
+        assert '<a class="xref" href="00_guide.generated.html#48-foundations"' in html
         assert 'title="4.8 Foundations"' in html
 
     def test_reference_to_this_page_stays_local(self, temp_dir):
@@ -368,6 +381,11 @@ class TestCrossReferencesAndTerms:
     def test_bold_term_gets_hover_text(self, temp_dir):
         html = self._render(temp_dir, "00_guide.md")
         assert '<strong class="term" title="a unit of knowledge">memory</strong>' in html
+
+    def test_column_header_naming_a_term_gets_hover_text(self, temp_dir):
+        html = self._render(temp_dir, "01_model.md")
+        assert '<th class="term" title="a unit of knowledge">memory</th>' in html
+        assert "<th>width</th>" in html      # a header the site does not define is left alone
 
     def test_no_index_means_no_annotation(self, temp_dir):
         self._site(temp_dir)
@@ -389,19 +407,19 @@ class TestCrossReferencesAndTerms:
         out = _docs_serve.materialize_markdown(root / "01_model.md", site=site)
         body = (temp_dir / out.name).read_text(encoding="utf-8").split("<body>")[1]
         assert body.count('href="#31-local"') == 1
-        assert body.count('href="02_store.html#31-commit"') == 2
-        assert body.count('href="00_overview.html#31-overview-bit"') == 1
+        assert body.count('href="02_store.generated.html#31-commit"') == 2
+        assert body.count('href="00_overview.generated.html#31-overview-bit"') == 1
         assert "section 02 <a" in body     # the qualifier stays as text
 
     def test_reference_naming_a_page_without_that_section_stays_text(self, temp_dir):
         _, site = self._site(temp_dir)
-        html = _docs_serve.render_markdown("See section 07 \u00a72.", "x", site=site, page="/01_model.html")
+        html = _docs_serve.render_markdown("See section 07 \u00a72.", "x", site=site, page="/01_model.generated.html")
         body = html.split("<body>")[1]
         assert "xref" not in body and "section 07 \u00a72" in body
 
     def test_unknown_reference_is_left_as_text(self, temp_dir):
         _, site = self._site(temp_dir)
-        html = _docs_serve.render_markdown("See \u00a79.9 for that.", "x", site=site, page="/01_model.html")
+        html = _docs_serve.render_markdown("See \u00a79.9 for that.", "x", site=site, page="/01_model.generated.html")
         body = html.split("<body>")[1]
         assert "xref" not in body and "\u00a79.9" in body
 
