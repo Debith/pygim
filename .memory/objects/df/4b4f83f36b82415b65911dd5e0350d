@@ -1,0 +1,475 @@
+pygim-taxonomy-files-124:taxonomy/pack-pygim.yaml14489:pack: pygim
+entry:
+  brief: pygim itself — a C++26 and pybind11 library with a Python face.
+  full: >
+    Knowledge about building pygim: its extensions, their layers, the design
+    documents that justify them, and the tools around them. The domain is the
+    library, not the problems it is used on.
+  when: The knowledge is about developing pygim or something it ships.
+  when_not: Not about a project that merely uses pygim, and not about a subject domain such as dnd.
+  example: Why the memory service takes the commit lock before re-running its checks.
+
+dimensions:
+  component:
+    role: hard
+    weight: 1.0
+    entry:
+      brief: Which part of pygim the knowledge belongs to.
+      full: >
+        The subsystem, as the source tree names it. Hard, because knowledge
+        about the store's layout should not surface while working on paths.
+        Use `any` only for knowledge that holds across every component.
+      when: Every memory answers it — knowledge about this library is about some part of it.
+      when_not: Not the kind of thing being made — that is artifact.
+      example: The audit log's replay rules are component=memory.
+    values:
+      memory:
+        entry:
+          brief: The problem-space memory.
+          when: About the memory extension, its store, vocabulary or MCP server.
+          when_not: Not another subsystem that memory merely uses, such as pathlike.
+          example: Merge rows are determined by their parents only.
+      pathlike:
+        entry:
+          brief: Paths and path sets.
+          when: About path objects, path tables or the engine registry.
+          when_not: Not the persistence layer that stores them.
+          example: Two PathSets over one table intersect at bit speed.
+      mapping:
+        entry:
+          brief: The mapping toolkit.
+          when: About id sets, interners and the hashing helpers.
+          when_not: Not a consumer of those helpers.
+          example: basic_id_set is append-only; removal goes through `where`.
+      persistence:
+        entry:
+          brief: Storage and database access.
+          when: About the persistence architecture, Arrow or ODBC paths.
+          when_not: Not the files a subsystem writes for itself.
+          example: The BCP quickstart's batching rule.
+      each:
+        entry:
+          brief: The each iteration helpers.
+          when: About the each extension.
+          when_not: Not a general C++ idiom used elsewhere too.
+          example: How each composes with ranges.
+      datagen:
+        entry:
+          brief: Data generation.
+          when: About the datagen extension.
+          when_not: Not benchmarks that consume generated data.
+          example: Deterministic seeding for generated frames.
+      utils:
+        entry:
+          brief: Shared utilities.
+          when: About helpers no single subsystem owns, such as hashing.
+          when_not: Not a helper that belongs to one subsystem — name that one.
+          example: utils/hash.h's digest is the one every subsystem reuses.
+      wiring:
+        entry:
+          brief: Inversion of control and wiring.
+          when: About the wiring or IoC design.
+          when_not: Not the services being wired.
+          example: How a service is registered and resolved.
+      tools:
+        entry:
+          brief: Developer tooling inside the tree.
+          when: About benchmark fetchers and similar tools.
+          when_not: Not the CLI a user runs.
+          example: The fetch_benchmark extension's cache layout.
+      cli:
+        entry:
+          brief: The oo and pygim command line.
+          when: About a command, its options or its output.
+          when_not: Not the library behind the command.
+          example: oo docs serve renders Markdown on the fly.
+      mcp:
+        entry:
+          brief: The MCP servers.
+          when: About the JSON-RPC protocol surface an agent talks to.
+          when_not: Not the library the server exposes.
+          example: A refusal is a normal result, not a protocol error.
+      build:
+        entry:
+          brief: Building and packaging.
+          when: About manifests, the toolchain, compilation or CI.
+          when_not: Not the code being built.
+          example: Editable installs need --no-build-isolation.
+      docs:
+        entry:
+          brief: The documents themselves.
+          when: About how the design documents are written or served.
+          when_not: Not the subject a document describes — tag that subject.
+          example: Scenarios are written as BDD features with diagrams.
+
+  layer:
+    role: soft
+    weight: 1.0
+    entry:
+      brief: Which layer of an extension the knowledge sits in.
+      full: >
+        pygim's extensions are layered core, strategy, adapter and bindings.
+        The layer decides what may be depended on and what may be tested how.
+      when: The knowledge holds for one layer and not the others.
+      when_not: Not which subsystem it belongs to — that is component.
+      example: Value semantics and compile-time proofs belong to core.
+    values:
+      core:
+        entry:
+          brief: Pure logic, no I/O.
+          when: About types, invariants or algorithms with no platform contact.
+          when_not: Not anything that reads or writes — that is strategy.
+          example: The candidate set is a union within a dimension.
+      strategy:
+        entry:
+          brief: A swappable policy that touches the world.
+          when: About file formats, locking or another replaceable mechanism.
+          when_not: Not the interface it is chosen behind.
+          example: The files store appends a row and fsyncs it.
+      adapter:
+        entry:
+          brief: The boundary that translates for a consumer.
+          when: About converting between the core's types and another world's.
+          when_not: Not the binding glue itself.
+          example: The adapter returns plain dicts, never core types.
+      bindings:
+        entry:
+          brief: The pybind11 surface.
+          when: About module registration, signatures, the GIL or docstrings.
+          when_not: Not the adapter's translation.
+          example: rapidyaml must be defined in exactly one translation unit.
+      python:
+        entry:
+          brief: The Python side.
+          when: About the Python package, its stubs or pure-Python behaviour.
+          when_not: Not the extension it wraps.
+          example: The .pyi documents refusals as results, not exceptions.
+
+  concern:
+    role: soft
+    weight: 1.0
+    entry:
+      brief: The quality the knowledge is about.
+      full: >
+        What was being protected or traded away. Two memories about one
+        function can differ only in the concern they serve.
+      when: The knowledge turns on a named quality.
+      when_not: Not the activity — that is task.
+      example: Integer milli-units on the ranking path is a correctness concern.
+    values:
+      correctness:
+        entry:
+          brief: Getting the right answer.
+          when: About invariants, edge cases or reproducibility.
+          when_not: Not about speed — that is performance.
+          example: No float on the ranking path, so ranking is reproducible.
+      performance:
+        entry:
+          brief: Time and space.
+          when: About speed, allocation or memory footprint.
+          when_not: Not about whether the result is right.
+          example: Interning tags makes the candidate scan a bitset walk.
+      memory_safety:
+        entry:
+          brief: Lifetime and ownership.
+          when: About dangling references, ownership or unsafe casts.
+          when_not: Not logical correctness of the algorithm.
+          example: A span into a vector that reallocates is a dangling read.
+      api_design:
+        entry:
+          brief: The shape of an interface.
+          when: About what to expose, name or keep back.
+          when_not: Not how it is implemented behind the interface.
+          example: A refused write returns facts the caller can act on.
+      concurrency:
+        entry:
+          brief: Doing more than one thing at once.
+          when: About locks, the GIL, threads or processes.
+          when_not: Not single-threaded ordering.
+          example: Checks re-run under the commit lock, never before it.
+      portability:
+        entry:
+          brief: Working the same everywhere.
+          when: About platform differences or compiler versions.
+          when_not: Not performance differences between platforms.
+          example: An error reply must drain the request body on Windows.
+      build:
+        entry:
+          brief: Compiling and linking.
+          when: About toolchains, flags, manifests or link order.
+          when_not: Not the runtime behaviour of what was built.
+          example: std::to_string is not constexpr in GCC 14.
+      testing:
+        entry:
+          brief: How a thing is proven.
+          when: About what to assert, how to fixture, or a static proof.
+          when_not: Not the behaviour under test.
+          example: A law worth stating is worth a static proof.
+      documentation:
+        entry:
+          brief: How a thing is explained.
+          when: About writing docs, docstrings or diagrams.
+          when_not: Not the design being documented.
+          example: Prefer small diagrams over a wall of code.
+
+  language:
+    role: soft
+    weight: 0.5
+    entry:
+      brief: Which language the knowledge is expressed in.
+      full: Useful for filtering when a subsystem spans C++, Python and config.
+      when: The knowledge is specific to one language or its toolchain.
+      when_not: Not when the point holds regardless of language.
+      example: Structured bindings cannot be captured by a lambda before C++20.
+    values:
+      cpp:
+        entry:
+          brief: C++.
+          when: About C++ code, its standard or its compilers.
+          when_not: Not the Python that wraps it.
+          example: A constexpr decimal() replaces std::to_string.
+      python:
+        entry:
+          brief: Python.
+          when: About Python code, packaging or typing.
+          when_not: Not the extension it calls into.
+          example: Stub files carry the refusal contract.
+      config:
+        entry:
+          brief: Configuration and data files.
+          when: About TOML, YAML or JSON the project reads or writes.
+          when_not: Not the code that parses them.
+          example: An ext manifest lists sources and the module name.
+
+extends:
+  artifact:
+    extension:
+      entry:
+        brief: A compiled extension module.
+        when: The knowledge is about an extension as a whole, or its manifest.
+        when_not: Not one layer inside it — that is layer.
+        example: ext.memory.toml declares the memory module's sources.
+    api:
+      entry:
+        brief: A public interface.
+        when: About the surface a caller sees, including stubs.
+        when_not: Not the implementation behind it.
+        example: Memory.read returns the procedure first, then ranked memories.
+    service:
+      entry:
+        brief: A long-lived object that owns state.
+        when: About a service's lifecycle, invariants or threading.
+        when_not: Not a plain value type.
+        example: The memory service replays the audit log when it opens.
+    store:
+      entry:
+        brief: An on-disk format or layout.
+        when: About what is written where, and how it is read back.
+        when_not: Not the objects held in memory.
+        example: audit/<clone>.jsonl is the index; memories/ are head views.
+    protocol:
+      entry:
+        brief: A wire protocol.
+        when: About messages exchanged with another process.
+        when_not: Not the library that answers them.
+        example: MCP is JSON-RPC 2.0, one message per line on stdio.
+    design_doc:
+      entry:
+        brief: A design document.
+        when: About what a document says, or how the series is organised.
+        when_not: Not the code the document describes.
+        example: The overview's four checks govern every write.
+    test:
+      entry:
+        brief: A test or a proof.
+        when: About a test, a fixture or a static assertion.
+        when_not: Not the behaviour being tested.
+        example: Parity tests compare the extension with the prototype.
+    benchmark:
+      entry:
+        brief: A benchmark.
+        when: About measuring performance and reporting it.
+        when_not: Not a correctness test.
+        example: Results are kept per machine, never compared across them.
+    cli_command:
+      entry:
+        brief: A command a user runs.
+        when: About a verb, its options or its output.
+        when_not: Not the library behind the verb.
+        example: oo memory mcp serves a repository over stdio.
+    vocabulary:
+      entry:
+        brief: A taxonomy pack or its codebook.
+        when: About dimensions, values or the entries that define them.
+        when_not: Not a memory tagged with the vocabulary.
+        example: A value earns its place by cutting what no other value cuts.
+
+  task:
+    implement:
+      entry:
+        brief: Writing the code a design calls for.
+        when: The knowledge helps turn a decided design into working code.
+        when_not: Not deciding what to build — that is design.
+        example: Where to put the lock so the checks cannot race.
+    refactor:
+      entry:
+        brief: Changing structure without changing behaviour.
+        when: The knowledge helps move or reshape code that already works.
+        when_not: Not adding behaviour — that is implement.
+        example: Lifting a shared helper into utils once a second caller appears.
+
+  tier:
+    prototype:
+      entry:
+        brief: A sketch, not yet load-bearing.
+        when: The knowledge holds for throwaway or exploratory work.
+        when_not: Not for code others already depend on.
+        example: The Python prototype that the extension was checked against.
+    working:
+      entry:
+        brief: Works, and is used.
+        when: The knowledge holds for code in use but still moving.
+        when_not: Not for a frozen interface.
+        example: The first iteration of the memory MCP server.
+    hardened:
+      entry:
+        brief: Proven, and expensive to change.
+        when: The knowledge holds for stable, tested, depended-on code.
+        when_not: Not for something still being shaped.
+        example: The pathlike engine registry's published behaviour.
+18:taxonomy/base.yaml6089:# taxonomy v0 — the base every repository starts from.
+# Packs add values to domain, artifact and tier, and dimensions of their own.
+pack: base
+
+dimensions:
+  domain:
+    role: hard
+    weight: 1.0
+    entry:
+      brief: The field the knowledge belongs to.
+      full: >
+        Which body of work the knowledge is about. Each domain is prepared from
+        its documents and adds a pack; the domain's name is the pack's name.
+      when: Every memory answers it — knowledge always belongs to some field.
+      when_not: Not to say what the knowledge is about within the field — that is artifact.
+      example: A note about spell design is domain=dnd; one about pybind11 is domain=programming.
+
+  artifact:
+    role: hard
+    weight: 1.0
+    entry:
+      brief: What is being made or examined.
+      full: >
+        The kind of thing the knowledge concerns. The values are the domain's
+        own: spells and monsters in one, modules and bindings in another.
+      when: The knowledge is about one kind of thing the domain produces or studies.
+      when_not: Not the activity performed on the thing — that is task.
+      example: A rule about reaction spells is artifact=spell.
+
+  task:
+    role: hard
+    weight: 1.0
+    entry:
+      brief: What the knowledge is for doing.
+      full: >
+        The activity the knowledge helps with. Designing and judging need
+        different knowledge even about the same thing.
+      when: The knowledge helps someone make, judge, measure, fix or explain something.
+      when_not: Not the thing acted on — that is artifact.
+      example: A yardstick used while inventing a spell is task=design.
+    values:
+      design:
+        entry:
+          brief: Making something new.
+          when: The knowledge helps create a thing that does not yet exist.
+          when_not: Not judging or improving a thing that exists — that is critique or evaluate.
+          example: Choosing the yardstick for a new defensive reaction.
+      critique:
+        entry:
+          brief: Judging a thing that exists.
+          when: The knowledge helps say what is good or bad about an existing thing.
+          when_not: Not measuring against a fixed standard — that is evaluate.
+          example: Pointing out that a trigger is ambiguous.
+      evaluate:
+        entry:
+          brief: Measuring against a standard.
+          when: The knowledge compares a thing with a stated benchmark or rule.
+          when_not: Not an opinion about quality — that is critique.
+          example: Checking a spell's damage against the damage table.
+      troubleshoot:
+        entry:
+          brief: Finding why a thing fails.
+          when: The knowledge helps locate the cause of a failure.
+          when_not: Not improving a thing that works — that is design or critique.
+          example: Tracing why a build fails only on Windows.
+      explain:
+        entry:
+          brief: Making a thing understood.
+          when: The knowledge helps someone understand how or why a thing works.
+          when_not: Not changing or judging the thing — only understanding it.
+          example: Why concentration ends when the caster takes damage.
+
+  kind:
+    role: soft
+    weight: 0.5
+    entry:
+      brief: What sort of knowledge this is.
+      full: >
+        The epistemic type of a memory: a fact, a rule of thumb, a way of doing
+        something, an instance, a choice made, or a taste. Two memories about
+        the same thing can differ only in kind.
+      when: Every memory answers it.
+      when_not: Never to say how good the knowledge is — valence is not kind.
+      example: '"Shield is the yardstick" is a principle; "Frost Ward" is an example.'
+    values:
+      reference:
+        entry:
+          brief: A fact that can be looked up.
+          when: The text states something true that a source would confirm.
+          when_not: Not a rule for judging — that is a principle.
+          example: Shield grants +5 AC until the start of your next turn.
+      principle:
+        entry:
+          brief: A rule of thumb.
+          when: The text states a general rule that guides decisions.
+          when_not: Not a sequence of steps — that is a procedure.
+          example: A defensive reaction earns its slot only if it beats Shield per slot.
+      procedure:
+        entry:
+          brief: Ordered steps by which something is achieved.
+          full: >
+            How a thing is done in this domain, step by step, for one artifact
+            and one task. Placed first in every context for that pair.
+          when: The text is a sequence the reader should follow in order.
+          when_not: A single rule, however important — that is a principle.
+          example: 'Creating a spell: read the space, name it, find its yardstick, set its cost, check balance.'
+      example:
+        entry:
+          brief: One instance.
+          when: The text describes a particular case.
+          when_not: Not a generalisation drawn from cases — that is a principle.
+          example: Frost Ward trades flat AC for typed resistance.
+      decision:
+        entry:
+          brief: A choice made, and why.
+          when: The text records what was chosen among alternatives and the reason.
+          when_not: Not a rule for all cases — that is a principle.
+          example: Typed resistance was chosen over flat AC for the Ward family.
+      preference:
+        entry:
+          brief: A taste.
+          when: The text records how someone likes things done.
+          when_not: Not a claim about correctness — that is a principle.
+          example: Prefer templates even with one use case.
+
+  tier:
+    role: soft
+    weight: 1.0
+    entry:
+      brief: The level or maturity the knowledge applies to.
+      full: >
+        Where on the domain's scale of level, size or maturity the knowledge
+        holds. Packs name the bands.
+      when: The knowledge holds at some levels and not others.
+      when_not: Not how important the knowledge is.
+      example: A rule about 5th-level characters is tier=mid in dnd.
