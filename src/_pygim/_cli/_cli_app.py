@@ -93,6 +93,49 @@ class GimmicksCliApp:
         except (FileNotFoundError, _docs_serve.ServeError) as exc:
             raise click.ClickException(str(exc)) from exc
 
+    def memory_init(self, *, root: str) -> None:
+        """Create a memory repository at *root* with the base vocabulary."""
+        from pygim.memory import Memory
+
+        try:
+            Memory.init(root)
+        except RuntimeError as exc:
+            raise click.ClickException(str(exc)) from exc
+        m = Memory(root)
+        click.echo(f"created {m.root} at v{m.version} — add a pack under taxonomy/, or start with the base")
+
+    def memory_mcp(self, *, root: str) -> None:
+        """Serve the repository at *root* over MCP on stdio."""
+        from _pygim._mcp import memory as server
+        from pygim.memory import VocabularyError
+
+        try:
+            server.run(root)
+        except (RuntimeError, VocabularyError) as exc:
+            raise click.ClickException(str(exc)) from exc
+
+    def memory_ingest(self, *, corpus: str, root: str) -> None:
+        """Ingest a hand-written corpus file into the repository at *root*."""
+        from pygim.memory import Memory
+
+        result = Memory(root).ingest(corpus)
+        click.echo(f"{result['added']} added, {result['superseded']} superseded, {result['unchanged']} unchanged")
+        for line in result["refused"]:
+            click.echo(f"  refused {line}")
+        if result["refused"]:
+            raise click.exceptions.Exit(1)
+
+    def memory_status(self, *, root: str) -> None:
+        """Print where the repository at *root* stands."""
+        from pygim.memory import Memory
+
+        info = Memory(root).session()
+        click.echo(f"{root}: v{info['version']}, {info['memories']} memories, vocabulary {info['taxonomy'][:12]}")
+        for r in info["reviews"]:
+            click.echo(f"  review ({r['kind']}): {r['text']}")
+        for p in info["proposals"]:
+            click.echo(f"  proposal: {p['dimension'] or '(new dimension)'}={p['concept']} — asked by {', '.join(p['asked_by'])}")
+
     def stubs(self, *, check: bool = False) -> None:
         """Regenerate (or verify) the generated block of pygim/pathlike.pyi."""
         from pygim import _stubs

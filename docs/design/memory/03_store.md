@@ -315,7 +315,7 @@ classDiagram
     }
     class in_memory_store {
         rows in vectors
-        for tests and the parity run
+        for tests
     }
     class files_store {
         the layout of section 3

@@ -229,6 +229,10 @@ And the human reviews the report — one card per dimension — and accepts it a
 And every value in v1 carries a codebook entry and, where it came from the documents, a locator
 ```
 
+The first real run of this study — on the Player's Handbook, Dungeon Master's Guide and Monster Manual
+of 2024 — is recorded in the D&D project's `.memory/taxonomy/studies/dnd-2026-09-11/`. Its measured
+numbers replace this scenario's where they differ; the other figures in these panels are illustrative.
+
 No problem statement, no notes, no questions. A domain is where many problems will live,
 and the pack must serve all of them; what a particular problem needs arrives later, one
 proposal at a time (Scenario 1.3). The only guaranteed input is the documents.
@@ -332,7 +336,7 @@ flowchart TB
     res --> ok["purpose · action_economy · mechanic · resource<br/>and the values added to domain · artifact · task · tier<br/>coverage, share, κ within thresholds"]
     res --> f1["purpose: κ = 0.58 — below 0.70<br/>confused pair: control ↔ offensive, on Ray of Frost, Chill Touch, Slow<br/>→ the boundary sentence: a condition that rides on damage is offensive"]
     res --> f2["scaling: largest share 0.78 (upcast_scaling)<br/>→ separates little on this sample: few of 40 spells say anything about scaling"]
-    res --> f3["school (harvested): Cramér's V = 0.71 with purpose<br/>evocation → offensive, abjuration → defensive<br/>→ not an independent facet; kept as a locator field, dropped as a dimension"]
+    res --> f3["school (harvested): Cramér's V 0.653 with pillar over 22 spells, 0.597 with purpose<br/>the books say schools have no rules of their own<br/>→ not an independent facet — dropped as a dimension"]
 ```
 
 **Panel 9.** The report, and the review. One card per dimension: role, weight, the numbers,

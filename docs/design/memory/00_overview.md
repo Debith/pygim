@@ -8,12 +8,13 @@ This series specifies a memory system for AI agents in which retrieval is driven
 implemented in pygim's C++ core, exposed through a thin pybind11 adapter, and consumed by
 an MCP server so that any agent host (Claude Code first) can use it directly.
 
-The behavioural reference for *retrieval* is the Python prototype in
-`prototypes/problem_space_memory/`: its demo and evaluation define candidate selection, soft
-scoring and context building, and the C++ implementation must reproduce them. The rest of
-this specification goes beyond the prototype, which has no WRITE operation, no vocabulary
-study, no sources and no procedures. Where the two differ in naming, §4.1 records the
-mapping.
+The behavioural reference for *retrieval* was a Python prototype: its demo and evaluation
+defined candidate selection, soft scoring and context building, and the C++ implementation
+reproduces them — held to it by parity tests for as long as both existed. The prototype has
+since been removed, its behaviour having passed into this specification and the tests. The
+rest of this specification goes beyond it: the prototype had no WRITE operation, no
+vocabulary study, no sources and no procedures. Where the two differ in naming, §4.1 records
+the mapping.
 
 ### The series
 
@@ -138,11 +139,10 @@ only orders what was found there.
 
 ### 4.1 The seed vocabulary
 
-The taxonomy is data, not code. What follows is the vocabulary the prototype ships, restated
+The taxonomy is data, not code. What follows is the vocabulary the prototype shipped, restated
 in base-plus-pack form (§4.6): five base dimensions that ship with the tool, and the dnd pack
 that the study of the 2024 rulebooks proposes on top of them (§4.8; drawn in section 00a,
-Scenario 1.2). The C++ implementation must load it and reproduce the prototype's retrieval
-behaviour.
+Scenario 1.2). The C++ implementation loads it and reproduces that retrieval behaviour.
 
 **Base — taxonomy v0, ships with the tool.** Three of the five carry no values until a pack
 adds them: what is made and at what level are domain questions, and the domains themselves
@@ -189,7 +189,8 @@ half. The corpus's three decoys belong to packs this table does not spell out �
   versus cautionary distinction without a home; whether valence deserves a facet of its own
   is open (§10).
 
-Parity tests map the two names when they run the prototype's demo and evaluation.
+Parity tests mapped the two names for as long as the prototype was run beside the extension;
+the names below are now the only ones.
 
 ### 4.2 Roles: a dimension's default versus a query's tag
 
@@ -216,13 +217,12 @@ override: --soften artifact   →  artifact~spell joins the soft set; monsters m
 
 ### 4.3 The corpus
 
-The seed corpus is `prototypes/problem_space_memory/corpus.md`: 43 memories, 40 about D&D
+A corpus file is the seed form. The prototype's corpus held 43 memories, 40 about D&D
 spell design and 3 decoys from other problem spaces (programming, writing) that a purely
 semantic retriever tends to pull in. Each memory is a `## <slug>` heading, header lines
 `key: value[, value...]` where every key other than `title` is a taxonomy dimension, a blank
 line, and the content. This is also the plain-text form G7 asks for: a repository of
-memories is plain text and git can merge it (section 03 §3), and the prototype's demo and
-evaluation run against exactly this corpus. A corpus file is not a source (§4.9): its blocks *are*
+memories is plain text and git can merge it (section 03 §3). A corpus file is not a source (§4.9): its blocks *are*
 memories, tagged by hand and ingested, where a source is reference text that is cited and
 stays outside the corpus.
 
@@ -299,12 +299,13 @@ remember(text, reason,
          proposals = ["template"])
 ```
 
-And from the service's side, four checks and a commit — every check a lookup or a set
+And from the service's side, four checks — the first of them two-sided — and a commit — every check a lookup or a set
 operation, and every refusal an answer in facts rather than an opinion:
 
 | Check | Fails when | The service answers with |
 |---|---|---|
 | Closed vocabulary | a tag value is not in its list | `TaxonomyError`; nothing is written |
+| Findable | a hard-by-default dimension of the memory's domain has no value among its tags — no read could ever find it | the dimension and its values, and the reminder that `dimension=any` is for knowledge that holds for every value |
 | **No unread write** | `decision = new`, yet the candidate set under the write's hard tags minus `seen` is not empty | those candidates; nothing is written until the agent has read them |
 | Head only | `supersedes` names a version that is no longer the head of its chain | the current head |
 | Identical content | the content hash is already a head | that id; an exact repeat is a LEARN signal, not a write |
@@ -320,7 +321,7 @@ and it leaves behind exactly the evidence needed to name any miss that slips thr
 
 Determinism (G1) is untouched by the agent being the classifier: classification is an input
 to retrieval, and the same tags always yield the same context. The rule-based classifier
-remains for tests, for the prototype parity evaluation, and for hosts without a model.
+remains for tests and for hosts without a model.
 
 The deliberate path stays open: a human can still write a corpus file by hand with the tags
 spelled out, which is how a repository is seeded and how someone writes down a body of
@@ -655,7 +656,7 @@ same operations, drawn dashed because v1 has none.
 | Services | Mailbox, service base, threading and shutdown rules; the query logger and statistics observers | generic components | 09 |
 | Adapter & MCP | pybind11 boundary, GIL rules, MCP tool surface, IoC wiring | one implementation | 10 |
 | Sharing | Repository layout, associations file, layering of repos, trust | conventions | 11 |
-| Testing & evaluation | Contract tests per strategy, behavioural parity with the prototype, the hypothesis eval; the scenarios of section 00a are the acceptance tests and their ids, tags and texts are the fixtures | conventions | 12 |
+| Testing & evaluation | Contract tests per strategy, the hypothesis eval; the scenarios of section 00a are the acceptance tests and their ids, tags and texts are the fixtures | conventions | 12 |
 
 ## 8. Layering rules
 
