@@ -249,3 +249,30 @@ def test_header_dependencies_follow_quoted_includes_across_directories(tmp_path)
     (gen / "generated.h").write_text('#include "local.h"\n')                                 # resolvable via a search dir only
     deps = ns["_header_dependencies"]([str(ext / "bindings.cpp")], [ext, gen])
     assert deps == sorted(str(p.resolve()) for p in [ext / "local.h", shared / "core.h", shared / "storage.h", gen / "generated.h"])
+
+
+# ─── Runtime requirements: pyarrow is the release the extensions link ───────
+
+
+@pytest.mark.parametrize("requirements,pyarrow_version,expected", [
+    (["click>=8", "pyarrow>=15", "polars"], "23.0.1", ["click>=8", "pyarrow==23.0.*", "polars"]),
+    (["PyArrow >= 15; python_version >= '3.10'"], "25.1.0", ["pyarrow==25.1.*"]),   # soname 2501, not 2500
+    (["pyarrow[parquet]"], "21.0.0", ["pyarrow==21.0.*"]),
+    (["pyarrow-hotfix", "click"], "23.0.1", ["pyarrow-hotfix", "click", "pyarrow==23.0.*"]),  # absent: added
+])
+def test_pyarrow_is_pinned_to_the_build_release(requirements, pyarrow_version, expected):
+    ns = _extract("_pin_arrow_abi")
+    assert ns["_pin_arrow_abi"](requirements, pyarrow_version) == expected
+
+
+def test_runtime_requirements_are_dynamic_so_the_pin_reaches_the_wheel():
+    # A static [project] dependencies list overrides what setup.py passes, which
+    # would publish wheels that accept any pyarrow.
+    try:
+        import tomllib
+    except ModuleNotFoundError:  # Python < 3.11
+        import tomli as tomllib
+    pyproject = tomllib.loads((SETUP_PY.parent / "pyproject.toml").read_text(encoding="utf-8"))
+    assert "dependencies" in pyproject["project"]["dynamic"]
+    assert "dependencies" not in pyproject["project"]
+    assert any(r.startswith("pyarrow") for r in pyproject["tool"]["pygim"]["build"]["dependencies"])
