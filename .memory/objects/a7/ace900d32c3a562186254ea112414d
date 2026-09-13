@@ -1,10 +1,3 @@
----
-memory: c83c508888eecf6f010dc3ad77908149
-title: "Memories are written concrete during a session and consolidated at its end"
-origin: written
-tags: ["domain=pygim","component=memory","artifact=design_doc","task=design","kind=decision"]
-supersedes: ["c878d0d03801a0ca65e014c4a5abdb1f"]
----
 Debith's direction (2026-09-12, settled 2026-09-13): during work, memories record what was learned, concretely and with the case. When the user asks for a consolidation — at any point, not only at a session's end — the agent reads back what the session wrote and states once, at the level the cases support, a pattern several of them share. Design: overview §4.11, section 04 §3.9, section 00a Feature 7, section 01 §4, §7 and §8.
 
 Built (2026-09-13): `remember` takes `generalises` — two or more heads, which stay heads and count as read; the service refuses one case, a non-head, an instance also superseded by the same write, and a generalisation that does not cover its instances on every hard dimension (a dimension's `any` covers everything, so overreach is caught in review). `review(session)` lists a session's writes with what already generalises each. The MCP server serves the steps as the `consolidate` prompt, started by the user.
