@@ -276,8 +276,10 @@ public:
                 return out;
             }
         }
-        std::vector<memory_id> supersedes, seen;
-        if (!resolve_refs(s, w.supersedes, supersedes, out.why) || !resolve_refs(s, w.seen, seen, out.why)) return out;
+        std::vector<memory_id> supersedes, seen, generalises;
+        if (!resolve_refs(s, w.supersedes, supersedes, out.why) || !resolve_refs(s, w.seen, seen, out.why) ||
+            !resolve_refs(s, w.generalises, generalises, out.why))
+            return out;
 
         // 3. head only
         for (const auto m : supersedes) {
@@ -287,6 +289,10 @@ public:
                 return out;
             }
         }
+        // a generalisation (overview §4.11): several heads, kept as evidence, and covered
+        if (!generalises.empty() && !check_generalisation(s, tags, supersedes, generalises, out.why)) return out;
+        for (const auto m : generalises)  // naming an instance is having read it
+            if (std::find(seen.begin(), seen.end(), m) == seen.end()) seen.push_back(m);
         // 2. no unread write — a write that starts a chain must have read the space it lands in
         if (supersedes.empty() && w.origin != "seed") {
             const memory_set space = s.candidates(write_space(s, tags));
@@ -317,6 +323,7 @@ public:
         r.add("length", decimal(w.text.size()));
         for (const auto t : tags) r.add("tag", s.tax().info(t).qualified);
         for (const auto m : supersedes) r.add("supersedes", s.record(m).key.hex());
+        for (const auto m : generalises) r.add("generalises", s.record(m).key.hex());
         for (const auto m : seen) r.add("seen", s.record(m).key.hex());
         for (const auto& c : w.cites) r.add("cite", c);
         if (!w.reason.empty()) r.add("reason", w.reason);
@@ -796,6 +803,48 @@ private:
             }
         }
         return out;
+    }
+
+    /// What the service can check of a generalisation without reading it (overview §4.11): at
+    /// least two instances, each a head, none retired by this same write, and every value an
+    /// instance gives a hard dimension also given by the generalisation — or `any` — so it is
+    /// findable wherever one of its cases is. Whether the pattern is real is not checkable here.
+    bool check_generalisation(const snapshot& s, const std::vector<tag_id>& tags, const std::vector<memory_id>& supersedes,
+                              const std::vector<memory_id>& generalises, refusal& why) const {
+        if (generalises.size() < 2) {
+            why = {"one case", "a generalisation states what several memories share — name at least two instances", {}};
+            return false;
+        }
+        for (const auto m : generalises) {
+            if (!s.is_head(m)) {
+                why = {"not a head", "#" + decimal(m.value()) + " has been superseded — generalise the current head", {}};
+                for (const auto h : chain_heads(s, m)) why.facts.push_back(describe(s, h));
+                return false;
+            }
+            if (std::find(supersedes.begin(), supersedes.end(), m) != supersedes.end()) {
+                why = {"evidence", "#" + decimal(m.value()) + " cannot be both superseded and generalised — a generalisation keeps its evidence", {}};
+                return false;
+            }
+        }
+        const auto& tax = s.tax();
+        tag_set mine;
+        for (const auto t : tags) mine.note(t.value());
+        std::vector<std::string> missing;
+        for (std::size_t i = 0; i < tax.dimensions(); ++i) {
+            const dimension_id d(static_cast<dimension_id::value_type>(i));
+            if (tax.default_role(d) != role::hard) continue;
+            if (const auto any = tax.any_of(d); any && mine.has(any->value())) continue;
+            for (const auto m : generalises)
+                for (const auto t : s.tags_of(m).members())
+                    if (tax.dimension_of(tag_id(t)) == d && !mine.has(t))
+                        missing.push_back(describe(s, m) + " answers " + tax.info(tag_id(t)).qualified);
+        }
+        if (!missing.empty()) {
+            why = {"not covered", "a generalisation must be findable wherever its cases are — add these values, or the dimension's `any` if the pattern holds for every value",
+                   std::move(missing)};
+            return false;
+        }
+        return true;
     }
 
     bool resolve_refs(const snapshot& s, const std::vector<std::string>& refs, std::vector<memory_id>& out, refusal& why) const {

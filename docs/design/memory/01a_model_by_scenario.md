@@ -695,10 +695,10 @@ sequenceDiagram
     S-->>A: retired · digest unchanged · superseded by #54 · in 23 contexts before
 ```
 
-## Feature 7 — Close a session
+## Feature 7 — Consolidate what a session wrote
 
 A generalisation is a write whose request names the memories it is drawn from. The service
-checks that they are heads and that the generalisation covers them; nothing on the instances
+checks that there are at least two, that they are heads, and that the generalisation covers them; nothing on the instances
 changes except the edge that points back.
 
 ### Scenario 7.1 — Three new reactions make one point
@@ -733,7 +733,7 @@ sequenceDiagram
     participant A as Agent
     participant S as Service
     participant St as Store
-    U->>A: close the session
+    U->>A: /consolidate
     A->>S: review(session 13)
     S-->>A: #55 #56 #57 with their tags
     A->>S: read(domain=dnd artifact=spell task=design, purpose~defensive)

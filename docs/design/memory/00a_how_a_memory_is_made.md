@@ -23,7 +23,7 @@ reads prose, never judges meaning: it checks, stores, counts, intersects and exp
 
 ```mermaid
 flowchart LR
-    agent["AGENT<br/>thinks: classifies, reads, decides, writes<br/>and at a session's close, generalises"]
+    agent["AGENT<br/>thinks: classifies, reads, decides, writes<br/>and, when asked, consolidates"]
     human["HUMAN<br/>governs: vocabulary, proposals, review"]
     later["agents beside the service<br/><i>later: consolidation, curation</i>"]
     service["SERVICE<br/>checks · stores · counts · intersects · explains<br/><i>never reads prose</i>"]
@@ -1035,12 +1035,12 @@ flowchart LR
 
 ---
 
-## Feature 7 — Close a session
+## Feature 7 — Consolidate what a session wrote
 
-*In the model's types: [Feature 7 in section 01a](01a_model_by_scenario.md#feature-7-close-a-session).*
+*In the model's types: [Feature 7 in section 01a](01a_model_by_scenario.md#feature-7-consolidate-what-a-session-wrote).*
 
-Features 2 to 6 write cases one at a time, as the work produces them. The close of a session
-adds the other half: the agent reads back what it wrote and states once what several cases
+Features 2 to 6 write cases one at a time, as the work produces them. A consolidation, whenever
+the user asks for one, adds the other half: the agent reads back what it wrote and states once what several cases
 showed, without retiring any of them (overview §4.11).
 
 ### Scenario 7.1 — Three new reactions make one point
@@ -1050,22 +1050,23 @@ showed, without retiring any of them (overview §4.11).
 ```gherkin
 Given session 13 designed three defensive reactions and wrote #55, #56 and #57, one example each
 And #54, the Ward family note, already says the Wards are a niche, not an upgrade
-When the user asks the agent to close the session
+When the user asks for a consolidation
 And the agent reads back what it wrote
 Then it sees that all four make one point: each reaction beats Shield against one kind of threat and loses against another
 And it writes #58, a principle that generalises #54 to #57
 And #54 to #57 stay heads, as the principle's evidence
 ```
 
-**Panel 1.** The user closes the session, and the agent fetches its writes from the records.
-Nothing closes a session on its own. The service lists the writes; it does not read them.
+**Panel 1.** The user asks for a consolidation — here at the end of session 13, but it could be
+at any point — and the agent fetches the session's writes. The service lists them; it does
+not read them.
 
 ```mermaid
 sequenceDiagram
     participant User
     participant Agent
     participant Service
-    User->>Agent: close the session
+    User->>Agent: /consolidate
     Agent->>Service: review(session 13)
     Service-->>Agent: #55 Mirror Veil · #56 Thunder Riposte · #57 Stone Skin Reflex — each kind=example, artifact=spell, task=design, purpose=defensive
 ```
@@ -1097,7 +1098,7 @@ pattern it belongs to.
 ```mermaid
 flowchart LR
     ask1["show #55"] --> ans1["#55 Mirror Veil — head · generalised by #58"]
-    ask2["show #58"] --> ans2["#58 — principle · generalises #54 #55 #56 #57<br/>written at the close of session 13"]
+    ask2["show #58"] --> ans2["#58 — principle · generalises #54 #55 #56 #57<br/>written when session 13 was consolidated"]
 ```
 
 ### Scenario 7.2 — A wider suspicion waits for its case
@@ -1108,7 +1109,7 @@ flowchart LR
 Given #58 was drawn from four spells
 When the agent suspects the same holds for defensive magic items
 Then #58 stays artifact=spell, and no magic-item tag or artifact=any is added on a hunch
-And the suspicion becomes part of the pattern only when a magic-item case exists and a later close finds it
+And the suspicion becomes part of the pattern only when a magic-item case exists and a later consolidation finds it
 ```
 
 **Panel 1.** The cases decide the tags.
@@ -1119,7 +1120,7 @@ flowchart TB
     hunch["hunch: a ring that turns arrows but not fire would be the same"]
     cases --> tag["#58 answers artifact=spell — as far as its cases reach"]
     hunch --> wait["not a tag — a hunch is not a case"]
-    wait --> later["a later session writes a magic-item example<br/>the next close may widen the pattern by superseding #58 with one that generalises that case too"]
+    wait --> later["a later session writes a magic-item example<br/>the next consolidation may widen the pattern by superseding #58 with one that generalises that case too"]
 ```
 
 **Panel 2.** Where overreach is caught. The coverage check cannot see it: `any` covers every
@@ -1139,7 +1140,7 @@ A memory:
 ```mermaid
 stateDiagram-v2
     [*] --> Head: WRITE, decision new — the agent, mid-task (Feature 2) — a procedure is written the same way
-    [*] --> Head: WRITE at a session's close, generalising (Feature 7) — its instances stay heads
+    [*] --> Head: WRITE on a consolidation, generalising (Feature 7) — its instances stay heads
     [*] --> Head: ingestion of a hand-written file (Feature 4)
     [*] --> Head: merge (Feature 5)
     Head --> Head: link · unlink · learn · promote (Feature 3)

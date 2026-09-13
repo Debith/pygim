@@ -35,7 +35,39 @@ not by similarity to the prompt.
    read as `seen`. A concept with no tag goes in `proposals` — never force a tag.
 4. A refusal is information: it names the facts (unread memories, the current
    head, the missing hard question). Act on them and try again.
+5. Consolidate only when the user asks (the `consolidate` prompt): `review` what
+   the session wrote, find a point several memories make, and `remember` it once
+   with `generalises` naming them. They stay heads; nothing is retired.
 """
+
+CONSOLIDATE = """\
+Consolidate what this session has written into memory so far.
+
+1. Call `review` for the list of memories this session wrote, with their tags and
+   whatever already generalises each one.
+2. Read them together, and `read` the spaces they landed in: a generalisation looks
+   before it writes like any memory, and an older memory may share the pattern too.
+3. Look for a point that two or more of them make and none of them states alone.
+   A memory already generalised needs nothing more, unless a new case widens that
+   pattern — then write the wider version superseding the old generalisation.
+4. For each pattern, `remember` it once: as general as its cases reach and no
+   further; tags that cover every instance on every hard dimension (a dimension's
+   `any` only if the pattern truly holds for every value); `generalises` naming the
+   instances; `seen` naming what you read. Usually kind=principle; kind=procedure
+   when the session kept repeating the same steps.
+5. Where no pattern exists, write nothing. Report what you wrote, and what you left
+   as cases and why.
+"""
+
+PROMPTS: List[Dict[str, Any]] = [
+    {
+        "name": "consolidate",
+        "description": "Read back what this session has written and state once, as a generalisation, "
+                       "any pattern several memories share. Nothing is retired.",
+        "arguments": [],
+    },
+]
+_PROMPT_TEXT = {"consolidate": CONSOLIDATE}
 
 _REF = {"type": "string", "description": "A memory: #n from a read or show, or at least 8 characters of its key."}
 _TAGS = {"type": "array", "items": {"type": "string"}, "description": "Qualified tags, dimension=value, from the vocabulary."}
@@ -86,6 +118,9 @@ TOOLS: List[Dict[str, Any]] = [
             "tags": _TAGS,
             "reason": {"type": "string", "description": "Why this outlives the task, or why it replaces what it supersedes."},
             "supersedes": _REFS,
+            "generalises": {"type": "array", "items": _REF,
+                            "description": "For a generalisation: the two or more heads whose shared pattern this states. "
+                                           "They stay heads, count as read, and must be covered on every hard dimension."},
             "seen": _REFS,
             "cites": {"type": "array", "items": {"type": "string"}, "description": "Source locators, e.g. phb-2024-spells:L4459."},
             "proposals": {"type": "array", "items": _schema({
@@ -129,6 +164,12 @@ TOOLS: List[Dict[str, Any]] = [
         "inputSchema": _schema({"memory": _REF, "reason": {"type": "string"}}, ["memory", "reason"]),
     },
     {
+        "name": "review",
+        "description": "What this session has written so far, in order: each memory's tags, whether it is still a head, "
+                       "and what already generalises it. Where a consolidation starts. `session` names an earlier one.",
+        "inputSchema": _schema({"session": {"type": "integer", "minimum": 1, "description": "Default: this session."}}),
+    },
+    {
         "name": "show",
         "description": "One memory in full: its text, tags, lineage, what it saw, citations and counters.",
         "inputSchema": _schema({"memory": _REF}, ["memory"]),
@@ -163,6 +204,7 @@ class MemoryServer:
             "link": lambda a: self.memory.link(a["memory"], a["tag"], reason=a["reason"], author="agent"),
             "unlink": lambda a: self.memory.unlink(a["memory"], a["tag"], reason=a["reason"], author="agent"),
             "retire": lambda a: self.memory.retire(a["memory"], reason=a["reason"], author="agent"),
+            "review": lambda a: self.memory.review(a.get("session") or self._session_no()),
             "show": lambda a: self.memory.show(a["memory"]),
             "proposals": lambda a: self.memory.proposals(),
         }
@@ -182,7 +224,8 @@ class MemoryServer:
     def _remember(self, a: Dict[str, Any]) -> Any:
         return self.memory.remember(
             title=a["title"], text=a["text"], tags=a["tags"], reason=a.get("reason", ""),
-            supersedes=a.get("supersedes", []), seen=a.get("seen", []), cites=a.get("cites", []),
+            supersedes=a.get("supersedes", []), generalises=a.get("generalises", []), seen=a.get("seen", []),
+            cites=a.get("cites", []),
             proposals=a.get("proposals", []), session=self._session_no(), turn=self.turn, author="agent")
 
     # ── protocol ────────────────────────────────────────────────────────────
@@ -196,7 +239,7 @@ class MemoryServer:
             requested = (msg.get("params") or {}).get("protocolVersion") or PROTOCOL_VERSION
             return _result(mid, {
                 "protocolVersion": requested,
-                "capabilities": {"tools": {"listChanged": False}},
+                "capabilities": {"tools": {"listChanged": False}, "prompts": {"listChanged": False}},
                 "serverInfo": {"name": SERVER_NAME, "version": _version()},
                 "instructions": INSTRUCTIONS,
             })
@@ -207,6 +250,16 @@ class MemoryServer:
         if method == "tools/call":
             params = msg.get("params") or {}
             return _result(mid, self.call(params.get("name", ""), params.get("arguments") or {}))
+        if method == "prompts/list":
+            return _result(mid, {"prompts": PROMPTS})
+        if method == "prompts/get":
+            name = (msg.get("params") or {}).get("name", "")
+            text = _PROMPT_TEXT.get(name)
+            if text is None:
+                return {"jsonrpc": "2.0", "id": mid, "error": {"code": -32602, "message": f"unknown prompt: {name}"}}
+            meta = next(p for p in PROMPTS if p["name"] == name)
+            return _result(mid, {"description": meta["description"],
+                                 "messages": [{"role": "user", "content": {"type": "text", "text": text}}]})
         return {"jsonrpc": "2.0", "id": mid, "error": {"code": -32601, "message": f"method not found: {method}"}}
 
     def call(self, name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:

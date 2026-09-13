@@ -224,6 +224,12 @@ public:
             out += "\nsupersedes: ";
             json_strings(out, keys);
         }
+        if (!m.generalises.empty()) {
+            std::vector<std::string> keys;
+            for (const auto& k : m.generalises) keys.push_back(k.hex());
+            out += "\ngeneralises: ";
+            json_strings(out, keys);
+        }
         if (!m.cites.empty()) {
             out += "\ncites: ";
             json_strings(out, m.cites);

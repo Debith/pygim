@@ -26,6 +26,13 @@ namespace F = pygim::memory::strategy::files;
 using service = memory_service<F::store>;
 
 inline std::string ref(memory_id m) { return "#" + decimal(m.value()); }
+/// Keys a record names, as `#n` in this snapshot; a key the snapshot does not hold is left out.
+inline std::vector<std::string> refs_of(const snapshot& s, const std::vector<row_id>& keys) {
+    std::vector<std::string> out;
+    for (const auto& k : keys)
+        if (auto m = s.find(k)) out.push_back(ref(*m));
+    return out;
+}
 inline std::string score_text(score_t milli) { return milli % 1000 == 0 ? decimal(static_cast<std::uint64_t>(milli / 1000)) + ".0"
                                                                          : weight_text(static_cast<weight_t>(milli)); }
 
@@ -184,14 +191,16 @@ public:
     }
 
     py::dict remember(std::string title, std::string text, std::vector<std::string> tags, std::string reason,
-                      std::vector<std::string> supersedes, std::vector<std::string> seen, std::vector<std::string> cites,
-                      const py::list& proposals, std::uint64_t session, std::uint32_t turn, std::string author) {
+                      std::vector<std::string> supersedes, std::vector<std::string> generalises, std::vector<std::string> seen,
+                      std::vector<std::string> cites, const py::list& proposals, std::uint64_t session, std::uint32_t turn,
+                      std::string author) {
         write_request w;
         w.title = std::move(title);
         w.text = std::move(text);
         w.tags = std::move(tags);
         w.reason = std::move(reason);
         w.supersedes = std::move(supersedes);
+        w.generalises = std::move(generalises);
         w.seen = std::move(seen);
         w.cites = std::move(cites);
         w.session = session;
@@ -262,6 +271,43 @@ public:
         return op_dict(out);
     }
 
+    /// What one session wrote, in order — where a consolidation starts (overview §4.11). Each
+    /// entry says whether it is still a head and what already generalises it, so a second
+    /// consolidation in the same session does not state a pattern twice.
+    py::dict review(std::uint64_t session) {
+        {
+            py::gil_scoped_release nogil;
+            m_service->refresh();
+        }
+        const auto snap = m_service->current();
+        py::list written;
+        for (std::size_t i = 0; i < snap->size(); ++i) {
+            const memory_id m(static_cast<std::uint32_t>(i));
+            const auto& r = snap->record(m);
+            if (r.session != session) continue;
+            py::dict e;
+            e["memory"] = ref(m);
+            e["key"] = r.key.hex().substr(0, 12);
+            e["title"] = r.title;
+            e["origin"] = r.origin;
+            e["head"] = snap->is_head(m);
+            std::vector<std::string> tags;
+            for (const auto t : snap->tags_of(m).members()) tags.push_back(snap->tax().info(tag_id(t)).qualified);
+            e["tags"] = tags;
+            e["generalises"] = refs_of(*snap, r.generalises);
+            std::vector<std::string> gen_by;
+            for (const auto x : snap->generalised_by(m)) gen_by.push_back(ref(x));
+            e["generalised_by"] = gen_by;
+            written.append(e);
+        }
+        py::dict d;
+        d["ok"] = true;
+        d["session"] = session;
+        d["version"] = snap->version();
+        d["written"] = written;
+        return d;
+    }
+
     /// One memory in full: its text, lineage, tags, and what has been observed of it.
     py::dict show(const std::string& memory) {
         const auto snap = m_service->current();
@@ -291,6 +337,10 @@ public:
             if (auto x = snap->find(k)) seen.push_back(ref(*x));
         d["supersedes"] = sup;
         d["superseded_by"] = by;
+        d["generalises"] = refs_of(*snap, r.generalises);
+        std::vector<std::string> gen_by;
+        for (const auto x : snap->generalised_by(*m)) gen_by.push_back(ref(x));
+        d["generalised_by"] = gen_by;
         d["seen"] = seen;
         d["cites"] = r.cites;
         if (!r.corpus.empty()) d["corpus"] = r.corpus;
