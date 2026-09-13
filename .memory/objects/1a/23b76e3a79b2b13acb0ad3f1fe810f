@@ -1,4 +1,4 @@
-pack: pygim
+pygim-taxonomy-files-124:taxonomy/pack-pygim.yaml15688:pack: pygim
 entry:
   brief: pygim itself — a C++26 and pybind11 library with a Python face.
   full: >
@@ -24,91 +24,78 @@ dimensions:
       example: The audit log's replay rules are component=memory.
     values:
       memory:
-        source: {doc: ext-memory, line: 2, lines: 1, passage: c99a06c66492e1f0e749523d5550b351}
         entry:
           brief: The problem-space memory.
           when: About the memory extension, its store, vocabulary or MCP server.
           when_not: Not another subsystem that memory merely uses, such as pathlike.
           example: Merge rows are determined by their parents only.
       pathlike:
-        source: {doc: ext-pathlike, line: 2, lines: 1, passage: e4465dd5ae60b9a622d2fb179b9eb248}
         entry:
           brief: Paths and path sets.
           when: About path objects, path tables or the engine registry.
           when_not: Not the persistence layer that stores them.
           example: Two PathSets over one table intersect at bit speed.
       mapping:
-        source: {doc: design-memory-00, line: 17, lines: 1, passage: 578631f7df446d07c0ccc1676647812f}
         entry:
           brief: The mapping toolkit.
           when: About id sets, interners and the hashing helpers.
           when_not: Not a consumer of those helpers.
           example: basic_id_set is append-only; removal goes through `where`.
       persistence:
-        source: {doc: ext-persistence, line: 2, lines: 1, passage: 8e0a99b38a34429151d08af511dd239c}
         entry:
           brief: Storage and database access.
           when: About the persistence architecture, Arrow or ODBC paths.
           when_not: Not the files a subsystem writes for itself.
           example: The BCP quickstart's batching rule.
       each:
-        source: {doc: ext-each, line: 2, lines: 1, passage: 9ccfd680012d7e2c683275802f366bcb}
         entry:
           brief: The each iteration helpers.
           when: About the each extension.
           when_not: Not a general C++ idiom used elsewhere too.
           example: How each composes with ranges.
       datagen:
-        source: {doc: ext-datagen, line: 2, lines: 1, passage: 566c979477094e75717ebd4cae8426e5}
         entry:
           brief: Data generation.
           when: About the datagen extension.
           when_not: Not benchmarks that consume generated data.
           example: Deterministic seeding for generated frames.
       utils:
-        source: {doc: ext-utils, line: 2, lines: 1, passage: 32d0b2ee1a895cc6e5e66d0ba3de28cb}
         entry:
           brief: Shared utilities.
           when: About helpers no single subsystem owns, such as hashing.
           when_not: Not a helper that belongs to one subsystem — name that one.
           example: utils/hash.h's digest is the one every subsystem reuses.
       wiring:
-        source: {doc: copilot-instructions, line: 17, lines: 1, passage: b244c202672d1855edbb1939dda43550}
         entry:
           brief: Inversion of control and wiring.
           when: About the wiring or IoC design.
           when_not: Not the services being wired.
           example: How a service is registered and resolved.
       tools:
-        source: {doc: ext-fetch_benchmark, line: 1, lines: 1, passage: 1a4ed5d40bf17506284dae864c9a0ad1}
         entry:
           brief: Developer tooling inside the tree.
           when: About benchmark fetchers and similar tools.
           when_not: Not the CLI a user runs.
           example: The fetch_benchmark extension's cache layout.
       cli:
-        source: {doc: copilot-instructions, line: 17, lines: 1, passage: b244c202672d1855edbb1939dda43550}
         entry:
           brief: The oo and pygim command line.
           when: About a command, its options or its output.
           when_not: Not the library behind the command.
           example: oo docs serve renders Markdown on the fly.
       mcp:
-        source: {doc: design-memory-00, line: 9, lines: 1, passage: 3c25010d653229e6ec5053e3c94aeaa5}
         entry:
           brief: The MCP servers.
           when: About the JSON-RPC protocol surface an agent talks to.
           when_not: Not the library the server exposes.
           example: A refusal is a normal result, not a protocol error.
       build:
-        source: {doc: copilot-instructions, line: 36, lines: 1, passage: a77fd7b366ae0cb76de86c9b18b5229c}
         entry:
           brief: Building and packaging.
           when: About manifests, the toolchain, compilation or CI.
           when_not: Not the code being built.
           example: Editable installs need --no-build-isolation.
       docs:
-        source: {doc: copilot-instructions, line: 14, lines: 1, passage: 86d29b973b5ee95d1132ffe8143e8fa9}
         entry:
           brief: The documents themselves.
           when: About how the design documents are written or served.
@@ -128,35 +115,30 @@ dimensions:
       example: Value semantics and compile-time proofs belong to core.
     values:
       core:
-        source: {doc: copilot-instructions, line: 26, lines: 1, passage: 2d377268facce46cc31ee48293321c47}
         entry:
           brief: Pure logic, no I/O.
           when: About types, invariants or algorithms with no platform contact.
           when_not: Not anything that reads or writes — that is strategy.
           example: The candidate set is a union within a dimension.
       strategy:
-        source: {doc: copilot-instructions, line: 36, lines: 1, passage: a77fd7b366ae0cb76de86c9b18b5229c}
         entry:
           brief: A swappable policy that touches the world.
           when: About file formats, locking or another replaceable mechanism.
           when_not: Not the interface it is chosen behind.
           example: The files store appends a row and fsyncs it.
       adapter:
-        source: {doc: copilot-instructions, line: 26, lines: 1, passage: 2d377268facce46cc31ee48293321c47}
         entry:
           brief: The boundary that translates for a consumer.
           when: About converting between the core's types and another world's.
           when_not: Not the binding glue itself.
           example: The adapter returns plain dicts, never core types.
       bindings:
-        source: {doc: copilot-instructions, line: 26, lines: 1, passage: 2d377268facce46cc31ee48293321c47}
         entry:
           brief: The pybind11 surface.
           when: About module registration, signatures, the GIL or docstrings.
           when_not: Not the adapter's translation.
           example: rapidyaml must be defined in exactly one translation unit.
       python:
-        source: {doc: copilot-instructions, line: 3, lines: 1, passage: 0bd4f09aa207f7961b9b89cd44446ba6}
         entry:
           brief: The Python side.
           when: About the Python package, its stubs or pure-Python behaviour.
@@ -176,95 +158,78 @@ dimensions:
       example: Integer milli-units on the ranking path is a correctness concern.
     values:
       correctness:
-        source: {doc: design-memory-02, line: 443, lines: 1, passage: 7fc5a76c698fb7b88039ca4298d74dbd}
         entry:
           brief: Getting the right answer.
           when: About invariants, edge cases or reproducibility.
           when_not: Not about speed — that is performance.
           example: No float on the ranking path, so ranking is reproducible.
       performance:
-        source: {doc: copilot-instructions, line: 80, lines: 1, passage: 7e862106b957ad9044d08e619f912db4}
         entry:
           brief: Time and space.
           when: About speed, allocation or memory footprint.
           when_not: Not about whether the result is right.
           example: Interning tags makes the candidate scan a bitset walk.
       memory_safety:
-        retired: Renamed lifetime, the term pygim's docs use (90 uses; "memory safety" none).
-        see: concern=lifetime
         entry:
           brief: Lifetime and ownership.
           when: About dangling references, ownership or unsafe casts.
           when_not: Not logical correctness of the algorithm.
           example: A span into a vector that reallocates is a dangling read.
       api_design:
-        retired: Renamed public_api, the term pygim's docs use ("public API"; "API design" none).
-        see: concern=public_api
         entry:
           brief: The shape of an interface.
           when: About what to expose, name or keep back.
           when_not: Not how it is implemented behind the interface.
           example: A refused write returns facts the caller can act on.
       concurrency:
-        retired: Renamed threading, the term pygim's docs use ("threading and shutdown rules"; "concurrency" none).
-        see: concern=threading
         entry:
           brief: Doing more than one thing at once.
           when: About locks, the GIL, threads or processes.
           when_not: Not single-threaded ordering.
           example: Checks re-run under the commit lock, never before it.
       portability:
-        source: {doc: copilot-instructions, line: 85, lines: 1, passage: 1a5c0867ada2ceb75562c8470d4c158d}
         entry:
           brief: Working the same everywhere.
           when: About platform differences or compiler versions.
           when_not: Not performance differences between platforms.
           example: An error reply must drain the request body on Windows.
       build:
-        retired: Renamed toolchain, the docs' word; build already names a component.
-        see: concern=toolchain
         entry:
           brief: Compiling and linking.
           when: About toolchains, flags, manifests or link order.
           when_not: Not the runtime behaviour of what was built.
           example: std::to_string is not constexpr in GCC 14.
       testing:
-        source: {doc: copilot-instructions, line: 35, lines: 1, passage: 2accbbf0f80da95abb8405ee19fc6e90}
         entry:
           brief: How a thing is proven.
           when: About what to assert, how to fixture, or a static proof.
           when_not: Not the behaviour under test.
           example: A law worth stating is worth a static proof.
       documentation:
-        source: {doc: copilot-instructions, line: 11, lines: 1, passage: 2fb483ac73d31f59a7e49a385df73094}
         entry:
           brief: How a thing is explained.
           when: About writing docs, docstrings or diagrams.
           when_not: Not the design being documented.
           example: Prefer small diagrams over a wall of code.
       toolchain:
-        source: {doc: copilot-instructions, line: 51, lines: 1, passage: c2d318b4716bb1b47da62da303f41c4d}
         entry:
           brief: Compiling and linking.
           when: About compilers, flags, manifests or link order.
           when_not: Not the runtime behaviour of what was built, and not the build subsystem itself — that is component=build.
           example: std::to_string is not constexpr in GCC 14.
       lifetime:
-        source: {doc: design-pathset-storage, line: 24, lines: 1, passage: 498b160f1af87bbc7d97391dab7d8260}
         entry:
           brief: Who owns a thing, and for how long.
           when: About dangling references, ownership or unsafe casts.
           when_not: Not logical correctness of the algorithm.
           example: A span into a vector that reallocates is a dangling read.
       threading:
-        source: {doc: design-memory-00, line: 656, lines: 1, passage: 0c3bdfb907e90e917f1d7703b358a24f}
         entry:
           brief: Threads, locks and the GIL.
           when: About owner threads, locks, releasing the GIL, or several processes on one store.
           when_not: Not single-threaded ordering.
           example: Checks re-run under the commit lock, never before it.
       public_api:
-        source: {doc: copilot-instructions, line: 10, lines: 1, passage: c1a86b9b4a740e0f693d95ae40448106}
         entry:
           brief: The shape of what a caller sees.
           when: About what to expose, name or keep back.
@@ -282,21 +247,18 @@ dimensions:
       example: Structured bindings cannot be captured by a lambda before C++20.
     values:
       cpp:
-        source: {doc: copilot-instructions, line: 3, lines: 1, passage: 0bd4f09aa207f7961b9b89cd44446ba6}
         entry:
           brief: C++.
           when: About C++ code, its standard or its compilers.
           when_not: Not the Python that wraps it.
           example: A constexpr decimal() replaces std::to_string.
       python:
-        source: {doc: copilot-instructions, line: 3, lines: 1, passage: 0bd4f09aa207f7961b9b89cd44446ba6}
         entry:
           brief: Python.
           when: About Python code, packaging or typing.
           when_not: Not the extension it calls into.
           example: Stub files carry the refusal contract.
       config:
-        source: {doc: copilot-instructions, line: 45, lines: 1, passage: 40b8df7a0136132eb1014cc22c9e12a6}
         entry:
           brief: Configuration and data files.
           when: About TOML, YAML or JSON the project reads or writes.
@@ -306,35 +268,30 @@ dimensions:
 extends:
   artifact:
     extension:
-      source: {doc: copilot-instructions, line: 19, lines: 1, passage: a19708e5616d3634955c042f50ea7e47}
       entry:
         brief: A compiled extension module.
         when: The knowledge is about an extension as a whole, or its manifest.
         when_not: Not one layer inside it — that is layer.
         example: ext.memory.toml declares the memory module's sources.
     api:
-      source: {doc: copilot-instructions, line: 10, lines: 1, passage: c1a86b9b4a740e0f693d95ae40448106}
       entry:
         brief: A public interface.
         when: About the surface a caller sees, including stubs.
         when_not: Not the implementation behind it.
         example: Memory.read returns the procedure first, then ranked memories.
     service:
-      source: {doc: copilot-instructions, line: 33, lines: 1, passage: 465fee5390a699ae4bec014131700684}
       entry:
         brief: A long-lived object that owns state.
         when: About a service's lifecycle, invariants or threading.
         when_not: Not a plain value type.
         example: The memory service replays the audit log when it opens.
     store:
-      source: {doc: design-memory-00, line: 120, lines: 1, passage: 2ce17104622078b170432db47fcf03a9}
       entry:
         brief: An on-disk format or layout.
         when: About what is written where, and how it is read back.
         when_not: Not the objects held in memory.
         example: audit/<clone>.jsonl is the index; memories/ are head views.
     protocol:
-      source: {doc: copilot-instructions, line: 27, lines: 1, passage: 8a2c57ce4d9ed347c7dccde7f74f593a}
       entry:
         brief: A wire protocol.
         when: About messages exchanged with another process.
@@ -347,28 +304,24 @@ extends:
         when_not: Not the code the document describes.
         example: The overview's four checks govern every write.
     test:
-      source: {doc: copilot-instructions, line: 35, lines: 1, passage: 2accbbf0f80da95abb8405ee19fc6e90}
       entry:
         brief: A test or a proof.
         when: About a test, a fixture or a static assertion.
         when_not: Not the behaviour being tested.
         example: Parity tests compare the extension with the prototype.
     benchmark:
-      source: {doc: copilot-instructions, line: 87, lines: 1, passage: 06599522edfcbb84a7c580ce6741c3f3}
       entry:
         brief: A benchmark.
         when: About measuring performance and reporting it.
         when_not: Not a correctness test.
         example: Results are kept per machine, never compared across them.
     cli_command:
-      source: {doc: copilot-instructions, line: 90, lines: 1, passage: c801ad319e7946fcee9f302d39b3adb4}
       entry:
         brief: A command a user runs.
         when: About a verb, its options or its output.
         when_not: Not the library behind the verb.
         example: oo memory mcp serves a repository over stdio.
     vocabulary:
-      source: {doc: design-memory-00, line: 16, lines: 1, passage: 3f460c18a7651d39a77b33fc515adf9a}
       entry:
         brief: A taxonomy pack or its codebook.
         when: About dimensions, values or the entries that define them.
@@ -377,7 +330,6 @@ extends:
 
   task:
     implement:
-      source: {doc: design-memory-04, line: 103, lines: 1, passage: 20c4f6245b1054dc02ca476a460e5d27}
       entry:
         brief: Writing the code a design calls for.
         when: The knowledge helps turn a decided design into working code.
@@ -392,14 +344,12 @@ extends:
 
   tier:
     prototype:
-      source: {doc: design-memory-00, line: 11, lines: 1, passage: 4377cc37ad450453b927fdf6a4a191f3}
       entry:
         brief: A sketch, not yet load-bearing.
         when: The knowledge holds for throwaway or exploratory work.
         when_not: Not for code others already depend on.
         example: The Python prototype that the extension was checked against.
     working:
-      source: {doc: design-memory-00, line: 43, lines: 1, passage: 3de51dae791f722e83f9a6d023478fa6}
       entry:
         brief: Works, and is used.
         when: The knowledge holds for code in use but still moving.
@@ -411,3 +361,139 @@ extends:
         when: The knowledge holds for stable, tested, depended-on code.
         when_not: Not for something still being shaped.
         example: The pathlike engine registry's published behaviour.
+18:taxonomy/base.yaml6187:# taxonomy v0 — the base every repository starts from.
+# Packs add values to domain, artifact and tier, and dimensions of their own.
+pack: base
+
+dimensions:
+  domain:
+    role: hard
+    weight: 1.0
+    entry:
+      brief: The field the knowledge belongs to.
+      full: >
+        Which body of work the knowledge is about. Each domain is prepared from
+        its documents and adds a pack; the domain's name is the pack's name.
+      when: Every memory answers it — knowledge always belongs to some field.
+      when_not: Not to say what the knowledge is about within the field — that is artifact.
+      example: A note on sourdough hydration is domain=baking; one on reading a lease is domain=tenancy.
+
+  artifact:
+    role: hard
+    weight: 1.0
+    entry:
+      brief: What is being made or examined.
+      full: >
+        The kind of thing the knowledge concerns. The values are the domain's
+        own: loaves and ovens in one, leases and clauses in another.
+      when: The knowledge is about one kind of thing the domain produces or studies.
+      when_not: Not the activity performed on the thing — that is task.
+      example: A rule about shaping loaves is artifact=bread in a baking domain.
+
+  task:
+    role: hard
+    weight: 1.0
+    entry:
+      brief: What the knowledge is for doing.
+      full: >
+        The activity the knowledge helps with. Designing and judging need
+        different knowledge even about the same thing.
+      when: The knowledge helps someone make, judge, measure, fix or explain something.
+      when_not: Not the thing acted on — that is artifact.
+      example: A checklist used while drafting a new lease clause is task=design.
+    values:
+      design:
+        entry:
+          brief: Making something new.
+          when: The knowledge helps create a thing that does not yet exist.
+          when_not: Not judging or improving a thing that exists — that is critique or evaluate.
+          example: Choosing the dimensions of a bookshelf that does not exist yet.
+      critique:
+        entry:
+          brief: Judging a thing that exists.
+          when: The knowledge helps say what is good or bad about an existing thing.
+          when_not: Not measuring against a fixed standard — that is evaluate.
+          example: Pointing out that a contract clause can be read two ways.
+      evaluate:
+        entry:
+          brief: Measuring against a standard.
+          when: The knowledge compares a thing with a stated benchmark or rule.
+          when_not: Not an opinion about quality — that is critique.
+          example: Checking a shelf's load against the manufacturer's rating.
+      troubleshoot:
+        entry:
+          brief: Finding why a thing fails.
+          when: The knowledge helps locate the cause of a failure.
+          when_not: Not improving a thing that works — that is design or critique.
+          example: Tracing why a build fails only on Windows.
+      explain:
+        entry:
+          brief: Making a thing understood.
+          when: The knowledge helps someone understand how or why a thing works.
+          when_not: Not changing or judging the thing — only understanding it.
+          example: Why bread dough rises in a warm room.
+
+  kind:
+    role: soft
+    weight: 0.5
+    entry:
+      brief: What sort of knowledge this is.
+      full: >
+        The epistemic type of a memory: a fact, a rule of thumb, a way of doing
+        something, an instance, a choice made, or a taste. Two memories about
+        the same thing can differ only in kind.
+      when: Every memory answers it.
+      when_not: Never to say how good the knowledge is — valence is not kind.
+      example: '"Measure twice, cut once" is a principle; "the pine shelf that sagged" is an example.'
+    values:
+      reference:
+        entry:
+          brief: A fact that can be looked up.
+          when: The text states something true that a source would confirm.
+          when_not: Not a rule for judging — that is a principle.
+          example: Water boils at 100 °C at sea level.
+      principle:
+        entry:
+          brief: A rule of thumb.
+          when: The text states a general rule that guides decisions.
+          when_not: Not a sequence of steps — that is a procedure.
+          example: A new tool earns its place only if it beats the one it replaces.
+      procedure:
+        entry:
+          brief: Ordered steps by which something is achieved.
+          full: >
+            How a thing is done in this domain, step by step, for one artifact
+            and one task. Placed first in every context for that pair.
+          when: The text is a sequence the reader should follow in order.
+          when_not: A single rule, however important — that is a principle.
+          example: 'Replacing a fuse: switch off the mains, find the blown fuse, fit one of the same rating, switch on, test.'
+      example:
+        entry:
+          brief: One instance.
+          when: The text describes a particular case.
+          when_not: Not a generalisation drawn from cases — that is a principle.
+          example: The pine shelf sagged because its span was over 80 cm.
+      decision:
+        entry:
+          brief: A choice made, and why.
+          when: The text records what was chosen among alternatives and the reason.
+          when_not: Not a rule for all cases — that is a principle.
+          example: Oak was chosen over pine for the shelf because of the load it carries.
+      preference:
+        entry:
+          brief: A taste.
+          when: The text records how someone likes things done.
+          when_not: Not a claim about correctness — that is a principle.
+          example: Prefer a written agenda before any meeting.
+
+  tier:
+    role: soft
+    weight: 1.0
+    entry:
+      brief: The level or maturity the knowledge applies to.
+      full: >
+        Where on the domain's scale of level, size or maturity the knowledge
+        holds. Packs name the bands.
+      when: The knowledge holds at some levels and not others.
+      when_not: Not how important the knowledge is.
+      example: A technique only for experienced bakers is tier=advanced in a baking domain.
