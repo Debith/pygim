@@ -150,6 +150,9 @@ jobs:
           # The whole suite, against the repaired wheel installed in a clean
           # environment: what PyPI will serve is what gets tested.
           CIBW_TEST_EXTRAS: test
+          # pyodbc's macOS wheel (a test dependency) loads Homebrew's unixODBC,
+          # as pyodbc documents; the pygim wheel carries its own.
+          CIBW_BEFORE_TEST_MACOS: brew install unixodbc
           CIBW_TEST_COMMAND: pytest {project}/tests -p no:cacheprovider
 
       - name: Upload wheel
