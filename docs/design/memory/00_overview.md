@@ -597,9 +597,14 @@ cases rarely earns that — the coverage check passes it all the same, so overre
 review, not by the service. A wider suspicion is not written as a wider tag: it waits for a
 case in the wider space, and a later consolidation widens the generalisation by superseding it.
 
-**How retrieval treats it.** Like any memory. Candidate selection, scoring and ranking do not
-change, and its instances rank on their own tags. Whether a context that includes a
-generalisation should still spend budget on the instances it generalises is open (§10).
+**How retrieval treats it.** It is selected, scored and ranked like any memory, and its
+instances *fold* under it. A candidate one of whose generalisations is also a candidate gives
+up its own place and is named under that generalisation as its evidence — key and title, no
+text — so a context does not spend its budget saying one point five times, and a case is one
+`show` away when its detail matters. The fold happens before ranking and the budget, so it
+depends on neither: the evidence travels with its generalisation, and a retired generalisation
+is no candidate, so its instances unfold. Folded instances still count as admitted (section 04
+§3.9).
 
 **What starts it.** The user, whenever they choose — mid-session as readily as at its end. A
 consolidation is asked for the way a commit is, and the agent carries it out through the
@@ -772,7 +777,6 @@ does not require the ones after it.
 - **Promotion rule for learned associations** — raw count, decay, or review-only when the store is a shared repository (07, 11) — and which counters feed it (07).
 - **What "admitted" records** — one usage record per candidate, or a count in the receipt (04 §7.1).
 - **Typed memory-to-memory edges beyond `supersedes` and `generalises`**, with one-hop expansion — drafted as not in v1 (04 §7.2).
-- **Whether a context spends budget on a generalisation's instances** (04, 07) — include them as ranked, or list them under the generalisation as its evidence and let the reader `show` one when needed.
 - **What a later case that contradicts a generalisation should trigger** (07). The agent supersedes the generalisation with a narrower one, as with any correction; whether the service should also list, at the next close, generalisations whose space gained a head since they were written.
 - **Where the repository lives, and whether head views are committed** (03 §9.1, §9.2).
 - **Where agents beside the service run** when they arrive: in-process as services (09) or as separate clients over the same adapter (10).

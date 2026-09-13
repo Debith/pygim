@@ -39,6 +39,7 @@ struct match {
     std::uint32_t soft_hits = 0;
     std::uint32_t rank = 0;
     std::uint32_t tokens = 0;
+    std::vector<memory_id> evidence;    // candidates this generalisation folds: listed, not placed (04 §3.7)
 };
 
 /// What the agent receives (04 §3.6–3.8).
@@ -47,8 +48,10 @@ struct context {
     std::string procedure_note;          // why the slot is empty, or that the pair has two
     std::vector<match> selected;
     std::vector<match> skipped;          // candidates ranked but not included
+    std::vector<memory_id> procedure_evidence;  // candidates the procedure generalises, folded under it
     std::uint32_t corpus = 0;
     std::uint32_t candidates = 0;
+    std::uint32_t folded = 0;            // candidates listed under a generalisation instead of placed
     std::uint32_t tokens = 0;
     bool over_budget = false;
 };

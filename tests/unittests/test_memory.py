@@ -310,8 +310,40 @@ class TestGeneralising:
             assert shown["head"] and shown["generalised_by"] == [g["memory"]]
         assert mem.show(g["memory"])["generalises"] == [f["memory"], e["memory"]]
         assert set(mem.show(g["memory"])["seen"]) >= {f["memory"], e["memory"]}   # naming an instance is having read it
-        found = [m["memory"] for m in mem.read(DESIGN, max=10)["memories"]]
-        assert {f["memory"], e["memory"], g["memory"]} <= set(found)
+
+    def test_a_read_folds_instances_under_their_generalisation(self, mem):
+        p, y, f = seed(mem)
+        e = ember_ward(mem, p, y, f)
+        g = write(mem, "Reactions are niches", PATTERN, DESIGN + ["kind=principle"],
+                  generalises=[f["memory"], e["memory"]], seen=[p["memory"], y["memory"]])
+        r = mem.read(DESIGN, max=10)
+        placed = {m["memory"]: m for m in r["memories"]}
+        assert f["memory"] not in placed and e["memory"] not in placed
+        assert [x["memory"] for x in placed[g["memory"]]["evidence"]] == [f["memory"], e["memory"]]
+        assert r["folded"] == 2 and r["candidates"] == 5                  # folded cases were still admitted
+        ranks = sorted(m["rank"] for m in r["memories"] + r["skipped"])
+        assert ranks == list(range(1, len(ranks) + 1))                     # folded before ranking: no gaps
+
+    def test_the_evidence_is_named_not_paid_for(self, mem):
+        p, y, f = seed(mem)
+        e = ember_ward(mem, p, y, f)
+        g = write(mem, "Reactions are niches", PATTERN, DESIGN + ["kind=principle"],
+                  generalises=[f["memory"], e["memory"]], seen=[p["memory"], y["memory"]])
+        full = mem.read(DESIGN, max=10)
+        paid = full["procedure"]["tokens"] + sum(m["tokens"] for m in full["memories"])
+        assert full["tokens"] == paid                                      # the folded cases cost nothing
+        tight = mem.read(DESIGN, max=10, budget=paid)                      # exactly what the placed memories need
+        placed = {m["memory"]: m for m in tight["memories"]}
+        assert g["memory"] in placed and len(placed[g["memory"]]["evidence"]) == 2 and not tight["skipped"]
+
+    def test_a_retired_generalisation_unfolds_its_instances(self, mem):
+        p, y, f = seed(mem)
+        e = ember_ward(mem, p, y, f)
+        g = write(mem, "Reactions are niches", PATTERN, DESIGN + ["kind=principle"],
+                  generalises=[f["memory"], e["memory"]], seen=[p["memory"], y["memory"]])
+        assert mem.retire(g["memory"], reason="the pattern was wrong")["ok"]
+        r = mem.read(DESIGN, max=10)
+        assert {f["memory"], e["memory"]} <= {m["memory"] for m in r["memories"]} and r["folded"] == 0
 
     def test_one_case_is_not_a_pattern(self, mem):
         p, y, f = seed(mem)

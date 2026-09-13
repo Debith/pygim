@@ -424,7 +424,22 @@ private:
         d["soft_matched"] = names(s.tax(), m.soft_matched);
         d["soft_missed"] = names(s.tax(), m.soft_missed);
         d["tokens"] = m.tokens;
+        if (!m.evidence.empty()) d["evidence"] = evidence_list(s, m.evidence);
         return d;
+    }
+
+    /// The instances folded under a generalisation: named, not placed — `show` one for its text.
+    static py::list evidence_list(const snapshot& s, const std::vector<memory_id>& ids) {
+        py::list out;
+        for (const auto id : ids) {
+            py::dict e;
+            e["memory"] = ref(id);
+            e["key"] = s.record(id).key.hex().substr(0, 12);
+            e["title"] = s.record(id).title;
+            e["tokens"] = s.record(id).tokens;
+            out.append(e);
+        }
+        return out;
     }
 
     py::dict read_dict(const read_outcome& out, bool with_receipt = true) const {
@@ -436,6 +451,7 @@ private:
         d["version"] = s.version();
         d["corpus"] = out.ctx.corpus;
         d["candidates"] = out.ctx.candidates;
+        d["folded"] = out.ctx.folded;
         d["tokens"] = out.ctx.tokens;
         d["over_budget"] = out.ctx.over_budget;
         if (out.ctx.procedure) {
@@ -448,6 +464,7 @@ private:
             pd["title"] = s.record(pm.id).title;
             pd["text"] = m_service->text_of(s, pm.id).value_or("");
             pd["tokens"] = pm.tokens;
+            if (!out.ctx.procedure_evidence.empty()) pd["evidence"] = evidence_list(s, out.ctx.procedure_evidence);
             d["procedure"] = pd;
         } else {
             d["procedure"] = py::none();

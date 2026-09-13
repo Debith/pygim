@@ -146,6 +146,7 @@ sequenceDiagram
     S->>X: 3 posting lists, plus each dimension's any list
     S->>S: 4 union within a dimension, intersect across, intersect with heads
     S->>X: 5 forward sets of the candidates
+    S->>S: fold each candidate that a candidate generalises under that generalisation
     S->>S: 6 score, 7 rank, 8 fill the procedure slot, 9 fill the budget, 10 explain
     S-->>A: context
     S-)O: 11 receipt and usage, asynchronously
@@ -246,6 +247,25 @@ keys returned, the time — and one usage record per candidate admitted and per 
 leave through the event bus to the query logger and the statistics observer, after the context has
 been returned. A slow disk delays the log, never the agent.
 
+### 3.9 Folding a generalisation's instances — between steps 5 and 6
+
+A generalisation (overview §4.11) states the point its instances share, so placing both would
+spend the budget saying one thing several times. After step 5, every candidate one of whose
+`generalised_by` is also a candidate is taken out of the list that will be scored and named
+under that generalisation as `evidence` — its key and title, not its text. An instance of two
+candidate generalisations is named under each. The procedure slot is never folded.
+
+| Candidate | Placed | Named |
+|---|---|---|
+| a generalisation, and a candidate | ranked and budgeted like any match | its folded instances, under it |
+| an instance whose generalisation is a candidate | not scored, not ranked, not budgeted | under that generalisation |
+| an instance whose generalisation is retired, or outside this query's hard tags | ranked as usual | — |
+
+The fold comes before scoring, so it depends on neither the ranks nor the budget: ranks run
+without gaps, the evidence is included or skipped together with its generalisation, and a rerun
+folds exactly as the first read did. A folded instance still counts among the `candidates` and is
+admitted; `folded` says how many were named rather than placed.
+
 ---
 
 ## 4. Worked, end to end
@@ -303,6 +323,7 @@ C++ implementation is correct when it reruns every receipt to the prototype's an
 | Exact score | the final score is the integer formula of §3.3, evaluated without division | two processes rank the same candidates differently |
 | One slot | the procedure slot holds at most one memory, it is the head procedure for the query's single artifact and task, and it is not repeated below | a context opens with the wrong way of working, or with two |
 | Budget kept | the selected memories' tokens fit the budget, or the context is the procedure alone with `over_budget` set | a caller's budget is quietly exceeded, or its procedure quietly cut |
+| Fold before rank | a non-slot candidate is placed iff no candidate generalises it, decided before scoring | a context spends its budget repeating a pattern case by case — or the fold depends on the budget, and two budgets disagree about which memories count |
 | Immutable once published | a published snapshot never changes | a read sees half a commit |
 | Incremental equals full | the snapshot built by copying what changed equals the one a full replay of the same rows builds — tested, since it is a property of two code paths | a long-running service slowly diverges from the one that just restarted |
 | Rerun identity | rerunning a receipt returns its keys, order and explanations exactly | the reproducibility of 01 §3.1 is a claim, not a property |
