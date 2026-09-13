@@ -1,7 +1,7 @@
 # Problem-Space Memory — Technical Specification
 
 **Section 00a: How a memory is made — features and scenarios**
-Status: draft · Owner: Debith · Last updated: 2026-09-09
+Status: draft · Owner: Debith · Last updated: 2026-09-13
 
 Written the way a behaviour spec is written. Each **feature** is something a person does with
 the system; each **scenario** is one concrete situation, stated as *Given / When / Then* and
@@ -9,7 +9,7 @@ then drawn panel by panel. The domain is the seed corpus's: D&D spell design. Th
 and texts are consistent from the first scenario to the last, so they are also the fixtures
 of the acceptance tests in section 12.
 
-The rules the panels obey are stated in [the overview](00_overview.md), §4.4–§4.9 and §5.
+The rules the panels obey are stated in [the overview](00_overview.md), §4.4–§4.11 and §5.
 Two words the panels lean on: a **chain** is a memory and all of its versions, linked by
 *supersedes* — only the **head** is findable, the rest is readable history. Every write
 either starts a chain or extends one.
@@ -23,7 +23,7 @@ reads prose, never judges meaning: it checks, stores, counts, intersects and exp
 
 ```mermaid
 flowchart LR
-    agent["AGENT<br/>thinks: classifies, reads, decides, writes"]
+    agent["AGENT<br/>thinks: classifies, reads, decides, writes<br/>and at a session's close, generalises"]
     human["HUMAN<br/>governs: vocabulary, proposals, review"]
     later["agents beside the service<br/><i>later: consolidation, curation</i>"]
     service["SERVICE<br/>checks · stores · counts · intersects · explains<br/><i>never reads prose</i>"]
@@ -1035,6 +1035,100 @@ flowchart LR
 
 ---
 
+## Feature 7 — Close a session
+
+*In the model's types: [Feature 7 in section 01a](01a_model_by_scenario.md#feature-7-close-a-session).*
+
+Features 2 to 6 write cases one at a time, as the work produces them. The close of a session
+adds the other half: the agent reads back what it wrote and states once what several cases
+showed, without retiring any of them (overview §4.11).
+
+### Scenario 7.1 — Three new reactions make one point
+
+*In the model's types: [Scenario 7.1 in section 01a](01a_model_by_scenario.md#scenario-71-three-new-reactions-make-one-point).*
+
+```gherkin
+Given session 13 designed three defensive reactions and wrote #55, #56 and #57, one example each
+And #54, the Ward family note, already says the Wards are a niche, not an upgrade
+When the session closes and the agent reads back what it wrote
+Then it sees that all four make one point: each reaction beats Shield against one kind of threat and loses against another
+And it writes #58, a principle that generalises #54 to #57
+And #54 to #57 stay heads, as the principle's evidence
+```
+
+**Panel 1.** The session's writes, from the records. The service lists them; it does not read
+them.
+
+```mermaid
+sequenceDiagram
+    participant Agent
+    participant Service
+    Agent->>Service: review(session 13)
+    Service-->>Agent: #55 Mirror Veil · #56 Thunder Riposte · #57 Stone Skin Reflex — each kind=example, artifact=spell, task=design, purpose=defensive
+```
+
+**Panel 2.** Reading them together, and reading the space they share — a generalisation looks
+before it writes like any memory.
+
+```mermaid
+sequenceDiagram
+    participant Agent
+    participant Service
+    Agent->>Service: read(domain=dnd artifact=spell task=design, purpose~defensive action_economy~reaction)
+    Service-->>Agent: #2 yardstick · #54 Ward family · #55 · #56 · #57 · #7 typed resistance above 10th level
+    Note over Agent: Mirror Veil wins against one big hitter, Thunder Riposte deters only what cannot shrug it off, Stone Skin wins against brutes and loses to casters
+    Note over Agent: #54 said the same of the Wards — one pattern, four cases. #2 stays the yardstick and #7 is about tier, not threat
+```
+
+**Panel 3.** The generalisation. The caller writes the pattern; the service checks what it can
+check without reading it.
+
+```mermaid
+flowchart LR
+    call["remember('A defensive reaction wins against one threat profile and loses against another. Judge it against the encounter mix the party faces at that tier, not against Shield alone — Shield is where the measuring starts, not where it ends.',<br/>tags: domain=dnd artifact=spell task=design purpose=defensive action_economy=reaction kind=principle,<br/>generalises: #54 #55 #56 #57, seen: #2 #7 #54 #55 #56 #57)"] --> check["service: #54 to #57 are heads — yes<br/>#58 covers them on domain, artifact and task — yes"] --> ok["#58 written · generalises #54 to #57 · nothing retired · snapshot v59"]
+```
+
+**Panel 4.** What the store answers now. Each case still stands on its own and points at the
+pattern it belongs to.
+
+```mermaid
+flowchart LR
+    ask1["show #55"] --> ans1["#55 Mirror Veil — head · generalised by #58"]
+    ask2["show #58"] --> ans2["#58 — principle · generalises #54 #55 #56 #57<br/>written at the close of session 13"]
+```
+
+### Scenario 7.2 — A wider suspicion waits for its case
+
+*In the model's types: [Scenario 7.2 in section 01a](01a_model_by_scenario.md#scenario-72-a-wider-suspicion-waits-for-its-case).*
+
+```gherkin
+Given #58 was drawn from four spells
+When the agent suspects the same holds for defensive magic items
+Then #58 stays artifact=spell, and no magic-item tag or artifact=any is added on a hunch
+And the suspicion becomes part of the pattern only when a magic-item case exists and a later close finds it
+```
+
+**Panel 1.** The cases decide the tags.
+
+```mermaid
+flowchart TB
+    cases["#58's instances: #54 #55 #56 #57 — every one artifact=spell"]
+    hunch["hunch: a ring that turns arrows but not fire would be the same"]
+    cases --> tag["#58 answers artifact=spell — as far as its cases reach"]
+    hunch --> wait["not a tag — a hunch is not a case"]
+    wait --> later["a later session writes a magic-item example<br/>the next close may widen the pattern by superseding #58 with one that generalises that case too"]
+```
+
+**Panel 2.** Where overreach is caught. The coverage check cannot see it: `any` covers every
+value, so an over-wide generalisation passes. The diff is where it shows.
+
+```mermaid
+flowchart LR
+    over["had #58 answered artifact=any"] --> svc["service: covers its instances — yes, any covers everything"] --> human["human, reading the diff: 'four spells, and it claims every artifact?'"]
+```
+
+---
+
 ## The whole thing in two frames
 
 A memory:
@@ -1042,6 +1136,7 @@ A memory:
 ```mermaid
 stateDiagram-v2
     [*] --> Head: WRITE, decision new — the agent, mid-task (Feature 2) — a procedure is written the same way
+    [*] --> Head: WRITE at a session's close, generalising (Feature 7) — its instances stay heads
     [*] --> Head: ingestion of a hand-written file (Feature 4)
     [*] --> Head: merge (Feature 5)
     Head --> Head: link · unlink · learn · promote (Feature 3)
