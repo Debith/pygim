@@ -1,10 +1,3 @@
----
-memory: 8d4fa5821881d9a45926d1c3dcb1bbc8
-title: "Memories are written concrete during a session and consolidated at its end"
-origin: written
-tags: ["domain=pygim","component=memory","artifact=design_doc","task=design","kind=decision"]
-supersedes: ["4355ffe47ca65f96db246035d903b958"]
----
 Debith's direction (2026-09-12): during work, memories record what was learned in that session, concretely and with the case. At the session's close the agent reads back what it wrote and states once, at the level the cases support, a pattern several of them share. This is now the design — overview §4.11, section 00a Feature 7, section 01 §4 and §8 (commit 0362cba).
 
 What was decided:
