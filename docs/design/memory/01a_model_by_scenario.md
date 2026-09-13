@@ -729,9 +729,11 @@ classDiagram
 
 ```mermaid
 sequenceDiagram
+    participant U as User
     participant A as Agent
     participant S as Service
     participant St as Store
+    U->>A: close the session
     A->>S: review(session 13)
     S-->>A: #55 #56 #57 with their tags
     A->>S: read(domain=dnd artifact=spell task=design, purpose~defensive)

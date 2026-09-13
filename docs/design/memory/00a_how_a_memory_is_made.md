@@ -1050,19 +1050,22 @@ showed, without retiring any of them (overview §4.11).
 ```gherkin
 Given session 13 designed three defensive reactions and wrote #55, #56 and #57, one example each
 And #54, the Ward family note, already says the Wards are a niche, not an upgrade
-When the session closes and the agent reads back what it wrote
+When the user asks the agent to close the session
+And the agent reads back what it wrote
 Then it sees that all four make one point: each reaction beats Shield against one kind of threat and loses against another
 And it writes #58, a principle that generalises #54 to #57
 And #54 to #57 stay heads, as the principle's evidence
 ```
 
-**Panel 1.** The session's writes, from the records. The service lists them; it does not read
-them.
+**Panel 1.** The user closes the session, and the agent fetches its writes from the records.
+Nothing closes a session on its own. The service lists the writes; it does not read them.
 
 ```mermaid
 sequenceDiagram
+    participant User
     participant Agent
     participant Service
+    User->>Agent: close the session
     Agent->>Service: review(session 13)
     Service-->>Agent: #55 Mirror Veil · #56 Thunder Riposte · #57 Stone Skin Reflex — each kind=example, artifact=spell, task=design, purpose=defensive
 ```
