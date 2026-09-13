@@ -57,6 +57,7 @@ public:
     [[nodiscard]] const tag_set& tags_of(memory_id m) const { return *m_forward[m.value()]; }
     [[nodiscard]] const memory_set& carrying(tag_id t) const { return *m_postings[t.value()]; }
     [[nodiscard]] const std::vector<memory_id>& superseded_by(memory_id m) const { return *m_superseded_by[m.value()]; }
+    [[nodiscard]] const std::vector<memory_id>& generalised_by(memory_id m) const { return *m_generalised_by[m.value()]; }
 
     [[nodiscard]] std::optional<memory_id> find(const row_id& key) const {
         const auto it = m_keys->find(key);
@@ -310,6 +311,7 @@ private:
         m_forward.push_back(std::move(fwd));
         m_instances.push_back(std::move(inst));
         m_superseded_by.push_back(std::make_shared<const std::vector<memory_id>>());
+        m_generalised_by.push_back(std::make_shared<const std::vector<memory_id>>());
         auto keys = std::make_shared<key_map>(*m_keys);
         keys->emplace(r.id, m);
         m_keys = std::move(keys);
@@ -326,6 +328,15 @@ private:
                                                        " memories — two corrections of one note; merge them"});
             m_superseded_by[*old] = std::move(by);
             retire_id(*old);
+        }
+        // Evidence is kept (01 §8): a generalisation points at its instances and retires none of them.
+        for (const auto k : r.all("generalises")) {
+            const auto instance = resolve(k, r);
+            if (!instance) continue;
+            rec->generalises.push_back(m_memories[*instance]->key);
+            auto by = std::make_shared<std::vector<memory_id>>(*m_generalised_by[*instance]);
+            by->push_back(memory_id(m));
+            m_generalised_by[*instance] = std::move(by);
         }
         fold_proposals(r);
     }
@@ -407,6 +418,7 @@ private:
     std::vector<std::shared_ptr<const tag_set>> m_forward;
     std::vector<std::shared_ptr<const std::vector<instance>>> m_instances;
     std::vector<std::shared_ptr<const std::vector<memory_id>>> m_superseded_by;
+    std::vector<std::shared_ptr<const std::vector<memory_id>>> m_generalised_by;
     std::vector<std::shared_ptr<const memory_set>> m_postings;
     std::shared_ptr<const memory_set> m_retired;
     std::shared_ptr<const key_map> m_keys;

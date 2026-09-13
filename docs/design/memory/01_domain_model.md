@@ -323,7 +323,7 @@ classDiagram
 | | `session`, `turn` | which session wrote it |
 | | `corpus`, `revision` | which corpus file it was ingested from — a path row and the file's digest, since a corpus file is not a source (overview §4.3) |
 | | `supersedes` | the memories this one replaces |
-| | `generalises` | the memories whose shared pattern this one states, at a session's close — they stay heads (overview §4.11) |
+| | `generalises` | the memories whose shared pattern this one states, on the user's request — they stay heads (overview §4.11) |
 | `memory_state` | `tags` | the associations, forward-mapped into an `id_set` |
 | | `superseded_by` | empty means this is the head of its chain |
 | | `generalised_by` | the generalisations drawn from this memory; being generalised changes nothing about its retrieval |
@@ -442,7 +442,7 @@ against it:
 |---|---|---|
 | `tags` | the agent's classification | closed vocabulary |
 | `decision` | `new`, or `supersedes <id>` | no unread write · head only |
-| `generalises` | the instances a generalisation is drawn from | head only · coverage |
+| `generalises` | the instances a generalisation is drawn from — two or more | head only · coverage |
 | `seen` | the candidates the writer read | no unread write |
 | `content` | the text | identical content |
 | `proposals` | concepts with no tag, each a codebook entry | shape check |
@@ -491,7 +491,7 @@ breaks without it, so the third column says what.
 | Digest identity | `content_digest` is the digest of `content` | the duplicate check passes on content that differs, and a derived store rebuilt from files disagrees with the canonical one |
 | Entry completeness | a `tag_id` exists only if its codebook entry is complete | a tag with no boundary sentence: two sessions file the same memory two ways, which is the classification mismatch of overview §4.7 |
 | Proposal exclusivity | a proposal is accepted once, and then its tag exists | the same concept enters the vocabulary twice under two ids, splitting every memory that used it |
-| Evidence is kept | a `generalises` edge never sets its target's `superseded_by` | closing a session retires the cases its pattern rests on, and "why do we believe this" no longer has an answer |
+| Evidence is kept | a `generalises` edge never sets its target's `superseded_by` | consolidating retires the cases its pattern rests on, and "why do we believe this" no longer has an answer |
 | Generalisation covers | on every hard dimension, a generalisation's values include each instance's values, or it answers `any` | the pattern is missing from the very spaces its cases are found in, so the next agent rediscovers it from the cases |
 | Generalisation acyclicity | `generalises` edges form a directed acyclic graph, and no memory generalises itself | walking a pattern's evidence never terminates |
 

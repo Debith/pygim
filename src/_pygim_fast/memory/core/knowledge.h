@@ -29,6 +29,7 @@ struct memory_record {
     std::uint32_t turn = 0;
     std::string reason;
     std::vector<row_id> supersedes;
+    std::vector<row_id> generalises;  // the instances whose shared pattern this states (overview §4.11)
     std::vector<row_id> seen;
     std::vector<std::string> cites;
     std::string corpus;

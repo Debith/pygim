@@ -287,6 +287,84 @@ class TestMerging:
         assert r["verdict"].startswith("judgement error")
 
 
+def ember_ward(mem, p, y, f, **kw):
+    """A second case of Frost Ward's point, for a generalisation to draw on (00a Feature 7)."""
+    return write(mem, "Ember Ward", "Fire resistance until the start of your next turn; wins against breath, loses to weapons.",
+                 DESIGN + ["purpose=defensive", "action_economy=reaction", "kind=example", "tier=mid"],
+                 seen=[p["memory"], y["memory"], f["memory"]], **kw)
+
+
+PATTERN = "A defensive reaction wins against one threat and loses against another; judge it against the encounter mix."
+
+
+class TestGeneralising:
+    """Overview §4.11: a generalisation states what several heads share and retires none of them."""
+
+    def test_instances_stay_heads_and_point_at_their_generalisation(self, mem):
+        p, y, f = seed(mem)
+        e = ember_ward(mem, p, y, f)
+        g = write(mem, "Reactions are niches", PATTERN, DESIGN + ["purpose=defensive", "kind=principle"],
+                  generalises=[f["memory"], e["memory"]], seen=[p["memory"], y["memory"]])
+        for case in (f, e):
+            shown = mem.show(case["memory"])
+            assert shown["head"] and shown["generalised_by"] == [g["memory"]]
+        assert mem.show(g["memory"])["generalises"] == [f["memory"], e["memory"]]
+        assert set(mem.show(g["memory"])["seen"]) >= {f["memory"], e["memory"]}   # naming an instance is having read it
+        found = [m["memory"] for m in mem.read(DESIGN, max=10)["memories"]]
+        assert {f["memory"], e["memory"], g["memory"]} <= set(found)
+
+    def test_one_case_is_not_a_pattern(self, mem):
+        p, y, f = seed(mem)
+        r = mem.remember(title="Too soon", text=PATTERN, tags=DESIGN + ["kind=principle"],
+                         generalises=[f["memory"]], seen=[p["memory"], y["memory"]])
+        assert r["refused"] == "one case"
+
+    def test_it_must_cover_its_instances_and_any_covers_everything(self, mem):
+        p, y, f = seed(mem)
+        e = ember_ward(mem, p, y, f)
+        b = write(mem, "Stone Skin", "Resists weapons, loses to casters.", DESIGN + ["task=balance", "kind=example"],
+                  seen=[p["memory"], y["memory"], f["memory"], e["memory"]])
+        narrow = mem.remember(title="Reactions are niches", text=PATTERN, tags=DESIGN + ["kind=principle"],
+                              generalises=[f["memory"], b["memory"]], seen=[p["memory"], y["memory"], e["memory"]])
+        assert narrow["refused"] == "not covered"
+        assert narrow["facts"] == [b["memory"] + " " + mem.show(b["memory"])["key"][:8] + " Stone Skin answers task=balance"]
+        wide = mem.remember(title="Reactions are niches", text=PATTERN, tags=["domain=dnd", "artifact=spell", "task=any", "kind=principle"],
+                            generalises=[f["memory"], b["memory"]], seen=[p["memory"], y["memory"], e["memory"]])
+        assert wide["ok"]   # the check cannot see overreach — review in the diff does (00a Scenario 7.2)
+
+    def test_only_heads_and_never_what_it_supersedes(self, mem):
+        p, y, f = seed(mem)
+        e = ember_ward(mem, p, y, f)
+        stale = mem.remember(title="Reactions are niches", text=PATTERN, tags=DESIGN + ["kind=principle"],
+                             generalises=[f["memory"], e["memory"]], supersedes=[f["memory"]])
+        assert stale["refused"] == "evidence"
+        v2 = write(mem, "Frost Ward, again", "Cold resistance; a niche, not an upgrade.", DESIGN + ["kind=example"],
+                   supersedes=[f["memory"]])
+        old = mem.remember(title="Reactions are niches", text=PATTERN, tags=DESIGN + ["kind=principle"],
+                           generalises=[f["memory"], e["memory"]], seen=[p["memory"], y["memory"], v2["memory"]])
+        assert old["refused"] == "not a head" and old["facts"][0].startswith(v2["memory"])
+
+    def test_review_lists_what_a_session_wrote(self, mem):
+        p, y, f = seed(mem)
+        e = ember_ward(mem, p, y, f, session=5)
+        g = write(mem, "Reactions are niches", PATTERN, DESIGN + ["kind=principle"], session=5,
+                  generalises=[f["memory"], e["memory"]], seen=[p["memory"], y["memory"]])
+        written = mem.review(5)["written"]
+        assert [w["title"] for w in written] == ["Ember Ward", "Reactions are niches"]
+        assert written[0]["generalised_by"] == [g["memory"]] and written[1]["generalises"] == [f["memory"], e["memory"]]
+        assert mem.review(6)["written"] == []
+
+    def test_the_edge_survives_a_reopen_and_lands_in_the_head_view(self, root, mem):
+        p, y, f = seed(mem)
+        e = ember_ward(mem, p, y, f)
+        g = write(mem, "Reactions are niches", PATTERN, DESIGN + ["kind=principle"],
+                  generalises=[f["memory"], e["memory"]], seen=[p["memory"], y["memory"]])
+        again = Memory(str(root))
+        assert again.show(f["memory"])["generalised_by"] == [g["memory"]] and again.show(f["memory"])["head"]
+        view = (root / "memories" / (g["slug"] + ".md")).read_text(encoding="utf-8")
+        assert "generalises: " in view
+
+
 class TestRestartsAndReruns:
     def test_a_reopened_store_is_the_same_snapshot(self, root, mem):
         seed(mem)

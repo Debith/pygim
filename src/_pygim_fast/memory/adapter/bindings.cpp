@@ -49,11 +49,16 @@ operation returns a plain dict, and a refused write is a result with
              "Retrieves the context for a problem space: the procedure first, then ranked memories.")
         .def("remember", &Memory::remember, py::kw_only(), py::arg("title"), py::arg("text"), py::arg("tags"),
              py::arg("reason") = "", py::arg("supersedes") = std::vector<std::string>{},
+             py::arg("generalises") = std::vector<std::string>{},
              py::arg("seen") = std::vector<std::string>{}, py::arg("cites") = std::vector<std::string>{},
              py::arg("proposals") = py::list(), py::arg("session") = 0ull, py::arg("turn") = 0u,
              py::arg("author") = "agent",
              "Writes a memory, after the four checks: closed vocabulary, no unread write, head only,\n"
-             "identical content.")
+             "identical content. With `generalises`, it states the pattern two or more heads share: they\n"
+             "stay heads, and it must cover them on every hard dimension.")
+        .def("review", &Memory::review, py::arg("session"),
+             "What one session wrote, in order, with what already generalises each memory — where a\n"
+             "consolidation starts.")
         .def("merge", &Memory::merge, py::arg("memories"), py::kw_only(), py::arg("title"), py::arg("text"),
              py::arg("reason"), py::arg("tags") = std::vector<std::string>{}, py::arg("session") = 0ull,
              py::arg("author") = "agent", "Joins heads that say one thing into one memory that supersedes them.")

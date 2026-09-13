@@ -103,6 +103,7 @@ struct write_request {
     std::string reason;
     std::vector<std::string> tags;        // qualified names
     std::vector<std::string> supersedes;  // empty: start a chain
+    std::vector<std::string> generalises; // a generalisation's instances; they stay heads (overview §4.11)
     std::vector<std::string> seen;
     std::vector<std::string> cites;       // locators, kept as given
     std::vector<proposal_request> proposals;
