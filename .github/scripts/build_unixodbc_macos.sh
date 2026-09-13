@@ -12,9 +12,11 @@ VERSION=2.3.14
 SHA256=4e2814de3e01fc30b0b9f75e83bb5aba91ab0384ee951286504bb70205524771
 : "${MACOSX_DEPLOYMENT_TARGET:?must be the deployment target of the wheels}"
 
-# setup.py searches /opt/homebrew before /usr/local: a preinstalled Homebrew
-# unixODBC would be linked instead of this one.
-brew uninstall --ignore-dependencies unixodbc 2>/dev/null || true
+# setup.py searches /opt/homebrew before /usr/local, so a preinstalled
+# Homebrew unixODBC would be linked instead of this one. Unlink it rather than
+# uninstall it: that removes it from /opt/homebrew/{include,lib} but keeps
+# /opt/homebrew/opt/unixodbc, which pyodbc's wheel (a test dependency) loads.
+brew unlink unixodbc 2>/dev/null || true
 
 work=$(mktemp -d)
 cd "$work"
