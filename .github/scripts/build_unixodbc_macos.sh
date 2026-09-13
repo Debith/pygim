@@ -10,7 +10,7 @@ set -euo pipefail
 
 VERSION=2.3.14
 SHA256=4e2814de3e01fc30b0b9f75e83bb5aba91ab0384ee951286504bb70205524771
-: "${MACOSX_DEPLOYMENT_TARGET:?set MACOSX_DEPLOYMENT_TARGET to the wheels' target}"
+: "${MACOSX_DEPLOYMENT_TARGET:?must be the deployment target of the wheels}"
 
 # setup.py searches /opt/homebrew before /usr/local: a preinstalled Homebrew
 # unixODBC would be linked instead of this one.

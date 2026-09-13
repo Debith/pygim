@@ -125,7 +125,7 @@ jobs:
           MACOSX_DEPLOYMENT_TARGET: "13.3"  # std::format / std::to_chars need 13.3
 
           CIBW_BUILD: ${{ matrix.python }}-*
-          CIBW_SKIP: "*_musllinux_*"
+          CIBW_SKIP: "*-musllinux_*"
           CIBW_ARCHS_LINUX: x86_64
           CIBW_ARCHS_MACOS: arm64
           CIBW_ARCHS_WINDOWS: AMD64
