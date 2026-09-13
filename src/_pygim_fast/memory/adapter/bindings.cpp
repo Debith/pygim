@@ -56,6 +56,12 @@ operation returns a plain dict, and a refused write is a result with
              "Writes a memory, after the four checks: closed vocabulary, no unread write, head only,\n"
              "identical content. With `generalises`, it states the pattern two or more heads share: they\n"
              "stay heads, and it must cover them on every hard dimension.")
+        .def("accept", &Memory::accept, py::arg("memory"), py::kw_only(), py::arg("reason") = "", py::arg("author") = "human",
+             "A human accepts a generalisation: from the next read its instances fold under it. Returns the\n"
+             "refreshed report's path as `report`.")
+        .def("lessons", &Memory::lessons, py::arg("session"), py::arg("text"), py::kw_only(), py::arg("author") = "agent",
+             "Records what a consolidation learnt and publishes it in reviews/session-<n>.md, beside the\n"
+             "generalisations waiting for acceptance, the cases left, and the proposals raised.")
         .def("review", &Memory::review, py::arg("session"),
              "What one session wrote, in order, with what already generalises each memory — where a\n"
              "consolidation starts.")

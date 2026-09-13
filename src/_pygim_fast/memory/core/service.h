@@ -354,6 +354,7 @@ public:
         out.slug = next->record(id).slug;
         out.version = next->version();
         refresh_view(*next, id, w.text);
+        if (!generalises.empty()) write_report(*next, w.session);  // a new generalisation waits in its session's report
         return out;
     }
 
@@ -481,6 +482,135 @@ public:
         out.version = next->version();
         out.message = "retired";
         return out;
+    }
+
+    // ── consolidation review (overview §4.11) ─────────────────────────────
+
+    /// A human accepts a generalisation: from the next read its instances fold under it. Offered
+    /// to the human's tools only — an agent that could accept its own pattern would make the
+    /// gate a formality. `message` is the path of the report it refreshed.
+    op_outcome accept(std::string_view ref, std::string reason, std::string author = "human") {
+        op_outcome out;
+        auto guard = m_store.lock();
+        catch_up();
+        const auto snap = current();
+        std::vector<memory_id> ms;
+        if (!resolve_refs(*snap, {std::string(ref)}, ms, out.why)) return out;
+        const memory_id m = ms[0];
+        if (snap->record(m).generalises.empty()) {
+            out.why = {"not a generalisation", describe(*snap, m) + " generalises nothing — only a generalisation waits for acceptance", {}};
+            return out;
+        }
+        if (!snap->is_head(m)) {
+            out.why = {"not a head", describe(*snap, m) + " has left retrieval — accept the current head", {}};
+            for (const auto h : chain_heads(*snap, m)) out.why.facts.push_back(describe(*snap, h));
+            return out;
+        }
+        if (snap->is_accepted(m)) {
+            out.why = {"already accepted", describe(*snap, m) + " was accepted before — its instances already fold", {}};
+            return out;
+        }
+        row r;
+        r.op = std::string(ops::accept);
+        r.add("memory", snap->record(m).key.hex());
+        if (!reason.empty()) r.add("reason", std::move(reason));
+        r.add("author", std::move(author));
+        const auto next = append_locked(std::move(r));
+        out.ok = true;
+        out.version = next->version();
+        out.message = write_report(*next, next->record(m).session);
+        return out;
+    }
+
+    /// The agent's lessons learnt from a consolidation, kept in the log and published in the
+    /// session's report beside what the service can list itself. `message` is the report's path.
+    op_outcome record_lessons(std::uint64_t session, std::string text, std::string author = "agent") {
+        op_outcome out;
+        if (text.empty()) {
+            out.why = {"empty", "lessons learnt need text — even \"no pattern, and why\" is a lesson", {}};
+            return out;
+        }
+        auto guard = m_store.lock();
+        catch_up();
+        row r;
+        r.op = std::string(ops::lessons);
+        r.add("session", decimal(session));
+        r.add("text", std::move(text));
+        r.add("author", std::move(author));
+        const auto next = append_locked(std::move(r));
+        out.ok = true;
+        out.version = next->version();
+        out.message = write_report(*next, session);
+        return out;
+    }
+
+    /// The report for one session, as the snapshot stands (overview §4.11): generalisations and
+    /// whether each waits for acceptance, where one claims `any`, the cases left, proposals
+    /// raised, and the agent's lessons. Everything but the lessons is listed, not judged.
+    std::string write_report(const snapshot& s, std::uint64_t session) {
+        const auto& tax = s.tax();
+        std::vector<memory_id> gens, cases;
+        std::vector<row_id> keys;
+        for (std::size_t i = 0; i < s.size(); ++i) {
+            const memory_id m(static_cast<std::uint32_t>(i));
+            if (s.record(m).session != session) continue;
+            keys.push_back(s.record(m).key);
+            if (!s.is_head(m)) continue;
+            (s.record(m).generalises.empty() ? cases : gens).push_back(m);
+        }
+        std::string out = "---\nsession: " + decimal(session) + "\nversion: " + decimal(s.version()) + "\n---\n\n";
+        out += "# Lessons learnt — session " + decimal(session) + "\n\n";
+        out += "Regenerated from the audit log whenever this session's consolidation changes. Act with the "
+               "commands below rather than by editing this file.\n\n## Generalisations\n\n";
+        if (gens.empty()) out += "None written.\n\n";
+        for (const auto g : gens) {
+            const auto& rec = s.record(g);
+            out += "### " + describe(s, g) + "\n\n";
+            if (s.is_accepted(g)) {
+                out += "**Accepted** — its instances fold under it in reads.\n\n";
+            } else {
+                out += "**Waiting for your acceptance** — until then its instances are placed on their own.\n\n"
+                       "Accept it: `oo memory accept " + rec.key.hex().substr(0, 12) + " --reason \"…\"`\n\n";
+            }
+            out += "Generalises:\n\n";
+            for (const auto& k : rec.generalises)
+                if (const auto x = s.find(k)) out += "- " + describe(s, *x) + "\n";
+            std::vector<std::string> any;
+            for (const auto t : s.tags_of(g).members())
+                if (tax.info(tag_id(t)).any) any.push_back("`" + tax.info(tag_id(t)).qualified + "`");
+            if (!any.empty())
+                out += "\nClaims every value of " + join(any, ", ") +
+                       " — the coverage check cannot see overreach, so check that its cases reach that far.\n";
+            out += "\n";
+        }
+        out += "## Left as cases\n\n";
+        std::size_t left = 0;
+        for (const auto c : cases)
+            if (s.generalised_by(c).empty()) {
+                out += "- " + describe(s, c) + "\n";
+                ++left;
+            }
+        out += left ? "\n" : "None — every memory this session wrote belongs to a pattern.\n\n";
+        out += "## Vocabulary proposals raised\n\n";
+        std::size_t raised = 0;
+        for (const auto& p : s.proposals) {
+            if (std::none_of(p.asked_by.begin(), p.asked_by.end(),
+                             [&](const row_id& k) { return std::find(keys.begin(), keys.end(), k) != keys.end(); }))
+                continue;
+            out += "- " + (p.dimension.empty() ? std::string("(new dimension)") : p.dimension) + "=" + p.concept_name +
+                   " — " + p.entry.brief + "\n";
+            ++raised;
+        }
+        out += raised ? "\n" : "None.\n\n";
+        out += "## Lessons learnt\n\n";
+        std::size_t told = 0;
+        for (const auto& l : s.lessons) {
+            if (l.session != session) continue;
+            out += "### " + l.time + " — " + l.author + "\n\n" + l.text + "\n\n";
+            ++told;
+        }
+        if (!told) out += "None recorded yet — a consolidation ends by recording them.\n";
+        return m_store.write_report(session, out);
     }
 
     /// Hand-written corpus blocks, reconciled by slug and digest (Feature 4):

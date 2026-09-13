@@ -271,6 +271,31 @@ public:
         return op_dict(out);
     }
 
+    /// A human accepts a generalisation; its instances fold from the next read. The report of
+    /// the session that wrote it is refreshed, and its path returned as `report`.
+    py::dict accept(const std::string& memory, std::string reason, std::string author) {
+        op_outcome out;
+        {
+            py::gil_scoped_release nogil;
+            out = m_service->accept(memory, std::move(reason), std::move(author));
+        }
+        py::dict d = op_dict(out);
+        if (out.ok) d["report"] = out.message;
+        return d;
+    }
+
+    /// The agent's lessons learnt from a consolidation, published in the session's report.
+    py::dict lessons(std::uint64_t session, std::string text, std::string author) {
+        op_outcome out;
+        {
+            py::gil_scoped_release nogil;
+            out = m_service->record_lessons(session, std::move(text), std::move(author));
+        }
+        py::dict d = op_dict(out);
+        if (out.ok) d["report"] = out.message;
+        return d;
+    }
+
     /// What one session wrote, in order — where a consolidation starts (overview §4.11). Each
     /// entry says whether it is still a head and what already generalises it, so a second
     /// consolidation in the same session does not state a pattern twice.
@@ -295,6 +320,7 @@ public:
             for (const auto t : snap->tags_of(m).members()) tags.push_back(snap->tax().info(tag_id(t)).qualified);
             e["tags"] = tags;
             e["generalises"] = refs_of(*snap, r.generalises);
+            if (!r.generalises.empty()) e["accepted"] = snap->is_accepted(m);
             std::vector<std::string> gen_by;
             for (const auto x : snap->generalised_by(m)) gen_by.push_back(ref(x));
             e["generalised_by"] = gen_by;
@@ -338,6 +364,7 @@ public:
         d["supersedes"] = sup;
         d["superseded_by"] = by;
         d["generalises"] = refs_of(*snap, r.generalises);
+        if (!r.generalises.empty()) d["accepted"] = snap->is_accepted(*m);
         std::vector<std::string> gen_by;
         for (const auto x : snap->generalised_by(*m)) gen_by.push_back(ref(x));
         d["generalised_by"] = gen_by;

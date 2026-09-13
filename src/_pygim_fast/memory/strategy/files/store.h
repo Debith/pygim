@@ -39,7 +39,7 @@ public:
     static void init(const fs::path& root) {
         if (fs::exists(root / "taxonomy" / "base.yaml"))
             throw std::runtime_error(root.string() + ": already a memory repository");
-        for (const char* d : {"taxonomy", "objects", "audit", "usage", "receipts", "memories", "corpus", "local"})
+        for (const char* d : {"taxonomy", "objects", "audit", "usage", "receipts", "memories", "reviews", "corpus", "local"})
             fs::create_directories(root / d);
         write_atomically(root / "taxonomy" / "base.yaml", base_vocabulary);
         write_atomically(root / ".gitignore", "local/\n");
@@ -238,6 +238,15 @@ public:
         out.append(text);
         if (out.back() != '\n') out.push_back('\n');
         write_atomically(m_root / "memories" / (m.slug + ".md"), out);
+    }
+
+    /// A session's lessons-learnt report (overview §4.11): a view regenerated from the audit log,
+    /// committed with the repository so the human reviews it in the diff. Returns its path.
+    std::string write_report(std::uint64_t session, std::string_view text) {
+        const fs::path p = m_root / "reviews" / ("session-" + std::to_string(session) + ".md");
+        fs::create_directories(p.parent_path());
+        write_atomically(p, text);
+        return p.string();
     }
 
     void remove_view(std::string_view slug) {

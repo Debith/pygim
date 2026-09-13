@@ -36,6 +36,7 @@ public:
     explicit snapshot(std::shared_ptr<const taxonomy> tax)
         : m_tax(std::move(tax)),
           m_retired(std::make_shared<const memory_set>()),
+          m_accepted(std::make_shared<const memory_set>()),
           m_keys(std::make_shared<const key_map>()) {
         const auto empty = std::make_shared<const memory_set>();
         m_postings.assign(m_tax->tags(), empty);
@@ -54,6 +55,8 @@ public:
     [[nodiscard]] std::size_t heads() const noexcept { return m_memories.size() - m_retired->size(); }
     [[nodiscard]] const memory_record& record(memory_id m) const { return *m_memories[m.value()]; }
     [[nodiscard]] bool is_head(memory_id m) const { return !m_retired->has(m.value()); }
+    /// A generalisation a human has accepted; only these fold their instances (overview §4.11).
+    [[nodiscard]] bool is_accepted(memory_id m) const { return m_accepted->has(m.value()); }
     [[nodiscard]] const tag_set& tags_of(memory_id m) const { return *m_forward[m.value()]; }
     [[nodiscard]] const memory_set& carrying(tag_id t) const { return *m_postings[t.value()]; }
     [[nodiscard]] const std::vector<memory_id>& superseded_by(memory_id m) const { return *m_superseded_by[m.value()]; }
@@ -91,6 +94,7 @@ public:
 
     std::vector<pending_proposal> proposals;
     std::vector<review_item> reviews;
+    std::vector<lesson_record> lessons;
 
     // ── replay ────────────────────────────────────────────────────────────
 
@@ -101,6 +105,8 @@ public:
         else if (r.op == ops::link) apply_link(r);
         else if (r.op == ops::unlink) apply_unlink(r);
         else if (r.op == ops::retire) apply_retire(r);
+        else if (r.op == ops::accept) apply_accept(r);
+        else if (r.op == ops::lessons) apply_lessons(r);
         // taxonomy and merge rows are history: they move the head, nothing else
         m_head = r.id;
         ++m_version;
@@ -141,10 +147,11 @@ public:
         const std::optional<std::uint32_t> slot = procedure_slot(q, cand, ctx.procedure_note);
         if (slot) ctx.procedure = memory_id(*slot);
 
-        // The fold (overview §4.11, 04 §3.7): a candidate one of whose generalisations is also a
-        // candidate gives up its own place and is listed under that generalisation as evidence.
+        // The fold (overview §4.11, 04 §3.9): a candidate one of whose *accepted* generalisations is
+        // also a candidate gives up its own place and is listed under that generalisation as evidence.
         // It happens before ranking and the budget, so it depends on neither; the procedure slot is
-        // never folded, and a retired generalisation is no candidate, so its instances unfold.
+        // never folded; a generalisation waiting for acceptance folds nothing, and a retired one is
+        // no candidate, so its instances unfold.
         std::unordered_map<std::uint32_t, std::vector<memory_id>> under;
         std::vector<std::uint32_t> placed;
         placed.reserve(ids.size());
@@ -152,7 +159,7 @@ public:
             if (slot && id == *slot) continue;
             bool folded = false;
             for (const auto g : *m_generalised_by[id])
-                if (cand.has(g.value())) {
+                if (cand.has(g.value()) && m_accepted->has(g.value())) {
                     under[g.value()].push_back(memory_id(id));
                     folded = true;
                 }
@@ -403,6 +410,23 @@ private:
         if (const auto m = resolve(r.get("memory"), r)) retire_id(*m);
     }
 
+    void apply_accept(const row& r) {
+        const auto m = resolve(r.get("memory"), r);
+        if (!m || m_accepted->has(*m)) return;
+        auto s = std::make_shared<memory_set>(*m_accepted);
+        s->note(*m);
+        m_accepted = std::move(s);
+    }
+
+    void apply_lessons(const row& r) {
+        lesson_record l;
+        for (const char c : r.get("session")) l.session = l.session * 10 + static_cast<std::uint64_t>(c - '0');
+        l.time = r.time;
+        l.author = std::string(r.get("author"));
+        l.text = std::string(r.get("text"));
+        lessons.push_back(std::move(l));
+    }
+
     void retire_id(std::uint32_t m) {
         if (m_retired->has(m)) return;
         auto s = std::make_shared<memory_set>(*m_retired);
@@ -442,6 +466,7 @@ private:
     std::vector<std::shared_ptr<const std::vector<memory_id>>> m_generalised_by;
     std::vector<std::shared_ptr<const memory_set>> m_postings;
     std::shared_ptr<const memory_set> m_retired;
+    std::shared_ptr<const memory_set> m_accepted;
     std::shared_ptr<const key_map> m_keys;
 };
 
