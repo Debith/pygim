@@ -597,8 +597,8 @@ cases rarely earns that — the coverage check passes it all the same, so overre
 review, not by the service. A wider suspicion is not written as a wider tag: it waits for a
 case in the wider space, and a later consolidation widens the generalisation by superseding it.
 
-**How retrieval treats it.** It is selected, scored and ranked like any memory, and its
-instances *fold* under it. A candidate one of whose generalisations is also a candidate gives
+**How retrieval treats it.** It is selected, scored and ranked like any memory, and once a
+person has accepted it (below), its instances *fold* under it. A candidate one of whose generalisations is also a candidate gives
 up its own place and is named under that generalisation as its evidence — key and title, no
 text — so a context does not spend its budget saying one point five times, and a case is one
 `show` away when its detail matters. The fold happens before ranking and the budget, so it
@@ -613,6 +613,23 @@ the session wrote. Nothing starts one automatically: the service learns a sessio
 when its connection closes, too late for the agent to do any work, and a consolidation nobody
 asked for would generalise work that is still half done. Asking twice in one session is
 harmless — `review` shows what is already generalised.
+
+**Reviewing it.** A consolidation ends with a report the user reads: `reviews/session-<n>.md`,
+committed with the repository and reviewed in the diff like the head views. The service lists
+what it can see without reading prose — each generalisation and whether it waits for
+acceptance, any that claims `any` on a hard dimension, the cases left ungeneralised, the
+vocabulary proposals the session raised. The agent adds what only it can judge, through the
+`lessons` tool: why each pattern's cases belong together, why each case was left, and the gaps —
+a detail a pattern drops, a case that only half fits, a contradiction. The report is a view,
+regenerated from the audit log whenever the session's consolidation changes.
+
+**The fold waits for a person.** A generalisation takes effect as a memory at once, but its
+instances fold under it only after a person accepts it with `oo memory accept` — a command,
+not an MCP tool, so the agent that wrote the pattern cannot open its own gate. This is the one
+approval step in the system, and it is kept narrow on purpose: nothing else waits (§4.5), and
+what it guards is the only operation that takes memories out of a reader's sight. Until then
+the instances are placed on their own; a person who disagrees retires the generalisation or
+asks for a narrower one.
 
 ## 5. Principles
 
@@ -708,7 +725,7 @@ same operations, drawn dashed because v1 has none.
 | Classifier | Request or new memory → tags from the taxonomy only; reports unmapped. On an LLM host the caller is the classifier: the service publishes the vocabulary and validates what comes back | runtime interface (caller-supplied is the default; rules for tests and parity; LLM via Python for hosts without one) | 05 |
 | Ranker | Optional score within the candidate set | runtime interface (none, TF-IDF, embeddings) | 06 |
 | Writing | `remember`: the four checks (closed vocabulary, no unread write, head only, identical content), write or supersede, record decision and `seen`, attach proposals, land the file (§4.5) | one implementation | 07 |
-| Learning & curation | link, unlink, learn with promotion threshold, merge (recording the recollection failure and its kind), generalise on the user's request (two or more heads, coverage), retire, audit | one implementation | 07 |
+| Learning & curation | link, unlink, learn with promotion threshold, merge (recording the recollection failure and its kind), generalise on the user's request (two or more heads, coverage), lessons learnt and the session report, a person's acceptance of a generalisation, retire, audit | one implementation | 07 |
 | Event bus | Typed in-process dispatch plus transport bridge. The `TransformerPolicy` turns a typed event into the frame a transport carries and back | compile-time policy (`TransportPolicy`, `TransformerPolicy`) | 08 |
 | Services | Mailbox, service base, threading and shutdown rules; the query logger and statistics observers | generic components | 09 |
 | Adapter & MCP | pybind11 boundary, GIL rules, MCP tool surface, IoC wiring | one implementation | 10 |

@@ -118,6 +118,16 @@ def memory_ingest(corpus, root):
     GimmicksCliApp().memory_ingest(corpus=corpus, root=root)
 
 
+@memory.command("accept")
+@click.argument("memory_ref", metavar="MEMORY")
+@click.option("--reason", default="", help="Why the pattern holds; kept in the audit log.")
+@_ROOT
+def memory_accept(memory_ref, reason, root):
+    """Accept a generalisation: from the next read its instances fold under it.
+    A person runs this after reading reviews/session-<n>.md — the agent has no tool for it."""
+    GimmicksCliApp().memory_accept(memory=memory_ref, reason=reason, root=root)
+
+
 @memory.command("status")
 @_ROOT
 def memory_status(root):

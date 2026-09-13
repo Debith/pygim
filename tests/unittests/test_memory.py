@@ -311,11 +311,65 @@ class TestGeneralising:
         assert mem.show(g["memory"])["generalises"] == [f["memory"], e["memory"]]
         assert set(mem.show(g["memory"])["seen"]) >= {f["memory"], e["memory"]}   # naming an instance is having read it
 
+    def test_nothing_folds_until_a_person_accepts(self, mem):
+        p, y, f = seed(mem)
+        e = ember_ward(mem, p, y, f)
+        g = write(mem, "Reactions are niches", PATTERN, DESIGN + ["kind=principle"],
+                  generalises=[f["memory"], e["memory"]], seen=[p["memory"], y["memory"]])
+        waiting = mem.read(DESIGN, max=10)
+        assert waiting["folded"] == 0 and {f["memory"], e["memory"], g["memory"]} <= {m["memory"] for m in waiting["memories"]}
+        assert mem.show(g["memory"])["accepted"] is False
+        assert mem.accept(g["memory"], reason="the cases share it")["ok"]
+        assert mem.show(g["memory"])["accepted"] is True and mem.read(DESIGN, max=10)["folded"] == 2
+
+    def test_accept_takes_only_a_waiting_generalisation(self, mem):
+        p, y, f = seed(mem)
+        e = ember_ward(mem, p, y, f)
+        g = write(mem, "Reactions are niches", PATTERN, DESIGN + ["kind=principle"],
+                  generalises=[f["memory"], e["memory"]], seen=[p["memory"], y["memory"]])
+        assert mem.accept(f["memory"])["refused"] == "not a generalisation"
+        assert mem.accept(g["memory"])["ok"]
+        assert mem.accept(g["memory"])["refused"] == "already accepted"
+
+    def test_the_session_report_lists_what_waits_and_what_was_learnt(self, root, mem):
+        p, y, f = seed(mem)
+        e = ember_ward(mem, p, y, f, session=5)
+        loose = write(mem, "Riposte", "Thunder damage to a melee attacker.", DESIGN + ["kind=example"], session=5,
+                      seen=[p["memory"], y["memory"], f["memory"], e["memory"]])
+        g = write(mem, "Reactions are niches", PATTERN, ["domain=dnd", "artifact=spell", "task=any", "kind=principle"],
+                  session=5, generalises=[f["memory"], e["memory"]], seen=[p["memory"], y["memory"], loose["memory"]])
+        path = root / "reviews" / "session-5.md"
+        assert path.exists()                                               # a generalisation waits in its report at once
+        r = mem.lessons(5, "## Gaps\n\nThe pattern drops Frost Ward's temp-HP rider.")
+        assert r["ok"] and r["report"] == str(path)
+        text = path.read_text(encoding="utf-8")
+        key = mem.show(g["memory"])["key"][:12]
+        assert "Waiting for your acceptance" in text and f"oo memory accept {key}" in text
+        assert "Claims every value of `task=any`" in text
+        assert "## Left as cases" in text and "Riposte" in text
+        assert "temp-HP rider" in text
+        mem.accept(g["memory"], reason="checked")
+        assert "**Accepted**" in path.read_text(encoding="utf-8")
+
+    def test_acceptance_survives_a_reopen_and_is_a_person_s_command(self, root, mem):
+        from click.testing import CliRunner
+        from pygim.__main__ import cli_oo
+
+        p, y, f = seed(mem)
+        e = ember_ward(mem, p, y, f)
+        g = write(mem, "Reactions are niches", PATTERN, DESIGN + ["kind=principle"],
+                  generalises=[f["memory"], e["memory"]], seen=[p["memory"], y["memory"]])
+        key = mem.show(g["memory"])["key"][:12]
+        out = CliRunner().invoke(cli_oo, ["memory", "accept", key, "--reason", "checked", "--root", str(root)])
+        assert out.exit_code == 0, out.output
+        assert Memory(str(root)).read(DESIGN, max=10)["folded"] == 2
+
     def test_a_read_folds_instances_under_their_generalisation(self, mem):
         p, y, f = seed(mem)
         e = ember_ward(mem, p, y, f)
         g = write(mem, "Reactions are niches", PATTERN, DESIGN + ["kind=principle"],
                   generalises=[f["memory"], e["memory"]], seen=[p["memory"], y["memory"]])
+        mem.accept(g["memory"])
         r = mem.read(DESIGN, max=10)
         placed = {m["memory"]: m for m in r["memories"]}
         assert f["memory"] not in placed and e["memory"] not in placed
@@ -329,6 +383,7 @@ class TestGeneralising:
         e = ember_ward(mem, p, y, f)
         g = write(mem, "Reactions are niches", PATTERN, DESIGN + ["kind=principle"],
                   generalises=[f["memory"], e["memory"]], seen=[p["memory"], y["memory"]])
+        mem.accept(g["memory"])
         full = mem.read(DESIGN, max=10)
         paid = full["procedure"]["tokens"] + sum(m["tokens"] for m in full["memories"])
         assert full["tokens"] == paid                                      # the folded cases cost nothing
@@ -341,6 +396,8 @@ class TestGeneralising:
         e = ember_ward(mem, p, y, f)
         g = write(mem, "Reactions are niches", PATTERN, DESIGN + ["kind=principle"],
                   generalises=[f["memory"], e["memory"]], seen=[p["memory"], y["memory"]])
+        mem.accept(g["memory"])
+        assert mem.read(DESIGN, max=10)["folded"] == 2
         assert mem.retire(g["memory"], reason="the pattern was wrong")["ok"]
         r = mem.read(DESIGN, max=10)
         assert {f["memory"], e["memory"]} <= {m["memory"] for m in r["memories"]} and r["folded"] == 0

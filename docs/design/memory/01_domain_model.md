@@ -290,6 +290,7 @@ classDiagram
         tags
         superseded_by
         generalised_by
+        accepted
         use
     }
     class association {
@@ -326,7 +327,8 @@ classDiagram
 | | `generalises` | the memories whose shared pattern this one states, on the user's request — they stay heads (overview §4.11) |
 | `memory_state` | `tags` | the associations, forward-mapped into an `id_set` |
 | | `superseded_by` | empty means this is the head of its chain |
-| | `generalised_by` | the generalisations drawn from this memory; being generalised changes nothing about its retrieval |
+| | `generalised_by` | the generalisations drawn from this memory; it is placed on its own until one of them is accepted |
+| | `accepted` | for a generalisation: a person has accepted it, so its instances fold (overview §4.11) |
 | | `use` | counters: admitted, included, useful, and when last |
 | `association` | `source` | `seed`, `written`, `curated`, `learned`, `proposed` |
 | `usage_record` | `kind` | `admitted`, `included`, `useful`, `steps_held` |
@@ -494,6 +496,7 @@ breaks without it, so the third column says what.
 | Proposal exclusivity | a proposal is accepted once, and then its tag exists | the same concept enters the vocabulary twice under two ids, splitting every memory that used it |
 | Evidence is kept | a `generalises` edge never sets its target's `superseded_by` | consolidating retires the cases its pattern rests on, and "why do we believe this" no longer has an answer |
 | Generalisation covers | on every hard dimension, a generalisation's values include each instance's values, or it answers `any` | the pattern is missing from the very spaces its cases are found in, so the next agent rediscovers it from the cases |
+| The fold needs a person | a generalisation folds nothing until an `accept` row names it, and no agent-facing tool writes one | a wrong pattern hides its cases from every read before anyone has looked at it |
 | Generalisation acyclicity | `generalises` edges form a directed acyclic graph, and no memory generalises itself | walking a pattern's evidence never terminates |
 
 The three generalisation laws are stated ahead of their implementation in section 07 and become

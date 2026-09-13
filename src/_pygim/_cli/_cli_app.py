@@ -125,6 +125,16 @@ class GimmicksCliApp:
         if result["refused"]:
             raise click.exceptions.Exit(1)
 
+    def memory_accept(self, *, memory: str, reason: str, root: str) -> None:
+        """Accept a generalisation in the repository at *root*."""
+        from pygim.memory import Memory
+
+        result = Memory(root).accept(memory, reason=reason)
+        if not result["ok"]:
+            raise click.ClickException(f"{result['refused']}: {result['message']}"
+                                       + "".join(f"\n  {fact}" for fact in result["facts"]))
+        click.echo(f"accepted {memory} — its instances fold from the next read (report: {result['report']})")
+
     def memory_status(self, *, root: str) -> None:
         """Print where the repository at *root* stands."""
         from pygim.memory import Memory

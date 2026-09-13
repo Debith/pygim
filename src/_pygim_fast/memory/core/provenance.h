@@ -26,6 +26,8 @@ inline constexpr std::string_view write = "write";        // a memory is born
 inline constexpr std::string_view link = "link";          // an association added
 inline constexpr std::string_view unlink = "unlink";      // associations it had seen removed
 inline constexpr std::string_view retire = "retire";      // a memory leaves retrieval
+inline constexpr std::string_view accept = "accept";      // a human accepts a generalisation; its instances fold
+inline constexpr std::string_view lessons = "lessons";    // what a consolidation learnt, for the human to review
 inline constexpr std::string_view merge = "merge";        // two histories joined (03 §5)
 }  // namespace ops
 

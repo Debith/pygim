@@ -96,7 +96,15 @@ class TestTools:
                       generalises=[a["memory"], b["memory"]])
         assert not err and g["ok"]
         err, review = call(server, "review")
-        assert review["written"][0]["generalised_by"] == [g["memory"]]
+        assert review["written"][0]["generalised_by"] == [g["memory"]] and review["written"][2]["accepted"] is False
+        err, lessons = call(server, "lessons", text="## Patterns written\n\nTemplates everywhere.")
+        assert not err and lessons["report"].endswith(f"session-{review['session']}.md")
+
+    def test_the_agent_has_no_way_to_accept(self, server):
+        names = {t["name"] for t in TOOLS}
+        assert "accept" not in names and "lessons" in names
+        err, text = call(server, "accept", memory="#0")
+        assert err and "unknown tool" in text
 
     def test_a_missing_argument_is_a_tool_error_not_a_crash(self, server):
         err, text = call(server, "read")

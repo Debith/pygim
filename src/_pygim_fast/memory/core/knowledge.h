@@ -78,6 +78,16 @@ struct pending_proposal {
     }
 };
 
+/// What the agent learnt from a consolidation, in its own words: the patterns it
+/// wrote, the cases it left and why, and every gap it saw (overview §4.11). The
+/// service keeps and publishes it; it never reads it.
+struct lesson_record {
+    std::uint64_t session = 0;
+    std::string time;
+    std::string author;
+    std::string text;
+};
+
 /// Something the service noticed that needs judgement it does not have: a
 /// forked chain, a hand edit, a row naming a tag that no longer exists.
 struct review_item {

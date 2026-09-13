@@ -1055,7 +1055,9 @@ And the agent reads back what it wrote
 Then it sees that all four make one point: each reaction beats Shield against one kind of threat and loses against another
 And it writes #58, a principle that generalises #54 to #57
 And #54 to #57 stay heads, as the principle's evidence
-And the next read of the space places #58 and names #54 to #57 under it, without spending budget on them
+And the agent records its lessons learnt, and reviews/session-13.md shows #58 waiting for acceptance
+When the user reads the report and accepts #58
+Then the next read of the space places #58 and names #54 to #57 under it, without spending budget on them
 ```
 
 **Panel 1.** The user asks for a consolidation — here at the end of session 13, but it could be
@@ -1102,8 +1104,19 @@ flowchart LR
     ask2["show #58"] --> ans2["#58 — principle · generalises #54 #55 #56 #57<br/>written when session 13 was consolidated"]
 ```
 
-**Panel 5.** The next read of the space. The cases fold under the pattern: named, one `show` away,
-and not paid for twice.
+**Panel 5.** The lessons learnt, and the gate. The service lists what it can see; the agent adds
+what only it can judge. The fold waits for a person, through a command the agent does not have.
+
+```mermaid
+flowchart LR
+    lessons["lessons('Patterns written: #58, four reactions that each win against one threat. Left as cases: none. Gaps: #58 drops Frost Ward's temp-HP rider.')"] --> report["reviews/session-13.md<br/>#58 — waiting for your acceptance<br/>left as cases: none · proposals: none<br/>lessons: the temp-HP rider"]
+    report --> user["the user reads it in the diff"]
+    user --> accept["oo memory accept c83c50888eec --reason 'the four do share it'"]
+    accept --> row["accept row · #58 accepted · the report now says Accepted"]
+```
+
+**Panel 6.** The next read of the space, after acceptance. The cases fold under the pattern:
+named, one `show` away, and not paid for twice.
 
 ```mermaid
 sequenceDiagram
@@ -1137,11 +1150,12 @@ flowchart TB
 ```
 
 **Panel 2.** Where overreach is caught. The coverage check cannot see it: `any` covers every
-value, so an over-wide generalisation passes. The diff is where it shows.
+value, so an over-wide generalisation passes. The report flags it, and the fold stays shut
+until a person has looked.
 
 ```mermaid
 flowchart LR
-    over["had #58 answered artifact=any"] --> svc["service: covers its instances — yes, any covers everything"] --> human["human, reading the diff: 'four spells, and it claims every artifact?'"]
+    over["had #58 answered artifact=any"] --> svc["service: covers its instances — yes, any covers everything"] --> flag["reviews/session-13.md: claims every value of artifact=any — check its cases reach that far"] --> human["the user, reading the report: 'four spells, and every artifact?' — does not accept"]
 ```
 
 ---

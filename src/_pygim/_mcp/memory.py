@@ -36,8 +36,10 @@ not by similarity to the prompt.
 4. A refusal is information: it names the facts (unread memories, the current
    head, the missing hard question). Act on them and try again.
 5. Consolidate only when the user asks (the `consolidate` prompt): `review` what
-   the session wrote, find a point several memories make, and `remember` it once
-   with `generalises` naming them. They stay heads; nothing is retired.
+   the session wrote, find a point several memories make, `remember` it once with
+   `generalises` naming them, and record `lessons`. Nothing is retired, and a
+   generalisation folds its instances only after the user accepts it themselves
+   with `oo memory accept` — there is no tool for that, on purpose.
 """
 
 CONSOLIDATE = """\
@@ -55,8 +57,16 @@ Consolidate what this session has written into memory so far.
    `any` only if the pattern truly holds for every value); `generalises` naming the
    instances; `seen` naming what you read. Usually kind=principle; kind=procedure
    when the session kept repeating the same steps.
-5. Where no pattern exists, write nothing. Report what you wrote, and what you left
-   as cases and why.
+5. Record the lessons learnt with `lessons`, whatever you found — even "no pattern"
+   is a lesson. Use three sections: *Patterns written* (each, and why its cases
+   belong together); *Left as cases* (each, and why it did not fit); *Gaps* (details
+   a pattern drops, cases that only half fit, contradictions, anything the
+   vocabulary could not say). The service publishes them in
+   reviews/session-<n>.md beside what it lists itself: the generalisations waiting
+   for acceptance, any that claim `any`, the cases left, the proposals raised.
+6. Tell the user the report's path, and that each generalisation folds its
+   instances only after they accept it with `oo memory accept <key>` — you cannot
+   accept it for them.
 """
 
 PROMPTS: List[Dict[str, Any]] = [
@@ -170,6 +180,15 @@ TOOLS: List[Dict[str, Any]] = [
         "inputSchema": _schema({"session": {"type": "integer", "minimum": 1, "description": "Default: this session."}}),
     },
     {
+        "name": "lessons",
+        "description": "Record the lessons learnt of a consolidation — patterns written, cases left and why, and every "
+                       "gap you saw — and publish the session's report, reviews/session-<n>.md, for the user. "
+                       "Returns the report's path. The user accepts each generalisation themselves.",
+        "inputSchema": _schema({"text": {"type": "string",
+                                         "description": "Markdown with three sections: Patterns written, Left as cases, Gaps."}},
+                               ["text"]),
+    },
+    {
         "name": "show",
         "description": "One memory in full: its text, tags, lineage, what it saw, citations and counters.",
         "inputSchema": _schema({"memory": _REF}, ["memory"]),
@@ -205,6 +224,7 @@ class MemoryServer:
             "unlink": lambda a: self.memory.unlink(a["memory"], a["tag"], reason=a["reason"], author="agent"),
             "retire": lambda a: self.memory.retire(a["memory"], reason=a["reason"], author="agent"),
             "review": lambda a: self.memory.review(a.get("session") or self._session_no()),
+            "lessons": lambda a: self.memory.lessons(self._session_no(), a["text"], author="agent"),
             "show": lambda a: self.memory.show(a["memory"]),
             "proposals": lambda a: self.memory.proposals(),
         }

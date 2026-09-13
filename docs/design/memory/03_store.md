@@ -118,6 +118,7 @@ the same rule section 02 gave tag ids. The "#6" a person reads is that dense id.
   usage/<clone>/<day>.jsonl  observations, append-only
   receipts/<clone>/<day>.jsonl
   memories/<slug>.md         one head view per chain, regenerated
+  reviews/session-<n>.md     a session's lessons-learnt report, regenerated
   corpus/                    hand-written memory files for ingestion (Feature 4)
   local/                     never committed: clone id, commit lock, checkpoint, sqlite cache
 ```

@@ -714,6 +714,7 @@ classDiagram
     class memory_58 {
         lineage written
         kind principle
+        accepted by a person
     }
     class memory_state_55 {
         superseded_by empty
@@ -742,6 +743,11 @@ sequenceDiagram
     S->>S: #54 to #57 are heads — yes
     S->>S: covers them on every hard dimension — yes
     S->>St: commit #58, generalises #54 to #57, nothing superseded, snapshot v59
+    A->>S: lessons(patterns written, cases left, gaps)
+    S->>St: commit the lessons row, write reviews/session-13.md
+    U->>U: reads the report
+    U->>S: oo memory accept #58
+    S->>St: commit the accept row, #58 accepted, report refreshed
 ```
 
 ### Scenario 7.2 — A wider suspicion waits for its case
