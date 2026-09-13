@@ -569,8 +569,8 @@ that taught it (§4.5). That is the right grain for writing — a case can be ch
 writer knows it — but a store of cases alone makes the next agent rediscover the pattern from
 them every time. So a session ends the way it worked: the agent consolidates what it wrote.
 
-**The rhythm.** During work, write the case. At the session's close, ask the service for the
-session's writes — every audit row carries its session (§4.4) — read them together with the
+**The rhythm.** During work, write the case. When the user asks to close the session, the agent
+asks the service for the session's writes — every audit row carries its session (§4.4) — read them together with the
 spaces they landed in, and look for a point several of them make. Where there is one, write it
 once, at the level the cases support, as a *generalisation* of them. Where there is none,
 write nothing: a session that only added cases has still done its job.
@@ -600,10 +600,11 @@ case in the wider space, and a later close widens the generalisation by supersed
 change, and its instances rank on their own tags. Whether a context that includes a
 generalisation should still spend budget on the instances it generalises is open (§10).
 
-**What starts it.** Not the service. The server learns that a session ended when its
-connection closes, which is too late for the agent to do any work. The close is an agent step
-— the last step of a work procedure (§4.10), or a request from the human — and what makes it
-happen reliably is open (§10).
+**What starts it.** The user. A close is asked for, the way a commit is: the person who worked
+the session decides when it is over and worth consolidating, and the agent carries it out.
+Nothing starts one automatically. The service could not — it learns a session ended only when
+the connection closes, too late for the agent to do any work — and a close nobody asked for
+would consolidate work that is still half done.
 
 ## 5. Principles
 
@@ -768,7 +769,6 @@ does not require the ones after it.
 - **Promotion rule for learned associations** — raw count, decay, or review-only when the store is a shared repository (07, 11) — and which counters feed it (07).
 - **What "admitted" records** — one usage record per candidate, or a count in the receipt (04 §7.1).
 - **Typed memory-to-memory edges beyond `supersedes` and `generalises`**, with one-hop expansion — drafted as not in v1 (04 §7.2).
-- **What makes a session's close happen reliably** (07, 10). The server cannot: it learns the session ended when the connection is already gone. Candidates are a request from the human, a last step in every work procedure (§4.10), or a host hook that reminds the agent before the session ends.
 - **Whether a context spends budget on a generalisation's instances** (04, 07) — include them as ranked, or list them under the generalisation as its evidence and let the reader `show` one when needed.
 - **What a later case that contradicts a generalisation should trigger** (07). The agent supersedes the generalisation with a narrower one, as with any correction; whether the service should also list, at the next close, generalisations whose space gained a head since they were written.
 - **Where the repository lives, and whether head views are committed** (03 §9.1, §9.2).
