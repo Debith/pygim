@@ -13,7 +13,7 @@ dimensions:
         its documents and adds a pack; the domain's name is the pack's name.
       when: Every memory answers it — knowledge always belongs to some field.
       when_not: Not to say what the knowledge is about within the field — that is artifact.
-      example: A note about spell design is domain=dnd; one about pybind11 is domain=programming.
+      example: A note on sourdough hydration is domain=baking; one on reading a lease is domain=tenancy.
 
   artifact:
     role: hard
@@ -22,10 +22,10 @@ dimensions:
       brief: What is being made or examined.
       full: >
         The kind of thing the knowledge concerns. The values are the domain's
-        own: spells and monsters in one, modules and bindings in another.
+        own: loaves and ovens in one, leases and clauses in another.
       when: The knowledge is about one kind of thing the domain produces or studies.
       when_not: Not the activity performed on the thing — that is task.
-      example: A rule about reaction spells is artifact=spell.
+      example: A rule about shaping loaves is artifact=bread in a baking domain.
 
   task:
     role: hard
@@ -37,26 +37,26 @@ dimensions:
         different knowledge even about the same thing.
       when: The knowledge helps someone make, judge, measure, fix or explain something.
       when_not: Not the thing acted on — that is artifact.
-      example: A yardstick used while inventing a spell is task=design.
+      example: A checklist used while drafting a new lease clause is task=design.
     values:
       design:
         entry:
           brief: Making something new.
           when: The knowledge helps create a thing that does not yet exist.
           when_not: Not judging or improving a thing that exists — that is critique or evaluate.
-          example: Choosing the yardstick for a new defensive reaction.
+          example: Choosing the dimensions of a bookshelf that does not exist yet.
       critique:
         entry:
           brief: Judging a thing that exists.
           when: The knowledge helps say what is good or bad about an existing thing.
           when_not: Not measuring against a fixed standard — that is evaluate.
-          example: Pointing out that a trigger is ambiguous.
+          example: Pointing out that a contract clause can be read two ways.
       evaluate:
         entry:
           brief: Measuring against a standard.
           when: The knowledge compares a thing with a stated benchmark or rule.
           when_not: Not an opinion about quality — that is critique.
-          example: Checking a spell's damage against the damage table.
+          example: Checking a shelf's load against the manufacturer's rating.
       troubleshoot:
         entry:
           brief: Finding why a thing fails.
@@ -68,7 +68,7 @@ dimensions:
           brief: Making a thing understood.
           when: The knowledge helps someone understand how or why a thing works.
           when_not: Not changing or judging the thing — only understanding it.
-          example: Why concentration ends when the caster takes damage.
+          example: Why bread dough rises in a warm room.
 
   kind:
     role: soft
@@ -81,20 +81,20 @@ dimensions:
         the same thing can differ only in kind.
       when: Every memory answers it.
       when_not: Never to say how good the knowledge is — valence is not kind.
-      example: '"Shield is the yardstick" is a principle; "Frost Ward" is an example.'
+      example: '"Measure twice, cut once" is a principle; "the pine shelf that sagged" is an example.'
     values:
       reference:
         entry:
           brief: A fact that can be looked up.
           when: The text states something true that a source would confirm.
           when_not: Not a rule for judging — that is a principle.
-          example: Shield grants +5 AC until the start of your next turn.
+          example: Water boils at 100 °C at sea level.
       principle:
         entry:
           brief: A rule of thumb.
           when: The text states a general rule that guides decisions.
           when_not: Not a sequence of steps — that is a procedure.
-          example: A defensive reaction earns its slot only if it beats Shield per slot.
+          example: A new tool earns its place only if it beats the one it replaces.
       procedure:
         entry:
           brief: Ordered steps by which something is achieved.
@@ -103,25 +103,25 @@ dimensions:
             and one task. Placed first in every context for that pair.
           when: The text is a sequence the reader should follow in order.
           when_not: A single rule, however important — that is a principle.
-          example: 'Creating a spell: read the space, name it, find its yardstick, set its cost, check balance.'
+          example: 'Replacing a fuse: switch off the mains, find the blown fuse, fit one of the same rating, switch on, test.'
       example:
         entry:
           brief: One instance.
           when: The text describes a particular case.
           when_not: Not a generalisation drawn from cases — that is a principle.
-          example: Frost Ward trades flat AC for typed resistance.
+          example: The pine shelf sagged because its span was over 80 cm.
       decision:
         entry:
           brief: A choice made, and why.
           when: The text records what was chosen among alternatives and the reason.
           when_not: Not a rule for all cases — that is a principle.
-          example: Typed resistance was chosen over flat AC for the Ward family.
+          example: Oak was chosen over pine for the shelf because of the load it carries.
       preference:
         entry:
           brief: A taste.
           when: The text records how someone likes things done.
           when_not: Not a claim about correctness — that is a principle.
-          example: Prefer templates even with one use case.
+          example: Prefer a written agenda before any meeting.
 
   tier:
     role: soft
@@ -133,4 +133,4 @@ dimensions:
         holds. Packs name the bands.
       when: The knowledge holds at some levels and not others.
       when_not: Not how important the knowledge is.
-      example: A rule about 5th-level characters is tier=mid in dnd.
+      example: A technique only for experienced bakers is tier=advanced in a baking domain.

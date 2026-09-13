@@ -1,0 +1,7 @@
+---
+memory: 0718a0f213f7569f8b9a6ec6c3e6983b
+title: "Closed lists the sources already label are the cheapest dimensions"
+origin: written
+tags: ["domain=pygim","component=memory","artifact=vocabulary","task=design","kind=principle"]
+---
+When the sources print a closed scheme on every entry and the parser already extracts it, a dimension over it costs one codebook entry, needs no judgement to assign, and should score near-perfect agreement. In dnd: magic item category (9 values on all 350 items), feat category (4 on all 77), monster size and alignment (6 and 10 on all 504 stat blocks), trap and hazard severity. The label-read dimensions the study did measure — school, rarity, creature_type — all scored κ 1.000. Look for these before inventing dimensions that need interpretation, and still put them through the independence check like any other.
