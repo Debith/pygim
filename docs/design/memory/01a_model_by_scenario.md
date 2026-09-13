@@ -1,7 +1,7 @@
 # Problem-Space Memory — Technical Specification
 
 **Section 01a: The model, scenario by scenario**
-Status: draft · Owner: Debith · Last updated: 2026-09-11
+Status: draft · Owner: Debith · Last updated: 2026-09-13
 
 Every scenario of [section 00a](00a_how_a_memory_is_made.md) again, this time in the types of
 [section 01](01_domain_model.md). For each one, two small pictures: a **class diagram** of the
@@ -693,4 +693,83 @@ sequenceDiagram
     S->>St: commit #54, lineage corrected, #6 superseded, snapshot v55
     A->>S: show #6
     S-->>A: retired · digest unchanged · superseded by #54 · in 23 contexts before
+```
+
+## Feature 7 — Close a session
+
+A generalisation is a write whose request names the memories it is drawn from. The service
+checks that they are heads and that the generalisation covers them; nothing on the instances
+changes except the edge that points back.
+
+### Scenario 7.1 — Three new reactions make one point
+
+```mermaid
+classDiagram
+    direction LR
+    class write_request {
+        decision new
+        generalises 54 55 56 57
+        seen 2 7 54 55 56 57
+    }
+    class memory_58 {
+        lineage written
+        kind principle
+    }
+    class memory_state_55 {
+        superseded_by empty
+        generalised_by 58
+    }
+    class memory_55 {
+        content digest unchanged
+    }
+    write_request --> memory_58 : produces
+    memory_58 --> memory_55 : generalises
+    memory_state_55 --> memory_55 : index side
+```
+
+```mermaid
+sequenceDiagram
+    participant A as Agent
+    participant S as Service
+    participant St as Store
+    A->>S: review(session 13)
+    S-->>A: #55 #56 #57 with their tags
+    A->>S: read(domain=dnd artifact=spell task=design, purpose~defensive)
+    S-->>A: #2 #54 #55 #56 #57 #7
+    A->>S: remember(principle, generalises #54 to #57, seen #2 #7 #54 to #57)
+    S->>S: #54 to #57 are heads — yes
+    S->>S: covers them on every hard dimension — yes
+    S->>St: commit #58, generalises #54 to #57, nothing superseded, snapshot v59
+```
+
+### Scenario 7.2 — A wider suspicion waits for its case
+
+```mermaid
+classDiagram
+    direction LR
+    class coverage_check {
+        for each hard dimension
+        every instance value is a generalisation value
+        or the generalisation answers any
+    }
+    class memory_58 {
+        artifact spell
+        task design
+    }
+    class instances_54_to_57 {
+        artifact spell
+        task design
+    }
+    coverage_check --> memory_58 : reads tags
+    coverage_check --> instances_54_to_57 : reads tags
+```
+
+```mermaid
+sequenceDiagram
+    participant A as Agent
+    participant S as Service
+    participant H as Human
+    Note over A: suspects magic items behave the same — no case, so no tag, and nothing is written
+    Note over S: had #58 answered artifact=any, coverage would still pass
+    H->>H: the diff would show four spells claiming every artifact — review catches it
 ```

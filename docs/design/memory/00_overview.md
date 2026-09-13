@@ -1,7 +1,7 @@
 # Problem-Space Memory — Technical Specification
 
 **Section 00: Overview**
-Status: draft · Owner: Debith · Last updated: 2026-09-10
+Status: draft · Owner: Debith · Last updated: 2026-09-13
 
 This series specifies a memory system for AI agents in which retrieval is driven by the
 *kind of problem being solved* rather than by semantic similarity to the prompt. It is
@@ -20,7 +20,7 @@ the mapping.
 
 | Section | What it settles | State |
 |---|---|---|
-| **00** — this document | goals, glossary, the vocabulary and writing rules, foundations, sources, procedures | draft |
+| **00** — this document | goals, glossary, the vocabulary and writing rules, foundations, sources, procedures, consolidating a session | draft |
 | [**00a** — how a memory is made](00a_how_a_memory_is_made.md) | the whole thing as features with Given/When/Then scenarios, drawn panel by panel | draft |
 | [**01** — domain model](01_domain_model.md) | the value types, their laws, and the arithmetic every later section uses | draft |
 | [**01a** — the model, scenario by scenario](01a_model_by_scenario.md) | every scenario of 00a again, as a class diagram and a sequence diagram in 01's types | draft |
@@ -58,7 +58,7 @@ only orders what was found there.
 | G8 | Pluggable behaviour | Classifier, ranker, and event transport are strategies behind stable contracts, selectable without touching the core |
 | G9 | Simplicity | The retrieval core is not itself an AI system; it is set arithmetic over an index |
 | G10 | History | Every memory and every association can answer *how it came to be*: the ingestion or consolidation that produced it, the audit rows that linked it, the usage that promoted it. The index as it stood after any audit row can be rebuilt by replaying the log |
-| G11 | Consolidation | Memories can be merged, split, or retired through explicit operations. The result carries a *supersedes* edge to its sources; the sources leave retrieval but stay readable as history. Measured by: after a merge, a query returns the merged memory and its explanation names the sources |
+| G11 | Consolidation | Memories can be merged, split, or retired through explicit operations. The result carries a *supersedes* edge to its sources; the sources leave retrieval but stay readable as history. Measured by: after a merge, a query returns the merged memory and its explanation names the sources. At a session's close, what several memories show can also be stated once as a *generalisation* of them: it carries a *generalises* edge, and they stay heads, as its evidence (§4.11) |
 | G12 | Usage accounting | Each memory carries counters: times admitted as a candidate, times included in a context, times reported useful (LEARN), and the last time of each. Each association carries how often it admitted or ranked a memory. Learning (G6) and consolidation (G11) read these numbers; `stats` reports them. Counters are derived from the query log and can be rebuilt from it |
 | G13 | Written in flow | An agent records a memory during the task that produced it, in one call, tagging it from the vocabulary it was given and stating whether it starts a chain or extends one. Nothing stands between the call and the memory being findable; the human's control is curation afterwards (§4.5) |
 | G14 | Look before writing | No write starts a chain unless the writer has read the space it lands in. The service enforces the mechanical half — the candidate set under the write's hard tags, minus what the writer says it has seen, must be empty — and keeps the evidence, so a duplicate discovered later is explainable as a classification mismatch or a judgement error, never as *never looked* (§4.5, §4.7) |
@@ -122,6 +122,7 @@ only orders what was found there.
 | **Procedure** | A memory of kind `procedure`: the ordered steps by which something is achieved for one artifact and one task, each step able to cite a source or another memory. At most one head procedure per (artifact, task) is placed first in a context (§4.10). |
 | **Unmapped concept** | Something the classifier noticed, in a request or in a memory being written, that has no tag in the taxonomy. Reported in a request; recorded as a *tag proposal* in a write. Never invented. |
 | **Chain** | A memory and all of its versions, linked by *supersedes*. Only the **head** is findable; the rest is readable history. Every write starts a chain or extends one; a merge joins chains. |
+| **Generalisation** | A memory that states the pattern several memories share, written at a session's close. It carries a *generalises* edge to them and, unlike a merge, retires nothing: its instances stay heads and are its evidence. It must *cover* them — be findable wherever one of them is (§4.11). |
 | **Write decision** | What the writer states in a write: `new` (start a chain) or `supersedes <id>` (extend one). The agent makes it; the service records it and checks that it was made after reading (§4.5). |
 | **Seen** | The candidates the writer read before deciding, named in the write and kept in its audit row. The evidence that makes a later duplicate explainable (§4.7). |
 | **Tag proposal** | A request to extend the vocabulary — a value in an existing dimension, or a new dimension — recorded by a write that met a concept with no tag. Pending until a human accepts or rejects it (§4.6). |
@@ -134,7 +135,7 @@ only orders what was found there.
 | **Locator** | A citation into a source: the source's id, a line or section, and the hash of the passage. The path lives once, in the inventory. Carried by harvested tags and by memories; resolved by the service in one call (§4.9). |
 | **Recollection failure** | Two chains that turn out to say one thing. Found at merge time; the later write's `seen` list and the earlier head's tags at that moment say whether classification or judgement failed (§4.7). |
 | **Usage record** | One observation that a memory was admitted, included, or reported useful for a given tag, with a time and a reason. The raw material of G12 and of LEARN. |
-| **Lineage** | Where a memory came from: the session and turn that wrote it, the corpus file and revision it was ingested from, or the consolidation that produced it and the memories it supersedes (§4.4). |
+| **Lineage** | Where a memory came from: the session and turn that wrote it, the corpus file and revision it was ingested from, or the consolidation that produced it and the memories it supersedes or generalises (§4.4, §4.11). |
 | **READ / WRITE / LEARN / CURATE** | The four operation families: retrieve; record a new memory during work (§4.5); record usefulness; explicitly link, unlink, or consolidate. |
 
 ### 4.1 The seed vocabulary
@@ -234,7 +235,7 @@ content.
 | Record | Written by | Answers |
 |---|---|---|
 | **Audit row** | every WRITE, CURATE and LEARN mutation, synchronously | who wrote, linked, unlinked, promoted, merged, or retired what, when, and why — and for a write, the decision and what was seen. Replaying the rows in order rebuilds the index at any point |
-| **Lineage** | every WRITE, ingestion and consolidation | which session and turn wrote a memory, which corpus file and revision it was ingested from, or which memories it supersedes and by which operation. Superseded memories keep their content hash and stay readable; they leave the candidate set |
+| **Lineage** | every WRITE, ingestion and consolidation | which session and turn wrote a memory, which corpus file and revision it was ingested from, or which memories it supersedes and by which operation, or which it generalises. Superseded memories keep their content hash and stay readable; they leave the candidate set. Generalised memories stay in it |
 | **Usage record / counters** | every READ (asynchronously, through the event bus) and every LEARN | how often a memory was admitted, included, and reported useful, and when last. Counters are a derived view over usage records and can be rebuilt |
 
 [Section 00a](00a_how_a_memory_is_made.md) draws all of this as features with scenarios, the
@@ -251,6 +252,10 @@ failure* on record (§4.7): the merge row points at the later write's evidence, 
 can be named. A consolidator beside the service (out of scope for v1) may propose merges and
 retirements from the counters — low usage, high overlap — but it proposes; a human or an
 explicit call commits.
+
+Merge is not the only consolidation. At a session's close the agent also reads back what it
+wrote and states, once, the pattern several memories share — a *generalisation* that retires
+nothing (§4.11).
 
 ### 4.5 Writing during work
 
@@ -557,6 +562,49 @@ missing — and counts like any usefulness signal. A session in which a step tur
 missing writes the next version. Whether usage should be recorded per step, so a step nobody
 ever needs can be retired, is open (§10).
 
+### 4.11 Consolidating a session
+
+Memories written in flow are concrete: they record what this session learned, with the case
+that taught it (§4.5). That is the right grain for writing — a case can be checked, and its
+writer knows it — but a store of cases alone makes the next agent rediscover the pattern from
+them every time. So a session ends the way it worked: the agent consolidates what it wrote.
+
+**The rhythm.** During work, write the case. At the session's close, ask the service for the
+session's writes — every audit row carries its session (§4.4) — read them together with the
+spaces they landed in, and look for a point several of them make. Where there is one, write it
+once, at the level the cases support, as a *generalisation* of them. Where there is none,
+write nothing: a session that only added cases has still done its job.
+
+**A generalisation is not a merge.** A merge joins memories that say one thing and retires
+them (§4.4). A generalisation says *more* than any of its instances — the pattern they share
+— and they stay heads: each is still true, still findable, and now also evidence for the
+pattern. So it carries a `generalises` edge to its instances, distinct from `supersedes`. It
+may be of any kind — usually a principle, sometimes a procedure, when a session kept
+repeating the same steps — and it is written with the same `remember` call and the same four
+checks as any memory. Section 00a, Feature 7, draws it.
+
+**What the service checks.** Two things it can check without reading prose. Every generalised
+memory exists and is a head. And the generalisation *covers* its instances: on every hard
+dimension its values include each instance's values, or it answers `any` — so it is findable
+wherever one of its cases is. Whether the pattern is real is the agent's judgement and the
+human's review in the diff, like every other meaning in this system (§4.7).
+
+**How far to generalise.** As far as the instances reach, and no further. Four spells are
+evidence about spells, not about magic items; one domain is not every domain. `any` claims
+every value of its dimension, including values not yet in the vocabulary, and a handful of
+cases rarely earns that — the coverage check passes it all the same, so overreach is caught in
+review, not by the service. A wider suspicion is not written as a wider tag: it waits for a
+case in the wider space, and a later close widens the generalisation by superseding it.
+
+**How retrieval treats it.** Like any memory. Candidate selection, scoring and ranking do not
+change, and its instances rank on their own tags. Whether a context that includes a
+generalisation should still spend budget on the instances it generalises is open (§10).
+
+**What starts it.** Not the service. The server learns that a session ended when its
+connection closes, which is too late for the agent to do any work. The close is an agent step
+— the last step of a work procedure (§4.10), or a request from the human — and what makes it
+happen reliably is open (§10).
+
 ## 5. Principles
 
 1. **Content and index are separate, and only the index moves.** A memory's title and
@@ -651,7 +699,7 @@ same operations, drawn dashed because v1 has none.
 | Classifier | Request or new memory → tags from the taxonomy only; reports unmapped. On an LLM host the caller is the classifier: the service publishes the vocabulary and validates what comes back | runtime interface (caller-supplied is the default; rules for tests and parity; LLM via Python for hosts without one) | 05 |
 | Ranker | Optional score within the candidate set | runtime interface (none, TF-IDF, embeddings) | 06 |
 | Writing | `remember`: the four checks (closed vocabulary, no unread write, head only, identical content), write or supersede, record decision and `seen`, attach proposals, land the file (§4.5) | one implementation | 07 |
-| Learning & curation | link, unlink, learn with promotion threshold, merge (recording the recollection failure and its kind), retire, audit | one implementation | 07 |
+| Learning & curation | link, unlink, learn with promotion threshold, merge (recording the recollection failure and its kind), generalise at a session's close (heads, coverage), retire, audit | one implementation | 07 |
 | Event bus | Typed in-process dispatch plus transport bridge. The `TransformerPolicy` turns a typed event into the frame a transport carries and back | compile-time policy (`TransportPolicy`, `TransformerPolicy`) | 08 |
 | Services | Mailbox, service base, threading and shutdown rules; the query logger and statistics observers | generic components | 09 |
 | Adapter & MCP | pybind11 boundary, GIL rules, MCP tool surface, IoC wiring | one implementation | 10 |
@@ -719,7 +767,10 @@ does not require the ones after it.
 - **Whether `seen` must be named in the write**, or the service may correlate the writer's most recent read over the same hard tags in the same session (07). Explicit is simpler to audit; implicit is one argument fewer.
 - **Promotion rule for learned associations** — raw count, decay, or review-only when the store is a shared repository (07, 11) — and which counters feed it (07).
 - **What "admitted" records** — one usage record per candidate, or a count in the receipt (04 §7.1).
-- **Typed memory-to-memory edges beyond `supersedes`**, with one-hop expansion — drafted as not in v1 (04 §7.2).
+- **Typed memory-to-memory edges beyond `supersedes` and `generalises`**, with one-hop expansion — drafted as not in v1 (04 §7.2).
+- **What makes a session's close happen reliably** (07, 10). The server cannot: it learns the session ended when the connection is already gone. Candidates are a request from the human, a last step in every work procedure (§4.10), or a host hook that reminds the agent before the session ends.
+- **Whether a context spends budget on a generalisation's instances** (04, 07) — include them as ranked, or list them under the generalisation as its evidence and let the reader `show` one when needed.
+- **What a later case that contradicts a generalisation should trigger** (07). The agent supersedes the generalisation with a narrower one, as with any correction; whether the service should also list, at the next close, generalisations whose space gained a head since they were written.
 - **Where the repository lives, and whether head views are committed** (03 §9.1, §9.2).
 - **Where agents beside the service run** when they arrive: in-process as services (09) or as separate clients over the same adapter (10).
 - **Frame format** produced by the transformer for cross-process transports: JSON first, binary later (08).
