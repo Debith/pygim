@@ -141,12 +141,33 @@ public:
         const std::optional<std::uint32_t> slot = procedure_slot(q, cand, ctx.procedure_note);
         if (slot) ctx.procedure = memory_id(*slot);
 
-        std::vector<match> ranked;
-        ranked.reserve(ids.size());
+        // The fold (overview §4.11, 04 §3.7): a candidate one of whose generalisations is also a
+        // candidate gives up its own place and is listed under that generalisation as evidence.
+        // It happens before ranking and the budget, so it depends on neither; the procedure slot is
+        // never folded, and a retired generalisation is no candidate, so its instances unfold.
+        std::unordered_map<std::uint32_t, std::vector<memory_id>> under;
+        std::vector<std::uint32_t> placed;
+        placed.reserve(ids.size());
         for (const auto id : ids) {
             if (slot && id == *slot) continue;
-            ranked.push_back(score(memory_id(id), q));
+            bool folded = false;
+            for (const auto g : *m_generalised_by[id])
+                if (cand.has(g.value())) {
+                    under[g.value()].push_back(memory_id(id));
+                    folded = true;
+                }
+            if (folded) ++ctx.folded;
+            else placed.push_back(id);
         }
+        std::vector<match> ranked;
+        ranked.reserve(placed.size());
+        for (const auto id : placed) {
+            match m = score(memory_id(id), q);
+            if (const auto it = under.find(id); it != under.end()) m.evidence = it->second;
+            ranked.push_back(std::move(m));
+        }
+        if (slot)
+            if (const auto it = under.find(*slot); it != under.end()) ctx.procedure_evidence = it->second;
         std::sort(ranked.begin(), ranked.end(), [](const match& a, const match& b) {
             if (a.final_score != b.final_score) return a.final_score > b.final_score;
             if (a.soft_hits != b.soft_hits) return a.soft_hits > b.soft_hits;

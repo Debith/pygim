@@ -1055,6 +1055,7 @@ And the agent reads back what it wrote
 Then it sees that all four make one point: each reaction beats Shield against one kind of threat and loses against another
 And it writes #58, a principle that generalises #54 to #57
 And #54 to #57 stay heads, as the principle's evidence
+And the next read of the space places #58 and names #54 to #57 under it, without spending budget on them
 ```
 
 **Panel 1.** The user asks for a consolidation — here at the end of session 13, but it could be
@@ -1099,6 +1100,18 @@ pattern it belongs to.
 flowchart LR
     ask1["show #55"] --> ans1["#55 Mirror Veil — head · generalised by #58"]
     ask2["show #58"] --> ans2["#58 — principle · generalises #54 #55 #56 #57<br/>written when session 13 was consolidated"]
+```
+
+**Panel 5.** The next read of the space. The cases fold under the pattern: named, one `show` away,
+and not paid for twice.
+
+```mermaid
+sequenceDiagram
+    participant Agent
+    participant Service
+    Agent->>Service: read(domain=dnd artifact=spell task=design, purpose~defensive action_economy~reaction, budget 600)
+    Service-->>Agent: #1 procedure · #2 yardstick · #58 principle — evidence: #54 Ward family, #55 Mirror Veil, #56 Thunder Riposte, #57 Stone Skin Reflex · #7 typed resistance
+    Note over Agent: four cases named, none placed — the budget went to four memories that each say something different
 ```
 
 ### Scenario 7.2 — A wider suspicion waits for its case

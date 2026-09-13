@@ -456,14 +456,15 @@ against it:
 ```mermaid
 flowchart LR
     c["classification<br/>hard · soft · evidence · unmapped"] --> q["query<br/>hard · soft · max · budget"]
-    q --> m["match, per candidate<br/>hard matched · soft matched · soft missed · score · rank"]
-    m --> x["context<br/>procedure first · selected · corpus · candidates · tokens"]
+    q --> m["match, per candidate<br/>hard matched · soft matched · soft missed · score · rank · evidence"]
+    m --> x["context<br/>procedure first · selected · corpus · candidates · folded · tokens"]
 ```
 
 `soft_missed` is carried because every inclusion must be explainable (G2), and because the
 open decision on miss-versus-neutral scoring (overview §10) changes how a miss is *scored*,
 not whether it is *recorded*. `context::procedure` is the first slot of overview §4.10 —
-outside the ranked list, at most one.
+outside the ranked list, at most one. `match::evidence` names the candidates a generalisation
+folds (overview §4.11): they are admitted and counted in `folded`, but not placed (section 04 §3.9).
 
 Every retrieval also leaves a `retrieval_receipt` — query id, when, `snapshot_version`,
 `taxonomy_version`, the classification, and the ids returned. It is what §3.1's rerun
