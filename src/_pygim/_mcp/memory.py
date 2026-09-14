@@ -328,7 +328,7 @@ def _write(stdout: IO[str], msg: Dict[str, Any]) -> None:
 def _version() -> str:
     try:
         from importlib.metadata import version
-        return version("python-gimmicks")
+        return version("pygim")
     except Exception:
         return "0"
 
