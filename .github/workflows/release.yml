@@ -86,7 +86,7 @@ jobs:
           ACTION: ${{ steps.version.outputs.action }}
         run: |
           {
-            echo "### python-gimmicks $VERSION"
+            echo "### pygim $VERSION"
             echo "Commit: \`$(git rev-parse HEAD)\`"
             case "$ACTION" in
               cut) echo "Cuts release/$VERSION from main and starts its release there." ;;
@@ -232,7 +232,7 @@ jobs:
     runs-on: ubuntu-latest
     environment:
       name: pypi
-      url: https://pypi.org/project/python-gimmicks/${{ needs.prepare.outputs.version }}/
+      url: https://pypi.org/project/pygim/${{ needs.prepare.outputs.version }}/
     permissions:
       id-token: write  # PyPI trusted publishing: no API token is stored
     steps:

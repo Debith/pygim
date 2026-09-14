@@ -8,15 +8,15 @@ Python Gimmicks (pygim)
     :target: https://readthedocs.org/projects/pygim
     :alt: Documentation Status
 
-.. |downloads| image:: https://img.shields.io/pypi/dm/python-gimmicks.svg
+.. |downloads| image:: https://img.shields.io/pypi/dm/pygim.svg
     :alt: PyPI Package monthly downloads
-    :target: https://pypi.org/project/python-gimmicks/
+    :target: https://pypi.org/project/pygim/
 
-.. |wheel| image:: https://img.shields.io/pypi/format/python-gimmicks.svg
+.. |wheel| image:: https://img.shields.io/pypi/format/pygim.svg
     :alt: PyPI Wheel
-    :target: https://pypi.org/project/python-gimmicks/
+    :target: https://pypi.org/project/pygim/
 
-.. |pyversions| image:: https://img.shields.io/pypi/pyversions/python-gimmicks.svg
+.. |pyversions| image:: https://img.shields.io/pypi/pyversions/pygim.svg
 
 
 Python Gimmicks is a library that contains magical but useful tools
@@ -31,7 +31,7 @@ To install this project, simply write the following command:
 
 .. code-block:: bash
 
-    $ pip install python-gimmicks
+    $ pip install pygim
 
 Command Line Interface
 ======================
