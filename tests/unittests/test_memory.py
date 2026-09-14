@@ -535,3 +535,13 @@ class TestIngestion:
         assert mem.ingest(str(path))["superseded"] == 1
         texts = [m["text"] for m in mem.read(DESIGN)["memories"]]
         assert texts == ["Shield is the reference point for any reaction that reduces incoming harm, less so by tier 3."]
+
+    def test_crlf_line_endings_are_not_part_of_a_memory(self, tmp_path, mem):
+        # A file written in text mode on Windows ends its lines in \r\n.
+        path = tmp_path / "spells.md"
+        path.write_bytes(self.CORPUS.replace("\n", "\r\n").encode("utf-8"))
+        assert mem.ingest(str(path))["added"] == 1
+        texts = [m["text"] for m in mem.read(DESIGN)["memories"]]
+        assert texts == ["Shield is the reference point for any reaction that reduces incoming harm."]
+        path.write_bytes(self.CORPUS.encode("utf-8"))
+        assert mem.ingest(str(path))["unchanged"] == 1

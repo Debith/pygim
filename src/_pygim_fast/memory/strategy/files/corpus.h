@@ -22,14 +22,17 @@ struct corpus_parse {
 [[nodiscard]] inline corpus_parse parse_corpus(std::string_view text, std::string_view name) {
     corpus_parse out;
     auto trim = [](std::string_view s) {
-        while (!s.empty() && (s.front() == ' ' || s.front() == '\t' || s.front() == '\r')) s.remove_prefix(1);
-        while (!s.empty() && (s.back() == ' ' || s.back() == '\t' || s.back() == '\r')) s.remove_suffix(1);
+        while (!s.empty() && (s.front() == ' ' || s.front() == '\t')) s.remove_prefix(1);
+        while (!s.empty() && (s.back() == ' ' || s.back() == '\t')) s.remove_suffix(1);
         return s;
     };
+    // Lines end in \n or \r\n (a file written in text mode on Windows); the
+    // \r is part of the line ending, never of a memory's text.
     std::vector<std::string_view> lines;
     for (std::size_t pos = 0; pos <= text.size();) {
         const auto nl = text.find('\n', pos);
-        const auto end = nl == std::string_view::npos ? text.size() : nl;
+        auto end = nl == std::string_view::npos ? text.size() : nl;
+        if (end > pos && text[end - 1] == '\r') --end;
         lines.push_back(text.substr(pos, end - pos));
         if (nl == std::string_view::npos) break;
         pos = nl + 1;
