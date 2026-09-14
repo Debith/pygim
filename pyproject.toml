@@ -5,8 +5,9 @@ backend-path = []
 
 [project]
 name = "python-gimmicks"
-dynamic = ["version"]
+dynamic = ["version", "dependencies"]
 description = "Full Python Gimmicks project with all of its sub-projects."
+readme = "README.rst"
 classifiers = [
   "Development Status :: 4 - Beta",
   "Intended Audience :: Developers",
@@ -21,13 +22,6 @@ classifiers = [
   "Topic :: Software Development :: Libraries :: Python Modules",
   "Topic :: Software Development :: Quality Assurance",
   "Typing :: Typed",
-]
-dependencies = [
-  "click>=8",
-  "pyarrow>=15",
-  "polars>=0.20",
-  "tabulate>=0.9",
-  "typing_extensions>=4.0",
 ]
 
 [project.urls]
@@ -103,6 +97,17 @@ exclude_lines = [
     "if __name__ == .__main__.:",
     "@abc.abstractmethod",
     "@abc.abstractproperty",
+]
+
+[tool.pygim.build]
+# The runtime requirements. They are dynamic because setup.py pins pyarrow to
+# the release the extensions were built against (setup.py::_pin_arrow_abi).
+dependencies = [
+  "click>=8",
+  "pyarrow>=15",
+  "polars>=0.20",
+  "tabulate>=0.9",
+  "typing_extensions>=4.0",
 ]
 
 [tool.pygim.commands]
