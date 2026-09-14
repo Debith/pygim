@@ -7,16 +7,26 @@ import click
 from _pygim._cli._cli_app import GimmicksCliApp, flag_opt
 
 
-@click.group()
-def cli():
-    r"""\b
-     ___        ___ _
-    | _ \_  _  / __(_)\_ __
-    |  _/ || || (_ | | '  \ \b
-    |_|  \_, / \___|_|_|_|_|
-        |_/Python Gimmicks
+# "PyGim" in figlet's small font. Click rewraps help text unless a paragraph
+# starts with a line holding only \b (the backspace character), so the banner
+# is passed as help= with a real one; a raw docstring would carry a literal
+# backslash and b instead.
+_PYGIM = r"""
+ ___       ___ _
+| _ \_  _ / __(_)_ __
+|  _/ || | (_ | | '  \
+|_|  \_, |\___|_|_|_|_|
+     |__/ """
 
-    """
+
+def _banner(tagline):
+    """Help text: the PyGim banner with *tagline*, kept verbatim by click."""
+    return "\b" + _PYGIM + tagline
+
+
+@click.group(help=_banner("Python Gimmicks"))
+def cli():
+    pass
 
 
 @cli.command()
@@ -71,17 +81,9 @@ class _OoGroup(click.Group):
         return super().invoke(ctx)
 
 
-@click.group(cls=_OoGroup, invoke_without_command=True)
+@click.group(cls=_OoGroup, invoke_without_command=True, help=_banner("AI powered Python Gimmicks"))
 @click.pass_context
 def cli_oo(ctx):
-    r"""\b
-     ___        ___ _
-    | _ \_  _  / __(_)\_ __
-    |  _/ || || (_ | | '  \ \b
-    |_|  \_, / \___|_|_|_|_|
-        |_/ AI powered Python Gimmicks
-
-    """
     if ctx.invoked_subcommand is None and ctx.meta.get("free_text") is None:
         click.echo(ctx.get_help())
 
