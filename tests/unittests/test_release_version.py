@@ -32,11 +32,12 @@ def _resolve(rv, event, ref_name="", bump="patch", version="", tags=TAGS, pypi=(
     return rv.resolve(event, ref_name, bump, version, tags, set(pypi))
 
 
-# ─── push: the branch names the version ─────────────────────────────────────
+# ─── release: on release/<version>, the branch names the version ────────────
 
 
-def test_release_branch_names_the_version(rv):
-    assert _resolve(rv, "push", "release/0.1.0") == {"version": "0.1.0", "publish": True, "prerelease": False}
+@pytest.mark.parametrize("event", ["push", "workflow_dispatch"])
+def test_release_branch_names_the_version(rv, event):
+    assert _resolve(rv, event, "release/0.1.0") == {"action": "release", "version": "0.1.0", "prerelease": False}
 
 
 def test_release_branch_may_name_a_prerelease(rv):
@@ -55,6 +56,12 @@ def test_malformed_release_branch_is_refused(rv, ref_name, problem):
         _resolve(rv, "push", ref_name)
 
 
+def test_version_input_cannot_rename_a_release_branch(rv):
+    with pytest.raises(rv.ReleaseError, match="contradicts the branch"):
+        _resolve(rv, "workflow_dispatch", "release/0.1.0", version="0.2.0")
+    assert _resolve(rv, "workflow_dispatch", "release/0.1.0", version="0.1.0")["version"] == "0.1.0"
+
+
 def test_released_version_is_refused(rv):
     with pytest.raises(rv.ReleaseError, match="v0.0.9 is already released"):
         _resolve(rv, "push", "release/0.0.9")
@@ -65,7 +72,7 @@ def test_version_on_pypi_is_refused_even_without_a_tag(rv):
         _resolve(rv, "push", "release/0.1.0", pypi=["0.1.0"])
 
 
-# ─── workflow_dispatch: an explicit version, or a bump of the latest ────────
+# ─── cut: dispatched on main, it names a new release branch ─────────────────
 
 
 @pytest.mark.parametrize("bump,expected", [
@@ -75,33 +82,45 @@ def test_version_on_pypi_is_refused_even_without_a_tag(rv):
 ])
 def test_bump_starts_from_the_latest_final_release(rv, bump, expected):
     # v0.1.0rc1 is a prerelease: a patch bump continues the 0.0.x line.
-    assert _resolve(rv, "workflow_dispatch", bump=bump)["version"] == expected
+    assert _resolve(rv, "workflow_dispatch", "main", bump=bump) == {
+        "action": "cut", "version": expected, "prerelease": False,
+    }
 
 
 def test_bump_without_any_release_tag_starts_at_zero(rv):
-    assert _resolve(rv, "workflow_dispatch", bump="minor", tags=["nightly"])["version"] == "0.1.0"
+    assert _resolve(rv, "workflow_dispatch", "main", bump="minor", tags=["nightly"])["version"] == "0.1.0"
 
 
 def test_bump_pads_a_short_version(rv):
-    assert _resolve(rv, "workflow_dispatch", bump="patch", tags=["v2.1"])["version"] == "2.1.1"
+    assert _resolve(rv, "workflow_dispatch", "main", bump="patch", tags=["v2.1"])["version"] == "2.1.1"
 
 
 def test_explicit_version_overrides_bump(rv):
-    assert _resolve(rv, "workflow_dispatch", bump="major", version="0.2.0b1") == {
-        "version": "0.2.0b1", "publish": True, "prerelease": True,
+    assert _resolve(rv, "workflow_dispatch", "main", bump="major", version="0.2.0b1") == {
+        "action": "cut", "version": "0.2.0b1", "prerelease": True,
     }
+
+
+def test_cut_of_a_released_version_is_refused(rv):
+    with pytest.raises(rv.ReleaseError, match="already released"):
+        _resolve(rv, "workflow_dispatch", "main", version="0.0.9")
 
 
 def test_unknown_bump_is_refused(rv):
     with pytest.raises(rv.ReleaseError, match="bump must be one of"):
-        _resolve(rv, "workflow_dispatch", bump="huge")
+        _resolve(rv, "workflow_dispatch", "main", bump="huge")
 
 
-# ─── pull_request: a dry run that never publishes ───────────────────────────
+def test_nothing_is_released_from_another_branch(rv):
+    with pytest.raises(rv.ReleaseError, match="nothing is released from 'core/memory'"):
+        _resolve(rv, "workflow_dispatch", "core/memory")
+
+
+# ─── dry-run: a pull request never publishes ────────────────────────────────
 
 
 def test_pull_request_is_an_unpublished_dev_build(rv):
-    assert _resolve(rv, "pull_request") == {"version": "0.0.10.dev0", "publish": False, "prerelease": True}
+    assert _resolve(rv, "pull_request") == {"action": "dry-run", "version": "0.0.10.dev0", "prerelease": True}
 
 
 def test_other_events_are_refused(rv):

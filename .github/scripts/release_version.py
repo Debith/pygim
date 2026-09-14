@@ -1,13 +1,16 @@
-"""Resolve the version a run of ``.github/workflows/release.yml`` releases.
+"""Decide what a run of ``.github/workflows/release.yml`` does, and for which version.
 
-A release is named by its branch, ``release/<version>``. The workflow reaches
-here from three events, and each names the version differently:
+Nothing is released from ``main``: a release runs on its branch,
+``release/<version>``. A run takes one of three actions:
 
-- ``push`` of ``release/<version>``: the branch name is the version.
-- ``workflow_dispatch``: the ``version`` input, or else the latest released
-  tag (``v<version>``) bumped by the ``bump`` input.
-- ``pull_request``: a dry run; the next patch version as ``.dev0``, never
-  published.
+- ``cut``: ``workflow_dispatch`` on ``main``. The version is the ``version``
+  input, or else the latest released tag (``v<version>``) bumped by the
+  ``bump`` input. The run creates ``release/<version>`` and starts the release
+  on it; it builds nothing itself.
+- ``release``: a ``push`` to ``release/<version>``, or ``workflow_dispatch``
+  on it. The branch name is the version. The run builds, tests and publishes.
+- ``dry-run``: ``pull_request``. The next patch version as ``.dev0``; built and
+  tested, never published.
 
 A version is released once: its tag must not exist and PyPI must not already
 hold it. Outputs are written as ``key=value`` lines to ``$GITHUB_OUTPUT``
@@ -73,20 +76,32 @@ def bump(tags, kind):
 
 
 def resolve(event, ref_name, bump_kind, version_input, tags, pypi_versions):
-    """The release a run makes: ``{"version", "publish", "prerelease"}``.
+    """What the run does: ``{"action", "version", "prerelease"}``.
 
     *pypi_versions* is the set of version strings PyPI already holds.
     """
     if event == "pull_request":
         version = Version(f"{bump(tags, 'patch')}.dev0")
-        return {"version": str(version), "publish": False, "prerelease": True}
+        return {"action": "dry-run", "version": str(version), "prerelease": True}
 
-    if event == "push":
-        if not ref_name.startswith(BRANCH_PREFIX):
-            raise ReleaseError(f"a release branch is named {BRANCH_PREFIX}<version>, not {ref_name!r}")
-        version = parse_version(ref_name[len(BRANCH_PREFIX):])
-    elif event == "workflow_dispatch":
+    if event == "workflow_dispatch" and ref_name == "main":
+        action = "cut"
         version = parse_version(version_input) if version_input else bump(tags, bump_kind)
+    elif event in ("push", "workflow_dispatch") and ref_name.startswith(BRANCH_PREFIX):
+        action = "release"
+        version = parse_version(ref_name[len(BRANCH_PREFIX):])
+        if version_input and version_input != str(version):
+            raise ReleaseError(
+                f"the version input {version_input!r} contradicts the branch {ref_name!r}; "
+                f"a release branch is its own version"
+            )
+    elif event == "workflow_dispatch":
+        raise ReleaseError(
+            f"nothing is released from {ref_name!r}: run the workflow on main to cut a "
+            f"release branch, or on {BRANCH_PREFIX}<version> to release it"
+        )
+    elif event == "push":
+        raise ReleaseError(f"a release branch is named {BRANCH_PREFIX}<version>, not {ref_name!r}")
     else:
         raise ReleaseError(f"the release workflow does not run on {event!r} events")
 
@@ -97,7 +112,7 @@ def resolve(event, ref_name, bump_kind, version_input, tags, pypi_versions):
         )
     if any(Version(v) == version for v in pypi_versions):
         raise ReleaseError(f"PyPI already holds {PROJECT} {version}; PyPI never accepts a version twice.")
-    return {"version": str(version), "publish": True, "prerelease": version.is_prerelease}
+    return {"action": action, "version": str(version), "prerelease": version.is_prerelease}
 
 
 def _git_tags():
@@ -131,8 +146,8 @@ def main():
         return 1
 
     lines = [
+        f"action={release['action']}",
         f"version={release['version']}",
-        f"publish={str(release['publish']).lower()}",
         f"prerelease={str(release['prerelease']).lower()}",
     ]
     output = os.environ.get("GITHUB_OUTPUT")

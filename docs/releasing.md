@@ -1,6 +1,7 @@
 # Releasing
 
-A release of pygim is a branch, `release/<version>`, cut from `main`. The
+Nothing is released from `main`. A release of pygim runs on its branch,
+`release/<version>`, cut from `main`. The
 [release workflow](../.github/workflows/release.yml) builds a wheel for every
 supported platform and Python and runs the whole test suite against each
 installed wheel. Only if every wheel passes does it publish to PyPI as
@@ -8,28 +9,30 @@ installed wheel. Only if every wheel passes does it publish to PyPI as
 
 ## Cutting a release
 
-From GitHub's Actions tab (*Release* → *Run workflow*), or from a terminal:
+From GitHub's Actions tab (*Release* → *Run workflow* on `main`), or from a
+terminal:
 
 ```bash
-gh workflow run release.yml -f bump=patch          # latest release 0.0.9 -> 0.0.10
-gh workflow run release.yml -f bump=minor          # -> 0.1.0
+gh workflow run release.yml -f bump=patch          # latest release 0.0.9 -> release/0.0.10
+gh workflow run release.yml -f bump=minor          # -> release/0.1.0
 gh workflow run release.yml -f version=0.1.0rc1    # an explicit version
-gh run watch                                       # follow it
+gh run list --workflow release.yml                 # the cut, then the release it started
 ```
 
-A dispatched release is always built from the current `main`, whichever
-branch the workflow was run from. The version is the latest `v*` tag bumped,
-or the one given. `release/<version>` is created only once the release is on
-PyPI, so a failed run leaves nothing behind: fix `main` and dispatch again.
+Run on `main`, the workflow only cuts: it picks the version (the latest `v*`
+tag bumped, or the one given), creates `release/<version>` from `main`, and
+starts the release on that branch. That second run is the release. Run on any
+other branch, the workflow refuses.
 
-To stabilise a release on its branch first, push the branch yourself:
+You can also cut a branch yourself. The push starts its release:
 
 ```bash
 git push origin origin/main:refs/heads/release/0.1.0
 ```
 
-Each push to that branch runs the release again, until one publishes.
-Changes made on a release branch are merged back into `main`.
+A release that fails stays on its branch. Push the fix there, which runs the
+release again, and merge the branch back into `main`. To rerun a branch's
+release without a new commit, use `gh workflow run release.yml --ref release/0.1.0`.
 
 ## What decides the version
 
@@ -50,11 +53,14 @@ The logic is in `.github/scripts/release_version.py` and is tested by
 
 ```mermaid
 flowchart LR
+    main["Run on main"] --> cut["Cut release/&lt;version&gt;<br/>and start its release"]
+    cut -.-> prepare
+    push["Push to release/&lt;version&gt;"] --> prepare
     prepare["Resolve version<br/>(refuse if released)"] --> wheels["18 wheels<br/>Linux x86_64, macOS arm64, Windows AMD64<br/>× CPython 3.9–3.14<br/>each tested with pytest"]
     prepare --> sdist["sdist<br/>twine check"]
     wheels --> publish["PyPI<br/>(environment: pypi)"]
     sdist --> publish
-    publish --> gh["release/&lt;version&gt; branch,<br/>tag v&lt;version&gt;,<br/>GitHub release"]
+    publish --> gh["Tag v&lt;version&gt;,<br/>GitHub release"]
 ```
 
 - **The version reaches the build as `SETUPTOOLS_SCM_PRETEND_VERSION`.** The
@@ -79,8 +85,8 @@ a dry run (version `<next patch>.dev0`, nothing published).
 
 | Failed at | Nothing was published. Do this |
 |---|---|
-| Resolve version | Read the error: it names the problem and the fix. |
-| A wheel or the sdist | Fix it, then dispatch again (or push to the release branch). |
+| Resolve version, or the cut | Read the error: it names the problem and the fix. |
+| A wheel or the sdist | Push the fix to the release branch; the push runs the release again. |
 | Publish | Usually PyPI configuration (see below). Fix it, then *Re-run failed jobs*. |
 
 | Failed at | The release **is** on PyPI. Do this |
@@ -98,8 +104,9 @@ stored in the repository. It needs:
    workflow `release.yml`, environment `pypi`.
 2. **The `pypi` environment on GitHub** (*Settings* → *Environments*). A
    first run creates it, but configure it before then:
-   - *Deployment branches and tags*: allow `main` (dispatched releases run
-     from it) and `release/*`.
+   - *Deployment branches and tags*: *Selected branches and tags*, with the
+     single rule `release/*`. PyPI uploads can then only come from a release
+     branch.
    - *Required reviewers* (optional): you approve every upload to PyPI before
      it happens. Everything before the upload has already passed by then.
 
