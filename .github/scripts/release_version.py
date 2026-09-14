@@ -26,7 +26,7 @@ import urllib.request
 
 from packaging.version import InvalidVersion, Version
 
-PROJECT = "python-gimmicks"
+PROJECT = "pygim"
 BRANCH_PREFIX = "release/"
 TAG_PREFIX = "v"
 BUMPS = ("patch", "minor", "major")

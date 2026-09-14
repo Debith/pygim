@@ -5,7 +5,7 @@ Nothing is released from `main`. A release of pygim runs on its branch,
 [release workflow](../.github/workflows/release.yml) builds a wheel for every
 supported platform and Python and runs the whole test suite against each
 installed wheel. Only if every wheel passes does it publish to PyPI as
-`python-gimmicks`, tag the commit `v<version>` and create the GitHub release.
+`pygim`, tag the commit `v<version>` and create the GitHub release.
 
 ## Cutting a release
 
@@ -98,10 +98,11 @@ a dry run (version `<next patch>.dev0`, nothing published).
 The workflow publishes with PyPI trusted publishing, so no API token is
 stored in the repository. It needs:
 
-1. **A trusted publisher on PyPI.** `python-gimmicks` is not on PyPI yet, so
-   add a *pending* publisher at <https://pypi.org/manage/account/publishing/>:
-   PyPI project `python-gimmicks`, owner `Debith`, repository `pygim`,
-   workflow `release.yml`, environment `pypi`.
+1. **A trusted publisher on the PyPI project `pygim`**
+   (<https://pypi.org/manage/project/pygim/settings/publishing/>): owner
+   `Debith`, repository `pygim`, workflow `release.yml`, environment `pypi`.
+   Every field must match what the workflow sends; a failed upload prints
+   those claims. A publisher cannot be edited, only removed and added again.
 2. **The `pypi` environment on GitHub** (*Settings* → *Environments*). A
    first run creates it, but configure it before then:
    - *Deployment branches and tags*: *Selected branches and tags*, with the
