@@ -267,6 +267,72 @@ class TestLearningAndCurating:
         assert "purpose=corruption" in again.show(w["memory"])["tags"]   # the asker is linked, source proposed
 
 
+class TestHeadViews:
+    """memories/<slug>.md follows the index, whatever changed it (03 §3.3)."""
+
+    @staticmethod
+    def view(root, w):
+        path = root / "memories" / (w["slug"] + ".md")
+        return path.read_text(encoding="utf-8") if path.exists() else None
+
+    def test_link_and_unlink_rewrite_the_tags(self, root, mem):
+        p, y, f = seed(mem)
+        mem.link(y["memory"], "task=balance", reason="always needed")
+        assert "task=balance" in self.view(root, y)
+        mem.unlink(y["memory"], "task=balance", reason="not after all")
+        assert "task=balance" not in self.view(root, y)
+
+    def test_a_promoted_tag_lands_in_the_view(self, root, mem):
+        p, y, f = seed(mem)
+        for _ in range(3):
+            mem.learn(f["memory"], tag="task=balance", reason="needed")
+        assert "task=balance" in self.view(root, f)
+
+    def test_an_accepted_proposal_lands_in_the_askers_view(self, root, mem):
+        p, y, f = seed(mem)
+        w = write(mem, "Spreading a sign", "Grow the sign by whole cubes.", DESIGN + ["kind=principle"],
+                  seen=[p["memory"], y["memory"], f["memory"]],
+                  proposals=[{"concept": "corruption", "dimension": "purpose", "brief": "Spreads corruption.",
+                              "when": "It creates a sign of corruption.", "when_not": "Plain necrotic damage.",
+                              "example": "Spreading Blight."}])
+        path = root / "taxonomy" / "pack-dnd.yaml"
+        path.write_text(path.read_text().replace(
+            "      control:",
+            "      corruption: {entry: {brief: Spreads corruption., when: It creates a sign., when_not: Plain necrotic damage., example: Spreading Blight.}}\n      control:"),
+            encoding="utf-8")
+        Memory(str(root))
+        assert "purpose=corruption" in self.view(root, w)
+
+    def test_rows_from_another_process_reach_the_view(self, root, mem):
+        p, y, f = seed(mem)
+        other = Memory(str(root))
+        other.link(y["memory"], "task=balance", reason="from elsewhere")
+        (root / "memories" / (y["slug"] + ".md")).unlink()
+        mem.unlink(f["memory"], "tier=mid", reason="catches up first")   # catching up rewrites y's view
+        assert "task=balance" in self.view(root, y) and "tier=mid" not in self.view(root, f)
+
+    def test_a_stale_or_missing_view_is_regenerated_on_open(self, root, mem):
+        p, y, f = seed(mem)
+        (root / "memories" / (y["slug"] + ".md")).write_text("stale", encoding="utf-8")
+        (root / "memories" / (f["slug"] + ".md")).unlink()
+        Memory(str(root))
+        assert "Shield is the yardstick" in self.view(root, y) and self.view(root, f) is not None
+
+    def test_an_up_to_date_view_is_not_rewritten(self, root, mem):
+        seed(mem)
+        before = {p: p.stat().st_mtime_ns for p in (root / "memories").iterdir()}
+        Memory(str(root))
+        assert {p: p.stat().st_mtime_ns for p in (root / "memories").iterdir()} == before
+
+    def test_retiring_removes_the_view_and_superseding_keeps_the_chains(self, root, mem):
+        p, y, f = seed(mem)
+        mem.retire(f["memory"], reason="obsolete")
+        assert self.view(root, f) is None
+        n = write(mem, "Shield is still the yardstick", "Beat Shield per slot, and name the niche.",
+                  DESIGN + ["purpose=defensive", "kind=principle"], supersedes=[y["memory"]], seen=[p["memory"], y["memory"]])
+        assert n["slug"] == y["slug"] and "name the niche" in self.view(root, n)
+
+
 class TestMerging:
     def test_a_merge_supersedes_its_sources_and_names_the_failure(self, mem):
         p = write(mem, "Creating a spell", "steps", DESIGN + ["kind=procedure"])

@@ -353,7 +353,6 @@ public:
         out.key = next->record(id).key;
         out.slug = next->record(id).slug;
         out.version = next->version();
-        refresh_view(*next, id, w.text);
         if (!generalises.empty()) write_report(*next, w.session);  // a new generalisation waits in its session's report
         return out;
     }
@@ -477,7 +476,6 @@ public:
         r.add("reason", std::move(reason));
         r.add("author", std::move(author));
         const auto next = append_locked(std::move(r));
-        m_store.remove_view(snap->record(ms[0]).slug);
         out.ok = true;
         out.version = next->version();
         out.message = "retired";
@@ -687,8 +685,35 @@ private:
     // ── replay and publication ────────────────────────────────────────────
 
     void publish(std::shared_ptr<const snapshot> s) {
-        std::lock_guard<std::mutex> g(m_publish);
-        m_current = std::move(s);
+        std::shared_ptr<const snapshot> before;
+        {
+            std::lock_guard<std::mutex> g(m_publish);
+            before = std::exchange(m_current, s);
+        }
+        sync_views(before.get(), *s);
+    }
+
+    /// Keeps memories/<slug>.md in step with the index (03 §3.3). Every change to the index is
+    /// published here — a write, a link, an unlink, a promotion, an accepted proposal, or rows
+    /// another process appended — so this is the one place views follow it: a head whose tags
+    /// changed, or which just became a head, is rewritten; a chain left with no head loses its view.
+    /// Snapshots share a memory's tag set until it changes, so "changed" is a pointer comparison.
+    /// With no `before` (opening the store) every head is checked, and the store writes a view only
+    /// when its content differs, so an up-to-date repository sees no churn. Called under the lock.
+    void sync_views(const snapshot* before, const snapshot& after) {
+        std::unordered_set<std::string> head_slugs;
+        for (std::size_t i = 0; i < after.size(); ++i)
+            if (after.is_head(memory_id(static_cast<std::uint32_t>(i)))) head_slugs.insert(after.record(memory_id(static_cast<std::uint32_t>(i))).slug);
+        for (std::size_t i = 0; i < after.size(); ++i) {
+            const memory_id m(static_cast<std::uint32_t>(i));
+            const bool known = before != nullptr && i < before->size();
+            if (after.is_head(m)) {
+                if (!known || !before->is_head(m) || &before->tags_of(m) != &after.tags_of(m))
+                    if (const auto text = text_of(after, m)) refresh_view(after, m, *text);
+            } else if (!known || before->is_head(m)) {
+                if (!head_slugs.contains(after.record(m).slug)) m_store.remove_view(after.record(m).slug);
+            }
+        }
     }
 
     /// Rows in topological order, ties by row id (03 §5): the same set of

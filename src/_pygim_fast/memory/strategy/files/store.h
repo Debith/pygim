@@ -237,7 +237,10 @@ public:
         out += "\n---\n";
         out.append(text);
         if (out.back() != '\n') out.push_back('\n');
-        write_atomically(m_root / "memories" / (m.slug + ".md"), out);
+        const fs::path p = m_root / "memories" / (m.slug + ".md");
+        std::error_code ec;
+        if (fs::is_regular_file(p, ec) && read_file(p) == out) return;  // unchanged: no rewrite, no churn in git
+        write_atomically(p, out);
     }
 
     /// A session's lessons-learnt report (overview §4.11): a view regenerated from the audit log,
