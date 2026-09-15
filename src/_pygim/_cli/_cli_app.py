@@ -9,6 +9,7 @@ from subprocess import Popen, DEVNULL
 import sys
 import shutil
 import functools
+from typing import Optional
 from pathlib import Path
 from dataclasses import dataclass
 from importlib import import_module
@@ -93,19 +94,8 @@ class GimmicksCliApp:
         except (FileNotFoundError, _docs_serve.ServeError) as exc:
             raise click.ClickException(str(exc)) from exc
 
-    def memory_init(self, *, root: str) -> None:
-        """Create a memory repository at *root* with the base vocabulary."""
-        from pygim.memory import Memory
-
-        try:
-            Memory.init(root)
-        except RuntimeError as exc:
-            raise click.ClickException(str(exc)) from exc
-        m = Memory(root)
-        click.echo(f"created {m.root} at v{m.version} — add a pack under taxonomy/, or start with the base")
-
-    def memory_mcp(self, *, root: str) -> None:
-        """Serve the repository at *root* over MCP on stdio."""
+    def memory_mcp(self, *, root: Optional[str]) -> None:
+        """Serve the project's store over MCP on stdio; the server starts even without one."""
         from _pygim._mcp import memory as server
         from pygim.memory import VocabularyError
 
@@ -114,33 +104,94 @@ class GimmicksCliApp:
         except (RuntimeError, VocabularyError) as exc:
             raise click.ClickException(str(exc)) from exc
 
-    def memory_ingest(self, *, corpus: str, root: str) -> None:
-        """Ingest a hand-written corpus file into the repository at *root*."""
+    @staticmethod
+    def _store(root: Optional[str]) -> str:
+        """The store for this project, or a ClickException that says how to make one."""
+        from _pygim._mcp import _stores
+
+        found = _stores.find(root)
+        if found is None or not found.exists:
+            raise click.ClickException(_stores.guidance())
+        return str(found.root)
+
+    def memory_setup(self, *, kind: Optional[str], name: Optional[str], path: Optional[str], source: Optional[str],
+                     register: bool) -> None:
+        """Find or create the project's store, point the clone at it, and register the server."""
+        from _pygim._mcp import _stores
+
+        cwd = Path.cwd()
+        try:
+            if kind == "user":
+                root = _stores.setup_user(cwd, name, Path(source) if source else None)
+                how = "a user-level store"
+            elif kind == "local":
+                root = _stores.setup_local(cwd, Path(source) if source else None)
+                how = "the project's own .memory"
+            elif kind == "branch":
+                root = _stores.setup_branch(cwd, Path(path) if path else None, Path(source) if source else None)
+                how = f"the `{_stores.BRANCH}` branch"
+            else:
+                found = _stores.find(cwd=cwd)
+                if found is None or not found.exists:
+                    raise click.ClickException("no store yet — choose where it lives: `oo memory setup --user` "
+                                               "(your user data directory) or `oo memory setup --branch` "
+                                               "(an orphan branch shared through git)")
+                root, how = found.root, found.how
+        except RuntimeError as exc:
+            raise click.ClickException(str(exc)) from exc
+        click.echo(f"store: {root} ({how})")
+        if _stores.git(["config", "--get", _stores.GIT_KEY], cwd):
+            click.echo(f"every worktree of this clone finds it through `git config {_stores.GIT_KEY}`")
+        local = Path(cwd) / ".mcp.json"
+        if local.is_file() and _stores.SERVER in local.read_text(encoding="utf-8"):
+            click.echo(f"note: {local} also defines `{_stores.SERVER}`; a project-scoped entry overrides the user one")
+        if register:
+            r = _stores.register()
+            click.echo(r.message)
+            if not r.ran and not r.message.startswith(f"`{_stores.SERVER}` is already"):
+                click.echo("  " + " ".join(r.command))
+
+    def memory_ingest(self, *, corpus: str, root: Optional[str]) -> None:
+        """Ingest a hand-written corpus file into the project's store."""
         from pygim.memory import Memory
 
-        result = Memory(root).ingest(corpus)
+        result = Memory(self._store(root)).ingest(corpus)
         click.echo(f"{result['added']} added, {result['superseded']} superseded, {result['unchanged']} unchanged")
         for line in result["refused"]:
             click.echo(f"  refused {line}")
         if result["refused"]:
             raise click.exceptions.Exit(1)
 
-    def memory_accept(self, *, memory: str, reason: str, root: str) -> None:
-        """Accept a generalisation in the repository at *root*."""
+    def memory_accept(self, *, memory: Optional[str], pack: Optional[str], reason: str, replace: bool,
+                      root: Optional[str]) -> None:
+        """Accept a generalisation (*memory*) or a drafted vocabulary pack (*pack*) in the project's store."""
         from pygim.memory import Memory
 
-        result = Memory(root).accept(memory, reason=reason)
+        if (memory is None) == (pack is None):
+            raise click.UsageError("accept one thing: a generalisation as MEMORY, or a vocabulary draft with --pack")
+        if pack is not None:
+            from _pygim._mcp import _packs
+
+            done = _packs.accept(Path(self._store(root)), Path(pack).resolve(), replace=replace)
+            if not done["ok"]:
+                raise click.ClickException(done["errors"])
+            click.echo(f"accepted pack `{done['pack']}`: {len(done['dimensions'])} dimension(s), {done['values']} value(s)"
+                       + (f"; {len(done['inventory'])} document(s) added to the inventory" if done["inventory"] else ""))
+            click.echo("a running MCP server picks it up at its next call")
+            return
+        result = Memory(self._store(root)).accept(memory, reason=reason)
         if not result["ok"]:
             raise click.ClickException(f"{result['refused']}: {result['message']}"
                                        + "".join(f"\n  {fact}" for fact in result["facts"]))
         click.echo(f"accepted {memory} — its instances fold from the next read (report: {result['report']})")
 
-    def memory_status(self, *, root: str) -> None:
+    def memory_status(self, *, root: Optional[str]) -> None:
         """Print where the repository at *root* stands."""
         from pygim.memory import Memory
 
-        info = Memory(root).session()
-        click.echo(f"{root}: v{info['version']}, {info['memories']} memories, vocabulary {info['taxonomy'][:12]}")
+        store = self._store(root)
+        info = Memory(store).session()
+        click.echo(f"{store}: v{info['version']}, {info['memories']} memories, vocabulary {info['taxonomy'][:12]}")
         for r in info["reviews"]:
             click.echo(f"  review ({r['kind']}): {r['text']}")
         for p in info["proposals"]:

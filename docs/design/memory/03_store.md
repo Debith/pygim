@@ -1,7 +1,7 @@
 # Problem-Space Memory — Technical Specification
 
 **Section 03: Store**
-Status: draft · Owner: Debith · Last updated: 2026-09-11
+Status: draft · Owner: Debith · Last updated: 2026-09-15
 
 What is written down, in what form, and how it survives the three things that happen to a
 memory repository in real use: a process dying mid-commit, two sessions writing at once, and
@@ -364,12 +364,24 @@ runs, would be another derived store over the same rows, built on the persistenc
 
 ## 9. Open decisions
 
-### 9.1 Where the repository lives (11)
+### 9.1 Where the repository lives — settled
 
-| Option | Concretely | For | Against |
+Anywhere, and found the same way from every worktree. A project may keep its store in three
+places, and every command and the MCP server find it in one order: an explicit `--root`;
+`$PYGIM_MEMORY_ROOT`; `git config pygim.memory`; a `.memory` directory above the working
+directory.
+
+| Where | Concretely | For | Against |
 |---|---|---|---|
-| **Inside the project it serves** (drafted) | `pygim/.memory/`, `D-D-2024/.memory/` | memories travel and branch with the code they are about; one clone, one review | a project shared with people who do not use the memory carries a folder they did not ask for |
-| A repository of its own | `~/memory/dnd/`, its own git remote | memory spanning several projects has one home | two clones to keep in step; a memory about a branch of the code is not on that branch |
+| **An orphan `memory` branch** | a worktree of its own beside the project, `pygim-memory/`, named by `git config pygim.memory` | shared through the project's own remote; independent of code branches, so every worktree on any branch sees one memory; still reviewed in diffs | a second branch to push and pull |
+| **A user-level directory** | `~/.local/share/pygim/memory/pygim/` (the platform's user data directory) | nothing in the project's git at all | stays on one machine unless copied |
+| Inside the project | `pygim/.memory/`, committed | memories branch with the code they are about | only the branch that carries it has a memory — a project with several worktrees on several branches has several, or none |
+
+`git config` is what makes a store global to a project: git keeps it in the clone's shared
+configuration, so one `oo memory setup` points every worktree at the same store. The server is
+registered once, at user scope and without a root, and finds each project's store from the
+directory the host starts it in. A consequence for sources (02 §5.2): a store outside the checkout
+cannot hold paths relative to itself, so an inventory path is relative to the project's root.
 
 ### 9.2 Whether head views are committed (11)
 

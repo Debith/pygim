@@ -1,0 +1,11 @@
+---
+memory: 8ab468e037e43cc05978fdd8c5b1d291
+title: "A PathSet does not walk the filesystem; a path's glob does"
+origin: written
+tags: ["domain=pygim","component=pathlike","artifact=api","task=explain","kind=reference","concern=public_api","language=python"]
+---
+`PathSet(d)` stores `d` itself — one member, no walk. Enumeration lives on a path: `pygim.path(d).pathset()` gives the direct children, `pathset("**/*")` everything beneath, files and folders alike, as one set over the path's table; `rglob(pattern)` gives a list. Narrowing is filters over that set — `ext()`, `name()`, `absolute()`, combined with `&` into a lazy Query — and filters read the table, never the filesystem.
+
+Consequence: there is no files-only or folders-only filter. The walk inside `pathset("**/*")` knows each entry's kind and discards it, so "folders only" costs one `is_dir()` per path; `oo clean-up` does exactly that.
+
+History: an earlier `PathSet()` rooted at the working directory offered `.files(suffix=...)` and `.dirs(name=...)` (last used by the CLI in 2d62ce2, 2025-05-17). The C++ port the next day (2b6c8f1) kept only the paths it was given; the old definition is not in this repository's history. Checked by running both on a scratch tree, 2026-09-15.

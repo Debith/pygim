@@ -1,0 +1,11 @@
+---
+memory: 6e2bcbd36bb316b5ef94b2307022d57c
+title: "After every push: watch CI until it is green"
+origin: written
+tags: ["domain=pygim","component=build","artifact=test","task=evaluate","kind=procedure","concern=portability"]
+---
+Required by the repository guidelines (.github/copilot-instructions.md §3) since 2026-07-07: work is not done until the pushed branch's GitHub Actions run is green. Local tests miss the matrix of three operating systems and Python 3.9–3.14.
+1. Find the run for the pushed branch with the `gh` CLI (installed and authenticated as Debith) rather than raw API calls.
+2. Poll every 3–4 minutes: a run takes about 4–6 minutes plus queueing, and macOS jobs finish last. Without a token the API allows 60 requests an hour per address; back off using the exempt /rate_limit endpoint.
+3. On a failure, read `gh run view --log-failed`. Without a token raw logs are refused (403), but the Windows install step turns error lines into annotations, readable at /check-runs/<job id>/annotations.
+4. Known platform differences to suspect first: Apple Clang lacks std::jthread; older Pythons differ on __set_name__ and implicit Optional; on Windows the SDK's sqltypes.h needs <windows.h> first, so every ODBC include goes through persistence/odbc_headers.h.

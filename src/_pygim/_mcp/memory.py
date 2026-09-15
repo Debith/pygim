@@ -12,12 +12,18 @@ is the overview's §4.5.
 """
 from __future__ import annotations
 
+import datetime
 import json
+import os
 import sys
+from pathlib import Path
 from typing import Any, Callable, Dict, IO, List, Optional
+
+from . import _packs, _stores
 
 PROTOCOL_VERSION = "2025-06-18"
 SERVER_NAME = "pygim-memory"
+STANDING_TOKENS = 2000  # how much preference text the startup instructions may carry
 
 INSTRUCTIONS = """\
 A problem-space memory: knowledge is found by the kind of problem being solved,
@@ -40,6 +46,10 @@ not by similarity to the prompt.
    `generalises` naming them, and record `lessons`. Nothing is retired, and a
    generalisation folds its instances only after the user accepts it themselves
    with `oo memory accept` — there is no tool for that, on purpose.
+6. A project with no vocabulary pack of its own starts with the `prepare-vocabulary`
+   prompt (the user accepts the draft with `oo memory accept --pack`), then
+   `seed-memories`. If a tool says there is no store, tell the user to run
+   `oo memory setup` in the project.
 """
 
 CONSOLIDATE = """\
@@ -69,6 +79,89 @@ Consolidate what this session has written into memory so far.
    accept it for them.
 """
 
+PACK_SHAPE = """\
+pack: {domain}
+entry: {{brief: ..., when: ..., when_not: ..., example: ...}}       # the domain itself: domain={domain}
+dimensions:
+  <dimension>:
+    role: hard            # hard: filters by default. soft: only orders
+    weight: 1.0
+    entry: {{brief: ..., full: ..., when: ..., when_not: ..., example: ...}}
+    values:
+      <value>:
+        entry: {{brief: ..., when: ..., when_not: ..., example: ...}}
+        source: {{doc: <id from cite>, line: 12, lines: 1, passage: <digest from cite>}}
+extends:                  # this domain's values for the base dimensions
+  artifact:
+    <value>: {{entry: {{...}}, source: {{...}}}}
+  task:
+    <value>: {{entry: {{...}}}}
+  tier:
+    <value>: {{entry: {{...}}}}"""
+
+PREPARE_VOCABULARY = """\
+Prepare the vocabulary for the `{domain}` domain: a pack drafted from this project's own
+documents, which becomes the vocabulary only when the user accepts it.
+
+The base vocabulary (domain, artifact, task, kind, tier) ships with every store. A pack adds
+this domain's values to artifact, task and tier, and dimensions of its own. Every memory will be
+found through these tags, so the vocabulary is the first thing a project needs.
+
+1. Call `session` (it gives the store's `root` and the `project` root) and `vocabulary`.
+2. Inventory the sources. The project's documents are the only guaranteed input: the README,
+   design documents, guides, and the names the source tree itself uses — directories, modules,
+   manifests. List them. Anything you compute from them, such as a term count, is derived, not a source.
+3. Find the questions. A dimension is one question with a closed list of answers, independent of
+   the others. Make one hard only when knowledge under one answer should never surface while
+   working under another, as a subsystem's should not; everything else is soft. Look first for
+   closed lists the sources already label — directory names, manifest kinds, document types:
+   they cost nothing and classify reliably.
+4. Name every value in the project's ubiquitous language. Count how the sources name each
+   concept and use their word; never coin one. The dimension and the value together should read
+   as a term the project uses. Give each value a locator with `cite`, and list the values nothing
+   cites rather than inventing a source.
+5. Write a codebook entry for every dimension and value: brief, full (dimensions), when,
+   when_not, example. An artifact value names what a thing is, never how it is used — given
+   only the thing, two readers should agree on it.
+6. Reconcile every list you derived against the sources' complete list: what is in both, what
+   the sources have that you left out, and what you have that the sources do not. Never present
+   a derived list alone.
+7. Probe coverage: take one real item for every artifact value and try to tag it. Note what
+   cannot be tagged — that is where the vocabulary is thin.
+8. Draft into the store, under `taxonomy/studies/{today}-{domain}/`:
+   - `proposal/pack-{domain}.yaml`, in this shape:
+{pack_shape}
+   - `proposal/inventory.yaml`: one entry per cited document, from `cite`'s `inventory` —
+     `<id>:` then `kind`, `path` (relative to the project root) and `version`.
+   - `report.md`: the sources, each dimension and why it exists, the counts that chose each name,
+     the uncited values, the reconciliation, the coverage probe, and your open questions.
+9. Call `check_pack` on the proposal and fix every error it names, by file and line.
+10. Tell the user where the report is, and that the pack becomes the vocabulary only when they
+    run `oo memory accept --pack <path to the proposal>`. Do not copy it into taxonomy/ yourself.
+"""
+
+SEED_MEMORIES = """\
+Seed this project's memory with what is already known, so the first working session does not
+start from nothing.
+
+1. Call `session` and `vocabulary`. If no pack names this project's domain yet, stop and suggest
+   the `prepare-vocabulary` prompt first: a memory tagged from the base vocabulary alone is hard
+   to find again.
+2. Find durable knowledge in the project's documents and history: decisions and their reasons,
+   conventions the code follows, how recurring tasks are done (adding a module, releasing,
+   testing), known pitfalls. Skip what a document already states plainly — sources are cited,
+   not copied. A memory earns its place by saying what a reader would otherwise rediscover.
+3. For each one, `read` its space first, then decide: nothing covers it, so `remember`;
+   something says less or says it wrong, so `remember` superseding it; something already says
+   exactly this, so `learn`. Answer every hard dimension, and `cite` the passage it rests on.
+4. Write how a recurring task is done as a procedure (kind=procedure, one per artifact and
+   task), a choice and its reason as a decision, and a rule of thumb as a principle only when
+   several cases show it.
+5. Write concretely — the case and where it came from. Leave patterns for a later `consolidate`.
+6. Record `lessons`: what you seeded, what you left out and why, and the gaps — knowledge the
+   vocabulary could not tag. Tell the user the report's path.
+"""
+
 PROMPTS: List[Dict[str, Any]] = [
     {
         "name": "consolidate",
@@ -76,8 +169,35 @@ PROMPTS: List[Dict[str, Any]] = [
                        "any pattern several memories share. Nothing is retired.",
         "arguments": [],
     },
+    {
+        "name": "prepare-vocabulary",
+        "description": "Draft this project's vocabulary pack from its own documents, with a study report, "
+                       "for the user to accept with `oo memory accept --pack`.",
+        "arguments": [{"name": "domain", "description": "The domain's name, which is the pack's name "
+                                                        "(default: the project directory's name).", "required": False}],
+    },
+    {
+        "name": "seed-memories",
+        "description": "Record what the project's documents and history already know — decisions, conventions, "
+                       "procedures — as the store's first memories.",
+        "arguments": [],
+    },
 ]
-_PROMPT_TEXT = {"consolidate": CONSOLIDATE}
+
+
+def _domain_of(arguments: Dict[str, Any], server: "MemoryServer") -> str:
+    given = str(arguments.get("domain") or "").strip()
+    name = given or _stores.project_name(server._cwd)
+    return "".join(c if c.isalnum() else "_" for c in name.lower()).strip("_") or "project"
+
+
+_PROMPT_TEXT: Dict[str, Callable[[Dict[str, Any], "MemoryServer"], str]] = {
+    "consolidate": lambda args, server: CONSOLIDATE,
+    "prepare-vocabulary": lambda args, server: PREPARE_VOCABULARY.format(
+        domain=_domain_of(args, server), today=datetime.date.today().isoformat(),
+        pack_shape="\n".join("       " + line for line in PACK_SHAPE.format(domain=_domain_of(args, server)).split("\n"))),
+    "seed-memories": lambda args, server: SEED_MEMORIES,
+}
 
 _REF = {"type": "string", "description": "A memory: #n from a read or show, or at least 8 characters of its key."}
 _TAGS = {"type": "array", "items": {"type": "string"}, "description": "Qualified tags, dimension=value, from the vocabulary."}
@@ -199,18 +319,51 @@ TOOLS: List[Dict[str, Any]] = [
                        "adding it to a pack file under taxonomy/; the asking memories are then linked on the next start.",
         "inputSchema": _schema({}),
     },
+    {
+        "name": "cite",
+        "description": "A locator into one of this project's documents: the passage digest a vocabulary value or a "
+                       "memory carries, the document's inventory entry, and the passage's text. Paths are relative "
+                       "to the project root.",
+        "inputSchema": _schema({
+            "path": {"type": "string", "description": "The document, relative to the project root."},
+            "line": {"type": "integer", "minimum": 1},
+            "lines": {"type": "integer", "minimum": 1, "description": "How many lines the passage spans (default 1)."},
+        }, ["path", "line"]),
+    },
+    {
+        "name": "check_pack",
+        "description": "Loads a drafted pack beside the store's vocabulary in a scratch copy and reports every error "
+                       "by file and line, or what the pack adds. Nothing live changes; the user accepts a pack.",
+        "inputSchema": _schema({"path": {"type": "string",
+                                         "description": "The proposal, relative to the store root or the project root."}},
+                               ["path"]),
+    },
 ]
 
 
-class MemoryServer:
-    """Answers MCP messages for one repository. `handle` takes one decoded
-    message and returns the response to write, or None for a notification."""
+class NoStore(RuntimeError):
+    """The project has no memory store yet; the message says how to make one."""
 
-    def __init__(self, memory: Any) -> None:
-        self.memory = memory
+
+class MemoryServer:
+    """Answers MCP messages for one project's store. `handle` takes one decoded
+    message and returns the response to write, or None for a notification.
+
+    The store is found lazily (see `_stores.find`), so the server starts in a project
+    that has none and answers with setup guidance until one exists. It reopens the
+    store when a vocabulary file under taxonomy/ changes, so an accepted pack is live
+    at the next call without restarting the server."""
+
+    def __init__(self, memory: Any = None, *, root: Optional[str] = None, cwd: Optional[Path] = None) -> None:
+        self._memory = memory
+        self._root = root
+        self._cwd = Path(cwd or os.getcwd())
+        self._stamp = self._taxonomy_stamp() if memory is not None else None
         self.session: Optional[int] = None
         self.turn = 0
         self._calls: Dict[str, Callable[[Dict[str, Any]], Any]] = {
+            "cite": lambda a: _packs.cite(_stores.project_root(self._cwd), a["path"], int(a["line"]), int(a.get("lines", 1))),
+            "check_pack": lambda a: _packs.check(Path(self.memory.root), self._store_path(a["path"])),
             "session": self._session,
             "vocabulary": lambda a: self.memory.vocabulary(),
             "read": lambda a: self.memory.read(a["hard"], a.get("soft", []), max=a.get("max", 8),
@@ -229,6 +382,67 @@ class MemoryServer:
             "proposals": lambda a: self.memory.proposals(),
         }
 
+    # ── the store ───────────────────────────────────────────────────────────
+
+    @property
+    def memory(self) -> Any:
+        from pygim.memory import Memory
+
+        if self._memory is None:
+            found = _stores.find(self._root, self._cwd)
+            if found is None or not found.exists:
+                raise NoStore(_stores.guidance(self._cwd))
+            self._memory = Memory(str(found.root))
+            self._stamp = self._taxonomy_stamp()
+        elif self._taxonomy_stamp() != self._stamp:
+            self._memory = Memory(self._memory.root)  # a broken pack raises here, by file and line, and nothing is swapped
+            self._stamp = self._taxonomy_stamp()
+        return self._memory
+
+    def _standing(self) -> str:
+        """The project's standing knowledge, appended to the instructions a host loads into every
+        session: each preference in full, and the title of each procedure — a read naming its
+        artifact and task places its steps first anyway. Nothing is recorded as read. Empty when
+        there is no store, or nothing of either kind; capped at STANDING_TOKENS, naming what it leaves out."""
+        try:
+            preferences = self.memory.heads(["kind=preference"])
+            procedures = self.memory.heads(["kind=procedure"])
+        except Exception:  # no store yet, or a vocabulary that will not load: the tools will say so
+            return ""
+        if not preferences and not procedures:
+            return ""
+        out = ["", "Standing knowledge from this project's memory, as of this server's start. It applies to",
+               "every task, so it is given here instead of waiting for a read."]
+        if preferences:
+            out += ["", "Preferences:"]
+            used, left_out = 0, []
+            for p in preferences:
+                if used + p["tokens"] > STANDING_TOKENS:
+                    left_out.append(f"{p['memory']} {p['title']}")
+                    continue
+                used += p["tokens"]
+                body = p["text"].strip().replace("\n", "\n  ")
+                out.append(f"- {p['memory']} {p['title']}: {body}")
+            if left_out:
+                out.append("- not shown, for length (`show` them): " + "; ".join(left_out))
+        if procedures:
+            out += ["", "Procedures — a read naming their artifact and task places the steps first:"]
+            for p in procedures:
+                where = " ".join(t for t in p["tags"] if t.startswith(("artifact=", "task=")))
+                out.append(f"- {p['memory']} {p['title']} — {where}")
+        return "\n".join(out) + "\n"
+
+    def _taxonomy_stamp(self) -> Any:
+        files = sorted(Path(self._memory.root, "taxonomy").glob("*.yaml"))
+        return tuple((f.name, f.stat().st_mtime_ns, f.stat().st_size) for f in files)
+
+    def _store_path(self, path: str) -> Path:
+        p = Path(path).expanduser()
+        if p.is_absolute():
+            return p
+        in_store = Path(self.memory.root) / p
+        return in_store if in_store.exists() else _stores.project_root(self._cwd) / p
+
     # ── tools ───────────────────────────────────────────────────────────────
 
     def _session_no(self) -> int:
@@ -239,6 +453,8 @@ class MemoryServer:
     def _session(self, _: Dict[str, Any]) -> Any:
         info = self.memory.session()
         self.session = int(info["session"])
+        info["root"] = self.memory.root
+        info["project"] = str(_stores.project_root(self._cwd))
         return info
 
     def _remember(self, a: Dict[str, Any]) -> Any:
@@ -261,7 +477,7 @@ class MemoryServer:
                 "protocolVersion": requested,
                 "capabilities": {"tools": {"listChanged": False}, "prompts": {"listChanged": False}},
                 "serverInfo": {"name": SERVER_NAME, "version": _version()},
-                "instructions": INSTRUCTIONS,
+                "instructions": INSTRUCTIONS + self._standing(),
             })
         if method == "ping":
             return _result(mid, {})
@@ -273,11 +489,13 @@ class MemoryServer:
         if method == "prompts/list":
             return _result(mid, {"prompts": PROMPTS})
         if method == "prompts/get":
-            name = (msg.get("params") or {}).get("name", "")
-            text = _PROMPT_TEXT.get(name)
-            if text is None:
+            params = msg.get("params") or {}
+            name = params.get("name", "")
+            render = _PROMPT_TEXT.get(name)
+            if render is None:
                 return {"jsonrpc": "2.0", "id": mid, "error": {"code": -32602, "message": f"unknown prompt: {name}"}}
             meta = next(p for p in PROMPTS if p["name"] == name)
+            text = render(params.get("arguments") or {}, self)
             return _result(mid, {"description": meta["description"],
                                  "messages": [{"role": "user", "content": {"type": "text", "text": text}}]})
         return {"jsonrpc": "2.0", "id": mid, "error": {"code": -32601, "message": f"method not found: {method}"}}
@@ -291,6 +509,8 @@ class MemoryServer:
             return _text(f"unknown tool: {name}", error=True)
         try:
             result = fn(arguments)
+        except NoStore as exc:
+            return _text(f"{name}: {exc}", error=True)
         except KeyError as exc:
             return _text(f"{name}: missing argument {exc.args[0]!r}", error=True)
         except Exception as exc:  # the extension's messages already name file and line
@@ -328,15 +548,18 @@ def _write(stdout: IO[str], msg: Dict[str, Any]) -> None:
 def _version() -> str:
     try:
         from importlib.metadata import version
-        return version("pygim")
+        return version("python-gimmicks")
     except Exception:
         return "0"
 
 
-def run(root: str, stdin: Optional[IO[str]] = None, stdout: Optional[IO[str]] = None) -> None:
-    """Serves the repository at *root* over stdio until stdin closes."""
-    from pygim.memory import Memory
-
-    memory = Memory(root)
-    print(f"{SERVER_NAME}: serving {memory.root} at v{memory.version}", file=sys.stderr)
-    MemoryServer(memory).serve(stdin or sys.stdin, stdout or sys.stdout)
+def run(root: Optional[str] = None, stdin: Optional[IO[str]] = None, stdout: Optional[IO[str]] = None) -> None:
+    """Serves this project's store over stdio until stdin closes. With no *root*, the store is found
+    from the working directory the host started the server in; with none at all the server still
+    starts, and answers with how to create one."""
+    found = _stores.find(root)
+    if found and found.exists:
+        print(f"{SERVER_NAME}: serving {found.root} (from {found.how})", file=sys.stderr)
+    else:
+        print(f"{SERVER_NAME}: {_stores.guidance()}", file=sys.stderr)
+    MemoryServer(root=root).serve(stdin or sys.stdin, stdout or sys.stdout)

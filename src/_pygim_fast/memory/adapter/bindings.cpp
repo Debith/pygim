@@ -62,6 +62,9 @@ operation returns a plain dict, and a refused write is a result with
         .def("lessons", &Memory::lessons, py::arg("session"), py::arg("text"), py::kw_only(), py::arg("author") = "agent",
              "Records what a consolidation learnt and publishes it in reviews/session-<n>.md, beside the\n"
              "generalisations waiting for acceptance, the cases left, and the proposals raised.")
+        .def("heads", &Memory::heads, py::arg("tags"),
+             "Every head carrying any of `tags`, without recording a read — standing knowledge such as\n"
+             "kind=preference, handed to every session without touching usage counters.")
         .def("review", &Memory::review, py::arg("session"),
              "What one session wrote, in order, with what already generalises each memory — where a\n"
              "consolidation starts.")

@@ -85,9 +85,7 @@ written:
 
 .. code-block:: bash
 
-    $ oo docs serve --dir docs/design --host 127.0.0.1
-
-``/`` falls back to the first of ``site/``, ``docs/``,
+    $ oo docs serve --dir docs/design --host 127.0.0.1 ``/`` falls back to the first of ``site/``, ``docs/``,
 ``build/html/`` or ``docs/_build/html/`` that has an ``index.html`` (override
 with ``--index``). It binds all interfaces by default so the page is reachable
 via the WSL IP; set ``PYGIM_HOST`` or pass ``--host 127.0.0.1`` for

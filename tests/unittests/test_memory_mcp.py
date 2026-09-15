@@ -38,6 +38,25 @@ class TestProtocol:
         assert resp["result"]["capabilities"] == {"tools": {"listChanged": False}, "prompts": {"listChanged": False}}
         assert "read" in resp["result"]["instructions"]
 
+    def test_standing_knowledge_reaches_every_session_without_a_read(self, tmp_path):
+        root = tmp_path / "standing"
+        Memory.init(str(root))
+        m = Memory(str(root))
+        pref = m.remember(title="Prefer templates", text="Template it,\neven with one use.",
+                          tags=["domain=any", "artifact=any", "task=design", "kind=preference"])
+        m.remember(title="Releasing", text="1 tag\n2 push", tags=["domain=any", "artifact=any", "task=design", "kind=procedure"],
+                   seen=[pref["memory"]])
+        receipts = len(m.receipts())
+        text = MemoryServer(Memory(str(root))).handle(
+            {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}})["result"]["instructions"]
+        assert f"- {pref['memory']} Prefer templates: Template it,\n  even with one use." in text
+        assert "Releasing — artifact=any task=design" in text
+        assert len(Memory(str(root)).receipts()) == receipts                       # nothing recorded as read
+
+    def test_a_store_with_nothing_standing_adds_nothing(self, server):
+        text = server.handle({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}})["result"]["instructions"]
+        assert "Standing knowledge" not in text
+
     def test_notifications_are_never_answered(self, server):
         assert server.handle({"jsonrpc": "2.0", "method": "notifications/initialized"}) is None
 
@@ -51,7 +70,7 @@ class TestProtocol:
 
     def test_consolidate_is_offered_as_a_prompt(self, server):
         prompts = server.handle({"jsonrpc": "2.0", "id": 4, "method": "prompts/list"})["result"]["prompts"]
-        assert [p["name"] for p in prompts] == ["consolidate"]
+        assert [p["name"] for p in prompts] == ["consolidate", "prepare-vocabulary", "seed-memories"]
         got = server.handle({"jsonrpc": "2.0", "id": 5, "method": "prompts/get", "params": {"name": "consolidate"}})["result"]
         text = got["messages"][0]["content"]["text"]
         assert got["messages"][0]["role"] == "user" and "`review`" in text and "`generalises`" in text

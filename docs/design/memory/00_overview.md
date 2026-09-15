@@ -1,7 +1,7 @@
 # Problem-Space Memory — Technical Specification
 
 **Section 00: Overview**
-Status: draft · Owner: Debith · Last updated: 2026-09-13
+Status: draft · Owner: Debith · Last updated: 2026-09-15
 
 This series specifies a memory system for AI agents in which retrieval is driven by the
 *kind of problem being solved* rather than by semantic similarity to the prompt. It is
@@ -795,7 +795,7 @@ does not require the ones after it.
 - **What "admitted" records** — one usage record per candidate, or a count in the receipt (04 §7.1).
 - **Typed memory-to-memory edges beyond `supersedes` and `generalises`**, with one-hop expansion — drafted as not in v1 (04 §7.2).
 - **What a later case that contradicts a generalisation should trigger** (07). The agent supersedes the generalisation with a narrower one, as with any correction; whether the service should also list, at the next close, generalisations whose space gained a head since they were written.
-- **Where the repository lives, and whether head views are committed** (03 §9.1, §9.2).
+- **Whether head views are committed** (03 §9.2). Where the repository lives is settled: an orphan `memory` branch, a user-level directory, or the project itself, found in one order from every worktree (03 §9.1).
 - **Where agents beside the service run** when they arrive: in-process as services (09) or as separate clients over the same adapter (10).
 - **Frame format** produced by the transformer for cross-process transports: JSON first, binary later (08).
 - **Container teardown order** for singletons that own threads (09, 10).

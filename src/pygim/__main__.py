@@ -93,22 +93,35 @@ def memory():
     """Problem-space memory: retrieval by the kind of problem being solved."""
 
 
-_ROOT = click.option("--root", default=".memory", show_default=True, type=click.Path(file_okay=False),
-                     help="The memory repository.")
+_ROOT = click.option("--root", default=None, type=click.Path(file_okay=False),
+                     help="The memory store. Default: $PYGIM_MEMORY_ROOT, then `git config pygim.memory` "
+                          "(shared by every worktree), then a .memory above the working directory.")
 
 
-@memory.command("init")
-@_ROOT
-def memory_init(root):
-    """Create a repository with the base vocabulary."""
-    GimmicksCliApp().memory_init(root=root)
+@memory.command("setup")
+@click.option("--user", "kind", flag_value="user", help="Create the store in your user data directory.")
+@click.option("--branch", "kind", flag_value="branch",
+              help="Keep the store on an orphan `memory` branch, checked out as a worktree of its own.")
+@click.option("--local", "kind", flag_value="local",
+              help="Keep the store in the project as .memory, committed with the code on this branch.")
+@click.option("--name", default=None, help="--user: the store's name (default: the project directory's name).")
+@click.option("--path", "path", default=None, type=click.Path(file_okay=False),
+              help="--branch: where to check the branch out (default: beside the main worktree).")
+@click.option("--from", "source", default=None, type=click.Path(exists=True, file_okay=False),
+              help="Start the new store as a copy of an existing one, such as a project's .memory.")
+@click.option("--no-register", is_flag=True, help="Do not register the MCP server with Claude Code.")
+def memory_setup(kind, name, path, source, no_register):
+    """Set this project and machine up to use a memory store: find or create the store, point every
+    worktree of the clone at it, and register the MCP server with Claude Code at user scope.
+    Run it again on another machine to join a project whose store already exists."""
+    GimmicksCliApp().memory_setup(kind=kind, name=name, path=path, source=source, register=not no_register)
 
 
 @memory.command("mcp")
 @_ROOT
 def memory_mcp(root):
-    """Serve the repository to an agent over MCP (stdio). Register it with
-    `claude mcp add memory -- oo memory mcp --root <absolute path>`."""
+    """Serve the project's store to an agent over MCP (stdio). With no --root it is found from the
+    directory the host starts it in, so one registration serves every project and worktree."""
     GimmicksCliApp().memory_mcp(root=root)
 
 
@@ -121,13 +134,17 @@ def memory_ingest(corpus, root):
 
 
 @memory.command("accept")
-@click.argument("memory_ref", metavar="MEMORY")
-@click.option("--reason", default="", help="Why the pattern holds; kept in the audit log.")
+@click.argument("memory_ref", metavar="[MEMORY]", required=False)
+@click.option("--pack", "pack", default=None, type=click.Path(exists=True, dir_okay=False),
+              help="Accept a drafted vocabulary pack instead: check it, make it live, add its cited documents.")
+@click.option("--reason", default="", help="MEMORY: why the pattern holds; kept in the audit log.")
+@click.option("--replace", is_flag=True, help="--pack: replace a pack of the same name that is already live.")
 @_ROOT
-def memory_accept(memory_ref, reason, root):
-    """Accept a generalisation: from the next read its instances fold under it.
-    A person runs this after reading reviews/session-<n>.md — the agent has no tool for it."""
-    GimmicksCliApp().memory_accept(memory=memory_ref, reason=reason, root=root)
+def memory_accept(memory_ref, pack, reason, replace, root):
+    """Accept what the agent drafted, after reading it: a generalisation (MEMORY, from
+    reviews/session-<n>.md), whose instances then fold under it; or a vocabulary pack (--pack, from
+    its study report), which then becomes the vocabulary. A person runs this — the agent has no tool for it."""
+    GimmicksCliApp().memory_accept(memory=memory_ref, pack=pack, reason=reason, replace=replace, root=root)
 
 
 @memory.command("status")
