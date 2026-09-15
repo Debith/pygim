@@ -280,6 +280,27 @@ def _ensure_arrow_symlinks(libdir):
             pass
 
 
+def _pin_arrow_abi(requirements, pyarrow_version):
+    """*requirements* with pyarrow pinned to the release the extensions link.
+
+    The Arrow-linked extensions load Arrow's shared libraries by a soname that
+    encodes pyarrow's major and minor version (``libarrow.so.2300`` is pyarrow
+    23.0.x), so no other pyarrow release can satisfy them. A range such as
+    ``pyarrow>=15`` would let pip install another one, and every Arrow-linked
+    extension would then fail to import.
+    """
+    import re
+
+    def is_pyarrow(requirement):
+        return re.split(r"[\s\[;<>=!~]", requirement.strip(), maxsplit=1)[0].lower() == "pyarrow"
+
+    major, minor = pyarrow_version.split(".")[:2]
+    pin = f"pyarrow=={major}.{minor}.*"
+    if not any(is_pyarrow(r) for r in requirements):
+        return [*requirements, pin]
+    return [pin if is_pyarrow(r) else r for r in requirements]
+
+
 def _apply_arrow(kw):
     # pyarrow (declared in [build-system] requires) bundles Arrow C++ headers
     # and shared libraries — works cross-platform without any system packages.
@@ -490,7 +511,9 @@ cfg["package_dir"] = {
 }
 cfg["ext_modules"] = ext_modules
 cfg["packages"] = find_namespace_packages(where="src")
-cfg["install_requires"] = cfg.pop("dependencies")
+import pyarrow as _pa  # importable: every Arrow-linked extension required it above
+
+cfg["install_requires"] = _pin_arrow_abi(pyproject["tool"]["pygim"]["build"]["dependencies"], _pa.__version__)
 
 # Map PEP 621 scripts to setuptools entry_points
 scripts = cfg.pop("scripts", None)

@@ -8,13 +8,13 @@ Python Gimmicks (pygim)
     :target: https://readthedocs.org/projects/pygim
     :alt: Documentation Status
 
-.. |downloads| image:: http://img.shields.io/pypi/dm/pygim.png
+.. |downloads| image:: https://img.shields.io/pypi/dm/pygim.svg
     :alt: PyPI Package monthly downloads
-    :target: https://pypi.python.org/pypi/pygim
+    :target: https://pypi.org/project/pygim/
 
 .. |wheel| image:: https://img.shields.io/pypi/format/pygim.svg
     :alt: PyPI Wheel
-    :target: https://pypi.python.org/pypi/pygim
+    :target: https://pypi.org/project/pygim/
 
 .. |pyversions| image:: https://img.shields.io/pypi/pyversions/pygim.svg
 

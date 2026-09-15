@@ -1,0 +1,276 @@
+name: Release
+
+# Nothing is released from main. A release runs on its branch,
+# release/<version>: it builds wheels for each supported platform and Python,
+# runs the test suite against the installed wheels, and only then publishes to
+# PyPI, tags v<version> and creates the GitHub release. See docs/releasing.md.
+#
+#   gh workflow run release.yml -f bump=minor          # cut release/<next minor> from main, release it
+#   gh workflow run release.yml -f version=0.2.0rc1    # cut release/0.2.0rc1 from main, release it
+#   git push origin origin/main:refs/heads/release/0.2.0   # cut a branch yourself; the push releases it
+#   gh workflow run release.yml --ref release/0.2.0    # run a branch's release again
+#
+# A pull request that changes the release machinery runs it as a dry run: the
+# same builds and tests, nothing published.
+
+on:
+  push:
+    branches: ["release/**"]
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: Run on main - the part of the latest release to increment (ignored when a version is given)
+        type: choice
+        options: [patch, minor, major]
+        default: patch
+      version:
+        description: Run on main - an explicit PEP 440 version, e.g. 0.2.0 or 0.2.0rc1 (overrides bump)
+        type: string
+        default: ""
+  pull_request:
+    paths:
+      - .github/workflows/release.yml
+      - .github/scripts/**
+
+# One release at a time; dry runs of a pull request replace each other.
+concurrency:
+  group: ${{ github.event_name == 'pull_request' && format('release-dry-run-{0}', github.ref) || 'release' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+jobs:
+  prepare:
+    name: Resolve version
+    runs-on: ubuntu-latest
+    outputs:
+      action: ${{ steps.version.outputs.action }}  # cut, release or dry-run
+      version: ${{ steps.version.outputs.version }}
+      prerelease: ${{ steps.version.outputs.prerelease }}
+      sha: ${{ steps.version.outputs.sha }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # the tags
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Decide the action and version
+        id: version
+        env:
+          BUMP: ${{ inputs.bump }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          python -m pip install --quiet packaging
+          python .github/scripts/release_version.py
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Refuse a release branch that already exists
+        if: steps.version.outputs.action == 'cut'
+        env:
+          BRANCH: release/${{ steps.version.outputs.version }}
+        run: |
+          if git ls-remote --exit-code --heads origin "$BRANCH" >/dev/null; then
+            echo "::error title=Cannot release::$BRANCH already exists; run the workflow on it to release it again."
+            exit 1
+          fi
+
+      - name: Summary
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          ACTION: ${{ steps.version.outputs.action }}
+        run: |
+          {
+            echo "### pygim $VERSION"
+            echo "Commit: \`$(git rev-parse HEAD)\`"
+            case "$ACTION" in
+              cut) echo "Cuts release/$VERSION from main and starts its release there." ;;
+              release) echo "Publishes to PyPI once every wheel passes its tests." ;;
+              dry-run) echo "Dry run: builds and tests only, nothing is published." ;;
+            esac
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  cut:
+    name: Cut release branch
+    needs: prepare
+    if: needs.prepare.outputs.action == 'cut'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write  # creates the branch
+      actions: write   # starts the release run on it
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      BRANCH: release/${{ needs.prepare.outputs.version }}
+      SHA: ${{ needs.prepare.outputs.sha }}
+    steps:
+      - name: Create the release branch
+        run: gh api "repos/$GH_REPO/git/refs" -f ref="refs/heads/$BRANCH" -f sha="$SHA"
+
+      - name: Start the release on it
+        # A branch created with GITHUB_TOKEN triggers no push event, but a
+        # workflow_dispatch it sends does start a run.
+        run: |
+          gh workflow run release.yml --ref "$BRANCH"
+          echo "Started the release on \`$BRANCH\`: https://github.com/$GH_REPO/actions/workflows/release.yml" >> "$GITHUB_STEP_SUMMARY"
+
+  wheels:
+    name: Wheel ${{ matrix.python }} (${{ matrix.os }})
+    needs: prepare
+    if: needs.prepare.outputs.action != 'cut'
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        python: [cp39, cp310, cp311, cp312, cp313, cp314]
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.sha }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install cibuildwheel
+        run: python -m pip install "cibuildwheel==4.2.*"
+
+      - name: Build and test wheel
+        run: python -m cibuildwheel --output-dir wheelhouse
+        env:
+          # No tag exists yet, so setuptools_scm is told the version.
+          SETUPTOOLS_SCM_PRETEND_VERSION: ${{ needs.prepare.outputs.version }}
+          CIBW_ENVIRONMENT_PASS_LINUX: SETUPTOOLS_SCM_PRETEND_VERSION
+          MACOSX_DEPLOYMENT_TARGET: "13.3"  # std::format / std::to_chars need 13.3
+
+          CIBW_BUILD: ${{ matrix.python }}-*
+          CIBW_SKIP: "*-musllinux_*"
+          CIBW_ARCHS_LINUX: x86_64
+          CIBW_ARCHS_MACOS: arm64
+          CIBW_ARCHS_WINDOWS: AMD64
+
+          # Every extension is mandatory, so the builders need unixODBC.
+          # Windows gets ODBC from the SDK.
+          CIBW_BEFORE_ALL_LINUX: dnf install -y unixODBC-devel
+          CIBW_BEFORE_ALL_MACOS: bash .github/scripts/build_unixodbc_macos.sh
+
+          # Arrow's libraries belong to the pyarrow the wheel pins
+          # (setup.py::_pin_arrow_abi) and are loaded from it: pygim imports
+          # pyarrow before any extension. Vendoring them would load a second
+          # Arrow beside pyarrow's.
+          CIBW_REPAIR_WHEEL_COMMAND_LINUX: >-
+            auditwheel repair --exclude 'libarrow*.so*' --exclude 'libparquet*.so*' -w {dest_dir} {wheel}
+          CIBW_REPAIR_WHEEL_COMMAND_MACOS: >-
+            delocate-wheel --require-archs {delocate_archs} --exclude libarrow --exclude libparquet
+            --ignore-missing-dependencies -w {dest_dir} -v {wheel}
+          CIBW_REPAIR_WHEEL_COMMAND_WINDOWS: >-
+            delvewheel repair --exclude "arrow.dll;parquet.dll" -w {dest_dir} -v {wheel}
+
+          # The whole suite, against the repaired wheel installed in a clean
+          # environment: what PyPI will serve is what gets tested.
+          CIBW_TEST_EXTRAS: test
+          # pyodbc's macOS wheel (a test dependency) loads Homebrew's unixODBC,
+          # as pyodbc documents; the pygim wheel carries its own.
+          CIBW_BEFORE_TEST_MACOS: brew install unixodbc
+          CIBW_TEST_COMMAND: pytest {project}/tests -p no:cacheprovider
+
+      - name: Upload wheel
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist-wheel-${{ matrix.os }}-${{ matrix.python }}
+          path: wheelhouse/*.whl
+          if-no-files-found: error
+
+  sdist:
+    name: Source distribution
+    needs: prepare
+    if: needs.prepare.outputs.action != 'cut'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.sha }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install unixODBC (setup.py checks for sql.h before anything else)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y unixodbc-dev
+
+      - name: Build sdist
+        env:
+          SETUPTOOLS_SCM_PRETEND_VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          python -m pip install build twine
+          python -m build --sdist --outdir dist
+          python -m twine check --strict dist/*
+
+      - name: Upload sdist
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist-sdist
+          path: dist/*.tar.gz
+          if-no-files-found: error
+
+  publish:
+    name: Publish to PyPI
+    needs: [prepare, wheels, sdist]
+    if: needs.prepare.outputs.action == 'release'
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/project/pygim/${{ needs.prepare.outputs.version }}/
+    permissions:
+      id-token: write  # PyPI trusted publishing: no API token is stored
+    steps:
+      - name: Download distributions
+        uses: actions/download-artifact@v4
+        with:
+          pattern: dist-*
+          path: dist
+          merge-multiple: true
+
+      - name: Publish
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist
+
+  github-release:
+    name: Tag and GitHub release
+    needs: [prepare, publish]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      VERSION: ${{ needs.prepare.outputs.version }}
+      SHA: ${{ needs.prepare.outputs.sha }}
+    steps:
+      - name: Download distributions
+        uses: actions/download-artifact@v4
+        with:
+          pattern: dist-*
+          path: dist
+          merge-multiple: true
+
+      - name: Tag and create the GitHub release
+        env:
+          PRERELEASE: ${{ needs.prepare.outputs.prerelease }}
+        run: |
+          flags=()
+          if [ "$PRERELEASE" = true ]; then flags+=(--prerelease); fi
+          gh release create "v$VERSION" dist/* --target "$SHA" --title "v$VERSION" --generate-notes "${flags[@]}"
