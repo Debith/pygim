@@ -76,7 +76,9 @@ Two prompts do the first work. In Claude Code they appear under `/` as
 ## During work, and after
 
 The agent reads before it works and writes what outlives the task; the server's instructions teach
-it that loop. When you want the session's lessons drawn together, run
+it that loop. Those instructions also carry the project's *standing knowledge* — every memory of
+kind `preference` in full, and the title of every `procedure` — so it reaches each session without
+a read, as of the server's start. When you want the session's lessons drawn together, run
 `/mcp__pygim-memory__consolidate`. The agent writes each pattern it finds as a generalisation and
 records its lessons learnt in `reviews/session-<n>.md` in the store: what it generalised, what it
 left as cases and why, and the gaps it saw. Read it, then accept each pattern you agree with:

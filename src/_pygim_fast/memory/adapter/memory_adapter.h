@@ -271,6 +271,40 @@ public:
         return op_dict(out);
     }
 
+    /// Every head carrying any of `tags`, in id order, without recording a read — no receipt, no
+    /// usage — so a server can hand each session its standing knowledge (preferences, procedures)
+    /// without inflating a counter. A tag the vocabulary lacks is skipped: that store has none of it.
+    py::list heads(const std::vector<std::string>& tags) {
+        {
+            py::gil_scoped_release nogil;
+            m_service->refresh();
+        }
+        const auto snap = m_service->current();
+        std::vector<std::uint32_t> ids;
+        for (const auto& name : tags)
+            if (const auto t = snap->tax().tag(name))
+                for (const auto m : snap->carrying(*t).members())
+                    if (snap->is_head(memory_id(m))) ids.push_back(m);
+        std::sort(ids.begin(), ids.end());
+        ids.erase(std::unique(ids.begin(), ids.end()), ids.end());
+        py::list out;
+        for (const auto id : ids) {
+            const memory_id m(id);
+            const auto& r = snap->record(m);
+            py::dict d;
+            d["memory"] = ref(m);
+            d["key"] = r.key.hex().substr(0, 12);
+            d["title"] = r.title;
+            d["text"] = m_service->text_of(*snap, m).value_or("");
+            d["tokens"] = r.tokens;
+            std::vector<std::string> names;
+            for (const auto t : snap->tags_of(m).members()) names.push_back(snap->tax().info(tag_id(t)).qualified);
+            d["tags"] = names;
+            out.append(d);
+        }
+        return out;
+    }
+
     /// A human accepts a generalisation; its instances fold from the next read. The report of
     /// the session that wrote it is refreshed, and its path returned as `report`.
     py::dict accept(const std::string& memory, std::string reason, std::string author) {

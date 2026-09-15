@@ -23,6 +23,7 @@ from . import _packs, _stores
 
 PROTOCOL_VERSION = "2025-06-18"
 SERVER_NAME = "pygim-memory"
+STANDING_TOKENS = 2000  # how much preference text the startup instructions may carry
 
 INSTRUCTIONS = """\
 A problem-space memory: knowledge is found by the kind of problem being solved,
@@ -398,6 +399,39 @@ class MemoryServer:
             self._stamp = self._taxonomy_stamp()
         return self._memory
 
+    def _standing(self) -> str:
+        """The project's standing knowledge, appended to the instructions a host loads into every
+        session: each preference in full, and the title of each procedure — a read naming its
+        artifact and task places its steps first anyway. Nothing is recorded as read. Empty when
+        there is no store, or nothing of either kind; capped at STANDING_TOKENS, naming what it leaves out."""
+        try:
+            preferences = self.memory.heads(["kind=preference"])
+            procedures = self.memory.heads(["kind=procedure"])
+        except Exception:  # no store yet, or a vocabulary that will not load: the tools will say so
+            return ""
+        if not preferences and not procedures:
+            return ""
+        out = ["", "Standing knowledge from this project's memory, as of this server's start. It applies to",
+               "every task, so it is given here instead of waiting for a read."]
+        if preferences:
+            out += ["", "Preferences:"]
+            used, left_out = 0, []
+            for p in preferences:
+                if used + p["tokens"] > STANDING_TOKENS:
+                    left_out.append(f"{p['memory']} {p['title']}")
+                    continue
+                used += p["tokens"]
+                body = p["text"].strip().replace("\n", "\n  ")
+                out.append(f"- {p['memory']} {p['title']}: {body}")
+            if left_out:
+                out.append("- not shown, for length (`show` them): " + "; ".join(left_out))
+        if procedures:
+            out += ["", "Procedures — a read naming their artifact and task places the steps first:"]
+            for p in procedures:
+                where = " ".join(t for t in p["tags"] if t.startswith(("artifact=", "task=")))
+                out.append(f"- {p['memory']} {p['title']} — {where}")
+        return "\n".join(out) + "\n"
+
     def _taxonomy_stamp(self) -> Any:
         files = sorted(Path(self._memory.root, "taxonomy").glob("*.yaml"))
         return tuple((f.name, f.stat().st_mtime_ns, f.stat().st_size) for f in files)
@@ -443,7 +477,7 @@ class MemoryServer:
                 "protocolVersion": requested,
                 "capabilities": {"tools": {"listChanged": False}, "prompts": {"listChanged": False}},
                 "serverInfo": {"name": SERVER_NAME, "version": _version()},
-                "instructions": INSTRUCTIONS,
+                "instructions": INSTRUCTIONS + self._standing(),
             })
         if method == "ping":
             return _result(mid, {})

@@ -1,0 +1,9 @@
+---
+memory: 929406e361eb34bb8e4acffc59a8801e
+title: "Prefer the template, even with one use case"
+origin: written
+tags: ["domain=pygim","component=any","artifact=extension","artifact=api","artifact=service","artifact=store","task=design","task=implement","kind=preference","language=cpp"]
+---
+pygim is a generic library for learning advanced C++ approaches, so a component that could be a template on its id, key, word or policy type becomes one, even when only one instantiation exists today — with a default alias for the common case (`using id_set = basic_id_set<>`) — and its laws are proven over more than one instantiation. Debith (2026-09-08), when templating `id_set` was argued against for lack of a second user: "As this is super generic library and meant for learning how to use advanced approaches, I prefer template approach, even it is not needed to more than one use case. That is general approach for pygim library."
+
+Generality is a feature here, not something a second consumer has to earn. There is no "second consumer rule" in pygim; one was once invented in docs/design/mapping_toolkit.md and removed. Still say when a template buys nothing concrete — then build it anyway.
