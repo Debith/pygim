@@ -46,7 +46,7 @@ not by similarity to the prompt.
    generalisation folds its instances only after the user accepts it themselves
    with `oo memory accept` — there is no tool for that, on purpose.
 6. A project with no vocabulary pack of its own starts with the `prepare-vocabulary`
-   prompt (the user accepts the draft with `oo memory accept-pack`), then
+   prompt (the user accepts the draft with `oo memory accept --pack`), then
    `seed-memories`. If a tool says there is no store, tell the user to run
    `oo memory setup` in the project.
 """
@@ -136,7 +136,7 @@ found through these tags, so the vocabulary is the first thing a project needs.
      the uncited values, the reconciliation, the coverage probe, and your open questions.
 9. Call `check_pack` on the proposal and fix every error it names, by file and line.
 10. Tell the user where the report is, and that the pack becomes the vocabulary only when they
-    run `oo memory accept-pack <path to the proposal>`. Do not copy it into taxonomy/ yourself.
+    run `oo memory accept --pack <path to the proposal>`. Do not copy it into taxonomy/ yourself.
 """
 
 SEED_MEMORIES = """\
@@ -171,7 +171,7 @@ PROMPTS: List[Dict[str, Any]] = [
     {
         "name": "prepare-vocabulary",
         "description": "Draft this project's vocabulary pack from its own documents, with a study report, "
-                       "for the user to accept with `oo memory accept-pack`.",
+                       "for the user to accept with `oo memory accept --pack`.",
         "arguments": [{"name": "domain", "description": "The domain's name, which is the pack's name "
                                                         "(default: the project directory's name).", "required": False}],
     },

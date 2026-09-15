@@ -102,6 +102,8 @@ _ROOT = click.option("--root", default=None, type=click.Path(file_okay=False),
 @click.option("--user", "kind", flag_value="user", help="Create the store in your user data directory.")
 @click.option("--branch", "kind", flag_value="branch",
               help="Keep the store on an orphan `memory` branch, checked out as a worktree of its own.")
+@click.option("--local", "kind", flag_value="local",
+              help="Keep the store in the project as .memory, committed with the code on this branch.")
 @click.option("--name", default=None, help="--user: the store's name (default: the project directory's name).")
 @click.option("--path", "path", default=None, type=click.Path(file_okay=False),
               help="--branch: where to check the branch out (default: beside the main worktree).")
@@ -115,30 +117,12 @@ def memory_setup(kind, name, path, source, no_register):
     GimmicksCliApp().memory_setup(kind=kind, name=name, path=path, source=source, register=not no_register)
 
 
-@memory.command("init")
-@click.option("--root", default=".memory", show_default=True, type=click.Path(file_okay=False),
-              help="Where to create the store.")
-def memory_init(root):
-    """Create an empty store with the base vocabulary. `setup` does this for you."""
-    GimmicksCliApp().memory_init(root=root)
-
-
 @memory.command("mcp")
 @_ROOT
 def memory_mcp(root):
     """Serve the project's store to an agent over MCP (stdio). With no --root it is found from the
     directory the host starts it in, so one registration serves every project and worktree."""
     GimmicksCliApp().memory_mcp(root=root)
-
-
-@memory.command("accept-pack")
-@click.argument("proposal", type=click.Path(exists=True, dir_okay=False))
-@click.option("--replace", is_flag=True, help="Replace a pack of the same name that is already live.")
-@_ROOT
-def memory_accept_pack(proposal, replace, root):
-    """Accept a drafted vocabulary pack: check it, make it live, and add its cited documents to the
-    inventory. A person runs this after reading the study report — the agent only drafts."""
-    GimmicksCliApp().memory_accept_pack(proposal=proposal, replace=replace, root=root)
 
 
 @memory.command("ingest")
@@ -150,13 +134,17 @@ def memory_ingest(corpus, root):
 
 
 @memory.command("accept")
-@click.argument("memory_ref", metavar="MEMORY")
-@click.option("--reason", default="", help="Why the pattern holds; kept in the audit log.")
+@click.argument("memory_ref", metavar="[MEMORY]", required=False)
+@click.option("--pack", "pack", default=None, type=click.Path(exists=True, dir_okay=False),
+              help="Accept a drafted vocabulary pack instead: check it, make it live, add its cited documents.")
+@click.option("--reason", default="", help="MEMORY: why the pattern holds; kept in the audit log.")
+@click.option("--replace", is_flag=True, help="--pack: replace a pack of the same name that is already live.")
 @_ROOT
-def memory_accept(memory_ref, reason, root):
-    """Accept a generalisation: from the next read its instances fold under it.
-    A person runs this after reading reviews/session-<n>.md — the agent has no tool for it."""
-    GimmicksCliApp().memory_accept(memory=memory_ref, reason=reason, root=root)
+def memory_accept(memory_ref, pack, reason, replace, root):
+    """Accept what the agent drafted, after reading it: a generalisation (MEMORY, from
+    reviews/session-<n>.md), whose instances then fold under it; or a vocabulary pack (--pack, from
+    its study report), which then becomes the vocabulary. A person runs this — the agent has no tool for it."""
+    GimmicksCliApp().memory_accept(memory=memory_ref, pack=pack, reason=reason, replace=replace, root=root)
 
 
 @memory.command("status")

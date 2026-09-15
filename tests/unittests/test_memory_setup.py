@@ -130,6 +130,20 @@ class TestSetup:
         assert not (root / "local" / "clone").exists() or (root / "local" / "clone").read_text() != (old / "local" / "clone").read_text()
         assert sh("git", "status", "--porcelain", cwd=root) == ""                    # committed, local/ ignored
 
+    def test_a_local_store_is_the_project_s_own_and_leaves_git_config_alone(self, project, isolated):
+        root = _stores.setup_local(project)
+        assert root == project / ".memory" and _stores.is_store(root)
+        assert _stores.find(cwd=project).how.startswith(".memory")
+        assert _stores.git(["config", "--get", _stores.GIT_KEY], project) is None
+        assert _stores.find(cwd=isolated / "proj-feature") is None       # another branch's worktree has its own, or none
+
+    def test_one_command_per_job(self):
+        for gone in ("init", "accept-pack"):
+            out = CliRunner().invoke(cli_oo, ["memory", gone])
+            assert out.exit_code != 0 and "No such command" in out.output, gone
+        neither = CliRunner().invoke(cli_oo, ["memory", "accept"])
+        assert neither.exit_code != 0 and "accept one thing" in neither.output
+
     def test_outside_git_a_branch_store_is_refused_with_the_alternative(self, isolated):
         plain = isolated / "plain"
         plain.mkdir()
@@ -171,7 +185,7 @@ class TestANewProjectsVocabulary:
         got = server.handle({"jsonrpc": "2.0", "id": 1, "method": "prompts/get",
                              "params": {"name": "prepare-vocabulary", "arguments": {"domain": "Shop Front"}}})
         text = got["result"]["messages"][0]["content"]["text"]
-        assert "proposal/pack-shop_front.yaml" in text and "oo memory accept-pack" in text and "`check_pack`" in text
+        assert "proposal/pack-shop_front.yaml" in text and "oo memory accept --pack" in text and "`check_pack`" in text
         default = server.handle({"jsonrpc": "2.0", "id": 2, "method": "prompts/get", "params": {"name": "prepare-vocabulary"}})
         assert "pack-proj.yaml" in default["result"]["messages"][0]["content"]["text"]
         assert {p["name"] for p in PROMPTS} >= {"prepare-vocabulary", "seed-memories"}
@@ -206,11 +220,11 @@ class TestANewProjectsVocabulary:
         (draft.parent / "inventory.yaml").write_text("readme:\n  kind: text\n  path: README.md\n  version: abc\n", encoding="utf-8")
         checked = json.loads(server.call("check_pack", {"path": str(draft)})["content"][0]["text"])
         assert checked["ok"] and checked["dimensions"] == ["area"] and checked["values"] == 2
-        out = CliRunner().invoke(cli_oo, ["memory", "accept-pack", str(draft), "--root", str(store)])
+        out = CliRunner().invoke(cli_oo, ["memory", "accept", "--pack", str(draft), "--root", str(store)])
         assert out.exit_code == 0, out.output
         dims = [d["name"] for d in json.loads(server.call("vocabulary", {})["content"][0]["text"])["dimensions"]]
         assert "area" in dims
         assert "readme:" in (store / "sources" / "inventory.yaml").read_text(encoding="utf-8")
-        again = CliRunner().invoke(cli_oo, ["memory", "accept-pack", str(draft), "--root", str(store)])
+        again = CliRunner().invoke(cli_oo, ["memory", "accept", "--pack", str(draft), "--root", str(store)])
         assert again.exit_code != 0 and "--replace" in again.output
         assert _packs.accept(store, draft, replace=True)["ok"]

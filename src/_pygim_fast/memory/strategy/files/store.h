@@ -48,7 +48,7 @@ public:
 
     explicit store(const fs::path& root) : m_root(fs::absolute(root)), m_lock(m_root / "local" / "commit.lock") {
         if (!fs::exists(m_root / "taxonomy" / "base.yaml"))
-            throw std::runtime_error(m_root.string() + ": not a memory repository (no taxonomy/base.yaml) — run `oo memory init`");
+            throw std::runtime_error(m_root.string() + ": not a memory repository (no taxonomy/base.yaml) — run `oo memory setup` in the project");
         const auto id = m_root / "local" / "clone";
         if (fs::exists(id)) {
             m_clone = read_file(id);

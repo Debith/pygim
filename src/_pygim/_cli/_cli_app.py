@@ -94,17 +94,6 @@ class GimmicksCliApp:
         except (FileNotFoundError, _docs_serve.ServeError) as exc:
             raise click.ClickException(str(exc)) from exc
 
-    def memory_init(self, *, root: str) -> None:
-        """Create a memory repository at *root* with the base vocabulary."""
-        from pygim.memory import Memory
-
-        try:
-            Memory.init(root)
-        except RuntimeError as exc:
-            raise click.ClickException(str(exc)) from exc
-        m = Memory(root)
-        click.echo(f"created {m.root} at v{m.version} — add a pack under taxonomy/, or start with the base")
-
     def memory_mcp(self, *, root: Optional[str]) -> None:
         """Serve the project's store over MCP on stdio; the server starts even without one."""
         from _pygim._mcp import memory as server
@@ -135,6 +124,9 @@ class GimmicksCliApp:
             if kind == "user":
                 root = _stores.setup_user(cwd, name, Path(source) if source else None)
                 how = "a user-level store"
+            elif kind == "local":
+                root = _stores.setup_local(cwd, Path(source) if source else None)
+                how = "the project's own .memory"
             elif kind == "branch":
                 root = _stores.setup_branch(cwd, Path(path) if path else None, Path(source) if source else None)
                 how = f"the `{_stores.BRANCH}` branch"
@@ -159,18 +151,6 @@ class GimmicksCliApp:
             if not r.ran and not r.message.startswith(f"`{_stores.SERVER}` is already"):
                 click.echo("  " + " ".join(r.command))
 
-    def memory_accept_pack(self, *, proposal: str, replace: bool, root: Optional[str]) -> None:
-        """Check a drafted pack and make it live in the project's store."""
-        from _pygim._mcp import _packs
-
-        store = Path(self._store(root))
-        result = _packs.accept(store, Path(proposal).resolve(), replace=replace)
-        if not result["ok"]:
-            raise click.ClickException(result["errors"])
-        click.echo(f"accepted pack `{result['pack']}`: {len(result['dimensions'])} dimension(s), {result['values']} value(s)"
-                   + (f"; {len(result['inventory'])} document(s) added to the inventory" if result["inventory"] else ""))
-        click.echo("a running MCP server picks it up at its next call")
-
     def memory_ingest(self, *, corpus: str, root: Optional[str]) -> None:
         """Ingest a hand-written corpus file into the project's store."""
         from pygim.memory import Memory
@@ -182,10 +162,23 @@ class GimmicksCliApp:
         if result["refused"]:
             raise click.exceptions.Exit(1)
 
-    def memory_accept(self, *, memory: str, reason: str, root: Optional[str]) -> None:
-        """Accept a generalisation in the repository at *root*."""
+    def memory_accept(self, *, memory: Optional[str], pack: Optional[str], reason: str, replace: bool,
+                      root: Optional[str]) -> None:
+        """Accept a generalisation (*memory*) or a drafted vocabulary pack (*pack*) in the project's store."""
         from pygim.memory import Memory
 
+        if (memory is None) == (pack is None):
+            raise click.UsageError("accept one thing: a generalisation as MEMORY, or a vocabulary draft with --pack")
+        if pack is not None:
+            from _pygim._mcp import _packs
+
+            done = _packs.accept(Path(self._store(root)), Path(pack).resolve(), replace=replace)
+            if not done["ok"]:
+                raise click.ClickException(done["errors"])
+            click.echo(f"accepted pack `{done['pack']}`: {len(done['dimensions'])} dimension(s), {done['values']} value(s)"
+                       + (f"; {len(done['inventory'])} document(s) added to the inventory" if done["inventory"] else ""))
+            click.echo("a running MCP server picks it up at its next call")
+            return
         result = Memory(self._store(root)).accept(memory, reason=reason)
         if not result["ok"]:
             raise click.ClickException(f"{result['refused']}: {result['message']}"

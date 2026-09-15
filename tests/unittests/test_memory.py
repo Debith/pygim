@@ -97,7 +97,7 @@ class TestRepository:
         assert "local/" in (root / ".gitignore").read_text()
 
     def test_opening_a_plain_folder_says_how_to_start(self, tmp_path):
-        with pytest.raises(RuntimeError, match="oo memory init"):
+        with pytest.raises(RuntimeError, match="oo memory setup"):
             Memory(str(tmp_path))
 
     def test_init_twice_is_refused(self, root):

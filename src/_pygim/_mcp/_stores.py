@@ -95,7 +95,8 @@ def guidance(cwd: Optional[Path] = None) -> str:
     if where and not where.exists:
         return f"{where.root} (from {where.how}) is not a memory store yet — run `oo memory setup` in the project"
     return ("no memory store for this project — run `oo memory setup --user` (a store in your user directory) "
-            "or `oo memory setup --branch` (an orphan `memory` branch shared through git) in the project")
+            "or `oo memory setup --branch` (an orphan `memory` branch shared through git) in the project; "
+            "`--local` keeps one inside the project instead")
 
 
 # ── setup ─────────────────────────────────────────────────────────────────────
@@ -145,6 +146,16 @@ def setup_user(cwd: Path, name: Optional[str] = None, source: Optional[Path] = N
     if not is_store(root):
         create(root, source)
     point_git_at(root, cwd)
+    return root
+
+
+def setup_local(cwd: Path, source: Optional[Path] = None) -> Path:
+    """A store inside the project, as ``.memory`` at this worktree's top, committed with the code. Git
+    config is left alone: this store belongs to the branch that carries it, and other worktrees on
+    other branches find theirs, or none."""
+    root = project_root(cwd) / LOCAL
+    if not is_store(root):
+        create(root, source)
     return root
 
 

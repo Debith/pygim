@@ -12,6 +12,8 @@ After `pip install` of pygim, run one command inside the project:
 oo memory setup --branch      # the store lives on an orphan `memory` branch, shared through git
 # or
 oo memory setup --user        # the store lives in your user data directory, on this machine only
+# or
+oo memory setup --local       # the store lives in the project as .memory, committed with the code
 ```
 
 `setup` does whatever is missing:
@@ -19,9 +21,10 @@ oo memory setup --user        # the store lives in your user data directory, on 
 1. **Finds or creates the store.** `--branch` checks out an orphan `memory` branch as a worktree
    beside the project (`../<project>-memory`); it shares no history with the code. `--user` uses
    `~/.local/share/pygim/memory/<project>` on Linux, `~/Library/Application Support/...` on macOS,
-   `%LOCALAPPDATA%\...` on Windows. `--from .memory` starts the new store as a copy of an existing
-   one, with its history.
-2. **Points every worktree at it** with `git config pygim.memory <path>`. Git keeps that in the
+   `%LOCALAPPDATA%\...` on Windows. `--local` keeps `.memory` inside the project, on the branch
+   that carries it — simplest for a project with one checkout, but each branch then has its own.
+   `--from .memory` starts a new store as a copy of an existing one, with its history.
+2. **Points every worktree at it** with `git config pygim.memory <path>` (`--branch` and `--user`). Git keeps that in the
    clone's shared config, so all worktrees of the project, on any branch, use the same store.
 3. **Registers the MCP server with Claude Code** at user scope, once for every project. The server
    is registered without a store path: it finds each project's store from the directory Claude Code
@@ -63,7 +66,7 @@ Two prompts do the first work. In Claude Code they appear under `/` as
    Read the report, then make the vocabulary live:
 
    ```bash
-   oo memory accept-pack <store>/taxonomy/studies/<date>-<domain>/proposal/pack-<domain>.yaml
+   oo memory accept --pack <store>/taxonomy/studies/<date>-<domain>/proposal/pack-<domain>.yaml
    ```
 
    A running server picks it up at its next call.
@@ -89,13 +92,12 @@ pattern.
 
 | Command | What it does |
 |---|---|
-| `oo memory setup [--user \| --branch] [--from DIR]` | find or create the store, point the clone at it, register the server |
+| `oo memory setup [--branch \| --user \| --local] [--from DIR]` | find or create the store, point the clone at it, register the server |
 | `oo memory status` | which store, its version, reviews waiting, proposals |
 | `oo memory accept <key>` | accept a generalisation, so its cases fold |
-| `oo memory accept-pack <proposal>` | make a drafted vocabulary pack live |
+| `oo memory accept --pack <proposal>` | make a drafted vocabulary pack live |
 | `oo memory ingest <file>` | bring in hand-written memories |
 | `oo memory mcp` | the server itself; Claude Code runs this |
-| `oo memory init` | an empty store at a path; `setup` does this for you |
 
 ## When something is off
 
