@@ -196,7 +196,13 @@ class TestANewProjectsVocabulary:
         assert cited["text"] == "The basket keeps items for a week."
         assert cited["source"] == {"doc": "readme", "line": 4, "lines": 1, "passage": digest(cited["text"].encode("utf-8"))}
         assert cited["inventory"]["path"] == "README.md"
-        assert cited["inventory"]["version"] == digest((project / "README.md").read_bytes())
+        assert cited["inventory"]["version"] == digest((project / "README.md").read_bytes().replace(b"\r\n", b"\n"))
+
+    def test_windows_line_endings_cite_the_same_passage_and_version(self, project):
+        lf = MemoryServer(cwd=project).call("cite", {"path": "README.md", "line": 4})
+        (project / "README.md").write_bytes((project / "README.md").read_bytes().replace(b"\r\n", b"\n").replace(b"\n", b"\r\n"))
+        crlf = MemoryServer(cwd=project).call("cite", {"path": "README.md", "line": 4})
+        assert json.loads(crlf["content"][0]["text"]) == json.loads(lf["content"][0]["text"])
 
     def test_a_broken_draft_is_named_by_its_own_path(self, project):
         store = project / ".memory"
