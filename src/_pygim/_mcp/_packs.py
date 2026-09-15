@@ -109,7 +109,9 @@ def cite(project: Path, path: str, line: int, lines: int = 1) -> Dict[str, Any]:
         relative = file.relative_to(project.resolve())
     except ValueError:
         raise ValueError(f"{file} is outside the project {project} — cite the project's own documents") from None
-    content = file.read_bytes()
+    # \r\n is a line ending, never part of a line, as for hand-written memories (corpus.h): a checkout
+    # with Windows line endings must cite the same passage, and the same version, as one without.
+    content = file.read_bytes().replace(b"\r\n", b"\n")
     text = content.decode("utf-8").split("\n")
     if line < 1 or line + lines - 1 > len(text):
         raise ValueError(f"{relative} has {len(text)} lines; line {line} for {lines} is out of range")
