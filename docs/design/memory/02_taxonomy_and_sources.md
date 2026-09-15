@@ -1,7 +1,7 @@
 # Problem-Space Memory — Technical Specification
 
 **Section 02: Taxonomy and sources**
-Status: draft · Owner: Debith · Last updated: 2026-09-11
+Status: draft · Owner: Debith · Last updated: 2026-09-15
 
 How the vocabulary lives on disk, how it is loaded and checked, how it grows, how the
 vocabulary study's numbers are computed, and how sources are inventoried and cited. The
@@ -335,19 +335,20 @@ old one reported for review.
 # sources/inventory.yaml
 phb-2024-glossary:
   kind: text
-  path: ../D-D-2024/reference/rules/PHB 2024 - Rules Glossary - 5.5E
+  path: reference/rules/PHB 2024 - Rules Glossary - 5.5E
   version: b04c7d19e2a355f0c8e1d24b9a6f3170
   inventoried: 2026-09-10T08:12:44Z
 shardwake-corruption-magic:
   kind: markdown
-  path: ../D-D-2024/homebrew/corruption/WIP/corruption-magic.md
+  path: homebrew/corruption/WIP/corruption-magic.md
   version: c8e2a17b04d9f3e65a1c2b8d7e4f9012
   inventoried: 2026-09-10T15:02:03Z
 ```
 
-A path is kept as written — relative to the inventory file when the document sits beside
-the repository, as the rulebooks do here — and resolved through a `path_table` row (01, §6),
-so a hundred locators into one document share one path.
+A path is relative to the project's root, and resolved through a `path_table` row (01, §6),
+so a hundred locators into one document share one path. Not relative to the inventory file: a store
+may live outside the checkout — on its own branch, or in a user directory (03 §9.1) — and every
+worktree of the project must resolve the same document from the same path.
 
 ### 5.3 Resolving a locator
 

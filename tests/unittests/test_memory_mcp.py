@@ -51,7 +51,7 @@ class TestProtocol:
 
     def test_consolidate_is_offered_as_a_prompt(self, server):
         prompts = server.handle({"jsonrpc": "2.0", "id": 4, "method": "prompts/list"})["result"]["prompts"]
-        assert [p["name"] for p in prompts] == ["consolidate"]
+        assert [p["name"] for p in prompts] == ["consolidate", "prepare-vocabulary", "seed-memories"]
         got = server.handle({"jsonrpc": "2.0", "id": 5, "method": "prompts/get", "params": {"name": "consolidate"}})["result"]
         text = got["messages"][0]["content"]["text"]
         assert got["messages"][0]["role"] == "user" and "`review`" in text and "`generalises`" in text

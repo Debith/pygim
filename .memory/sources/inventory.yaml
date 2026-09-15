@@ -1,49 +1,49 @@
-# The documents pygim's vocabulary cites (02 §5.2). Paths are relative to this file.
+# The documents pygim's vocabulary cites (02 §5.2). Paths are relative to the project's root.
 copilot-instructions:
   kind: text
-  path: "../../.github/copilot-instructions.md"
+  path: ".github/copilot-instructions.md"
   version: e03678affbb0771177d3530a797d8738
 design-memory-00:
   kind: text
-  path: "../../docs/design/memory/00_overview.md"
+  path: "docs/design/memory/00_overview.md"
   version: 6403dbb554ee48fb4a3ce2a6e49fd475
 design-memory-02:
   kind: text
-  path: "../../docs/design/memory/02_taxonomy_and_sources.md"
+  path: "docs/design/memory/02_taxonomy_and_sources.md"
   version: 91b7f7154afa50a250c681dbd52c0af7
 design-memory-04:
   kind: text
-  path: "../../docs/design/memory/04_index_and_retrieval.md"
+  path: "docs/design/memory/04_index_and_retrieval.md"
   version: bc65bf160228812871a90950fc70ca49
 design-pathset-storage:
   kind: text
-  path: "../../docs/design/pathset_storage.md"
+  path: "docs/design/pathset_storage.md"
   version: 7f622c0f93f4a03b0720f432e8e9a02b
 ext-datagen:
   kind: text
-  path: "../../src/_pygim_fast/datagen/ext.datagen.toml"
+  path: "src/_pygim_fast/datagen/ext.datagen.toml"
   version: 13229dc4290f2e4ce9e2c8215499f709
 ext-each:
   kind: text
-  path: "../../src/_pygim_fast/each/ext.each.toml"
+  path: "src/_pygim_fast/each/ext.each.toml"
   version: b3ecd936761a4692316e22e98e031b37
 ext-fetch_benchmark:
   kind: text
-  path: "../../src/_pygim_fast/tools/ext.fetch_benchmark.toml"
+  path: "src/_pygim_fast/tools/ext.fetch_benchmark.toml"
   version: bbfa0b91481aef0c03e9ad3a1950fc89
 ext-memory:
   kind: text
-  path: "../../src/_pygim_fast/memory/ext.memory.toml"
+  path: "src/_pygim_fast/memory/ext.memory.toml"
   version: c8e25f7327ed5e548c053594ff631b63
 ext-pathlike:
   kind: text
-  path: "../../src/_pygim_fast/pathlike/ext.pathlike.toml"
+  path: "src/_pygim_fast/pathlike/ext.pathlike.toml"
   version: 387c3245d75381db829f378bfac9c2f0
 ext-persistence:
   kind: text
-  path: "../../src/_pygim_fast/persistence/ext.persistence.toml"
+  path: "src/_pygim_fast/persistence/ext.persistence.toml"
   version: 8ff246b9feca994370d001eea231e447
 ext-utils:
   kind: text
-  path: "../../src/_pygim_fast/utils/ext.utils.toml"
+  path: "src/_pygim_fast/utils/ext.utils.toml"
   version: 91f804f61393022853b5eecc029abae9
