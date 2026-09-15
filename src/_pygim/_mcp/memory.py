@@ -32,13 +32,17 @@ not by similarity to the prompt.
 1. Call `session` once, then `vocabulary`. Every tag is dimension=value from that
    list; each value's entry says when to use it and when not to.
 2. Before working, `read` the problem space: hard tags filter (every hard
-   dimension of the request), soft tags only order. Follow the procedure it
-   returns first, if any.
+   dimension of the request), soft tags only order, and `term` keeps only
+   memories that name the subject. Follow the procedure it returns first, if any.
+   When nothing fits, `coverage.not_cited` lists the documents none of the
+   candidates rests on — look there, rather than retrying other tags.
 3. When something outlives the task, decide against what you read: nothing
    covers it -> `remember` with supersedes empty; a memory covers it but says
    less or says it wrong -> `remember` with supersedes=[that memory]; a memory
    already says exactly this -> `learn` instead. Always pass the memories you
    read as `seen`. A concept with no tag goes in `proposals` — never force a tag.
+   When a memory you read helped, call `learn` on it: usefulness is only counted
+   when reported.
 4. A refusal is information: it names the facts (unread memories, the current
    head, the missing hard question). Act on them and try again.
 5. Consolidate only when the user asks (the `consolidate` prompt): `review` what
@@ -153,7 +157,11 @@ start from nothing.
    not copied. A memory earns its place by saying what a reader would otherwise rediscover.
 3. For each one, `read` its space first, then decide: nothing covers it, so `remember`;
    something says less or says it wrong, so `remember` superseding it; something already says
-   exactly this, so `learn`. Answer every hard dimension, and `cite` the passage it rests on.
+   exactly this, so `learn`. Pass `seed: true`: a store being seeded has nothing to have read,
+   so its writes skip the unread check. Answer every hard dimension, and put the `locator` that
+   `cite` returns for the passage it rests on in `cites`. A document's own cross-references ("see
+   also") are not yet followed by reads, so a memory that depends on another rule says so in its
+   text.
 4. Write how a recurring task is done as a procedure (kind=procedure, one per artifact and
    task), a choice and its reason as a decision, and a rule of thumb as a principle only when
    several cases show it.
@@ -225,12 +233,17 @@ TOOLS: List[Dict[str, Any]] = [
     {
         "name": "read",
         "description": "Retrieve the working context for a problem space. `hard`: tags a memory must match — at least "
-                       "one; several values of one dimension mean any of them. `soft`: tags that only order. Returns "
-                       "the procedure for the artifact and task first (follow its steps), then ranked memories, each "
-                       "with the tags that admitted and ranked it. Read before you write.",
+                       "one; several values of one dimension mean any of them; never `any` (name the value your work "
+                       "is: memories tagged `any` answer it too). `soft`: tags that only order. Returns the procedure "
+                       "for the artifact and task first (follow its steps), then ranked memories, each with the tags "
+                       "that admitted and ranked it; `skipped` counts the rest, `facets` counts the tags the candidates "
+                       "carry (a soft tag at 0 cannot match), and `coverage` names the documents they cite and the "
+                       "inventoried ones none cites. Read before you write.",
         "inputSchema": _schema({
             "hard": _TAGS,
             "soft": _TAGS,
+            "term": {"type": "string", "description": "Keep only candidates whose title or text contains this word — "
+                                                      "the subject tags cannot name, such as \"invisible\". A filter, never a score."},
             "max": {"type": "integer", "minimum": 1, "description": "Most memories to return (default 8)."},
             "budget": {"type": "integer", "minimum": 0, "description": "Token budget; 0 is unbounded."},
         }, ["hard"]),
@@ -252,7 +265,11 @@ TOOLS: List[Dict[str, Any]] = [
                             "description": "For a generalisation: the two or more heads whose shared pattern this states. "
                                            "They stay heads, count as read, and must be covered on every hard dimension."},
             "seen": _REFS,
-            "cites": {"type": "array", "items": {"type": "string"}, "description": "Source locators, e.g. phb-2024-spells:L4459."},
+            "cites": {"type": "array", "items": {"type": "string"},
+                      "description": "Source locators as `cite` returns them, e.g. phb-2024-spells:L4459 or phb-2024-ch1:L843-849."},
+            "seed": {"type": "boolean", "description": "Only when seeding a new store from existing documents (the "
+                                                       "seed-memories prompt): there is nothing to have read, so the unread "
+                                                       "check is skipped. Never for knowledge learned while working."},
             "proposals": {"type": "array", "items": _schema({
                 "concept": {"type": "string"},
                 "dimension": {"type": "string", "description": "The dimension it would be a value of; empty for a new dimension."},
@@ -280,12 +297,12 @@ TOOLS: List[Dict[str, Any]] = [
     },
     {
         "name": "link",
-        "description": "Add a tag to a memory, with a reason.",
+        "description": "Add a tag to a memory, with a reason. Returns the memory's tags as they now stand.",
         "inputSchema": _schema({"memory": _REF, "tag": {"type": "string"}, "reason": {"type": "string"}}, ["memory", "tag", "reason"]),
     },
     {
         "name": "unlink",
-        "description": "Remove a tag from a memory, with a reason.",
+        "description": "Remove a tag from a memory, with a reason. Returns the memory's tags as they now stand.",
         "inputSchema": _schema({"memory": _REF, "tag": {"type": "string"}, "reason": {"type": "string"}}, ["memory", "tag", "reason"]),
     },
     {
@@ -321,9 +338,9 @@ TOOLS: List[Dict[str, Any]] = [
     },
     {
         "name": "cite",
-        "description": "A locator into one of this project's documents: the passage digest a vocabulary value or a "
-                       "memory carries, the document's inventory entry, and the passage's text. Paths are relative "
-                       "to the project root.",
+        "description": "A locator into one of this project's documents: `locator` for a memory's `cites`, `source` for "
+                       "a vocabulary value, the document's inventory entry (under the id the inventory already gives "
+                       "it), and the passage's text. Paths are relative to the project root.",
         "inputSchema": _schema({
             "path": {"type": "string", "description": "The document, relative to the project root."},
             "line": {"type": "integer", "minimum": 1},
@@ -333,7 +350,9 @@ TOOLS: List[Dict[str, Any]] = [
     {
         "name": "check_pack",
         "description": "Loads a drafted pack beside the store's vocabulary in a scratch copy and reports every error "
-                       "by file and line, or what the pack adds. Nothing live changes; the user accepts a pack.",
+                       "by file and line, or what the pack adds, with `warnings` for locators that do not hold in their "
+                       "documents and `removed` for live values it drops, with the memories still carrying them — "
+                       "retag those before the user accepts. Nothing live changes; the user accepts a pack.",
         "inputSchema": _schema({"path": {"type": "string",
                                          "description": "The proposal, relative to the store root or the project root."}},
                                ["path"]),
@@ -359,15 +378,17 @@ class MemoryServer:
         self._root = root
         self._cwd = Path(cwd or os.getcwd())
         self._stamp = self._taxonomy_stamp() if memory is not None else None
+        self._vocabulary: Optional[str] = None  # the vocabulary version the agent last saw
         self.session: Optional[int] = None
         self.turn = 0
         self._calls: Dict[str, Callable[[Dict[str, Any]], Any]] = {
-            "cite": lambda a: _packs.cite(_stores.project_root(self._cwd), a["path"], int(a["line"]), int(a.get("lines", 1))),
-            "check_pack": lambda a: _packs.check(Path(self.memory.root), self._store_path(a["path"])),
+            "cite": lambda a: _packs.cite(_stores.project_root(self._cwd), a["path"], int(a["line"]), int(a.get("lines", 1)),
+                                          store=self._store_root()),
+            "check_pack": lambda a: _packs.check(Path(self.memory.root), self._store_path(a["path"]),
+                                                 project=_stores.project_root(self._cwd), memory=self.memory),
             "session": self._session,
             "vocabulary": lambda a: self.memory.vocabulary(),
-            "read": lambda a: self.memory.read(a["hard"], a.get("soft", []), max=a.get("max", 8),
-                                               budget=a.get("budget", 0), session=self._session_no()),
+            "read": self._read,
             "remember": self._remember,
             "learn": lambda a: self.memory.learn(a["memory"], tag=a.get("tag", ""), reason=a.get("reason", ""),
                                                  session=self._session_no()),
@@ -432,6 +453,12 @@ class MemoryServer:
                 out.append(f"- {p['memory']} {p['title']} — {where}")
         return "\n".join(out) + "\n"
 
+    def _store_root(self) -> Optional[Path]:
+        try:
+            return Path(self.memory.root)
+        except NoStore:  # a project can be cited before it has a store
+            return None
+
     def _taxonomy_stamp(self) -> Any:
         files = sorted(Path(self._memory.root, "taxonomy").glob("*.yaml"))
         return tuple((f.name, f.stat().st_mtime_ns, f.stat().st_size) for f in files)
@@ -457,12 +484,20 @@ class MemoryServer:
         info["project"] = str(_stores.project_root(self._cwd))
         return info
 
+    def _read(self, a: Dict[str, Any]) -> Any:
+        result = self.memory.read(a["hard"], a.get("soft", []), max=a.get("max", 8), budget=a.get("budget", 0),
+                                  term=a.get("term", ""), session=self._session_no())
+        if result.get("memories") or result.get("procedure"):
+            result["next"] = "When one of these helps, call learn with it; a read never counts as useful on its own."
+        return result
+
     def _remember(self, a: Dict[str, Any]) -> Any:
         return self.memory.remember(
             title=a["title"], text=a["text"], tags=a["tags"], reason=a.get("reason", ""),
             supersedes=a.get("supersedes", []), generalises=a.get("generalises", []), seen=a.get("seen", []),
             cites=a.get("cites", []),
-            proposals=a.get("proposals", []), session=self._session_no(), turn=self.turn, author="agent")
+            proposals=a.get("proposals", []), session=self._session_no(), turn=self.turn, author="agent",
+            origin="seed" if a.get("seed") else "written")
 
     # ── protocol ────────────────────────────────────────────────────────────
 
@@ -509,6 +544,7 @@ class MemoryServer:
             return _text(f"unknown tool: {name}", error=True)
         try:
             result = fn(arguments)
+            self._note_vocabulary(name, result)
         except NoStore as exc:
             return _text(f"{name}: {exc}", error=True)
         except KeyError as exc:
@@ -516,6 +552,20 @@ class MemoryServer:
         except Exception as exc:  # the extension's messages already name file and line
             return _text(f"{name}: {type(exc).__name__}: {exc}", error=True)
         return _text(json.dumps(result, ensure_ascii=False))
+
+    def _note_vocabulary(self, name: str, result: Any) -> None:
+        """Tells the agent, in the result of whichever call comes first, that the vocabulary changed
+        since it last saw it — an accepted pack is live without anyone polling `session`."""
+        if self._memory is None or name in ("cite",):
+            return
+        now = self._memory.taxonomy
+        if name in ("session", "vocabulary") or self._vocabulary is None:
+            self._vocabulary = now
+            return
+        if now != self._vocabulary and isinstance(result, dict):
+            result["vocabulary_changed"] = {"from": self._vocabulary, "to": now,
+                                            "next": "call vocabulary: values may have been added, renamed or removed"}
+            self._vocabulary = now
 
     def serve(self, stdin: IO[str], stdout: IO[str]) -> None:
         for line in stdin:

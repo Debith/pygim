@@ -156,6 +156,15 @@ service can only check form, so the rule is about form:
 | all five required | every value writes a paragraph | uniform | the paragraph for `tier=mid` restates the brief, and a restated brief teaches nothing |
 | brief only | — | cheap | the study's agreement numbers would be measuring guesswork |
 
+A drafted pack is checked before a person accepts it (`check_pack`, and again by `oo memory accept
+--pack`), and what the loader cannot see comes back beside what it can. Every locator the pack adds
+is resolved against its document, and a warning names each that does not hold: the document is not
+in the store's inventory or the draft's; it is not found; the lines there are not the cited
+passage; or the cited text also occurs on other lines. The last is the field report's case — a
+locator found by matching the text "Attack" took the Action entry's list item (`L61`), not the
+Attack Roll entry (`L131`), and nothing flagged it. They are warnings, not refusals: a repeated
+line can be the right one.
+
 A part that is empty, equal to the entry's own name, or equal to another part of the same
 entry is refused. Nothing else about a description is judged here; its adequacy is what the
 study measures (§4) and what the human reviews.
@@ -207,7 +216,11 @@ points outside the inventory inventories that document in the same commit (overv
 **Accepting a pack** is the same commit over a set: every `dimension_proposal` and
 `tag_proposal` the study produced, reviewed together, written into a new pack file at once.
 A value proposal may name a dimension that is itself only proposed; the set is accepted or
-edited as a whole, so nothing has to be accepted in the right order.
+edited as a whole, so nothing has to be accepted in the right order. **Replacing a live pack**
+(`--replace`) lists the values the new file drops, and is refused while any head still carries
+one, naming each memory: after the replacement it would carry a tag the vocabulary no longer has,
+and on a hard dimension no read could find it. Retag those memories first; §3.3 says why the
+service does not do it for you.
 
 ### 3.2 Rejecting, and what the agent is told
 
@@ -226,6 +239,11 @@ it still carry it, and ids never move. A retired value is left out of the vocabu
 to the agent; a write that uses it is refused with `retired, see <replacement>` when the
 retirement named one. Removing a value would mean rewriting every association that names it,
 which is an edit to history rather than a change to the vocabulary.
+
+A value can still disappear — a pack replaced, a file edited by hand. Replay then meets rows
+naming a tag it cannot resolve. Those rows are history: a review is raised only for a head that
+still carries the tag at the end of replay, one per memory and tag, so a value that was unlinked
+before it went raises nothing.
 
 ---
 
@@ -346,7 +364,10 @@ shardwake-corruption-magic:
 ```
 
 A path is relative to the project's root, and resolved through a `path_table` row (01, §6),
-so a hundred locators into one document share one path. Not relative to the inventory file: a store
+so a hundred locators into one document share one path. `cite` gives a document the id its
+inventory entry already has, found by path, and makes one from the path only for a document the
+inventory lacks — so a vocabulary value and a memory never name one document two ways. The locator
+a memory carries is `<id>:L<line>`, or `<id>:L<first>-<last>` for a passage of several lines. Not relative to the inventory file: a store
 may live outside the checkout — on its own branch, or in a user directory (03 §9.1) — and every
 worktree of the project must resolve the same document from the same path.
 

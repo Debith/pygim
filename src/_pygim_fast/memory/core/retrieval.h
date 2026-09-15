@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <optional>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "ids.h"
@@ -17,6 +18,7 @@ struct query {
     std::vector<std::string> soft;
     std::uint32_t max_memories = 8;
     std::uint32_t budget = 0;  // tokens; 0 means unbounded
+    std::string term;          // when set, only memories whose title or text contains it (ASCII case-insensitive)
 };
 
 /// The same read, resolved against one vocabulary.
@@ -25,6 +27,7 @@ struct resolved_query {
     std::vector<tag_id> soft;
     std::uint32_t max_memories = 8;
     std::uint32_t budget = 0;
+    std::optional<std::vector<std::uint32_t>> within;  // the term's matches among the candidates, when a term was given
 };
 
 /// One candidate, with everything its inclusion is explained by (G2).
@@ -49,8 +52,12 @@ struct context {
     std::vector<match> selected;
     std::vector<match> skipped;          // candidates ranked but not included
     std::vector<memory_id> procedure_evidence;  // candidates the procedure generalises, folded under it
+    std::vector<std::pair<tag_id, std::uint32_t>> facets;          // tags among the candidates, and how many carry each
+    std::vector<std::pair<std::string, std::uint32_t>> by_source;  // documents the candidates cite, and how many cite each
+    std::uint32_t uncited = 0;           // candidates citing nothing
     std::uint32_t corpus = 0;
-    std::uint32_t candidates = 0;
+    std::uint32_t candidates = 0;        // what the hard tags admit
+    std::optional<std::uint32_t> term_matched;  // of those, the ones a term kept
     std::uint32_t folded = 0;            // candidates listed under a generalisation instead of placed
     std::uint32_t tokens = 0;
     bool over_budget = false;

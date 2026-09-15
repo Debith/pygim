@@ -4,7 +4,8 @@ A pack drafted by the ``prepare-vocabulary`` prompt is a proposal until a person
 (overview §4.6). ``check`` loads a proposal beside the store's current vocabulary in a scratch
 store, so every error comes back by file and line without touching the real one; ``accept`` is
 the person's step that makes it live. ``cite`` turns a line of a project document into a locator
-— the passage digest a value carries, and the document's version for the inventory.
+— the passage digest a value carries, and the document's version for the inventory — under the id
+the store's inventory already gives that document, so a pack and a memory name it the same way.
 
 Citation paths are relative to the project's root, not to the store: a store in a user directory
 or on the ``memory`` branch lives outside the checkout, and every worktree must resolve the same
@@ -16,7 +17,7 @@ import re
 import shutil
 import tempfile
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 _PACK_NAME = re.compile(r"^pack:\s*([A-Za-z0-9_\-]+)\s*$", re.MULTILINE)
 _INVENTORY_ID = re.compile(r"^([A-Za-z0-9_.\-]+):\s*$", re.MULTILINE)
@@ -29,11 +30,35 @@ def pack_name(text: str) -> str:
     return m.group(1)
 
 
-def check(store: Path, proposal: Path) -> Dict[str, Any]:
+def _scratch(tmp: str, name: str, store: Path, skip: str, add: Optional[str] = None) -> Any:
+    """A scratch store holding the store's vocabulary files, less *skip*, plus *add* as *skip*."""
+    from pygim.memory import Memory
+
+    scratch = Path(tmp) / name
+    Memory.init(str(scratch))
+    for existing in sorted((store / "taxonomy").glob("*.yaml")):
+        if existing.name != skip:
+            shutil.copyfile(existing, scratch / "taxonomy" / existing.name)
+    if add is not None:
+        (scratch / "taxonomy" / skip).write_text(add, encoding="utf-8")
+    return Memory(str(scratch))
+
+
+def _tags(vocabulary: Dict[str, Any]) -> List[str]:
+    return [v["tag"] for d in vocabulary["dimensions"] for v in d["values"] if not v.get("any")]
+
+
+def check(store: Path, proposal: Path, *, project: Optional[Path] = None, memory: Any = None) -> Dict[str, Any]:
     """Loads *proposal* as ``taxonomy/pack-<name>.yaml`` beside the store's vocabulary, in a scratch
     copy. ``ok`` with what the pack adds, or ``ok: False`` with the loader's messages, which name
-    the proposal's own path and line."""
-    from pygim.memory import Memory, VocabularyError
+    the proposal's own path and line.
+
+    Two things the loader cannot see come back beside a pack that loads. ``warnings``: each locator
+    the pack adds, checked against its document in *project* — not inventoried, missing, a passage
+    that is not the cited one, or text that also occurs elsewhere, so a locator found by matching
+    text may point at the wrong occurrence. ``removed``: each value live now that the pack would
+    remove, with the heads of *memory* (the live store) still carrying it."""
+    from pygim.memory import VocabularyError
 
     text = proposal.read_text(encoding="utf-8")
     try:
@@ -42,35 +67,124 @@ def check(store: Path, proposal: Path) -> Dict[str, Any]:
         return {"ok": False, "errors": f"{proposal}:1: {exc}"}
     target = f"pack-{name}.yaml"
     with tempfile.TemporaryDirectory(prefix="pygim-pack-check-") as tmp:
-        scratch = Path(tmp) / "store"
-        Memory.init(str(scratch))
-        for existing in sorted((store / "taxonomy").glob("*.yaml")):
-            shutil.copyfile(existing, scratch / "taxonomy" / existing.name)
-        (scratch / "taxonomy" / target).write_text(text, encoding="utf-8")
         try:
-            memory = Memory(str(scratch))
+            drafted = _scratch(tmp, "store", store, target, text)
         except VocabularyError as exc:
+            scratch = Path(tmp) / "store"
             message = str(exc).replace(str(scratch / "taxonomy" / target), str(proposal)).replace(f"taxonomy/{target}", str(proposal))
             return {"ok": False, "errors": message}
-        dims = [d for d in memory.vocabulary()["dimensions"] if d.get("pack") == name]
-        del memory
+        vocabulary = drafted.vocabulary()
+        without = _scratch(tmp, "without", store, target)
+        before = {(x["tag"], x["doc"], x["line"], x["lines"], x["passage"]) for x in without.sources()}
+        added = [x for x in drafted.sources() if (x["tag"], x["doc"], x["line"], x["lines"], x["passage"]) not in before]
+        live = memory.vocabulary() if memory is not None else _scratch(tmp, "live", store, "").vocabulary()
+        del drafted, without
+    dims = [d for d in vocabulary["dimensions"] if d.get("pack") == name]
+    remaining = set(_tags(vocabulary))
+    removed = []
+    for tag in _tags(live):
+        if tag in remaining:
+            continue
+        carriers = [f"{h['memory']} {h['title']}" for h in memory.heads([tag])] if memory is not None else []
+        removed.append({"tag": tag, "carried_by": carriers})
     return {"ok": True, "pack": name, "dimensions": [d["name"] for d in dims],
             "values": sum(sum(1 for v in d["values"] if not v.get("any")) for d in dims),
-            "replaces": (store / "taxonomy" / target).exists()}
+            "replaces": (store / "taxonomy" / target).exists(),
+            "removed": removed,
+            "warnings": _locator_warnings(added, store, proposal.parent / "inventory.yaml", project)}
 
 
-def accept(store: Path, proposal: Path, replace: bool = False) -> Dict[str, Any]:
+def accept(store: Path, proposal: Path, replace: bool = False, *, project: Optional[Path] = None) -> Dict[str, Any]:
     """A person's step: checks the proposal, copies it to ``taxonomy/pack-<name>.yaml``, and adds the
     documents of an ``inventory.yaml`` beside it to ``sources/inventory.yaml``. A pack of that name
-    already live is replaced only when asked."""
-    result = check(store, proposal)
+    already live is replaced only when asked, and never while a memory still carries a value the
+    replacement removes: those memories would lose the tag without a word, and on a hard dimension
+    no read could find them. Retag them first."""
+    from pygim.memory import Memory
+
+    memory = Memory(str(store))
+    result = check(store, proposal, project=project, memory=memory)
     if not result["ok"]:
         return result
     if result["replaces"] and not replace:
         return {"ok": False, "errors": f"taxonomy/pack-{result['pack']}.yaml is already live — pass --replace to replace it"}
+    carried = [r for r in result["removed"] if r["carried_by"]]
+    if carried:
+        lines = [f"  {r['tag']}: {', '.join(r['carried_by'])}" for r in carried]
+        return {"ok": False, "errors": "the pack removes values that memories still carry — unlink or retag them first:\n" + "\n".join(lines)}
     shutil.copyfile(proposal, store / "taxonomy" / f"pack-{result['pack']}.yaml")
     result["inventory"] = _merge_inventory(store, proposal.parent / "inventory.yaml")
     return result
+
+
+def inventory(path: Path) -> Dict[str, str]:
+    """The documents of an inventory file: id to path, as written."""
+    out: Dict[str, str] = {}
+    if not path.is_file():
+        return out
+    current = None
+    for line in path.read_text(encoding="utf-8").splitlines():
+        m = _INVENTORY_ID.match(line)
+        if m:
+            current = m.group(1)
+            out[current] = ""
+            continue
+        field = re.match(r"^\s+path:\s*(.*?)\s*$", line)
+        if field and current is not None:
+            out[current] = field.group(1).strip("\"'")
+    return out
+
+
+def _resolve(inventory_file: Path, path: str, project: Optional[Path]) -> Optional[Path]:
+    """An inventoried path as a file: relative to the project's root (02 §5.2), or — in stores made
+    before that rule — relative to the inventory file."""
+    for base in ([project] if project else []) + [inventory_file.parent]:
+        candidate = (base / path).resolve()
+        if candidate.is_file():
+            return candidate
+    return None
+
+
+def _lines(file: Path) -> List[str]:
+    return file.read_bytes().replace(b"\r\n", b"\n").decode("utf-8").split("\n")
+
+
+def _locator_warnings(sources: List[Dict[str, Any]], store: Path, drafted: Path, project: Optional[Path]) -> List[str]:
+    from pygim.memory import digest
+
+    known = {doc: (store / "sources" / "inventory.yaml", path) for doc, path in inventory(store / "sources" / "inventory.yaml").items()}
+    known.update({doc: (drafted, path) for doc, path in inventory(drafted).items()})
+    texts: Dict[str, Optional[List[str]]] = {}
+    out = []
+    for s in sources:
+        where = f"{s['tag']}: {s['doc']}:L{s['line']}"
+        if s["doc"] not in known:
+            out.append(f"{where}: {s['doc']} is not in the inventory — add it, or cite an inventoried document")
+            continue
+        if s["doc"] not in texts:
+            file = _resolve(known[s["doc"]][0], known[s["doc"]][1], project)
+            texts[s["doc"]] = _lines(file) if file else None
+        text = texts[s["doc"]]
+        if text is None:
+            out.append(f"{where}: the document {known[s['doc']][1]} was not found")
+            continue
+        first, count = s["line"] - 1, s["lines"]
+        if first + count > len(text):
+            out.append(f"{where}: the document has {len(text)} lines")
+            continue
+        passage = text[first:first + count]
+        if s["passage"] and digest("\n".join(passage).encode("utf-8")) != s["passage"]:
+            out.append(f"{where}: the lines there are not the cited passage — the document changed, or the line is wrong")
+            continue
+        wanted = [x.strip() for x in passage]
+        if not any(wanted):
+            continue
+        also = [i + 1 for i in range(len(text) - count + 1)
+                if i != first and [x.strip() for x in text[i:i + count]] == wanted]
+        if also:
+            shown = ", ".join(f"L{n}" for n in also[:5]) + (" …" if len(also) > 5 else "")
+            out.append(f"{where}: the cited text also occurs at {shown} — check this is the occurrence meant")
+    return out
 
 
 def _merge_inventory(store: Path, drafted: Path) -> List[str]:
@@ -100,8 +214,10 @@ def doc_id(relative: Path) -> str:
     return re.sub(r"[^A-Za-z0-9_.]+", "-", stem.as_posix()).strip("-").lower()
 
 
-def cite(project: Path, path: str, line: int, lines: int = 1) -> Dict[str, Any]:
-    """A locator into a project document: the passage at *line* (1-based) for *lines* lines."""
+def cite(project: Path, path: str, line: int, lines: int = 1, store: Optional[Path] = None) -> Dict[str, Any]:
+    """A locator into a project document: the passage at *line* (1-based) for *lines* lines. A document
+    the *store*'s inventory already lists keeps that id; any other gets one made from its path.
+    ``locator`` is the form a memory's ``cites`` takes."""
     from pygim.memory import digest
 
     file = (project / path).resolve() if not Path(path).is_absolute() else Path(path).resolve()
@@ -117,8 +233,15 @@ def cite(project: Path, path: str, line: int, lines: int = 1) -> Dict[str, Any]:
         raise ValueError(f"{relative} has {len(text)} lines; line {line} for {lines} is out of range")
     passage = "\n".join(text[line - 1:line - 1 + lines])
     doc = doc_id(relative)
+    if store is not None:
+        listed = store / "sources" / "inventory.yaml"
+        for known, known_path in inventory(listed).items():
+            if _resolve(listed, known_path, project) == file:
+                doc = known
+                break
     return {
         "source": {"doc": doc, "line": line, "lines": lines, "passage": digest(passage.encode("utf-8"))},
+        "locator": f"{doc}:L{line}" + (f"-{line + lines - 1}" if lines > 1 else ""),
         "inventory": {"id": doc, "kind": "text", "path": relative.as_posix(), "version": digest(content)},
         "text": passage,
     }

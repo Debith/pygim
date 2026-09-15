@@ -69,14 +69,19 @@ Two prompts do the first work. In Claude Code they appear under `/` as
    oo memory accept --pack <store>/taxonomy/studies/<date>-<domain>/proposal/pack-<domain>.yaml
    ```
 
-   A running server picks it up at its next call.
+   A running server picks it up at its next call, and tells the agent the vocabulary changed.
+   `accept` also prints a warning for any citation that does not hold in its document. Replacing a
+   live pack (`--replace`) is refused while memories carry a value it removes; the message names
+   them, so they can be retagged first.
 2. **`seed-memories`** records what the documents and history already know — decisions,
    conventions, how recurring tasks are done — as the first memories.
 
 ## During work, and after
 
 The agent reads before it works and writes what outlives the task; the server's instructions teach
-it that loop. Those instructions also carry the project's *standing knowledge* — every memory of
+it that loop. A read can narrow by a word (`term`) when tags cannot name the subject, and says which
+documents its candidates cite and which inventoried ones none does, so a question the memory cannot
+answer is sent to the right document. Those instructions also carry the project's *standing knowledge* — every memory of
 kind `preference` in full, and the title of every `procedure` — so it reaches each session without
 a read, as of the server's start. When you want the session's lessons drawn together, run
 `/mcp__pygim-memory__consolidate`. The agent writes each pattern it finds as a generalisation and
@@ -108,3 +113,6 @@ pattern.
   project that also defines `pygim-memory` overrides the user registration — remove its entry.
 - **A vocabulary edit breaks loading.** The next tool call reports the file and line; fix the file
   and the server reopens it.
+- **You edited a file under `memories/`.** It is kept as you left it, and `oo memory status` lists
+  it as a review. The file is a view: to make the edit the memory, have the agent write it
+  superseding that memory.

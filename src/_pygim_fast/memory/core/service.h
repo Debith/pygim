@@ -11,6 +11,7 @@
 #include <cctype>
 #include <cstdint>
 #include <functional>
+#include <map>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -67,6 +68,7 @@ concept memory_store = requires(S& s, const row& r, const usage_record& u, const
     { s.append_receipt(rc) } -> std::same_as<void>;
     { s.write_view(mr, sv, names) } -> std::same_as<void>;
     { s.remove_view(sv) } -> std::same_as<void>;
+    { s.view_text(sv) } -> std::same_as<std::optional<std::string>>;
 };
 
 /// A check that failed, in facts rather than opinions (overview §4.5).
@@ -84,6 +86,7 @@ struct write_outcome {
     std::string slug;
     std::uint64_t version = 0;
     std::string verdict;  // a merge's recollection-failure kind (04, overview §4.7)
+    std::shared_ptr<const snapshot> snap;  // the snapshot the write published, to report the memory as it now stands
 };
 
 struct op_outcome {
@@ -92,6 +95,8 @@ struct op_outcome {
     std::string message;
     std::uint64_t version = 0;
     bool promoted = false;
+    std::optional<memory_id> id;           // the memory a link, unlink or retire changed
+    std::shared_ptr<const snapshot> snap;  // the snapshot that change published
 };
 
 struct read_outcome {
@@ -106,6 +111,7 @@ struct corpus_block {
     std::string slug;
     std::string title;
     std::vector<std::string> tags;
+    std::vector<std::string> cites;
     std::string text;
     std::size_t line = 0;
 };
@@ -175,6 +181,10 @@ public:
         auto out = m_load_reviews;
         const auto s = current();
         out.insert(out.end(), s->reviews.begin(), s->reviews.end());
+        const auto unknown = s->unknown_tag_reviews();
+        out.insert(out.end(), unknown.begin(), unknown.end());
+        std::lock_guard<std::mutex> g(m_publish);
+        for (const auto& [slug, text] : m_edited_views) out.push_back({"view edited", text});
         return out;
     }
     [[nodiscard]] std::uint64_t new_session() { return m_store.next_session(); }
@@ -200,6 +210,7 @@ public:
             out.why = {"no hard tags", "a read needs at least one hard tag — without one every memory is a candidate", {}};
             return out;
         }
+        if (!q.term.empty()) rq.within = term_matches(s, s.candidates(rq.hard), q.term);
         out.ctx = s.read(rq);
         out.ok = true;
         out.rec.snapshot = s.head();
@@ -241,6 +252,7 @@ public:
         rq.budget = rec.asked.budget;
         if (!resolve_query_tags(*tax, rec.asked.hard, rq.hard, out.why) || !resolve_query_tags(*tax, rec.asked.soft, rq.soft, out.why))
             return out;
+        if (!rec.asked.term.empty()) rq.within = term_matches(*snap, snap->candidates(rq.hard), rec.asked.term);  // content never changes, so neither do the matches
         out.ctx = snap->read(rq);
         out.ok = true;
         out.rec = rec;
@@ -310,7 +322,19 @@ public:
         // 4. identical content
         const digest content = digest::of(w.text);
         if (const auto same = s.heads_with_content(content); !same.empty()) {
-            out.why = {"identical", "this exact text is already a head — report it useful instead", {describe(s, same[0])}};
+            std::vector<std::string> add, remove;
+            for (const auto t : tags)
+                if (!s.tags_of(same[0]).has(t.value())) add.push_back("link " + s.tax().info(t).qualified);
+            for (const auto t : s.tags_of(same[0]).members())
+                if (std::find(tags.begin(), tags.end(), tag_id(t)) == tags.end()) remove.push_back("unlink " + s.tax().info(tag_id(t)).qualified);
+            if (add.empty() && remove.empty()) {
+                out.why = {"identical", "this exact text is already a head — report it useful with learn instead", {describe(s, same[0])}};
+            } else {  // the same text with other tags is a retag, which link and unlink do without a new version
+                out.why = {"identical", "this exact text is already a head with other tags — change its tags with link and unlink instead of writing it again",
+                           {describe(s, same[0])}};
+                out.why.facts.insert(out.why.facts.end(), add.begin(), add.end());
+                out.why.facts.insert(out.why.facts.end(), remove.begin(), remove.end());
+            }
             return out;
         }
 
@@ -350,6 +374,7 @@ public:
         const memory_id id(static_cast<std::uint32_t>(next->size() - 1));
         out.ok = true;
         out.id = id;
+        out.snap = next;
         out.key = next->record(id).key;
         out.slug = next->record(id).slug;
         out.version = next->version();
@@ -422,6 +447,8 @@ public:
                 out.promoted = linked.ok;
                 if (linked.ok) out.message += " — promoted";
                 out.version = linked.version;
+                out.id = linked.id;
+                out.snap = linked.snap;
             }
         }
         return out;
@@ -456,6 +483,8 @@ public:
         out.ok = true;
         out.version = next->version();
         out.message = "unlinked";
+        out.id = ms[0];
+        out.snap = next;
         return out;
     }
 
@@ -479,6 +508,8 @@ public:
         out.ok = true;
         out.version = next->version();
         out.message = "retired";
+        out.id = ms[0];
+        out.snap = next;
         return out;
     }
 
@@ -632,6 +663,7 @@ public:
             w.title = b.title;
             w.text = b.text;
             w.tags = b.tags;
+            w.cites = b.cites;
             w.slug = b.slug;
             w.origin = "seed";
             w.author = "ingest";
@@ -699,7 +731,9 @@ private:
     /// changed, or which just became a head, is rewritten; a chain left with no head loses its view.
     /// Snapshots share a memory's tag set until it changes, so "changed" is a pointer comparison.
     /// With no `before` (opening the store) every head is checked, and the store writes a view only
-    /// when its content differs, so an up-to-date repository sees no churn. Called under the lock.
+    /// when its content differs, so an up-to-date repository sees no churn. A view whose text is no
+    /// version of its chain was edited by a person, and is neither rewritten nor removed: it is
+    /// reported, and taking the edit is a write superseding the head (03 §3.4). Called under the lock.
     void sync_views(const snapshot* before, const snapshot& after) {
         std::unordered_set<std::string> head_slugs;
         for (std::size_t i = 0; i < after.size(); ++i)
@@ -709,11 +743,38 @@ private:
             const bool known = before != nullptr && i < before->size();
             if (after.is_head(m)) {
                 if (!known || !before->is_head(m) || &before->tags_of(m) != &after.tags_of(m))
-                    if (const auto text = text_of(after, m)) refresh_view(after, m, *text);
+                    if (const auto text = text_of(after, m); text && !edited_by_hand(after, m)) refresh_view(after, m, *text);
             } else if (!known || before->is_head(m)) {
-                if (!head_slugs.contains(after.record(m).slug)) m_store.remove_view(after.record(m).slug);
+                if (!head_slugs.contains(after.record(m).slug) && !edited_by_hand(after, m)) m_store.remove_view(after.record(m).slug);
             }
         }
+    }
+
+    /// Whether the view of `m`'s chain holds text that no memory of the chain has — a person's edit.
+    /// Recorded as a review until the view matches a version again.
+    bool edited_by_hand(const snapshot& s, memory_id m) {
+        const std::string& slug = s.record(m).slug;
+        const auto on_disk = m_store.view_text(slug);
+        bool edited = false;
+        if (on_disk) {
+            edited = true;
+            for (std::size_t i = 0; i < s.size() && edited; ++i) {
+                const memory_id x(static_cast<std::uint32_t>(i));
+                if (s.record(x).slug != slug) continue;
+                if (auto text = text_of(s, x)) {
+                    std::erase(*text, '\r');
+                    while (!text->empty() && text->back() == '\n') text->pop_back();
+                    edited = *text != *on_disk;
+                }
+            }
+        }
+        std::lock_guard<std::mutex> g(m_publish);
+        if (edited)
+            m_edited_views[slug] = "memories/" + slug + ".md was edited by hand: its text is no version of " + describe(s, m) +
+                                   ". It is kept as it is; to take the edit, remember it superseding the head, and the view follows.";
+        else
+            m_edited_views.erase(slug);
+        return edited;
     }
 
     /// Rows in topological order, ties by row id (03 §5): the same set of
@@ -889,6 +950,29 @@ private:
         out.ok = true;
         out.version = next->version();
         out.message = "linked";
+        out.id = ms[0];
+        out.snap = next;
+        return out;
+    }
+
+    /// The candidates whose title or text contains `term`, ignoring ASCII case (04 §3.2): a filter
+    /// after the hard tags, never a score, so the tags still decide what may answer.
+    [[nodiscard]] std::vector<std::uint32_t> term_matches(const snapshot& s, const memory_set& cand, std::string_view term) const {
+        const auto lower = [](std::string_view x) {
+            std::string out(x);
+            for (auto& c : out) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+            return out;
+        };
+        const std::string needle = lower(term);
+        std::vector<std::uint32_t> out;
+        for (const auto id : cand.members()) {
+            const memory_id m(id);
+            if (lower(s.record(m).title).find(needle) != std::string::npos) {
+                out.push_back(id);
+                continue;
+            }
+            if (const auto text = text_of(s, m); text && lower(*text).find(needle) != std::string::npos) out.push_back(id);
+        }
         return out;
     }
 
@@ -907,7 +991,8 @@ private:
                 return false;
             }
             if (tax.info(*t).any) {
-                why = {"any in a query", n + ": `any` is for memories that apply to every value, not for queries", {}};
+                why = {"any in a query", n + ": `any` is for memories that apply to every value, not for queries — name the value your work is; "
+                                            "memories tagged `any` answer every value, so they are found too", {}};
                 return false;
             }
             if (std::find(out.begin(), out.end(), *t) == out.end()) out.push_back(*t);
@@ -1100,6 +1185,7 @@ private:
     std::shared_ptr<const snapshot> m_current;
     std::vector<review_item> m_load_reviews;
     std::unordered_set<row_id, digest_hash> m_applied;  // every row id in the published snapshot
+    std::map<std::string, std::string> m_edited_views;  // slug → the review saying its view was edited by hand
 };
 
 }  // namespace pygim::memory

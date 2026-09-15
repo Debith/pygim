@@ -73,6 +73,7 @@ public:
     [[nodiscard]] std::string root() const { return m_store->root().string(); }
     [[nodiscard]] std::uint64_t version() const { return m_service->current()->version(); }
     [[nodiscard]] std::string head() const { return m_service->current()->head().hex(); }
+    [[nodiscard]] std::string taxonomy_version() const { return m_service->current()->tax().version().hex(); }
 
     void refresh() {
         py::gil_scoped_release nogil;
@@ -149,12 +150,13 @@ public:
     }
 
     py::dict read(const std::vector<std::string>& hard, const std::vector<std::string>& soft, std::uint32_t max_memories,
-                  std::uint32_t budget, std::uint64_t session) {
+                  std::uint32_t budget, std::string term, std::uint64_t session) {
         query q;
         q.hard = hard;
         q.soft = soft;
         q.max_memories = max_memories;
         q.budget = budget;
+        q.term = std::move(term);
         read_outcome out;
         {
             py::gil_scoped_release nogil;
@@ -175,6 +177,7 @@ public:
         r.asked.soft = rec["soft"].cast<std::vector<std::string>>();
         r.asked.max_memories = rec.contains("max") ? rec["max"].cast<std::uint32_t>() : 8;
         r.asked.budget = rec.contains("budget") ? rec["budget"].cast<std::uint32_t>() : 0;
+        r.asked.term = rec.contains("term") ? rec["term"].cast<std::string>() : std::string();
         read_outcome out;
         {
             py::gil_scoped_release nogil;
@@ -193,8 +196,11 @@ public:
     py::dict remember(std::string title, std::string text, std::vector<std::string> tags, std::string reason,
                       std::vector<std::string> supersedes, std::vector<std::string> generalises, std::vector<std::string> seen,
                       std::vector<std::string> cites, const py::list& proposals, std::uint64_t session, std::uint32_t turn,
-                      std::string author) {
+                      std::string author, std::string origin) {
+        if (origin != "written" && origin != "seed")
+            return refused({"origin", "origin is `written`, or `seed` when seeding a store from existing documents — not " + origin, {}});
         write_request w;
+        w.origin = std::move(origin);
         w.title = std::move(title);
         w.text = std::move(text);
         w.tags = std::move(tags);
@@ -448,6 +454,26 @@ public:
         return d;
     }
 
+    /// Every vocabulary value that cites a source, with its full locator — what checking a drafted
+    /// pack's citations against the documents needs (02 §5.3).
+    py::list sources() const {
+        const auto s = m_service->current();
+        const auto& tax = s->tax();
+        py::list out;
+        for (std::size_t i = 0; i < tax.tags(); ++i) {
+            const auto& ti = tax.info(tag_id(static_cast<tag_id::value_type>(i)));
+            if (!ti.source) continue;
+            py::dict d;
+            d["tag"] = ti.qualified;
+            d["doc"] = ti.source->doc;
+            d["line"] = ti.source->line;
+            d["lines"] = ti.source->lines ? ti.source->lines : 1;
+            d["passage"] = ti.source->passage;
+            out.append(d);
+        }
+        return out;
+    }
+
     py::list receipts() const {
         py::list out;
         for (const auto& r : m_store->receipts()) out.append(receipt_dict(r));
@@ -464,6 +490,7 @@ private:
         d["soft"] = r.asked.soft;
         d["max"] = r.asked.max_memories;
         d["budget"] = r.asked.budget;
+        if (!r.asked.term.empty()) d["term"] = r.asked.term;
         std::vector<std::string> keys;
         for (const auto& k : r.keys) keys.push_back(k.hex());
         d["keys"] = keys;
@@ -512,6 +539,7 @@ private:
         d["version"] = s.version();
         d["corpus"] = out.ctx.corpus;
         d["candidates"] = out.ctx.candidates;
+        if (out.ctx.term_matched) d["term_matched"] = *out.ctx.term_matched;
         d["folded"] = out.ctx.folded;
         d["tokens"] = out.ctx.tokens;
         d["over_budget"] = out.ctx.over_budget;
@@ -534,17 +562,45 @@ private:
         py::list mems;
         for (const auto& m : out.ctx.selected) mems.append(match_dict(s, m, true));
         d["memories"] = mems;
-        py::list skipped;
-        for (const auto& m : out.ctx.skipped) skipped.append(match_dict(s, m, false));
-        d["skipped"] = skipped;
+        d["skipped"] = out.ctx.skipped.size();  // ranked but not placed; `facets` says what they carry
+        py::dict facets;
+        for (const auto& [t, n] : out.ctx.facets) facets[py::str(s.tax().info(t).qualified)] = n;
+        d["facets"] = facets;
+        d["coverage"] = coverage_dict(out.ctx);
         if (with_receipt) d["receipt"] = receipt_dict(out.rec);
         return d;
+    }
+
+    /// Which documents the candidates rest on, and which inventoried documents none of them cites
+    /// — so a read that found nothing relevant also says where the store has nothing (04 §3.8).
+    py::dict coverage_dict(const context& ctx) const {
+        py::dict d;
+        py::dict cited;
+        std::vector<std::string> not_cited;
+        for (const auto& [doc, n] : ctx.by_source) cited[py::str(doc)] = n;
+        for (const auto& id : m_store->inventory_ids())
+            if (std::none_of(ctx.by_source.begin(), ctx.by_source.end(), [&](const auto& x) { return x.first == id; })) not_cited.push_back(id);
+        d["cited"] = cited;
+        d["uncited"] = ctx.uncited;
+        d["not_cited"] = not_cited;
+        return d;
+    }
+
+    /// A memory as a change left it: its tags and whether it is still a head, so the caller need
+    /// not `show` it to confirm.
+    static void stand(py::dict& d, const snapshot& s, memory_id m) {
+        std::vector<std::string> tags;
+        for (const auto t : s.tags_of(m).members()) tags.push_back(s.tax().info(tag_id(t)).qualified);
+        d["memory"] = ref(m);
+        d["tags"] = tags;
+        d["head"] = s.is_head(m);
     }
 
     static py::dict write_dict(const write_outcome& out) {
         if (!out.ok) return refused(out.why);
         py::dict d;
         d["ok"] = true;
+        if (out.snap) stand(d, *out.snap, out.id);
         d["memory"] = ref(out.id);
         d["key"] = out.key.hex();
         d["slug"] = out.slug;
@@ -559,6 +615,7 @@ private:
         d["ok"] = true;
         d["message"] = out.message;
         if (out.version) d["version"] = out.version;
+        if (out.snap && out.id) stand(d, *out.snap, *out.id);
         return d;
     }
 

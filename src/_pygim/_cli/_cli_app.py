@@ -172,11 +172,18 @@ class GimmicksCliApp:
         if pack is not None:
             from _pygim._mcp import _packs
 
-            done = _packs.accept(Path(self._store(root)), Path(pack).resolve(), replace=replace)
+            from _pygim._mcp import _stores
+
+            done = _packs.accept(Path(self._store(root)), Path(pack).resolve(), replace=replace,
+                                 project=_stores.project_root(Path.cwd()))
             if not done["ok"]:
                 raise click.ClickException(done["errors"])
             click.echo(f"accepted pack `{done['pack']}`: {len(done['dimensions'])} dimension(s), {done['values']} value(s)"
                        + (f"; {len(done['inventory'])} document(s) added to the inventory" if done["inventory"] else ""))
+            if done["removed"]:
+                click.echo("removed values, carried by no memory: " + ", ".join(r["tag"] for r in done["removed"]))
+            for warning in done["warnings"]:
+                click.echo(f"  locator: {warning}")
             click.echo("a running MCP server picks it up at its next call")
             return
         result = Memory(self._store(root)).accept(memory, reason=reason)

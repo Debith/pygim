@@ -8,6 +8,7 @@ from __future__ import annotations
 import json
 import subprocess
 import sys
+from pathlib import Path
 
 import pytest
 
@@ -15,6 +16,17 @@ from _pygim._mcp.memory import TOOLS, MemoryServer
 from pygim.memory import Memory
 
 TAGS = ["domain=any", "artifact=any", "task=design", "kind=principle"]
+SHOP = """\
+pack: shop
+entry: {brief: The shop front., when: About the shop front., when_not: Not another project., example: The basket.}
+dimensions:
+  area:
+    role: soft
+    weight: 1.0
+    entry: {brief: Which part of the shop., full: The part of the shop the knowledge is about., when: It holds for one part., when_not: Not the kind of thing made., example: The checkout.}
+    values:
+      basket: {entry: {brief: Holding items before paying., when: About the basket., when_not: Not paying., example: Adding an item.}}
+"""
 
 
 @pytest.fixture
@@ -118,6 +130,30 @@ class TestTools:
         assert review["written"][0]["generalised_by"] == [g["memory"]] and review["written"][2]["accepted"] is False
         err, lessons = call(server, "lessons", text="## Patterns written\n\nTemplates everywhere.")
         assert not err and lessons["report"].endswith(f"session-{review['session']}.md")
+
+    def test_a_read_narrows_by_term_and_asks_for_learn(self, server):
+        err, a = call(server, "remember", title="Mounted combat", text="A mount acts on your initiative.", tags=TAGS)
+        call(server, "remember", title="Hiding", text="Hide takes an action.", tags=TAGS, seen=[a["memory"]])
+        err, read = call(server, "read", hard=["task=design"], term="mount")
+        assert not err and [m["title"] for m in read["memories"]] == ["Mounted combat"] and read["term_matched"] == 1
+        assert "learn" in read["next"] and read["skipped"] == 0 and "coverage" in read
+        err, empty = call(server, "read", hard=["task=design"], term="invisible")
+        assert empty["memories"] == [] and "next" not in empty
+
+    def test_changes_return_the_tags_and_a_seed_skips_the_unread_check(self, server):
+        err, a = call(server, "remember", title="Rule one", text="One.", tags=TAGS)
+        err, b = call(server, "remember", title="Rule two", text="Two.", tags=TAGS, seed=True)
+        assert b["ok"] and call(server, "show", memory=b["memory"])[1]["origin"] == "seed"
+        err, unlinked = call(server, "unlink", memory=a["memory"], tag="kind=principle", reason="not a principle")
+        assert unlinked["ok"] and "kind=principle" not in unlinked["tags"] and unlinked["head"]
+
+    def test_the_next_call_says_when_the_vocabulary_changed(self, server):
+        call(server, "session")
+        before = server.memory.taxonomy
+        (Path(server.memory.root) / "taxonomy" / "pack-shop.yaml").write_text(SHOP, encoding="utf-8")
+        err, read = call(server, "read", hard=["task=design"])
+        assert read["vocabulary_changed"]["from"] == before and read["vocabulary_changed"]["to"] == server.memory.taxonomy
+        assert "vocabulary_changed" not in call(server, "read", hard=["task=design"])[1]
 
     def test_the_agent_has_no_way_to_accept(self, server):
         names = {t["name"] for t in TOOLS}

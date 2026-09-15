@@ -145,6 +145,7 @@ sequenceDiagram
     S->>S: 2 group hard tags by dimension
     S->>X: 3 posting lists, plus each dimension's any list
     S->>S: 4 union within a dimension, intersect across, intersect with heads
+    S->>S: with a term, keep the candidates whose title or text contains it
     S->>X: 5 forward sets of the candidates
     S->>S: fold each candidate that a candidate generalises under that generalisation
     S->>S: 6 score, 7 rank, 8 fill the procedure slot, 9 fill the budget, 10 explain
@@ -179,7 +180,10 @@ unambiguous trigger* holds whether you are designing, critiquing or balancing.
 
 `any` is interned in every hard-by-default dimension when the vocabulary loads, with a generated
 codebook entry. It exists for memories only: a *query* naming `any` is refused, because "must
-answer this question somehow" is a different request that nobody has needed. And `any` never
+answer this question somehow" is a different request that nobody has needed. The refusal says
+what to do instead — name the value the work is — because the first field report (D-D-2024,
+2026-09-15) showed an agent reaching for `task=any` when reference facts did not depend on the
+task: those facts should carry `task=any`, and then any task in the query finds them. And `any` never
 scores — in a query that softens its dimension it simply does not match — or generic memories
 would outrank specific ones on every read.
 
@@ -242,7 +246,18 @@ the prototype's: its content length in bytes over four, at least one.
 ### 3.8 Explanation, receipt, usage — steps 10 and 11
 
 Each selected match carries the tags that admitted it, the soft tags matched and missed, and
-every term of its score (G2). The receipt — snapshot id, taxonomy version, the query by name, the
+every term of its score (G2). The rest of the candidate list is summarised rather than listed —
+the field report's reads returned up to 135 skipped entries that the agent only ever counted:
+
+| Field | What it says | What the agent does with it |
+|---|---|---|
+| `skipped` | how many ranked candidates were not placed, for `max` or the budget | raises `max` or the budget, or narrows the read |
+| `facets` | for each tag among the candidates, how many carry it — leaving out tags every candidate carries, but always naming the query's soft tags, even at 0 | sees before reading again whether a soft tag can match at all (`pillar=combat: 0`), and which values would split the list |
+| `coverage` | the documents the candidates cite and how many cite each; how many cite nothing; the inventoried documents none of them cites | when nothing placed answers the question, goes to the uncited documents instead of trying another tag combination |
+
+A write that changes a memory — `remember`, `link`, `unlink`, `retire`, a promoting `learn` —
+answers with the memory's tags and whether it is a head, as the change left them, so confirming it
+takes no `show`. The receipt — snapshot id, taxonomy version, the query by name, the
 keys returned, the time — and one usage record per candidate admitted and per memory included
 leave through the event bus to the query logger and the statistics observer, after the context has
 been returned. A slow disk delays the log, never the agent.
@@ -266,6 +281,23 @@ The fold comes before scoring, so it depends on neither the ranks nor the budget
 without gaps, the evidence is included or skipped together with its generalisation, and a rerun
 folds exactly as the first read did. A folded instance still counts among the `candidates` and is
 admitted; `folded` says how many were named rather than placed.
+
+### 3.10 A term — between steps 4 and 5
+
+Tags say what kind of problem a memory answers, not what it is about: in the field report, 138
+glossary rules shared the same hard tags, and "invisible", "mounted" and "Animal Handling" —
+the subjects of the questions — could not be tags. A read may carry a `term`: after the hard
+filter, only candidates whose title or text contains it, ignoring ASCII case, stay candidates.
+
+| Option | Concretely | For | Against |
+|---|---|---|---|
+| **A filter after the hard tags** (chosen) | `read(hard=[domain=dnd, artifact=rule, task=explain], term="invisible")` places Invisible, Hide and the senses that see through it | one read decides; the hard tags still decide what may answer, so G5 holds; content never changes, so a rerun keeps the same matches | a word the memory does not use is missed — a synonym is not a match |
+| A lexical score | matches rank above non-matches | nothing is hidden | similarity to the prompt becomes a ranking signal, which the whole design exists to keep out |
+
+The term narrows everything after it — the fold, the ranking, the budget, `facets`, `coverage` —
+but not the procedure slot, which answers the artifact and the task, not the subject. `candidates`
+still counts what the hard tags admit, and `term_matched` how many of those the term kept. The
+term is part of the receipt.
 
 ---
 
@@ -308,7 +340,8 @@ flowchart LR
 ```
 
 Nothing a read depends on is missing from that picture: the rows are canonical, content is
-immutable, the vocabulary version is frozen, and every number is an integer. This is also how the
+immutable — so a term matches the same memories on every rerun — the vocabulary version is
+frozen, and every number is an integer. This is also how the
 prototype's evaluation becomes a test — each of its queries, run once, leaves a receipt, and the
 C++ implementation is correct when it reruns every receipt to the prototype's answer.
 
@@ -324,6 +357,7 @@ C++ implementation is correct when it reruns every receipt to the prototype's an
 | Exact score | the final score is the integer formula of §3.3, evaluated without division | two processes rank the same candidates differently |
 | One slot | the procedure slot holds at most one memory, it is the head procedure for the query's single artifact and task, and it is not repeated below | a context opens with the wrong way of working, or with two |
 | Budget kept | the selected memories' tokens fit the budget, or the context is the procedure alone with `over_budget` set | a caller's budget is quietly exceeded, or its procedure quietly cut |
+| A term only narrows | a read with a term places a subset of what the same read without it would admit, and its procedure slot is the same | a word in the prompt admits a memory the hard tags exclude, and retrieval by similarity is back |
 | Fold before rank | a non-slot candidate is placed iff no accepted candidate generalises it, decided before scoring | a context spends its budget repeating a pattern case by case — or the fold depends on the budget, and two budgets disagree about which memories count |
 | Immutable once published | a published snapshot never changes | a read sees half a commit |
 | Incremental equals full | the snapshot built by copying what changed equals the one a full replay of the same rows builds — tested, since it is a property of two code paths | a long-running service slowly diverges from the one that just restarted |

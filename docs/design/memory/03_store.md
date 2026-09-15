@@ -154,15 +154,24 @@ copy of the repository happened to load things in.
 
 `memories/<slug>.md` holds the current head of each chain as a human reads it — a short YAML
 header with its key, title, tags and citations, then the text. It is **generated**: rewritten
-when the head changes, and the reason it is committed is the diff. A correction appears in
+whenever what it shows changes — a new head, but also a link, an unlink, a promotion, an accepted
+proposal, or rows caught up from another process — and removed when its chain has no head. The
+service compares each published snapshot with the one before it, so every change reaches the views
+through one place; opening a store checks every view, and a view already right is not rewritten,
+so git sees no churn. The reason it is committed is the diff. A correction appears in
 review as an edit to a file that already existed, which is how a person expects to see it
 (overview §4.5, step 5).
 
-Because it is generated, a view is never read back as truth. A view whose text no longer
-matches its head's content digest was edited by hand — and that is treated as the human's
-correction (§3.4).
+Because it is generated, a view is never read back as truth. A view whose text is no
+version of its chain was edited by hand — and that is the human's, not the service's, to
+resolve (§3.4).
 
 ### 3.4 When a human edits a view
+
+**Built so far: keep and report.** A view whose text is no version of its chain is neither
+rewritten nor removed — not by a tag change, not by opening the store. It stays as the person left
+it, with a review item naming it, until someone writes the edit as a memory superseding the head;
+the view then matches a version again, and the review goes. Either option below starts from that.
 
 | Option | Concretely | For | Against |
 |---|---|---|---|
@@ -297,7 +306,9 @@ thousand one-kilobyte memories is a hundred megabytes nobody needs in memory to 
 **Ingestion** of hand-written corpus files reconciles by slug and digest, as Feature 4 draws: an
 unknown slug is an ingestion row, a known slug with a new digest is a supersede, and an unchanged
 block is nothing at all. A block that fails the vocabulary is named by file and line, and the
-others land.
+others land. A block's `cites:` header carries its locators, comma-separated, as a written
+memory's `cites` does. The same no-look rule is open to `remember` with origin `seed`, for an agent
+seeding a store from documents it has not yet written anything from.
 
 ---
 

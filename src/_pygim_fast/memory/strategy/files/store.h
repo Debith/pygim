@@ -67,6 +67,28 @@ public:
     /// Things noticed while reading the files that need a human's eye.
     [[nodiscard]] const std::vector<std::string>& problems() const noexcept { return m_problems; }
 
+    /// The ids of the documents in sources/inventory.yaml (02 §5.2), in file order: the top-level
+    /// keys, each on a line of its own. What a read's coverage compares its citations against.
+    [[nodiscard]] std::vector<std::string> inventory_ids() const {
+        std::vector<std::string> out;
+        const fs::path p = m_root / "sources" / "inventory.yaml";
+        std::error_code ec;
+        if (!fs::is_regular_file(p, ec)) return out;
+        const std::string text = read_file(p);
+        for (std::size_t pos = 0; pos < text.size();) {
+            auto nl = text.find('\n', pos);
+            if (nl == std::string::npos) nl = text.size();
+            std::string_view line(text.data() + pos, nl - pos);
+            pos = nl + 1;
+            while (!line.empty() && (line.back() == '\r' || line.back() == ' ' || line.back() == '\t')) line.remove_suffix(1);
+            if (line.empty() || line.front() == ' ' || line.front() == '\t' || line.front() == '#' || line.back() != ':') continue;
+            line.remove_suffix(1);
+            if (line.front() == '"' && line.size() >= 2 && line.back() == '"') line = line.substr(1, line.size() - 2);
+            out.emplace_back(line);
+        }
+        return out;
+    }
+
     // ── vocabulary ────────────────────────────────────────────────────────
 
     [[nodiscard]] std::vector<taxonomy_file> taxonomy_files() const {
@@ -250,6 +272,21 @@ public:
         fs::create_directories(p.parent_path());
         write_atomically(p, text);
         return p.string();
+    }
+
+    /// The text of a view as it is on disk — what follows its front matter, CR-LF read as LF and
+    /// trailing line ends dropped — or nothing when there is no view.
+    [[nodiscard]] std::optional<std::string> view_text(std::string_view slug) const {
+        const fs::path p = m_root / "memories" / (std::string(slug) + ".md");
+        std::error_code ec;
+        if (!fs::is_regular_file(p, ec)) return std::nullopt;
+        std::string text;
+        for (const char c : read_file(p))
+            if (c != '\r') text.push_back(c);
+        if (text.starts_with("---\n"))
+            if (const auto end = text.find("\n---\n", 3); end != std::string::npos) text.erase(0, end + 5);
+        while (!text.empty() && text.back() == '\n') text.pop_back();
+        return text;
     }
 
     void remove_view(std::string_view slug) {

@@ -139,13 +139,24 @@ public:
     [[nodiscard]] context read(const resolved_query& q) const {
         context ctx;
         ctx.corpus = static_cast<std::uint32_t>(heads());
-        const memory_set cand = candidates(q.hard);
+        const memory_set admitted = candidates(q.hard);
+        ctx.candidates = static_cast<std::uint32_t>(admitted.size());
+
+        // The procedure slot answers the artifact and task, not the term: it is chosen from
+        // everything the hard tags admit. Everything after it works on the term's matches.
+        const std::optional<std::uint32_t> slot = procedure_slot(q, admitted, ctx.procedure_note);
+        if (slot) ctx.procedure = memory_id(*slot);
+        memory_set cand = admitted;
+        if (q.within) {
+            memory_set kept;
+            for (const auto id : *q.within)
+                if (admitted.has(id)) kept.note(id);
+            cand = std::move(kept);
+            ctx.term_matched = static_cast<std::uint32_t>(cand.size());
+        }
         std::vector<std::uint32_t> ids(cand.members().begin(), cand.members().end());
         std::sort(ids.begin(), ids.end());
-        ctx.candidates = static_cast<std::uint32_t>(ids.size());
-
-        const std::optional<std::uint32_t> slot = procedure_slot(q, cand, ctx.procedure_note);
-        if (slot) ctx.procedure = memory_id(*slot);
+        describe_candidates(ids, q, ctx);
 
         // The fold (overview §4.11, 04 §3.9): a candidate one of whose *accepted* generalisations is
         // also a candidate gives up its own place and is listed under that generalisation as evidence.
@@ -204,8 +215,60 @@ public:
         return ctx;
     }
 
+    /// Memories that still carry a tag the vocabulary no longer has, one review per memory and
+    /// tag (02 §3.3). Only heads count, and a tag a later unlink removed is not carried: history
+    /// that named a removed value is not something to act on.
+    [[nodiscard]] std::vector<review_item> unknown_tag_reviews() const {
+        std::vector<review_item> out;
+        for (const auto& u : m_unknown)
+            if (is_head(memory_id(u.memory)))
+                out.push_back({"unknown tag", "#" + decimal(u.memory) + " (" + m_memories[u.memory]->slug + ") carries " + u.tag +
+                                                  ", which the vocabulary no longer has — row " + u.row + " named it"});
+        return out;
+    }
+
 private:
     using key_map = std::unordered_map<row_id, std::uint32_t, digest_hash>;
+
+    /// A tag a row gave a memory that the vocabulary does not have.
+    struct unknown_carry {
+        std::uint32_t memory = 0;
+        std::string tag;
+        std::string row;  // the first row that named it, as 12 hex characters
+    };
+
+    /// What a read says about the whole candidate list besides ranking it (04 §3.8): how many
+    /// candidates carry each tag — leaving out tags every candidate carries, which say nothing,
+    /// but always naming the query's soft tags, even at 0 — and which documents they cite.
+    void describe_candidates(const std::vector<std::uint32_t>& ids, const resolved_query& q, context& ctx) const {
+        std::vector<std::uint32_t> counts(m_tax->tags(), 0);
+        std::unordered_map<std::string, std::uint32_t> docs;
+        for (const auto id : ids) {
+            for (const auto t : m_forward[id]->members()) ++counts[t];
+            std::vector<std::string> mine;
+            for (const auto& c : m_memories[id]->cites) {
+                std::string doc = cited_document(c);
+                if (std::find(mine.begin(), mine.end(), doc) == mine.end()) mine.push_back(std::move(doc));
+            }
+            if (mine.empty()) ++ctx.uncited;
+            for (auto& d : mine) ++docs[std::move(d)];
+        }
+        const auto n = static_cast<std::uint32_t>(ids.size());
+        for (std::size_t t = 0; t < counts.size(); ++t) {
+            const tag_id tag(static_cast<tag_id::value_type>(t));
+            const bool asked = std::find(q.soft.begin(), q.soft.end(), tag) != q.soft.end();
+            if (asked || (counts[t] > 0 && counts[t] < n)) ctx.facets.emplace_back(tag, counts[t]);
+        }
+        ctx.by_source.assign(docs.begin(), docs.end());
+        std::sort(ctx.by_source.begin(), ctx.by_source.end());
+    }
+
+    /// The document a locator names: `phb-2024-glossary:L717` and `phb-2024-ch1:L843-849` both
+    /// name their text before `:L`; a locator without a line is all document.
+    [[nodiscard]] static std::string cited_document(std::string_view locator) {
+        const auto at = locator.rfind(":L");
+        return std::string(at == std::string_view::npos ? locator : locator.substr(0, at));
+    }
 
     [[nodiscard]] match score(memory_id m, const resolved_query& q) const {
         match out;
@@ -295,14 +358,19 @@ private:
         }
         return m->value();
     }
-    std::optional<std::uint16_t> resolve_tag(std::string_view name, const row& r) {
-        const auto t = m_tax->tag(name);
-        if (!t) {
-            reviews.push_back({"unknown tag", "row " + r.id.hex().substr(0, 12) + " (" + r.op + ") names " +
-                                                  std::string(name) + ", which the vocabulary no longer has"});
-            return std::nullopt;
+    /// A tag a row names, or nothing when the vocabulary no longer has it. A write or a link of such
+    /// a tag is remembered as carried, and an unlink of it forgets that; `unknown_tag_reviews` then
+    /// reports only what a head still carries.
+    std::optional<std::uint16_t> resolve_tag(std::string_view name, const row& r, std::optional<std::uint32_t> m) {
+        if (const auto t = m_tax->tag(name)) return t->value();
+        if (!m) return std::nullopt;
+        const auto same = [&](const unknown_carry& u) { return u.memory == *m && u.tag == name; };
+        if (r.op == ops::unlink) {
+            std::erase_if(m_unknown, same);
+        } else if (std::none_of(m_unknown.begin(), m_unknown.end(), same)) {
+            m_unknown.push_back({*m, std::string(name), r.id.hex().substr(0, 12)});
         }
-        return t->value();
+        return std::nullopt;
     }
 
     void apply_write(const row& r) {
@@ -330,7 +398,7 @@ private:
         auto fwd = std::make_shared<tag_set>();
         auto inst = std::make_shared<std::vector<instance>>();
         for (const auto name : r.all("tag")) {
-            const auto t = resolve_tag(name, r);
+            const auto t = resolve_tag(name, r, m);
             if (!t) continue;
             if (fwd->note(*t)) add_posting(*t, m);
             inst->emplace_back(*t, r.id);
@@ -371,7 +439,7 @@ private:
 
     void apply_link(const row& r) {
         const auto m = resolve(r.get("memory"), r);
-        const auto t = resolve_tag(r.get("tag"), r);
+        const auto t = resolve_tag(r.get("tag"), r, m);
         if (!m || !t) return;
         auto inst = std::make_shared<std::vector<instance>>(*m_instances[*m]);
         inst->emplace_back(*t, r.id);
@@ -388,7 +456,7 @@ private:
     /// ones its writer had seen — so a link made concurrently survives.
     void apply_unlink(const row& r) {
         const auto m = resolve(r.get("memory"), r);
-        const auto t = resolve_tag(r.get("tag"), r);
+        const auto t = resolve_tag(r.get("tag"), r, m);
         if (!m || !t) return;
         const auto removes = r.all("removes");
         auto inst = std::make_shared<std::vector<instance>>();
@@ -468,6 +536,7 @@ private:
     std::shared_ptr<const memory_set> m_retired;
     std::shared_ptr<const memory_set> m_accepted;
     std::shared_ptr<const key_map> m_keys;
+    std::vector<unknown_carry> m_unknown;
 };
 
 }  // namespace pygim::memory

@@ -198,6 +198,51 @@ class TestANewProjectsVocabulary:
         assert cited["inventory"]["path"] == "README.md"
         assert cited["inventory"]["version"] == digest((project / "README.md").read_bytes().replace(b"\r\n", b"\n"))
 
+    def test_cite_keeps_the_inventory_s_id_and_gives_a_locator_for_a_span(self, project):
+        store = project / ".memory"
+        Memory.init(str(store))
+        (store / "sources").mkdir(exist_ok=True)
+        (store / "sources" / "inventory.yaml").write_text('proj-readme:\n  kind: text\n  path: "README.md"\n', encoding="utf-8")
+        cited = json.loads(MemoryServer(cwd=project).call("cite", {"path": "README.md", "line": 3, "lines": 2})["content"][0]["text"])
+        assert cited["source"]["doc"] == "proj-readme" and cited["inventory"]["id"] == "proj-readme"
+        assert cited["locator"] == "proj-readme:L3-4"
+
+    def test_check_pack_warns_of_locators_that_do_not_hold(self, project):
+        store = project / ".memory"
+        Memory.init(str(store))
+        (project / "GUIDE.md").write_text("Basket\nSome text.\nBasket\nCheckout\n", encoding="utf-8")
+        basket = _packs.cite(project, "GUIDE.md", 1)["source"]
+        checkout = dict(_packs.cite(project, "GUIDE.md", 4)["source"], passage=basket["passage"])  # a digest not of line 4
+        draft = store / "taxonomy" / "studies" / "s" / "proposal" / "pack-proj.yaml"
+        draft.parent.mkdir(parents=True)
+        source = lambda s: "source: {doc: %s, line: %d, lines: 1, passage: %s}" % (s["doc"], s["line"], s["passage"])
+        draft.write_text(PACK.replace("example: Adding an item.}}", "example: Adding an item.}, " + source(basket) + "}")
+                             .replace("example: Paying by card.}}", "example: Paying by card.}, " + source(checkout) + "}"), encoding="utf-8")
+        checked = json.loads(MemoryServer(cwd=project).call("check_pack", {"path": str(draft)})["content"][0]["text"])
+        assert checked["ok"] and len(checked["warnings"]) == 2 and all("not in the inventory" in w for w in checked["warnings"])
+        (draft.parent / "inventory.yaml").write_text("guide:\n  kind: text\n  path: GUIDE.md\n", encoding="utf-8")
+        warnings = json.loads(MemoryServer(cwd=project).call("check_pack", {"path": str(draft)})["content"][0]["text"])["warnings"]
+        assert any("area=basket" in w and "also occurs at L3" in w for w in warnings)
+        assert any("area=checkout" in w and "not the cited passage" in w for w in warnings)
+
+    def test_replacing_a_pack_is_refused_while_memories_carry_what_it_removes(self, project):
+        store = project / ".memory"
+        Memory.init(str(store))
+        (store / "taxonomy" / "pack-proj.yaml").write_text(PACK, encoding="utf-8")
+        memory = Memory(str(store))
+        carrier = memory.remember(title="Checkout", text="Card only.", tags=["domain=proj", "artifact=page", "task=design",
+                                                                            "kind=principle", "area=checkout"])
+        draft = store / "taxonomy" / "studies" / "s" / "proposal" / "pack-proj.yaml"
+        draft.parent.mkdir(parents=True)
+        draft.write_text(PACK.replace("      checkout: {entry: {brief: Paying., when: About payment., when_not: Not the basket., example: Paying by card.}}\n", ""),
+                         encoding="utf-8")
+        checked = json.loads(MemoryServer(cwd=project).call("check_pack", {"path": str(draft)})["content"][0]["text"])
+        assert checked["removed"] == [{"tag": "area=checkout", "carried_by": [f"{carrier['memory']} Checkout"]}]
+        refused = _packs.accept(store, draft, replace=True)
+        assert not refused["ok"] and "area=checkout" in refused["errors"] and "unlink" in refused["errors"]
+        memory.unlink(carrier["memory"], "area=checkout", reason="the value goes")
+        assert _packs.accept(store, draft, replace=True)["ok"]
+
     def test_windows_line_endings_cite_the_same_passage_and_version(self, project):
         lf = MemoryServer(cwd=project).call("cite", {"path": "README.md", "line": 4})
         (project / "README.md").write_bytes((project / "README.md").read_bytes().replace(b"\r\n", b"\n").replace(b"\n", b"\r\n"))

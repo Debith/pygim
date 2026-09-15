@@ -204,7 +204,7 @@ class TestReading:
         seed(mem)
         full = mem.read(DESIGN)
         r = mem.read(DESIGN, budget=full["procedure"]["tokens"] + full["memories"][0]["tokens"])
-        assert len(r["memories"]) == 1 and len(r["skipped"]) == 1
+        assert len(r["memories"]) == 1 and r["skipped"] == 1
         assert mem.read(DESIGN, budget=1)["over_budget"]
 
     def test_any_is_found_by_every_value_and_refused_in_a_query(self, mem):
@@ -213,7 +213,8 @@ class TestReading:
         r = mem.read(["domain=dnd", "artifact=spell", "task=balance"])
         assert [m["memory"] for m in r["memories"]] == [a["memory"]]
         assert r["memories"][0]["hard_matched"] == ["domain=dnd", "artifact=spell", "task=any"]
-        assert mem.read(["task=any"])["refused"] == "any in a query"
+        refused = mem.read(["task=any"])
+        assert refused["refused"] == "any in a query" and "memories tagged `any` answer every value" in refused["message"]
 
     def test_a_read_needs_a_hard_tag(self, mem):
         assert mem.read([], ["tier=mid"])["refused"] == "no hard tags"
@@ -224,6 +225,96 @@ class TestReading:
         ids = [m["memory"] for m in mem.read(DESIGN)["memories"]]
         assert v2["memory"] in ids and f["memory"] not in ids
         assert mem.show(f["memory"])["superseded_by"] == [v2["memory"]]
+
+
+class TestWhatAReadSays:
+    """Beyond the ranked memories: counts instead of the list of the rest, the tags the candidates
+    carry, the documents they cite, and a term to narrow them (04 §3.8)."""
+
+    def test_the_rest_is_a_count_and_facets_say_what_the_candidates_carry(self, mem):
+        seed(mem)
+        r = mem.read(DESIGN, ["purpose=offensive", "tier=mid"], max=1)
+        assert r["skipped"] == 1                                             # 2 ranked, 1 placed, the procedure apart
+        facets = r["facets"]
+        assert facets["purpose=offensive"] == 0                              # a soft tag nothing carries can only miss
+        assert facets["kind=procedure"] == 1 and facets["tier=low"] == 1 and facets["tier=mid"] == 2
+        assert "domain=dnd" not in facets                                    # every candidate carries it: says nothing
+
+    def test_coverage_names_what_the_candidates_cite_and_what_none_does(self, root, mem):
+        (root / "sources").mkdir(exist_ok=True)
+        (root / "sources" / "inventory.yaml").write_text(
+            "# documents\nphb-glossary:\n  kind: text\n  path: \"glossary\"\nphb-ch1:\n  kind: text\n  path: \"ch1\"\n",
+            encoding="utf-8")
+        p = write(mem, "Creating a spell", "steps", DESIGN + ["kind=procedure"], cites=["phb-glossary:L10", "phb-glossary:L12-14"])
+        write(mem, "Shield", "Shield is the yardstick.", DESIGN + ["kind=principle"], seen=[p["memory"]])
+        coverage = mem.read(DESIGN)["coverage"]
+        assert coverage == {"cited": {"phb-glossary": 1}, "uncited": 1, "not_cited": ["phb-ch1"]}
+
+    def test_a_term_keeps_the_candidates_that_name_it_and_not_the_procedure_slot(self, mem):
+        p, y, f = seed(mem)
+        r = mem.read(DESIGN, term="SHIELD")                                  # the yardstick's title; Frost Ward's text does not say it
+        assert r["procedure"]["memory"] == p["memory"]
+        assert [m["memory"] for m in r["memories"]] == [y["memory"]]
+        assert r["candidates"] == 3 and r["term_matched"] == 1
+        by_text = mem.read(DESIGN, term="niche")
+        assert [m["memory"] for m in by_text["memories"]] == [f["memory"]]
+        assert mem.read(DESIGN, term="mounted")["memories"] == []
+
+    def test_a_term_is_part_of_the_receipt_and_reruns_the_same(self, root, mem):
+        p, y, f = seed(mem)
+        receipt = mem.read(DESIGN, term="niche")["receipt"]
+        assert receipt["term"] == "niche"
+        write(mem, "Another niche", "a niche again", DESIGN + ["kind=principle"], seen=[p["memory"], y["memory"], f["memory"]])
+        stored = Memory(str(root)).receipts()[-1]
+        assert stored["term"] == "niche" and Memory(str(root)).rerun(stored)["same"]
+
+
+class TestChangesReportTheirResult:
+    def test_link_unlink_and_remember_return_the_tags_as_they_stand(self, mem):
+        p, y, f = seed(mem)
+        linked = mem.link(y["memory"], "task=balance", reason="needed")
+        assert linked["memory"] == y["memory"] and "task=balance" in linked["tags"] and linked["head"]
+        assert "task=balance" not in mem.unlink(y["memory"], "task=balance", reason="not after all")["tags"]
+        assert set(DESIGN) <= set(write(mem, "N", "new", DESIGN + ["kind=principle"], seen=[p["memory"], y["memory"], f["memory"]])["tags"])
+        assert mem.retire(f["memory"], reason="gone")["head"] is False
+
+    def test_the_same_text_with_other_tags_points_to_link_and_unlink(self, mem):
+        p, y, f = seed(mem)
+        text = mem.show(f["memory"])["text"]
+        retag = mem.remember(title="Frost Ward", text=text, tags=DESIGN + ["purpose=control", "kind=example"],
+                             supersedes=[f["memory"]], seen=[p["memory"], y["memory"]])
+        assert retag["refused"] == "identical" and "link and unlink" in retag["message"]
+        assert "link purpose=control" in retag["facts"] and "unlink purpose=defensive" in retag["facts"]
+        same = mem.remember(title="Frost Ward", text=text, tags=mem.show(f["memory"])["tags"], supersedes=[f["memory"]])
+        assert same["refused"] == "identical" and "learn" in same["message"]
+
+
+class TestSeeding:
+    def test_a_seed_write_skips_the_unread_check(self, mem):
+        seed(mem)
+        written = mem.remember(title="From the book", text="A rule.", tags=DESIGN + ["kind=principle"], origin="seed")
+        assert written["ok"] and mem.show(written["memory"])["origin"] == "seed"
+        assert mem.remember(title="T", text="x", tags=DESIGN, origin="merged")["refused"] == "origin"
+
+    def test_ingest_carries_cites(self, tmp_path, mem):
+        path = tmp_path / "rules.md"
+        path.write_text("## per-day\ntitle: Per Day\ndomain: dnd\nartifact: spell\ntask: design\ncites: phb-glossary:L717, phb-ch1:L1-3\n\n"
+                        "Once per day means until a long rest.\n", encoding="utf-8")
+        assert mem.ingest(str(path))["added"] == 1
+        head = mem.read(DESIGN)["memories"][0]
+        assert mem.show(head["memory"])["cites"] == ["phb-glossary:L717", "phb-ch1:L1-3"]
+
+
+class TestAReplacedVocabulary:
+    def test_history_that_named_a_removed_value_raises_no_review(self, root, mem):
+        p, y, f = seed(mem)
+        mem.unlink(f["memory"], "tier=mid", reason="retagging before the value goes")
+        pack = root / "taxonomy" / "pack-dnd.yaml"
+        pack.write_text(pack.read_text(encoding="utf-8").replace(
+            "    mid: {entry: {brief: Levels 5 to 10., when: Holds at those levels., when_not: Not below level 5., example: A 5th-level character.}}\n", ""),
+            encoding="utf-8")
+        reviews = [r for r in Memory(str(root)).session()["reviews"] if r["kind"] == "unknown tag"]
+        assert len(reviews) == 1 and reviews[0]["text"].startswith(y["memory"]) and "tier=mid" in reviews[0]["text"]
 
 
 class TestLearningAndCurating:
@@ -313,10 +404,26 @@ class TestHeadViews:
 
     def test_a_stale_or_missing_view_is_regenerated_on_open(self, root, mem):
         p, y, f = seed(mem)
-        (root / "memories" / (y["slug"] + ".md")).write_text("stale", encoding="utf-8")
+        path = root / "memories" / (y["slug"] + ".md")
+        path.write_text(path.read_text(encoding="utf-8").replace('"tier=mid"', '"tier=low"'), encoding="utf-8")
         (root / "memories" / (f["slug"] + ".md")).unlink()
         Memory(str(root))
-        assert "Shield is the yardstick" in self.view(root, y) and self.view(root, f) is not None
+        assert '"tier=mid"' in self.view(root, y) and self.view(root, f) is not None
+
+    def test_a_view_edited_by_hand_is_kept_and_reported_until_the_edit_is_written(self, root, mem):
+        p, y, f = seed(mem)
+        path = root / "memories" / (y["slug"] + ".md")
+        edited = path.read_text(encoding="utf-8").replace("beats Shield per slot.", "beats Shield per slot, at every tier.")
+        path.write_text(edited, encoding="utf-8")
+        again = Memory(str(root))
+        again.link(y["memory"], "task=balance", reason="a tag change does not clobber the edit")
+        assert path.read_text(encoding="utf-8") == edited
+        reviews = [r["text"] for r in again.session()["reviews"] if r["kind"] == "view edited"]
+        assert len(reviews) == 1 and y["slug"] in reviews[0]
+        taken = write(again, "Shield is the yardstick", "A defensive reaction earns its slot only if it beats Shield per slot, at every tier.",
+                      DESIGN + ["kind=principle"], supersedes=[y["memory"]])
+        assert "at every tier" in self.view(root, taken) and "task=design" in self.view(root, taken)
+        assert not [r for r in again.session()["reviews"] if r["kind"] == "view edited"]
 
     def test_an_up_to_date_view_is_not_rewritten(self, root, mem):
         seed(mem)
@@ -441,8 +548,8 @@ class TestGeneralising:
         assert f["memory"] not in placed and e["memory"] not in placed
         assert [x["memory"] for x in placed[g["memory"]]["evidence"]] == [f["memory"], e["memory"]]
         assert r["folded"] == 2 and r["candidates"] == 5                  # folded cases were still admitted
-        ranks = sorted(m["rank"] for m in r["memories"] + r["skipped"])
-        assert ranks == list(range(1, len(ranks) + 1))                     # folded before ranking: no gaps
+        ranks = sorted(m["rank"] for m in r["memories"])
+        assert ranks == list(range(1, len(ranks) + 1)) and r["skipped"] == 0   # folded before ranking: no gaps
 
     def test_the_evidence_is_named_not_paid_for(self, mem):
         p, y, f = seed(mem)

@@ -41,21 +41,25 @@ operation returns a plain dict, and a refused write is a result with
         .def_property_readonly("root", &Memory::root)
         .def_property_readonly("version", &Memory::version, "How many rows the head's history holds.")
         .def_property_readonly("head", &Memory::head, "The id of the head row — what a receipt pins.")
+        .def_property_readonly("taxonomy", &Memory::taxonomy_version, "The live vocabulary's version, as 32 hex characters.")
         .def("refresh", &Memory::refresh, "Folds in rows other processes committed.")
         .def("session", &Memory::session, "Opens a session: its number, where the store stands, reviews and proposals.")
         .def("vocabulary", &Memory::vocabulary, "Every live dimension and value with its codebook entry.")
         .def("read", &Memory::read, py::arg("hard"), py::arg("soft") = std::vector<std::string>{}, py::kw_only(),
-             py::arg("max") = 8u, py::arg("budget") = 0u, py::arg("session") = 0ull,
-             "Retrieves the context for a problem space: the procedure first, then ranked memories.")
+             py::arg("max") = 8u, py::arg("budget") = 0u, py::arg("term") = "", py::arg("session") = 0ull,
+             "Retrieves the context for a problem space: the procedure first, then ranked memories, with\n"
+             "what the candidates carry (`facets`) and cite (`coverage`). `term` keeps only candidates whose\n"
+             "title or text contains it.")
         .def("remember", &Memory::remember, py::kw_only(), py::arg("title"), py::arg("text"), py::arg("tags"),
              py::arg("reason") = "", py::arg("supersedes") = std::vector<std::string>{},
              py::arg("generalises") = std::vector<std::string>{},
              py::arg("seen") = std::vector<std::string>{}, py::arg("cites") = std::vector<std::string>{},
              py::arg("proposals") = py::list(), py::arg("session") = 0ull, py::arg("turn") = 0u,
-             py::arg("author") = "agent",
+             py::arg("author") = "agent", py::arg("origin") = "written",
              "Writes a memory, after the four checks: closed vocabulary, no unread write, head only,\n"
              "identical content. With `generalises`, it states the pattern two or more heads share: they\n"
-             "stay heads, and it must cover them on every hard dimension.")
+             "stay heads, and it must cover them on every hard dimension. `origin=\"seed\"` marks a store\n"
+             "being seeded from existing documents, which has nothing to have read: no unread check.")
         .def("accept", &Memory::accept, py::arg("memory"), py::kw_only(), py::arg("reason") = "", py::arg("author") = "human",
              "A human accepts a generalisation: from the next read its instances fold under it. Returns the\n"
              "refreshed report's path as `report`.")
@@ -81,6 +85,7 @@ operation returns a plain dict, and a refused write is a result with
         .def("show", &Memory::show, py::arg("memory"))
         .def("proposals", &Memory::proposals, "Concepts the vocabulary lacks, folded, waiting for a human.")
         .def("ingest", &Memory::ingest, py::arg("path"), "Ingests a hand-written corpus file, reconciled by slug and digest.")
+        .def("sources", &Memory::sources, "Every vocabulary value that cites a source, with its full locator.")
         .def("receipts", &Memory::receipts)
         .def("rerun", &Memory::rerun, py::arg("receipt"),
              "Reruns a receipt against the snapshot and vocabulary it pinned; `same` says whether it matched.");

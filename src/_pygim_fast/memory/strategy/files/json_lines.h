@@ -206,7 +206,12 @@ struct parsed {
     json_strings(out, r.asked.hard);
     out += ",\"soft\":";
     json_strings(out, r.asked.soft);
-    out += ",\"max\":" + decimal(r.asked.max_memories) + ",\"budget\":" + decimal(r.asked.budget) + ",\"keys\":";
+    out += ",\"max\":" + decimal(r.asked.max_memories) + ",\"budget\":" + decimal(r.asked.budget);
+    if (!r.asked.term.empty()) {
+        out += ",\"term\":";
+        json_string(out, r.asked.term);
+    }
+    out += ",\"keys\":";
     std::vector<std::string> keys;
     for (const auto& k : r.keys) keys.push_back(k.hex());
     json_strings(out, keys);
@@ -233,6 +238,7 @@ struct parsed {
         r.asked.soft = strs(child(root, "soft"));
         r.asked.max_memories = static_cast<std::uint32_t>(number(child(root, "max")));
         r.asked.budget = static_cast<std::uint32_t>(number(child(root, "budget")));
+        if (const auto term = child(root, "term")) r.asked.term = str(*term);
         for (const auto& k : strs(child(root, "keys")))
             if (auto d = digest::from_hex(k)) r.keys.push_back(*d);
         if (const auto tm = child(root, "time")) r.time = str(*tm);

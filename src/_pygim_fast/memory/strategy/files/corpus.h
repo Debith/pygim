@@ -1,7 +1,7 @@
 // memory/strategy/files/corpus.h — hand-written memory files (Feature 4).
 //
 // A block starts with `## <slug>`, then header lines `key: value[, value…]`
-// — `title`, or a dimension — then a blank line and the text, up to the next
+// — `title`, `cites` (locators), or a dimension — then a blank line and the text, up to the next
 // block. Anything before the first block is a preamble and is skipped. A
 // corpus file is not a source: its blocks are memories (overview §4.3).
 #pragma once
@@ -86,7 +86,10 @@ struct corpus_parse {
         for (std::size_t p = 0; p <= value.size();) {
             const auto comma = value.find(',', p);
             const auto v = trim(value.substr(p, comma == std::string_view::npos ? std::string_view::npos : comma - p));
-            if (!v.empty()) cur->tags.push_back(key + "=" + std::string(v));
+            if (!v.empty()) {
+                if (key == "cites") cur->cites.emplace_back(v);
+                else cur->tags.push_back(key + "=" + std::string(v));
+            }
             if (comma == std::string_view::npos) break;
             p = comma + 1;
         }
