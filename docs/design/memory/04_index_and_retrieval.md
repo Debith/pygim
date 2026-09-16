@@ -252,6 +252,7 @@ the field report's reads returned up to 135 skipped entries that the agent only 
 | Field | What it says | What the agent does with it |
 |---|---|---|
 | `skipped` | how many ranked candidates were not placed, for `max` or the budget | raises `max` or the budget, or narrows the read |
+| `budget_dropped` | how many of those the budget had no room for, though `max` had room | tells an empty or short context caused by the budget from one caused by an empty store — the A/B's twelve-tokens-too-big case (field report §7.4) |
 | `facets` | for each tag among the candidates, how many carry it — leaving out tags every candidate carries, but always naming the query's soft tags, even at 0 | sees before reading again whether a soft tag can match at all (`pillar=combat: 0`), and which values would split the list |
 | `coverage` | the documents the candidates cite and how many cite each; how many cite nothing; the inventoried documents none of them cites | when nothing placed answers the question, goes to the uncited documents instead of trying another tag combination |
 
@@ -287,7 +288,13 @@ admitted; `folded` says how many were named rather than placed.
 Tags say what kind of problem a memory answers, not what it is about: in the field report, 138
 glossary rules shared the same hard tags, and "invisible", "mounted" and "Animal Handling" —
 the subjects of the questions — could not be tags. A read may carry a `term`: after the hard
-filter, only candidates whose title or text contains it, ignoring ASCII case, stay candidates.
+filter, only candidates whose title or text has it stay candidates.
+
+A match is at the **start of a word** — the start of the text, or after a character that is neither
+a letter nor a digit — and ASCII case is ignored. So a term behaves as a stem, `mount` finding
+*mounted* and *mounts*, while not matching inside a longer word: plain substring matching had
+`mount` return Damage Threshold, Prone and Speed, all for the word *amount* (field report §7.3).
+A term of several words matches that phrase as written.
 
 | Option | Concretely | For | Against |
 |---|---|---|---|

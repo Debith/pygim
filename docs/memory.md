@@ -111,6 +111,9 @@ pattern.
 - **A tool says there is no store.** Run `oo memory setup` in the project.
 - **The tools do not appear.** `claude mcp list` should show `pygim-memory`. A `.mcp.json` in the
   project that also defines `pygim-memory` overrides the user registration — remove its entry.
+- **A new server feature is missing in a running session.** The agent holds the tool descriptions
+  it was given when it connected. After upgrading pygim, reconnect (`/mcp`), or the session keeps
+  calling the old tools.
 - **A vocabulary edit breaks loading.** The next tool call reports the file and line; fix the file
   and the server reopens it.
 - **You edited a file under `memories/`.** It is kept as you left it, and `oo memory status` lists

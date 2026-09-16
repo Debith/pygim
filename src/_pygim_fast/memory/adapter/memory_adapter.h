@@ -563,6 +563,7 @@ private:
         for (const auto& m : out.ctx.selected) mems.append(match_dict(s, m, true));
         d["memories"] = mems;
         d["skipped"] = out.ctx.skipped.size();  // ranked but not placed; `facets` says what they carry
+        d["budget_dropped"] = out.ctx.budget_dropped;
         py::dict facets;
         for (const auto& [t, n] : out.ctx.facets) facets[py::str(s.tax().info(t).qualified)] = n;
         d["facets"] = facets;

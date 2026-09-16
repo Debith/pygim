@@ -236,14 +236,18 @@ TOOLS: List[Dict[str, Any]] = [
                        "one; several values of one dimension mean any of them; never `any` (name the value your work "
                        "is: memories tagged `any` answer it too). `soft`: tags that only order. Returns the procedure "
                        "for the artifact and task first (follow its steps), then ranked memories, each with the tags "
-                       "that admitted and ranked it; `skipped` counts the rest, `facets` counts the tags the candidates "
+                       "that admitted and ranked it; `skipped` counts the rest and `budget_dropped` how many of those the "
+                       "budget had no room for, `facets` counts the tags the candidates "
                        "carry (a soft tag at 0 cannot match), and `coverage` names the documents they cite and the "
                        "inventoried ones none cites. Read before you write.",
         "inputSchema": _schema({
             "hard": _TAGS,
             "soft": _TAGS,
-            "term": {"type": "string", "description": "Keep only candidates whose title or text contains this word — "
-                                                      "the subject tags cannot name, such as \"invisible\". A filter, never a score."},
+            "term": {"type": "string", "description": "Keep only candidates whose title or text has this word — the "
+                                                      "subject tags cannot name, such as \"invisible\". It matches at the start of a "
+                                                      "word, so query the shortest stem (\"mount\" finds mounted and mounts, not "
+                                                      "amount); several words match that phrase exactly. A filter, never a score: "
+                                                      "`term_matched` beside `candidates` shows what the word, not the tags, left."},
             "max": {"type": "integer", "minimum": 1, "description": "Most memories to return (default 8)."},
             "budget": {"type": "integer", "minimum": 0, "description": "Token budget; 0 is unbounded."},
         }, ["hard"]),

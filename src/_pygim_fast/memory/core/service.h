@@ -955,25 +955,36 @@ private:
         return out;
     }
 
-    /// The candidates whose title or text contains `term`, ignoring ASCII case (04 §3.2): a filter
-    /// after the hard tags, never a score, so the tags still decide what may answer.
+    /// The candidates whose title or text contains `term` at the start of a word, ignoring ASCII
+    /// case (04 §3.10): a filter after the hard tags, never a score, so the tags still decide what
+    /// may answer. Starting at a word means a term works as a stem — `mount` finds *mounted* and
+    /// *mounts* — without matching inside a longer word, where `mount` found *amount*.
     [[nodiscard]] std::vector<std::uint32_t> term_matches(const snapshot& s, const memory_set& cand, std::string_view term) const {
-        const auto lower = [](std::string_view x) {
-            std::string out(x);
-            for (auto& c : out) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-            return out;
-        };
-        const std::string needle = lower(term);
+        const std::string needle = lowered(term);
         std::vector<std::uint32_t> out;
         for (const auto id : cand.members()) {
             const memory_id m(id);
-            if (lower(s.record(m).title).find(needle) != std::string::npos) {
+            if (at_word_start(lowered(s.record(m).title), needle)) {
                 out.push_back(id);
                 continue;
             }
-            if (const auto text = text_of(s, m); text && lower(*text).find(needle) != std::string::npos) out.push_back(id);
+            if (const auto text = text_of(s, m); text && at_word_start(lowered(*text), needle)) out.push_back(id);
         }
         return out;
+    }
+
+    [[nodiscard]] static std::string lowered(std::string_view x) {
+        std::string out(x);
+        for (auto& c : out) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+        return out;
+    }
+
+    /// Whether `needle` occurs in `hay` at the start of a word — the start of the text, or after a
+    /// character that is neither a letter nor a digit.
+    [[nodiscard]] static bool at_word_start(const std::string& hay, const std::string& needle) {
+        for (std::size_t at = hay.find(needle); at != std::string::npos; at = hay.find(needle, at + 1))
+            if (at == 0 || !std::isalnum(static_cast<unsigned char>(hay[at - 1]))) return true;
+        return false;
     }
 
     // ── names ─────────────────────────────────────────────────────────────

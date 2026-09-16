@@ -260,6 +260,21 @@ class TestWhatAReadSays:
         assert [m["memory"] for m in by_text["memories"]] == [f["memory"]]
         assert mem.read(DESIGN, term="mounted")["memories"] == []
 
+    def test_a_term_matches_a_word_start_not_inside_a_word(self, mem):
+        p, y, f = seed(mem)
+        write(mem, "Damage threshold", "Only damage above the amount breaks it.", DESIGN + ["kind=principle"],
+              seen=[p["memory"], y["memory"], f["memory"]])
+        assert mem.read(DESIGN, term="mount")["memories"] == []                  # not inside "amount"
+        assert mem.read(DESIGN, term="yard")["memories"][0]["memory"] == y["memory"]   # a stem of "yardstick"
+        assert [m["memory"] for m in mem.read(DESIGN, term="typed resistance")["memories"]] == [f["memory"]]
+
+    def test_a_budget_says_how_many_it_had_no_room_for(self, mem):
+        seed(mem)
+        full = mem.read(DESIGN)
+        tight = mem.read(DESIGN, budget=full["procedure"]["tokens"] + 1)
+        assert tight["memories"] == [] and tight["skipped"] == 2 and tight["budget_dropped"] == 2
+        assert mem.read(DESIGN, max=1)["budget_dropped"] == 0                    # max, not the budget
+
     def test_a_term_is_part_of_the_receipt_and_reruns_the_same(self, root, mem):
         p, y, f = seed(mem)
         receipt = mem.read(DESIGN, term="niche")["receipt"]

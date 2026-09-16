@@ -59,6 +59,7 @@ struct context {
     std::uint32_t candidates = 0;        // what the hard tags admit
     std::optional<std::uint32_t> term_matched;  // of those, the ones a term kept
     std::uint32_t folded = 0;            // candidates listed under a generalisation instead of placed
+    std::uint32_t budget_dropped = 0;    // of the skipped, those the budget had no room for
     std::uint32_t tokens = 0;
     bool over_budget = false;
 };

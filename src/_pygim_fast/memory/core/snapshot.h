@@ -204,7 +204,9 @@ public:
             }
         }
         for (auto& m : ranked) {
-            if (ctx.selected.size() >= q.max_memories || (q.budget && used + m.tokens > q.budget)) {
+            const bool full = ctx.selected.size() >= q.max_memories;
+            if (full || (q.budget && used + m.tokens > q.budget)) {
+                if (!full) ++ctx.budget_dropped;  // a context can end up empty for the budget alone: say so (04 §3.7)
                 ctx.skipped.push_back(m);
                 continue;
             }
