@@ -104,9 +104,13 @@ _ROOT = click.option("--root", default=None, type=click.Path(file_okay=False),
               help="Keep the store on an orphan `memory` branch, checked out as a worktree of its own.")
 @click.option("--local", "kind", flag_value="local",
               help="Keep the store in the project as .memory, committed with the code on this branch.")
+@click.option("--global", "kind", flag_value="global",
+              help="Create this machine's global store, for knowledge about no single project "
+                   "(domain=any): every project's sessions read it, and each write is committed at once.")
 @click.option("--name", default=None, help="--user: the store's name (default: the project directory's name).")
 @click.option("--path", "path", default=None, type=click.Path(file_okay=False),
-              help="--branch: where to check the branch out (default: beside the main worktree).")
+              help="--branch: where to check the branch out (default: beside the main worktree). "
+                   "--global: where the global store lives (default: your user data directory).")
 @click.option("--from", "source", default=None, type=click.Path(exists=True, file_okay=False),
               help="Start the new store as a copy of an existing one, such as a project's .memory.")
 @click.option("--no-register", is_flag=True, help="Do not register the MCP server with Claude Code.")

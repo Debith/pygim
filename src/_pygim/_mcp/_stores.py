@@ -11,7 +11,20 @@ A store is found, in order, by:
 ``oo memory setup`` writes that git config, creates the store — in a user-level directory, or
 on an orphan ``memory`` branch checked out as a worktree of its own — and registers the MCP
 server with Claude Code at user scope, without a root, so it finds each project's store from the
-directory it is started in. Nothing here imports click; the CLI and the MCP server both use it.
+directory it is started in.
+
+Beside a project's store there may be one **global store**: what holds knowledge that is about no
+single project, tagged ``domain=any`` — how to write for this person, how they like options laid
+out. Every session reads it, whatever project it is in, so a preference written once reaches
+projects that do not exist yet. It is found by ``$PYGIM_MEMORY_GLOBAL``, then
+``git config --global pygim.memory.global``, then the default place under the user data directory.
+
+A store says in ``policy.yaml`` how its writes leave the machine: ``push: auto`` commits and
+pushes each write (a personal store, one owner), ``push: manual`` leaves that to a person (a
+project's store, or one a community shares and whose owners review what enters). The file is
+committed, so a clone of a shared store knows not to push before anyone has to remember.
+
+Nothing here imports click; the CLI and the MCP server both use it.
 """
 from __future__ import annotations
 
@@ -28,6 +41,10 @@ GIT_KEY = "pygim.memory"
 LOCAL = ".memory"
 BRANCH = "memory"
 SERVER = "pygim-memory"
+GLOBAL_ENV = "PYGIM_MEMORY_GLOBAL"
+GLOBAL_KEY = "pygim.memory.global"
+GLOBAL_NAME = "global"
+POLICY = "policy.yaml"
 
 
 @dataclass(frozen=True)
@@ -99,6 +116,61 @@ def guidance(cwd: Optional[Path] = None) -> str:
             "`--local` keeps one inside the project instead")
 
 
+# ── how a store's writes leave the machine ────────────────────────────────────
+
+
+@dataclass(frozen=True)
+class Policy:
+    """A store's own rules, committed with it so a clone arrives knowing them."""
+    sharing: str = "project"   # project · personal (one owner) · community (owners review)
+    push: str = "manual"       # auto: each write is committed and pushed · manual: a person does it
+
+    @property
+    def automatic(self) -> bool:
+        return self.push == "auto"
+
+
+def policy(root: Path) -> Policy:
+    """*root*'s policy, or the safe default — a store without the file is a project's, published by
+    hand, which is how every store made before this existed behaves."""
+    fields = {}
+    try:
+        text = (root / POLICY).read_text(encoding="utf-8")
+    except OSError:
+        return Policy()
+    for line in text.splitlines():
+        key, sep, value = line.partition(":")
+        if sep and not key.startswith((" ", "\t", "#")):
+            fields[key.strip()] = value.split("#")[0].strip()
+    return Policy(sharing=fields.get("sharing", "project"), push=fields.get("push", "manual"))
+
+
+def write_policy(root: Path, p: Policy) -> None:
+    (root / POLICY).write_text(
+        "# How this store is shared, and how its writes leave this machine (03 §9.1).\n"
+        f"sharing: {p.sharing}\n"
+        f"push: {p.push}\n", encoding="utf-8")
+
+
+def publish(root: Path, message: str) -> str:
+    """Records a write in *root*'s git history if its policy says to, and pushes when a remote
+    exists. Returns what happened, for the caller to pass on; never raises — a store that cannot be
+    published is still a store, and the memory is already written."""
+    if not policy(root).automatic:
+        return "manual: this store is published by its owners"
+    if git(["rev-parse", "--git-dir"], root) is None:
+        return "not a git repository — nothing to commit to"
+    git(["add", "-A"], root)
+    if git(["commit", "-m", message], root) is None:
+        return "nothing to commit"
+    if not git(["remote"], root):
+        return "committed (no remote yet)"
+    branch = git(["rev-parse", "--abbrev-ref", "HEAD"], root) or "HEAD"
+    if git(["push", "origin", branch], root) is None:
+        return "committed, but the push failed — push it yourself"
+    return "committed and pushed"
+
+
 # ── setup ─────────────────────────────────────────────────────────────────────
 
 
@@ -111,6 +183,35 @@ def user_data_dir() -> Path:
     else:
         base = Path(os.environ.get("XDG_DATA_HOME") or Path.home() / ".local" / "share")
     return base / "pygim" / "memory"
+
+
+def find_global() -> Optional[Path]:
+    """The global store, or None when this machine has none: ``$PYGIM_MEMORY_GLOBAL``, then
+    ``git config --global pygim.memory.global``, then the default place if a store is there."""
+    if os.environ.get(GLOBAL_ENV):
+        return Path(os.environ[GLOBAL_ENV]).expanduser().resolve()
+    configured = git(["config", "--global", "--get", GLOBAL_KEY], Path.home())
+    if configured:
+        return Path(configured).expanduser().resolve()
+    default = user_data_dir() / GLOBAL_NAME
+    return default if is_store(default) else None
+
+
+def setup_global(source: Optional[Path] = None, path: Optional[Path] = None) -> Path:
+    """The machine's global store: created under the user data directory unless *path* says
+    otherwise, marked personal so every write is committed, and recorded in the user's git config so
+    every project on this machine finds it."""
+    root = (path or user_data_dir() / GLOBAL_NAME).expanduser().resolve()
+    fresh = not is_store(root)
+    if fresh:
+        create(root, source)
+    if not (root / POLICY).is_file():
+        write_policy(root, Policy(sharing="personal", push="auto"))
+    if git(["rev-parse", "--git-dir"], root) is None:
+        git(["init", "-q"], root)
+    git(["config", "--global", GLOBAL_KEY, str(root)], root)
+    publish(root, "memory: the global store, as initialised by oo memory setup --global")
+    return root
 
 
 def project_name(cwd: Path) -> str:

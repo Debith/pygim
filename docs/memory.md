@@ -45,6 +45,23 @@ For any command, and for the server, in order:
 
 `oo memory status` says which store it found.
 
+### One store for what is not about a project
+
+Knowledge about no single project — how you want explanations written, how you want options laid
+out — goes in a **global store**, which every project on this machine reads:
+
+```bash
+oo memory setup --global      # ~/.local/share/pygim/memory/global, recorded in your git config
+```
+
+The agent reads and writes it by passing `scope: global`, and tags such knowledge `domain=any`.
+Each write is committed at once, and pushed if you give the store a git remote — that is what
+carries a preference to your other projects and machines. Sessions already running are told at
+their next memory call; sessions started afterwards get it in their standing knowledge.
+
+A store shared with other people is the other case: its `policy.yaml` says `push: manual`, so
+writes stay in your own clone and reach the others as a pull request its owners merge.
+
 ### On another machine
 
 ```bash
@@ -100,6 +117,7 @@ pattern.
 | Command | What it does |
 |---|---|
 | `oo memory setup [--branch \| --user \| --local] [--from DIR]` | find or create the store, point the clone at it, register the server |
+| `oo memory setup --global` | create this machine's global store, read by every project |
 | `oo memory status` | which store, its version, reviews waiting, proposals |
 | `oo memory accept <key>` | accept a generalisation, so its cases fold |
 | `oo memory accept --pack <proposal>` | make a drafted vocabulary pack live |

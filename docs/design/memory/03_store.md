@@ -394,6 +394,59 @@ registered once, at user scope and without a root, and finds each project's stor
 directory the host starts it in. A consequence for sources (02 §5.2): a store outside the checkout
 cannot hold paths relative to itself, so an inventory path is relative to the project's root.
 
+### 9.1.1 The global store — settled 2026-09-17
+
+Some knowledge is about no single project: how this person wants an explanation written, how they
+want choices laid out. Filed in one project's store it reaches only that project's sessions — and
+the projects that need it most are the ones not created yet. So a machine may have one **global
+store** beside the project's, found by `$PYGIM_MEMORY_GLOBAL`, then
+`git config --global pygim.memory.global`, then the default place under the user data directory.
+
+| | Concretely | For | Against |
+|---|---|---|---|
+| **A second store, layered** (chosen) | `oo memory setup --global`; tools take `scope: global`; standing knowledge merges both, marking the global ones | project stores stay clean and shareable; one write reaches every project, old and new; reads stay project-scoped, so ranking and `#n` stay simple | two places to write to, so the rule *`domain=any` belongs in the global store* has to be taught |
+| One store for everything | every project's git config points at the same store | nothing new to build | one history for unrelated projects, and no project's store can be handed to anyone |
+| Copy preferences into each store | an export/import command | each store self-contained | copies drift; superseding one leaves stale twins |
+
+Reading stays per store: a `#n` numbers memories within one store, so an agent reads a scope before
+writing to it. Where the two disagree, the project's memory is the nearer rule, and standing
+knowledge lists the project's last.
+
+### 9.1.2 How a write leaves the machine — settled 2026-09-17
+
+A store says in its own committed `policy.yaml` how its writes travel: `sharing` (project,
+personal, community) and `push` (auto, manual). A store without the file is a project's, published
+by hand, which is how every store made before this behaves.
+
+| Store | An agent writing to it | Leaving the machine |
+|---|---|---|
+| a project's | writes freely | a person commits, as before |
+| personal global (`push: auto`) | writes freely | committed at once, and pushed when a remote exists |
+| community (`push: manual`) | writes to that person's clone only | a branch and a pull request; the owners merge |
+
+The policy is committed, so a clone of a shared store arrives knowing not to publish on its own —
+a guard rail, not a lock: what stops a stranger's write is the remote's permissions. Debith, 2026-09-17:
+"automatic push, yes. However, if there is a community based memory store, it should be manual (owners)."
+
+Propagation then needs nothing new. A write is committed and pushed; another machine pulls; the
+audit files are append-only, one per clone, merged by union, and divergent histories are joined by
+a merge row at open (§5). Two machines writing different preferences merge silently; two editing
+the same one produce a forked chain, which is reported for a person to merge rather than resolved
+by the loser's work disappearing.
+
+What each kind of session sees, and when:
+
+| Who | How it reaches them | Delay |
+|---|---|---|
+| the session that wrote it | the write's own result | none |
+| another session on this machine, already open | its next memory call carries `standing_changed`, naming the preferences added or gone | that session's next call |
+| a new session anywhere on this machine | standing knowledge, read at the server's start | at once |
+| another machine | `git pull` of the global store | that machine's next session |
+
+Two gaps stay open. A session already running on another machine keeps its standing knowledge until
+it restarts, since nothing tells it to pull; and a session whose agent never calls a memory tool
+never sees `standing_changed`, because there is no result to carry it.
+
 ### 9.2 Whether head views are committed (11)
 
 | Option | Concretely | For | Against |

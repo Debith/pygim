@@ -121,6 +121,14 @@ class GimmicksCliApp:
 
         cwd = Path.cwd()
         try:
+            if kind == "global":
+                root = _stores.setup_global(Path(source) if source else None, Path(path) if path else None)
+                policy = _stores.policy(root)
+                click.echo(f"global store: {root} (sharing: {policy.sharing}, push: {policy.push})")
+                click.echo("every project on this machine reads it; write `domain=any` knowledge there with scope global")
+                click.echo(f"other machines: give it a git remote, or point them at a clone with "
+                           f"`git config --global {_stores.GLOBAL_KEY} <path>`")
+                return
             if kind == "user":
                 root = _stores.setup_user(cwd, name, Path(source) if source else None)
                 how = "a user-level store"
@@ -140,6 +148,8 @@ class GimmicksCliApp:
         except RuntimeError as exc:
             raise click.ClickException(str(exc)) from exc
         click.echo(f"store: {root} ({how})")
+        if (wide := _stores.find_global()) is not None:
+            click.echo(f"global store: {wide} — read by every project on this machine")
         if _stores.git(["config", "--get", _stores.GIT_KEY], cwd):
             click.echo(f"every worktree of this clone finds it through `git config {_stores.GIT_KEY}`")
         local = Path(cwd) / ".mcp.json"
@@ -199,6 +209,13 @@ class GimmicksCliApp:
         store = self._store(root)
         info = Memory(store).session()
         click.echo(f"{store}: v{info['version']}, {info['memories']} memories, vocabulary {info['taxonomy'][:12]}")
+        from _pygim._mcp import _stores
+
+        if (wide := _stores.find_global()) is not None and Path(wide) != Path(store):
+            policy = _stores.policy(wide)
+            wide_info = Memory(str(wide)).session()
+            click.echo(f"{wide}: v{wide_info['version']}, {wide_info['memories']} memories "
+                       f"(global, sharing: {policy.sharing}, push: {policy.push})")
         for r in info["reviews"]:
             click.echo(f"  review ({r['kind']}): {r['text']}")
         for p in info["proposals"]:

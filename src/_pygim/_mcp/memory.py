@@ -54,6 +54,11 @@ not by similarity to the prompt.
    prompt (the user accepts the draft with `oo memory accept --pack`), then
    `seed-memories`. If a tool says there is no store, tell the user to run
    `oo memory setup` in the project.
+7. Knowledge about no single project — how this person wants things written, how
+   they like choices laid out — belongs in the global store, which every project's
+   session reads: pass `scope: "global"` to read it and to write there, and tag it
+   `domain=any`. A `#n` is a number in one store, so read a scope before writing to
+   it. Everything else stays in the project's store, the default.
 """
 
 CONSOLIDATE = """\
@@ -207,6 +212,10 @@ _PROMPT_TEXT: Dict[str, Callable[[Dict[str, Any], "MemoryServer"], str]] = {
     "seed-memories": lambda args, server: SEED_MEMORIES,
 }
 
+_SCOPE = {"type": "string", "enum": ["project", "global"],
+          "description": "Which store: this project's (default), or the machine's global one, whose knowledge is "
+                         "about no single project and reaches every project's sessions. A #n numbers memories within "
+                         "one store, so read a scope before writing to it."}
 _REF = {"type": "string", "description": "A memory: #n from a read or show, or at least 8 characters of its key."}
 _TAGS = {"type": "array", "items": {"type": "string"}, "description": "Qualified tags, dimension=value, from the vocabulary."}
 _REFS = {"type": "array", "items": _REF}
@@ -228,7 +237,7 @@ TOOLS: List[Dict[str, Any]] = [
         "description": "The controlled vocabulary. Each dimension is one question with a closed list of answers; "
                        "role hard means it filters by default, soft means it only orders; each value's entry says "
                        "when to use it and when not to. Tag requests and memories with these exact names.",
-        "inputSchema": _schema({}),
+        "inputSchema": _schema({"scope": _SCOPE}),
     },
     {
         "name": "read",
@@ -243,10 +252,12 @@ TOOLS: List[Dict[str, Any]] = [
         "inputSchema": _schema({
             "hard": _TAGS,
             "soft": _TAGS,
+            "scope": _SCOPE,
             "term": {"type": "string", "description": "Keep only candidates whose title or text has this word — the "
                                                       "subject tags cannot name, such as \"invisible\". It matches at the start of a "
-                                                      "word, so query the shortest stem (\"mount\" finds mounted and mounts, not "
-                                                      "amount); several words match that phrase exactly. A filter, never a score: "
+                                                      "word, so query the word as your sources write it (\"mount\" finds mounted and "
+                                                      "mounts, not amount; \"visible\" does not find invisible); several words match "
+                                                      "that phrase exactly. A filter, never a score: "
                                                       "`term_matched` beside `candidates` shows what the word, not the tags, left."},
             "max": {"type": "integer", "minimum": 1, "description": "Most memories to return (default 8)."},
             "budget": {"type": "integer", "minimum": 0, "description": "Token budget; 0 is unbounded."},
@@ -260,6 +271,7 @@ TOOLS: List[Dict[str, Any]] = [
                        "memory says, pass it in `supersedes`. If a memory already says exactly this, call `learn` "
                        "instead. Concepts with no tag go in `proposals`, each with brief, when, when_not and example.",
         "inputSchema": _schema({
+            "scope": _SCOPE,
             "title": {"type": "string"},
             "text": {"type": "string"},
             "tags": _TAGS,
@@ -287,7 +299,8 @@ TOOLS: List[Dict[str, Any]] = [
         "description": "Report that a memory helped. With a tag the memory does not carry, the report counts toward "
                        "linking that tag (three reports promote it). On a procedure with no tag, it records that its "
                        "steps held.",
-        "inputSchema": _schema({"memory": _REF, "tag": {"type": "string"}, "reason": {"type": "string"}}, ["memory"]),
+        "inputSchema": _schema({"memory": _REF, "tag": {"type": "string"}, "reason": {"type": "string"}, "scope": _SCOPE},
+                               ["memory"]),
     },
     {
         "name": "merge",
@@ -302,17 +315,19 @@ TOOLS: List[Dict[str, Any]] = [
     {
         "name": "link",
         "description": "Add a tag to a memory, with a reason. Returns the memory's tags as they now stand.",
-        "inputSchema": _schema({"memory": _REF, "tag": {"type": "string"}, "reason": {"type": "string"}}, ["memory", "tag", "reason"]),
+        "inputSchema": _schema({"memory": _REF, "tag": {"type": "string"}, "reason": {"type": "string"}, "scope": _SCOPE},
+                               ["memory", "tag", "reason"]),
     },
     {
         "name": "unlink",
         "description": "Remove a tag from a memory, with a reason. Returns the memory's tags as they now stand.",
-        "inputSchema": _schema({"memory": _REF, "tag": {"type": "string"}, "reason": {"type": "string"}}, ["memory", "tag", "reason"]),
+        "inputSchema": _schema({"memory": _REF, "tag": {"type": "string"}, "reason": {"type": "string"}, "scope": _SCOPE},
+                               ["memory", "tag", "reason"]),
     },
     {
         "name": "retire",
         "description": "Take a memory out of retrieval, with a reason. It stays readable with `show`.",
-        "inputSchema": _schema({"memory": _REF, "reason": {"type": "string"}}, ["memory", "reason"]),
+        "inputSchema": _schema({"memory": _REF, "reason": {"type": "string"}, "scope": _SCOPE}, ["memory", "reason"]),
     },
     {
         "name": "review",
@@ -332,7 +347,7 @@ TOOLS: List[Dict[str, Any]] = [
     {
         "name": "show",
         "description": "One memory in full: its text, tags, lineage, what it saw, citations and counters.",
-        "inputSchema": _schema({"memory": _REF}, ["memory"]),
+        "inputSchema": _schema({"memory": _REF, "scope": _SCOPE}, ["memory"]),
     },
     {
         "name": "proposals",
@@ -381,6 +396,8 @@ class MemoryServer:
         self._memory = memory
         self._root = root
         self._cwd = Path(cwd or os.getcwd())
+        self._global: Any = None
+        self._standing_seen: Optional[Dict[str, str]] = None  # global preference key → title, as last told
         self._stamp = self._taxonomy_stamp() if memory is not None else None
         self._vocabulary: Optional[str] = None  # the vocabulary version the agent last saw
         self.session: Optional[int] = None
@@ -391,21 +408,46 @@ class MemoryServer:
             "check_pack": lambda a: _packs.check(Path(self.memory.root), self._store_path(a["path"]),
                                                  project=_stores.project_root(self._cwd), memory=self.memory),
             "session": self._session,
-            "vocabulary": lambda a: self.memory.vocabulary(),
+            "vocabulary": lambda a: self._mem(a).vocabulary(),
             "read": self._read,
             "remember": self._remember,
-            "learn": lambda a: self.memory.learn(a["memory"], tag=a.get("tag", ""), reason=a.get("reason", ""),
+            "learn": lambda a: self._mem(a).learn(a["memory"], tag=a.get("tag", ""), reason=a.get("reason", ""),
                                                  session=self._session_no()),
             "merge": lambda a: self.memory.merge(a["memories"], title=a["title"], text=a["text"], reason=a["reason"],
                                                  tags=a.get("tags", []), session=self._session_no()),
-            "link": lambda a: self.memory.link(a["memory"], a["tag"], reason=a["reason"], author="agent"),
-            "unlink": lambda a: self.memory.unlink(a["memory"], a["tag"], reason=a["reason"], author="agent"),
-            "retire": lambda a: self.memory.retire(a["memory"], reason=a["reason"], author="agent"),
+            "link": lambda a: self._mem(a).link(a["memory"], a["tag"], reason=a["reason"], author="agent"),
+            "unlink": lambda a: self._mem(a).unlink(a["memory"], a["tag"], reason=a["reason"], author="agent"),
+            "retire": lambda a: self._mem(a).retire(a["memory"], reason=a["reason"], author="agent"),
             "review": lambda a: self.memory.review(a.get("session") or self._session_no()),
             "lessons": lambda a: self.memory.lessons(self._session_no(), a["text"], author="agent"),
-            "show": lambda a: self.memory.show(a["memory"]),
+            "show": lambda a: self._mem(a).show(a["memory"]),
             "proposals": lambda a: self.memory.proposals(),
         }
+
+    # ── the stores ──────────────────────────────────────────────────────────
+
+    def _mem(self, arguments: Dict[str, Any]) -> Any:
+        """The store a call works on: the project's, or the machine's global one (`scope`)."""
+        return self.global_memory if arguments.get("scope") == "global" else self.memory
+
+    @property
+    def global_memory(self) -> Any:
+        """The global store, opened on first use. Knowledge here reaches every project's sessions."""
+        from pygim.memory import Memory
+
+        if self._global is None:
+            root = _stores.find_global()
+            if root is None or not _stores.is_store(root):
+                raise NoStore("this machine has no global store — run `oo memory setup --global` to make one; "
+                              "knowledge about one project belongs in its own store")
+            self._global = Memory(str(root))
+        return self._global
+
+    def _global_if_any(self) -> Any:
+        try:
+            return self.global_memory
+        except Exception:  # no store, or a vocabulary that will not load: the tools say so
+            return None
 
     # ── the store ───────────────────────────────────────────────────────────
 
@@ -424,38 +466,57 @@ class MemoryServer:
             self._stamp = self._taxonomy_stamp()
         return self._memory
 
-    def _standing(self) -> str:
-        """The project's standing knowledge, appended to the instructions a host loads into every
-        session: each preference in full, and the title of each procedure — a read naming its
-        artifact and task places its steps first anyway. Nothing is recorded as read. Empty when
-        there is no store, or nothing of either kind; capped at STANDING_TOKENS, naming what it leaves out."""
+    def _heads(self, memory: Any, tag: str) -> List[Dict[str, Any]]:
         try:
-            preferences = self.memory.heads(["kind=preference"])
-            procedures = self.memory.heads(["kind=procedure"])
-        except Exception:  # no store yet, or a vocabulary that will not load: the tools will say so
-            return ""
+            return memory.heads([tag]) if memory is not None else []
+        except Exception:  # a store that will not load: the tools will say so
+            return []
+
+    def _standing(self) -> str:
+        """The standing knowledge appended to the instructions a host loads into every session: each
+        preference in full, and the title of each procedure — a read naming its artifact and task
+        places its steps first anyway. Nothing is recorded as read.
+
+        Two stores contribute: the machine's global store, whose knowledge is about no single
+        project, and this project's. The global comes first and the project's second, because where
+        the two disagree the project's is the nearer rule. Empty when there is neither; capped at
+        STANDING_TOKENS, naming what it leaves out."""
+        wide = self._global_if_any()
+        near = self._memory if self._memory is not None else self._project_if_any()
+        sources = [("global", wide), ("project", near)]
+        preferences = [(origin, p) for origin, m in sources for p in self._heads(m, "kind=preference")]
+        procedures = [(origin, p) for origin, m in sources for p in self._heads(m, "kind=procedure")]
+        self._standing_seen = {p["key"]: p["title"] for origin, p in preferences if origin == "global"}
         if not preferences and not procedures:
             return ""
-        out = ["", "Standing knowledge from this project's memory, as of this server's start. It applies to",
-               "every task, so it is given here instead of waiting for a read."]
+        out = ["", "Standing knowledge, as of this server's start: this project's memory, and the global",
+               "memory of things that hold in every project. It applies to every task, so it is given",
+               "here instead of waiting for a read; where the two disagree, this project's is the rule."]
         if preferences:
             out += ["", "Preferences:"]
             used, left_out = 0, []
-            for p in preferences:
+            for origin, p in preferences:
+                where = " (global)" if origin == "global" else ""
                 if used + p["tokens"] > STANDING_TOKENS:
-                    left_out.append(f"{p['memory']} {p['title']}")
+                    left_out.append(f"{p['memory']}{where} {p['title']}")
                     continue
                 used += p["tokens"]
                 body = p["text"].strip().replace("\n", "\n  ")
-                out.append(f"- {p['memory']} {p['title']}: {body}")
+                out.append(f"- {p['memory']}{where} {p['title']}: {body}")
             if left_out:
                 out.append("- not shown, for length (`show` them): " + "; ".join(left_out))
         if procedures:
             out += ["", "Procedures — a read naming their artifact and task places the steps first:"]
-            for p in procedures:
+            for origin, p in procedures:
                 where = " ".join(t for t in p["tags"] if t.startswith(("artifact=", "task=")))
-                out.append(f"- {p['memory']} {p['title']} — {where}")
+                out.append(f"- {p['memory']}{' (global)' if origin == 'global' else ''} {p['title']} — {where}")
         return "\n".join(out) + "\n"
+
+    def _project_if_any(self) -> Any:
+        try:
+            return self.memory
+        except Exception:
+            return None
 
     def _store_root(self) -> Optional[Path]:
         try:
@@ -489,14 +550,14 @@ class MemoryServer:
         return info
 
     def _read(self, a: Dict[str, Any]) -> Any:
-        result = self.memory.read(a["hard"], a.get("soft", []), max=a.get("max", 8), budget=a.get("budget", 0),
+        result = self._mem(a).read(a["hard"], a.get("soft", []), max=a.get("max", 8), budget=a.get("budget", 0),
                                   term=a.get("term", ""), session=self._session_no())
         if result.get("memories") or result.get("procedure"):
             result["next"] = "When one of these helps, call learn with it; a read never counts as useful on its own."
         return result
 
     def _remember(self, a: Dict[str, Any]) -> Any:
-        return self.memory.remember(
+        return self._mem(a).remember(
             title=a["title"], text=a["text"], tags=a["tags"], reason=a.get("reason", ""),
             supersedes=a.get("supersedes", []), generalises=a.get("generalises", []), seen=a.get("seen", []),
             cites=a.get("cites", []),
@@ -549,6 +610,7 @@ class MemoryServer:
         try:
             result = fn(arguments)
             self._note_vocabulary(name, result)
+            self._note_global(name, arguments, result)
         except NoStore as exc:
             return _text(f"{name}: {exc}", error=True)
         except KeyError as exc:
@@ -570,6 +632,33 @@ class MemoryServer:
             result["vocabulary_changed"] = {"from": self._vocabulary, "to": now,
                                             "next": "call vocabulary: values may have been added, renamed or removed"}
             self._vocabulary = now
+
+    WRITES = ("remember", "link", "unlink", "retire", "learn", "merge")
+
+    def _note_global(self, name: str, arguments: Dict[str, Any], result: Any) -> None:
+        """Two things about the global store. A write to it is published at once if its policy says
+        so — that is what carries a preference to this machine's other projects and to other
+        machines. And whatever the call was, a preference that appeared or left since this session
+        last looked is named, so a session already running learns of one written elsewhere."""
+        if not isinstance(result, dict):
+            return
+        if arguments.get("scope") == "global" and result.get("ok") and name in self.WRITES:
+            result["store"] = "global"
+            what = arguments.get("title") or f"{name} {result.get('memory', '')}".strip()
+            result["synced"] = _stores.publish(Path(self._global.root), f"memory: {what}")
+        wide = self._global if self._global is not None else self._global_if_any()
+        if wide is None:
+            return
+        current = {p["key"]: p["title"] for p in self._heads(wide, "kind=preference")}
+        if self._standing_seen is None:
+            self._standing_seen = current
+            return
+        added = [t for k, t in current.items() if k not in self._standing_seen]
+        gone = [t for k, t in self._standing_seen.items() if k not in current]
+        if added or gone:
+            result["standing_changed"] = {"added": added, "no_longer": gone,
+                                          "next": "these hold in every project; `show` them with scope global"}
+            self._standing_seen = current
 
     def serve(self, stdin: IO[str], stdout: IO[str]) -> None:
         for line in stdin:

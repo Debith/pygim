@@ -49,6 +49,14 @@ def git_at_least(major: int, minor: int) -> bool:
     return bool(found) and (int(found.group(1)), int(found.group(2))) >= (major, minor)
 
 
+def call(server, name, **arguments):
+    """One tool call, as the MCP host makes it: (is_error, the decoded result or the error text)."""
+    resp = server.handle({"jsonrpc": "2.0", "id": 7, "method": "tools/call",
+                          "params": {"name": name, "arguments": arguments}})
+    result = resp["result"]
+    return result["isError"], (result["content"][0]["text"] if result["isError"] else json.loads(result["content"][0]["text"]))
+
+
 @pytest.fixture
 def isolated(tmp_path, monkeypatch):
     for key, value in {"GIT_AUTHOR_NAME": "Test", "GIT_AUTHOR_EMAIL": "test@example.com",
@@ -177,6 +185,82 @@ class TestTheServerWithoutAStore:
         Memory.init(str(isolated / ".memory"))
         result = server.call("session", {})
         assert not result["isError"] and json.loads(result["content"][0]["text"])["root"] == str((isolated / ".memory").resolve())
+
+
+class TestTheGlobalStore:
+    """One store per machine for knowledge about no single project, read by every project's
+    sessions, and published the moment it is written (03 §9.1)."""
+
+    PREF = dict(tags=["domain=any", "artifact=any", "task=any", "kind=preference"])
+
+    @staticmethod
+    def with_project(project):
+        store = project / ".memory"
+        Memory.init(str(store))
+        return store
+
+    def test_setup_makes_it_personal_published_and_found_from_any_project(self, project, isolated):
+        out = CliRunner().invoke(cli_oo, ["memory", "setup", "--global"])
+        assert out.exit_code == 0, out.output
+        root = isolated / "user-data" / "global"
+        assert _stores.is_store(root) and "sharing: personal" in out.output
+        assert _stores.policy(root) == _stores.Policy(sharing="personal", push="auto")
+        assert sh("git", "log", "--oneline", "-1", cwd=root)                       # committed as it was made
+        assert _stores.find_global() == root                                       # through git's global config
+        assert _stores.find(cwd=project) is None or _stores.find(cwd=project).root != root   # not the project's store
+
+    def test_a_write_with_scope_global_lands_there_and_is_committed(self, project, isolated, monkeypatch):
+        store = self.with_project(project)
+        wide = _stores.setup_global()
+        monkeypatch.setenv(_stores.GLOBAL_ENV, str(wide))
+        server = MemoryServer(cwd=project)
+        err, written = call(server, "remember", scope="global", title="Explain in layers",
+                            text="Assumed words first, then one line.", **self.PREF)
+        assert not err and written["ok"] and written["store"] == "global"
+        assert written["synced"] == "committed (no remote yet)"
+        assert "Explain in layers" in sh("git", "log", "-1", "--pretty=%s", cwd=wide)
+        assert Memory(str(wide)).session()["memories"] == 1
+        err, here = call(server, "remember", title="A project rule", text="Only here.", **self.PREF)
+        assert here["ok"] and "store" not in here and Memory(str(store)).session()["memories"] == 1
+        assert sh("git", "status", "--porcelain", cwd=wide) == ""                  # nothing left uncommitted
+
+    def test_both_stores_reach_the_session_and_the_global_ones_say_so(self, project, isolated, monkeypatch):
+        store = self.with_project(project)
+        wide = _stores.setup_global()
+        monkeypatch.setenv(_stores.GLOBAL_ENV, str(wide))
+        Memory(str(wide)).remember(title="Explain in layers", text="Assumed words first.", **self.PREF)
+        Memory(str(store)).remember(title="Prefer templates", text="Template it.", **self.PREF)
+        text = MemoryServer(cwd=project).handle(
+            {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}})["result"]["instructions"]
+        assert "(global) Explain in layers: Assumed words first." in text
+        assert "Prefer templates: Template it." in text and "(global) Prefer templates" not in text
+        assert "where the two disagree, this project's is the rule" in text
+
+    def test_a_preference_written_elsewhere_reaches_a_session_already_running(self, project, isolated, monkeypatch):
+        self.with_project(project)
+        wide = _stores.setup_global()
+        monkeypatch.setenv(_stores.GLOBAL_ENV, str(wide))
+        server = MemoryServer(cwd=project)
+        call(server, "session")                                                     # the baseline it will compare against
+        Memory(str(wide)).remember(title="Lay options out as a table", text="With a recommendation.", **self.PREF)
+        err, info = call(server, "session")
+        assert info["standing_changed"]["added"] == ["Lay options out as a table"]
+        assert "no_longer" in info["standing_changed"] and info["standing_changed"]["no_longer"] == []
+        assert "standing_changed" not in call(server, "session")[1]                 # said once, not on every call
+
+    def test_a_store_whose_owners_publish_it_is_never_pushed_here(self, project, isolated):
+        shared = isolated / "community"
+        _stores.create(shared)
+        _stores.write_policy(shared, _stores.Policy(sharing="community", push="manual"))
+        sh("git", "init", "-q", cwd=shared)
+        assert _stores.publish(shared, "memory: something").startswith("manual")
+        assert _stores.git(["rev-parse", "--verify", "HEAD"], shared) is None       # no commit made on our say-so
+
+    def test_without_a_global_store_the_scope_says_how_to_make_one(self, project, isolated, monkeypatch):
+        self.with_project(project)
+        monkeypatch.delenv(_stores.GLOBAL_ENV, raising=False)
+        err, text = call(MemoryServer(cwd=project), "remember", scope="global", title="t", text="x", **self.PREF)
+        assert err and "oo memory setup --global" in text
 
 
 class TestANewProjectsVocabulary:
