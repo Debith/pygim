@@ -129,6 +129,15 @@ def memory_mcp(root):
     GimmicksCliApp().memory_mcp(root=root)
 
 
+@memory.command("stores")
+@flag_opt("--remote", "remote", help="Also list the stores kept in the remote that are not checked out here.")
+@_ROOT
+def memory_stores(remote, root):
+    """List the stores this machine holds, as a session can name them with `scope`. Nothing is
+    configured: a store is found by its policy's name or its directory's."""
+    GimmicksCliApp().memory_stores(remote=remote, root=root)
+
+
 @memory.command("reload")
 @flag_opt("--signal", "signal_servers",
           help="Also SIGHUP every running server, including other projects'. A server older than "

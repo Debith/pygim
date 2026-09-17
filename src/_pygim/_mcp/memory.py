@@ -58,11 +58,12 @@ not by similarity to the prompt.
    prompt (the user accepts the draft with `oo memory accept --pack`), then
    `seed-memories`. If a tool says there is no store, tell the user to run
    `oo memory setup` in the project.
-7. Knowledge about no single project — how this person wants things written, how
-   they like choices laid out — belongs in the global store, which every project's
-   session reads: pass `scope: "global"` to read it and to write there, and tag it
-   `domain=any`. A `#n` is a number in one store, so read a scope before writing to
-   it. Everything else stays in the project's store, the default.
+7. This machine may hold several stores, and `session` lists them: `project` (the
+   default), `global` for knowledge about no single project — how this person wants
+   things written — and any other store found beside a project or in the user data
+   directory, such as a subject others contribute to. Name one with `scope`. A `#n`
+   is a number in one store, so read a scope before writing to it, and tag knowledge
+   that holds everywhere `domain=any`.
 """
 
 CONSOLIDATE = """\
@@ -216,10 +217,10 @@ _PROMPT_TEXT: Dict[str, Callable[[Dict[str, Any], "MemoryServer"], str]] = {
     "seed-memories": lambda args, server: SEED_MEMORIES,
 }
 
-_SCOPE = {"type": "string", "enum": ["project", "global"],
-          "description": "Which store: this project's (default), or the machine's global one, whose knowledge is "
-                         "about no single project and reaches every project's sessions. A #n numbers memories within "
-                         "one store, so read a scope before writing to it."}
+_SCOPE = {"type": "string",
+          "description": "Which store: `project` (default), `global` — the machine's, for knowledge about no single "
+                         "project — or the name of any other store this machine holds, as `session` lists them. A #n "
+                         "numbers memories within one store, so read a scope before writing to it."}
 _REF = {"type": "string", "description": "A memory: #n from a read or show, or at least 8 characters of its key."}
 _TAGS = {"type": "array", "items": {"type": "string"}, "description": "Qualified tags, dimension=value, from the vocabulary."}
 _REFS = {"type": "array", "items": _REF}
@@ -403,6 +404,7 @@ class MemoryServer:
         self._global: Any = None
         self._standing_seen: Optional[Dict[str, str]] = None  # global preference key → title, as last told
         self.signalled = False        # set by SIGHUP; acted on between messages
+        self._stores_open: Dict[str, Any] = {}   # stores opened by name this session
         self._started = time.time_ns()
         self._code = self._code_stamp()
         self._told_stale = False
@@ -435,8 +437,29 @@ class MemoryServer:
     # ── the stores ──────────────────────────────────────────────────────────
 
     def _mem(self, arguments: Dict[str, Any]) -> Any:
-        """The store a call works on: the project's, or the machine's global one (`scope`)."""
-        return self.global_memory if arguments.get("scope") == "global" else self.memory
+        """The store a call works on, by name. `project` (the default) and `global` always resolve;
+        every other store this machine holds is found by `_stores.discover`, so a store checked out
+        beside a project is addressable the moment it exists — nothing to configure."""
+        name = (arguments.get("scope") or "project").strip().lower()
+        if name == "project":
+            return self.memory
+        if name == "global":
+            return self.global_memory
+        if name in self._stores_open:
+            return self._stores_open[name]
+        from pygim.memory import Memory
+
+        found = _stores.scope(name, self._cwd, self._root)
+        if found is None:
+            known = ", ".join(s.name for s in self.scopes()) or "project"
+            raise NoStore(f"no store called `{name}` — this machine has: {known}. A store is found by its "
+                          f"policy's name or its directory's, in your user data directory or beside a project.")
+        self._stores_open[name] = Memory(str(found.root))
+        return self._stores_open[name]
+
+    def scopes(self) -> List[Any]:
+        """Every store a session can name here, the project's first."""
+        return _stores.discover(self._cwd, self._root)
 
     @property
     def global_memory(self) -> Any:
@@ -555,6 +578,10 @@ class MemoryServer:
         self.session = int(info["session"])
         info["root"] = self.memory.root
         info["project"] = str(_stores.project_root(self._cwd))
+        info["scopes"] = [{"scope": s.name, "root": str(s.root), "how": s.how,
+                           "sharing": _stores.policy(s.root).sharing,
+                           **({"also": s.aliases} if s.aliases else {})}
+                          for s in self.scopes()]
         return info
 
     def _read(self, a: Dict[str, Any]) -> Any:
@@ -651,10 +678,12 @@ class MemoryServer:
         last looked is named, so a session already running learns of one written elsewhere."""
         if not isinstance(result, dict):
             return
-        if arguments.get("scope") == "global" and result.get("ok") and name in self.WRITES:
-            result["store"] = "global"
+        where = (arguments.get("scope") or "project").strip().lower()
+        if where != "project" and result.get("ok") and name in self.WRITES:
+            written = self._mem(arguments)
+            result["store"] = where
             what = arguments.get("title") or f"{name} {result.get('memory', '')}".strip()
-            result["synced"] = _stores.publish(Path(self._global.root), f"memory: {what}")
+            result["synced"] = _stores.publish(Path(written.root), f"memory: {what}")
         wide = self._global if self._global is not None else self._global_if_any()
         if wide is None:
             return

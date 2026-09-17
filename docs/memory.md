@@ -71,6 +71,22 @@ repository is public it must not be; and a store can live anywhere, as long as i
 are relative to the project root (`oo memory status` opens it and reports anything it cannot
 resolve).
 
+### Stores this machine holds
+
+```bash
+oo memory stores            # what a session can name with `scope`
+oo memory stores --remote   # and what the remote holds that is not checked out here
+```
+
+A store is found, never configured: the project's own, the global one, anything in your user data
+directory, and any `<name>-memory` directory beside the project. Its name comes from its
+`policy.yaml`, or from the directory with `-memory` dropped — so `~/projects/ddd-memory` is `ddd`,
+and an agent reads it with `scope: "ddd"`.
+
+Two things a named store does *not* do: it never contributes to the standing knowledge injected
+into every session (only the project's store and the global one do), and a write to it follows its
+own policy — a store marked `sharing: community` is published by its owners, not by you.
+
 ### On another machine
 
 ```bash

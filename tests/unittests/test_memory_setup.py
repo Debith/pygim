@@ -263,6 +263,50 @@ class TestTheGlobalStore:
         assert err and "oo memory setup --global" in text
 
 
+class TestDiscoveringStores:
+    """A machine's stores are found, not configured: a session names any of them with `scope`."""
+
+    def test_a_store_beside_the_project_is_a_scope_under_its_own_name(self, project, isolated, monkeypatch):
+        Memory.init(str(project / ".memory"))
+        subject = isolated / "ddd-memory"                       # the convention: <name>-memory beside the project
+        _stores.create(subject)
+        _stores.write_policy(subject, _stores.Policy(sharing="community", push="manual"))
+        named = {s.name: s for s in _stores.discover(project)}
+        assert named["ddd"].root == subject.resolve() and "beside" in named["ddd"].how
+        assert named["project"].root == (project / ".memory").resolve()
+        Memory(str(subject)).remember(title="Value objects compare by value", text="And carry no identity.",
+                                      tags=["domain=any", "artifact=any", "task=design", "kind=principle"])
+        err, read = call(MemoryServer(cwd=project), "read", scope="ddd", hard=["task=design"])
+        assert not err and [m["title"] for m in read["memories"]] == ["Value objects compare by value"]
+
+    def test_a_policy_name_wins_over_the_directory(self, project, isolated):
+        store = isolated / "D-D-2024-memory"
+        _stores.create(store)
+        _stores.write_policy(store, _stores.Policy(sharing="project", push="manual", name="dnd"))
+        assert _stores.store_name(store) == "dnd"
+        assert {s.name for s in _stores.discover(project)} >= {"dnd"}
+
+    def test_session_lists_them_and_an_unknown_scope_names_what_there_is(self, project, isolated):
+        Memory.init(str(project / ".memory"))
+        _stores.create(isolated / "ddd-memory")
+        server = MemoryServer(cwd=project)
+        err, info = call(server, "session")
+        assert [s["scope"] for s in info["scopes"]] == ["project", "ddd"]
+        assert info["scopes"][0]["also"] == ["proj"]                       # the project directory's own name
+        err, text = call(server, "show", scope="nope", memory="#0")
+        assert err and "no store called `nope`" in text and "project, ddd" in text
+
+    def test_the_command_lists_stores_and_what_the_remote_holds(self, project, isolated, monkeypatch):
+        Memory.init(str(project / ".memory"))
+        _stores.create(isolated / "ddd-memory")
+        monkeypatch.setattr(_stores, "remote_stores", lambda root: ["memory", "ddd", "global"])
+        monkeypatch.chdir(project)
+        out = CliRunner().invoke(cli_oo, ["memory", "stores", "--remote"])
+        assert out.exit_code == 0, out.output
+        assert "ddd" in out.output and "sharing: project" in out.output
+        assert "not checked out here: memory, global" in out.output
+
+
 class TestAskingForAReload:
     def test_reload_marks_the_stores_a_server_here_would_serve(self, project, isolated, monkeypatch):
         store = project / ".memory"

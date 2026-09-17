@@ -125,6 +125,7 @@ class Policy:
     """A store's own rules, committed with it so a clone arrives knowing them."""
     sharing: str = "project"   # project · personal (one owner) · community (owners review)
     push: str = "manual"       # auto: each write is committed and pushed · manual: a person does it
+    name: str = ""             # what a session calls this store; empty means "take it from the directory"
 
     @property
     def automatic(self) -> bool:
@@ -143,14 +144,29 @@ def policy(root: Path) -> Policy:
         key, sep, value = line.partition(":")
         if sep and not key.startswith((" ", "\t", "#")):
             fields[key.strip()] = value.split("#")[0].strip()
-    return Policy(sharing=fields.get("sharing", "project"), push=fields.get("push", "manual"))
+    return Policy(sharing=fields.get("sharing", "project"), push=fields.get("push", "manual"),
+                  name=fields.get("name", ""))
 
 
 def write_policy(root: Path, p: Policy) -> None:
+    named = f"name: {p.name}\n" if p.name else ""
     (root / POLICY).write_text(
         "# How this store is shared, and how its writes leave this machine (03 §9.1).\n"
-        f"sharing: {p.sharing}\n"
+        + named
+        + f"sharing: {p.sharing}\n"
         f"push: {p.push}\n", encoding="utf-8")
+
+
+def store_name(root: Path) -> str:
+    """What a session calls a store: the name its policy declares, else its directory's — with a
+    trailing `-memory` dropped, so ~/projects/ddd-memory is `ddd`, and `.memory` named for its
+    project. Lowercase; a session addresses a store by this."""
+    declared = policy(root).name
+    if declared:
+        return declared.strip().lower()
+    if root.name == LOCAL:
+        return root.parent.name.lower()
+    return root.name.removesuffix("-memory").lower() or root.name.lower()
 
 
 def publish(root: Path, message: str) -> str:
@@ -170,6 +186,78 @@ def publish(root: Path, message: str) -> str:
     if git(["push", "origin", branch], root) is None:
         return "committed, but the push failed — push it yourself"
     return "committed and pushed"
+
+
+# ── what stores this machine has ──────────────────────────────────────────────
+
+
+@dataclass(frozen=True)
+class Scope:
+    """A store a session can address by name, and where it was found."""
+    name: str
+    root: Path
+    how: str
+    aliases: List[str]
+
+
+def discover(cwd: Optional[Path] = None, explicit: Optional[str] = None) -> List[Scope]:
+    """Every store this machine holds, as scopes a session can name. Nothing is configured: a store
+    declares its name in its policy or takes it from its directory, and stores are looked for where
+    the conventions put them — the project's own (`project`), the machine's global one (`global`),
+    the stores kept in the user data directory, and the `<name>-memory` directories beside the
+    project, which is where a store lives when it is kept out of the project it serves (03 §9.1).
+
+    Order matters: the first entry for a root keeps it, later ones only add aliases, so the
+    project's store answers to `project` as well as to its own name."""
+    cwd = Path(cwd or os.getcwd()).resolve()
+    found: List[Scope] = []
+
+    def add(root: Optional[Path], how: str, name: Optional[str] = None) -> None:
+        if root is None or not is_store(root):
+            return
+        root = root.resolve()
+        called = (name or store_name(root)).lower()
+        for scope in found:
+            if scope.root == root:
+                if called != scope.name and called not in scope.aliases:
+                    scope.aliases.append(called)
+                return
+            if called == scope.name:            # two stores of one name: the second keeps its path
+                called = f"{called}@{root.parent.name}"
+        found.append(Scope(called, root, how, []))
+
+    here = find(explicit, cwd)
+    if here is not None:
+        add(here.root, here.how, "project")
+        add(here.root, here.how)                 # and by its own name
+    add(find_global(), "global store", "global")
+    home = user_data_dir()
+    if home.is_dir():
+        for child in sorted(home.iterdir()):
+            add(child, f"in {home}")
+    project = project_root(cwd)
+    for sibling in sorted(project.parent.glob("*-memory")) if project.parent.is_dir() else []:
+        add(sibling, f"beside {project.name}")
+    return found
+
+
+def scope(name: str, cwd: Optional[Path] = None, explicit: Optional[str] = None) -> Optional[Scope]:
+    """The store a session means by *name*, matched on its name or an alias."""
+    wanted = name.strip().lower()
+    for s in discover(cwd, explicit):
+        if wanted == s.name or wanted in s.aliases:
+            return s
+    return None
+
+
+def remote_stores(root: Path) -> List[str]:
+    """The branches of a store's remote — every store kept in that repository, including any this
+    machine has not checked out yet. Empty when there is no remote or it cannot be reached."""
+    url = git(["remote", "get-url", "origin"], root) or git(["remote", "get-url", "private"], root)
+    if not url:
+        return []
+    listing = git(["ls-remote", "--heads", url], root)
+    return sorted(line.rsplit("refs/heads/", 1)[-1] for line in (listing or "").splitlines() if "refs/heads/" in line)
 
 
 # ── setup ─────────────────────────────────────────────────────────────────────

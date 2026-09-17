@@ -459,6 +459,36 @@ Reading stays per store: a `#n` numbers memories within one store, so an agent r
 writing to it. Where the two disagree, the project's memory is the nearer rule, and standing
 knowledge lists the project's last.
 
+### 9.1.4 Which stores a session can name — settled 2026-09-17
+
+A subject is not a project. Domain-driven design, or any body of practice, is applied *inside*
+projects and belongs to none of them; it may also be something several people contribute to. So a
+store is the unit of sharing, and a session may name more than one.
+
+Nothing is configured (Debith, 2026-09-17: "we need to support dynamic discovery of packs, for
+scope, etc. No point adding manually"). A store declares its name in its `policy.yaml`, or takes it
+from its directory with a trailing `-memory` dropped, and the machine's stores are found where the
+conventions already put them: the project's own (`project`), the global one (`global`), whatever
+sits in the user data directory, and the `<name>-memory` directories beside the project — which is
+where a store lives when it is deliberately kept out of the project it serves. `session` lists
+them; `scope` names one; an unknown name is refused with the list of what there is.
+
+| Option | Concretely | For | Against |
+|---|---|---|---|
+| **Discovery by convention** (chosen) | a store is a scope the moment it is checked out beside a project | nothing to declare, nothing to keep in step; a store cloned from a shared repository just appears | a directory name becomes an interface, so two stores of one name need distinguishing |
+| A mount file per project | `mounts.yaml` naming each store | explicit, and can pin a version | one more file to maintain, and it goes stale exactly when a store is added |
+
+Three limits, on purpose. A read answers from one store: ranking compares scores from one
+vocabulary, and `#3` means different memories in different stores, so a merged ranking is a design
+problem this does not need yet. Standing knowledge still comes only from the project's store and
+the global one — a discovered store's `kind=preference` memories are *not* injected into a
+session's instructions, because that would let whoever contributes to a shared store write
+instructions into every session that has it. And a write to a named store follows that store's own
+policy, so a community store is not published by the contributor.
+
+What this makes possible next: a repository of stores, one per branch, is a distribution channel —
+`oo memory stores --remote` already lists the branches this machine has not checked out.
+
 ### 9.1.2 How a write leaves the machine — settled 2026-09-17
 
 A store says in its own committed `policy.yaml` how its writes travel: `sharing` (project,

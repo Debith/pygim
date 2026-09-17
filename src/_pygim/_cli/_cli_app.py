@@ -161,6 +161,27 @@ class GimmicksCliApp:
             if not r.ran and not r.message.startswith(f"`{_stores.SERVER}` is already"):
                 click.echo("  " + " ".join(r.command))
 
+    def memory_stores(self, *, remote: bool, root: Optional[str]) -> None:
+        """List the stores a session can name here."""
+        from _pygim._mcp import _stores
+
+        scopes = _stores.discover(Path.cwd(), root)
+        if not scopes:
+            click.echo("no store found — run `oo memory setup` in a project, or `oo memory setup --global`")
+            return
+        for s in scopes:
+            policy = _stores.policy(s.root)
+            also = f" (also: {', '.join(s.aliases)})" if s.aliases else ""
+            click.echo(f"{s.name:12} {s.root}{also}\n{'':12} {s.how} · sharing: {policy.sharing} · push: {policy.push}")
+        if remote:
+            here = scopes[0].root
+            branches = _stores.remote_stores(here)
+            have = {s.name for s in scopes} | {a for s in scopes for a in s.aliases}
+            missing = [b for b in branches if b.lower() not in have]
+            click.echo(f"in the remote of {here}: {', '.join(branches) or 'nothing'}")
+            if missing:
+                click.echo("not checked out here: " + ", ".join(missing))
+
     def memory_reload(self, *, signal_servers: bool = False) -> None:
         """Ask the running MCP servers to restart into the code on disk."""
         from _pygim._mcp import _stores

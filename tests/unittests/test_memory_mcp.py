@@ -13,6 +13,7 @@ from pathlib import Path
 
 import pytest
 
+from _pygim._mcp import _stores
 from _pygim._mcp.memory import TOOLS, MemoryServer
 from pygim.memory import Memory
 
@@ -37,13 +38,14 @@ def no_machine_state(tmp_path, monkeypatch):
     monkeypatch.setenv("PYGIM_MEMORY_GLOBAL", str(tmp_path / "no-global-store"))
     monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(tmp_path / "gitconfig"))
     monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
+    monkeypatch.setattr(_stores, "user_data_dir", lambda: tmp_path / "user-data")
 
 
 @pytest.fixture
 def server(tmp_path):
     root = tmp_path / "repo"
     Memory.init(str(root))
-    return MemoryServer(Memory(str(root)))
+    return MemoryServer(Memory(str(root)), cwd=tmp_path)   # cwd matters: stores are discovered around it
 
 
 def call(server, name, **arguments):
