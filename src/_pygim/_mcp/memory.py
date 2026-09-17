@@ -15,7 +15,9 @@ from __future__ import annotations
 import datetime
 import json
 import os
+import signal
 import sys
+import time
 from pathlib import Path
 from typing import Any, Callable, Dict, IO, List, Optional
 
@@ -24,6 +26,8 @@ from . import _packs, _stores
 PROTOCOL_VERSION = "2025-06-18"
 SERVER_NAME = "pygim-memory"
 STANDING_TOKENS = 2000  # how much preference text the startup instructions may carry
+SESSION_ENV = "PYGIM_MEMORY_SESSION"   # a reloaded server resumes the session number it had
+RELOADED_ENV = "PYGIM_MEMORY_RELOADED"  # set on the process a reload exec'd into
 
 INSTRUCTIONS = """\
 A problem-space memory: knowledge is found by the kind of problem being solved,
@@ -398,9 +402,13 @@ class MemoryServer:
         self._cwd = Path(cwd or os.getcwd())
         self._global: Any = None
         self._standing_seen: Optional[Dict[str, str]] = None  # global preference key → title, as last told
+        self.signalled = False        # set by SIGHUP; acted on between messages
+        self._started = time.time_ns()
+        self._code = self._code_stamp()
+        self._told_stale = False
+        self.session: Optional[int] = int(os.environ[SESSION_ENV]) if os.environ.get(SESSION_ENV) else None
         self._stamp = self._taxonomy_stamp() if memory is not None else None
         self._vocabulary: Optional[str] = None  # the vocabulary version the agent last saw
-        self.session: Optional[int] = None
         self.turn = 0
         self._calls: Dict[str, Callable[[Dict[str, Any]], Any]] = {
             "cite": lambda a: _packs.cite(_stores.project_root(self._cwd), a["path"], int(a["line"]), int(a.get("lines", 1)),
@@ -611,6 +619,7 @@ class MemoryServer:
             result = fn(arguments)
             self._note_vocabulary(name, result)
             self._note_global(name, arguments, result)
+            self._note_stale(result)
         except NoStore as exc:
             return _text(f"{name}: {exc}", error=True)
         except KeyError as exc:
@@ -660,7 +669,70 @@ class MemoryServer:
                                           "next": "these hold in every project; `show` them with scope global"}
             self._standing_seen = current
 
+    # ── reloading (03 §9.1.3) ───────────────────────────────────────────────
+
+    def _code_stamp(self) -> Any:
+        """What the server is running: the version, and every source file it was loaded from. A
+        reinstall or an edited file changes it, and the process cannot pick that up by itself —
+        Python has already imported what it has, and the extension cannot be re-imported at all."""
+        files = []
+        for module in list(sys.modules.values()):
+            path = getattr(module, "__file__", None)
+            if not path or ("_pygim" not in path and "pygim" not in path):
+                continue
+            try:
+                stat = os.stat(path)
+            except OSError:
+                continue
+            files.append((path, stat.st_mtime_ns, stat.st_size))
+        return (_version(), tuple(sorted(files)))
+
+    def stale(self) -> bool:
+        """Whether the code on disk has moved on since this process started."""
+        return self._code_stamp() != self._code
+
+    def _reload_asked(self) -> bool:
+        """`oo memory reload` asks either by signal — SIGHUP, which sets the flag — or by touching
+        `local/reload` in the store, which is what Windows has instead of a signal."""
+        if self.signalled:
+            return True
+        try:
+            marker = Path(self._memory.root) / "local" / "reload" if self._memory is not None else None
+            return marker is not None and marker.is_file() and marker.stat().st_mtime_ns > self._started
+        except OSError:
+            return False
+
+    def reload(self, stdout: IO[str]) -> None:
+        """Replaces this process with a fresh one, between messages. The pipes are file descriptors,
+        and exec keeps them, so the host's connection survives; the session number travels in the
+        environment so the audit log does not split a session in two. Never returns."""
+        print(f"{SERVER_NAME}: reloading into the code on disk", file=sys.stderr)
+        stdout.flush()
+        try:
+            marker = Path(self._memory.root) / "local" / "reload" if self._memory is not None else None
+            if marker is not None and marker.is_file():
+                marker.unlink()
+        except OSError:
+            pass
+        os.environ[RELOADED_ENV] = "1"
+        if self.session is not None:
+            os.environ[SESSION_ENV] = str(self.session)
+        os.execv(sys.executable, [sys.executable, *sys.argv])
+
+    def _note_stale(self, result: Any) -> None:
+        """Says once, in a result, that this server is running code older than the files on disk —
+        the reader can then run `oo memory reload`, which every server here acts on at its next
+        quiet moment. Said once per staleness, not on every call."""
+        if not isinstance(result, dict) or not self.stale() or self._told_stale:
+            return
+        self._told_stale = True
+        result["server_stale"] = {"running": _version(),
+                                  "next": "the installed pygim has changed since this server started — "
+                                          "tell the user to run `oo memory reload` (or reconnect the server)"}
+
     def serve(self, stdin: IO[str], stdout: IO[str]) -> None:
+        if os.environ.pop(RELOADED_ENV, None):  # a host that watches for it re-fetches the schemas
+            _write(stdout, {"jsonrpc": "2.0", "method": "notifications/tools/list_changed"})
         for line in stdin:
             line = line.strip()
             if not line:
@@ -673,6 +745,8 @@ class MemoryServer:
             response = self.handle(msg) if isinstance(msg, dict) else None
             if response is not None:
                 _write(stdout, response)
+            if self._reload_asked():   # between messages: nothing is half-answered
+                self.reload(stdout)
 
 
 def _result(mid: Any, result: Dict[str, Any]) -> Dict[str, Any]:
@@ -699,10 +773,14 @@ def _version() -> str:
 def run(root: Optional[str] = None, stdin: Optional[IO[str]] = None, stdout: Optional[IO[str]] = None) -> None:
     """Serves this project's store over stdio until stdin closes. With no *root*, the store is found
     from the working directory the host started the server in; with none at all the server still
-    starts, and answers with how to create one."""
+    starts, and answers with how to create one. SIGHUP asks it to reload into the code on disk,
+    which it does between messages — `oo memory reload` sends it."""
     found = _stores.find(root)
     if found and found.exists:
         print(f"{SERVER_NAME}: serving {found.root} (from {found.how})", file=sys.stderr)
     else:
         print(f"{SERVER_NAME}: {_stores.guidance()}", file=sys.stderr)
-    MemoryServer(root=root).serve(stdin or sys.stdin, stdout or sys.stdout)
+    server = MemoryServer(root=root)
+    if hasattr(signal, "SIGHUP"):
+        signal.signal(signal.SIGHUP, lambda *_: setattr(server, "signalled", True))
+    server.serve(stdin or sys.stdin, stdout or sys.stdout)

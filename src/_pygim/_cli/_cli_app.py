@@ -161,6 +161,20 @@ class GimmicksCliApp:
             if not r.ran and not r.message.startswith(f"`{_stores.SERVER}` is already"):
                 click.echo("  " + " ".join(r.command))
 
+    def memory_reload(self, *, signal_servers: bool = False) -> None:
+        """Ask the running MCP servers to restart into the code on disk."""
+        from _pygim._mcp import _stores
+
+        asked = _stores.ask_reload(Path.cwd(), send_signal=signal_servers)
+        if asked["signalled"]:
+            click.echo(f"signalled {len(asked['signalled'])} server(s): " + ", ".join(str(p) for p in asked["signalled"]))
+        for root in asked["marked"]:
+            click.echo(f"marked {root} — a server on it reloads at its next call")
+        if not asked["signalled"] and not asked["marked"]:
+            click.echo("no running server found and no store to mark — reconnect the server in your editor instead")
+        else:
+            click.echo("each server reloads between messages; the call in flight finishes on the old code")
+
     def memory_ingest(self, *, corpus: str, root: Optional[str]) -> None:
         """Ingest a hand-written corpus file into the project's store."""
         from pygim.memory import Memory

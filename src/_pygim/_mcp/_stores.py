@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import os
 import shutil
+import signal
 import subprocess
 import sys
 from dataclasses import dataclass
@@ -296,6 +297,53 @@ def setup_branch(cwd: Path, path: Optional[Path] = None, source: Optional[Path] 
 def _require(result: Optional[str], what: str) -> None:
     if result is None:
         raise RuntimeError(f"`{what}` failed — run it yourself to see why")
+
+
+# ── reloading a running server ────────────────────────────────────────────────
+
+
+def server_pids() -> List[int]:
+    """The `oo memory mcp` processes running for this user, however they were started."""
+    try:
+        done = subprocess.run(["ps", "-eo", "pid,args"], capture_output=True, text=True, timeout=20)
+    except (OSError, subprocess.TimeoutExpired):
+        return []
+    out = []
+    for line in done.stdout.splitlines()[1:]:
+        pid, _, args = line.strip().partition(" ")
+        if "memory" in args and " mcp" in args and pid.isdigit() and int(pid) != os.getpid():
+            out.append(int(pid))
+    return out
+
+
+def ask_reload(cwd: Optional[Path] = None, send_signal: bool = False) -> dict:
+    """Asks the servers on this project's store, and on the global one, to restart into the code on
+    disk: a `local/reload` marker each server checks between messages, so it acts at a quiet moment
+    and the host's connection survives.
+
+    SIGHUP does the same for a server serving any other project, but only on request: a server
+    older than this feature has no handler for it, and the default action for SIGHUP is to die."""
+    cwd = Path(cwd or os.getcwd())
+    signalled = []
+    if send_signal and hasattr(signal, "SIGHUP"):
+        for pid in server_pids():
+            try:
+                os.kill(pid, signal.SIGHUP)
+                signalled.append(pid)
+            except OSError:
+                continue
+    marked = []
+    here = find(cwd=cwd)
+    for root in (here.root if here and here.exists else None, find_global()):
+        if root is None or not is_store(root):
+            continue
+        try:
+            (root / "local").mkdir(exist_ok=True)
+            (root / "local" / "reload").write_text("asked by oo memory reload\n", encoding="utf-8")
+            marked.append(root)
+        except OSError:
+            continue
+    return {"signalled": signalled, "marked": marked}
 
 
 # ── registration ──────────────────────────────────────────────────────────────

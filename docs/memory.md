@@ -118,6 +118,7 @@ pattern.
 |---|---|
 | `oo memory setup [--branch \| --user \| --local] [--from DIR]` | find or create the store, point the clone at it, register the server |
 | `oo memory setup --global` | create this machine's global store, read by every project |
+| `oo memory reload` | ask running servers to restart into the installed code (`--signal` reaches other projects') |
 | `oo memory status` | which store, its version, reviews waiting, proposals |
 | `oo memory accept <key>` | accept a generalisation, so its cases fold |
 | `oo memory accept --pack <proposal>` | make a drafted vocabulary pack live |
@@ -129,9 +130,11 @@ pattern.
 - **A tool says there is no store.** Run `oo memory setup` in the project.
 - **The tools do not appear.** `claude mcp list` should show `pygim-memory`. A `.mcp.json` in the
   project that also defines `pygim-memory` overrides the user registration — remove its entry.
-- **A new server feature is missing in a running session.** The agent holds the tool descriptions
-  it was given when it connected. After upgrading pygim, reconnect (`/mcp`), or the session keeps
-  calling the old tools.
+- **A new server feature is missing in a running session.** Run `oo memory reload`: each server
+  restarts into the installed code at its next quiet moment, keeping your session. A result also
+  says `server_stale` once when the code on disk has moved on. The agent still holds the tool
+  descriptions it was given when it connected, so if a *new parameter* seems ignored, reconnect
+  (`/mcp`) as well.
 - **A vocabulary edit breaks loading.** The next tool call reports the file and line; fix the file
   and the server reopens it.
 - **You edited a file under `memories/`.** It is kept as you left it, and `oo memory status` lists

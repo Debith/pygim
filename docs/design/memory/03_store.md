@@ -447,6 +447,27 @@ Two gaps stay open. A session already running on another machine keeps its stand
 it restarts, since nothing tells it to pull; and a session whose agent never calls a memory tool
 never sees `standing_changed`, because there is no result to carry it.
 
+### 9.1.3 Reloading a server into new code — settled 2026-09-17
+
+Data reaches a running server by itself: rows are caught up per call, and a changed vocabulary
+reopens the store. Its own code cannot — the process has imported what it imported, and the
+extension cannot be imported twice — so a server upgraded underneath keeps serving the old
+behaviour until someone reconnects it by hand (field report §7.5).
+
+| Option | Concretely | For | Against |
+|---|---|---|---|
+| **Re-exec between messages** (chosen) | `oo memory reload` marks the store; the server sees the marker after answering, and `execv`s itself | exec keeps the file descriptors, so the host's pipes and the session survive; nothing is half-answered; the session number travels in the environment, so the audit log does not split | the call in flight still runs the old code; broken code on disk becomes a server that will not start |
+| Reload the modules in place | `importlib.reload` | no new process | the compiled extension cannot be reloaded at all, so only half the server would move |
+| Report only | a `server_stale` note in results | nothing can go wrong | every upgrade costs a person a reconnect |
+
+Both are built: a result says `server_stale` once when the files on disk have moved on, and
+`oo memory reload` asks the servers to act. The ask is a `local/reload` marker in this project's
+store and the global one, which a server checks between messages. SIGHUP does the same and reaches
+servers on other projects, but only with `--signal`: a server older than this feature has no
+handler, and SIGHUP's default action is to exit. After reloading, the new process sends
+`notifications/tools/list_changed`, so a host that watches for it re-fetches the tool schemas —
+the other half of §7.5, where a cached schema silently dropped a new parameter.
+
 ### 9.2 Whether head views are committed (11)
 
 | Option | Concretely | For | Against |

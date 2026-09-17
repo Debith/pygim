@@ -263,6 +263,24 @@ class TestTheGlobalStore:
         assert err and "oo memory setup --global" in text
 
 
+class TestAskingForAReload:
+    def test_reload_marks_the_stores_a_server_here_would_serve(self, project, isolated, monkeypatch):
+        store = project / ".memory"
+        Memory.init(str(store))
+        wide = _stores.setup_global()
+        monkeypatch.setenv(_stores.GLOBAL_ENV, str(wide))
+        def never(*_):                                                   # signals are opt-in: a server
+            raise AssertionError("no signal without --signal")            # too old to handle SIGHUP dies of it
+        monkeypatch.setattr(_stores, "server_pids", never)
+        monkeypatch.chdir(project)
+        out = CliRunner().invoke(cli_oo, ["memory", "reload"])
+        assert out.exit_code == 0, out.output
+        assert (store / "local" / "reload").is_file() and (wide / "local" / "reload").is_file()
+        assert "reloads at its next call" in out.output
+        monkeypatch.setattr(_stores, "server_pids", lambda: [])
+        assert CliRunner().invoke(cli_oo, ["memory", "reload", "--signal"]).exit_code == 0
+
+
 class TestANewProjectsVocabulary:
     def test_prepare_vocabulary_names_the_pack_and_the_person_s_step(self, project):
         server = MemoryServer(cwd=project)

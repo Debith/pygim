@@ -129,6 +129,17 @@ def memory_mcp(root):
     GimmicksCliApp().memory_mcp(root=root)
 
 
+@memory.command("reload")
+@flag_opt("--signal", "signal_servers",
+          help="Also SIGHUP every running server, including other projects'. A server older than "
+               "this feature has no handler for SIGHUP and will exit instead of reloading.")
+def memory_reload(signal_servers):
+    """Ask the MCP servers on this project's store, and on the global one, to restart into the
+    installed code — after upgrading pygim, or editing the server. Each reloads between messages,
+    so the host's connection survives."""
+    GimmicksCliApp().memory_reload(signal_servers=signal_servers)
+
+
 @memory.command("ingest")
 @click.argument("corpus", type=click.Path(exists=True, dir_okay=False))
 @_ROOT

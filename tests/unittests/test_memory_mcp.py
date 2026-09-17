@@ -5,6 +5,7 @@ mcp` command over pipes, the way an agent host does.
 """
 from __future__ import annotations
 
+import io
 import json
 import subprocess
 import sys
@@ -27,6 +28,15 @@ dimensions:
     values:
       basket: {entry: {brief: Holding items before paying., when: About the basket., when_not: Not paying., example: Adding an item.}}
 """
+
+
+@pytest.fixture(autouse=True)
+def no_machine_state(tmp_path, monkeypatch):
+    """Nothing here reads this machine's own stores: a server merges the global store into standing
+    knowledge, and a test that found the developer's would pass or fail by what is in it."""
+    monkeypatch.setenv("PYGIM_MEMORY_GLOBAL", str(tmp_path / "no-global-store"))
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(tmp_path / "gitconfig"))
+    monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
 
 
 @pytest.fixture
@@ -168,6 +178,39 @@ class TestTools:
     def test_an_unknown_tool_is_a_tool_error(self, server):
         err, text = call(server, "forget")
         assert err and "unknown tool" in text
+
+
+class TestReloading:
+    """A server holds the code it started with; `oo memory reload` asks it to restart into what is
+    on disk, between messages, keeping the host's pipes (03 §9.1.3)."""
+
+    def test_a_result_says_once_that_the_code_moved_on(self, server):
+        assert not server.stale()
+        server._code = ("an older pygim", ())
+        assert server.stale()
+        err, info = call(server, "session")
+        assert "`oo memory reload`" in info["server_stale"]["next"]
+        assert "server_stale" not in call(server, "session")[1]        # said once, not on every call
+
+    def test_a_signal_or_a_marker_asks_for_the_reload(self, server):
+        assert not server._reload_asked()
+        (Path(server.memory.root) / "local" / "reload").write_text("asked", encoding="utf-8")
+        assert server._reload_asked()
+        (Path(server.memory.root) / "local" / "reload").unlink()
+        assert not server._reload_asked()
+        server.signalled = True                                        # what the SIGHUP handler sets
+        assert server._reload_asked()
+
+    def test_a_reloaded_server_resumes_its_session_and_says_the_tools_may_have_moved(self, tmp_path, monkeypatch):
+        root = tmp_path / "repo"
+        Memory.init(str(root))
+        monkeypatch.setenv("PYGIM_MEMORY_SESSION", "7")
+        monkeypatch.setenv("PYGIM_MEMORY_RELOADED", "1")
+        resumed = MemoryServer(Memory(str(root)))
+        assert resumed.session == 7                                    # the audit log keeps one session
+        out = io.StringIO()
+        resumed.serve(io.StringIO(""), out)
+        assert json.loads(out.getvalue())["method"] == "notifications/tools/list_changed"
 
 
 def test_the_real_command_over_pipes(tmp_path):
