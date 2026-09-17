@@ -62,6 +62,15 @@ their next memory call; sessions started afterwards get it in their standing kno
 A store shared with other people is the other case: its `policy.yaml` says `push: manual`, so
 writes stay in your own clone and reach the others as a pull request its owners merge.
 
+### Several stores, one repository
+
+Each store keeps its own history, so unrelated stores can share one private repository as separate
+branches — for example `memory` for a project's, `global` for the machine's, `dnd` for another
+project's. Two rules of thumb: a store's remote need not be its project's, and for a project whose
+repository is public it must not be; and a store can live anywhere, as long as its inventory paths
+are relative to the project root (`oo memory status` opens it and reports anything it cannot
+resolve).
+
 ### On another machine
 
 ```bash

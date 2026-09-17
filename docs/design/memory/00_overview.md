@@ -631,6 +631,22 @@ what it guards is the only operation that takes memories out of a reader's sight
 the instances are placed on their own; a person who disagrees retires the generalisation or
 asks for a narrower one.
 
+### 4.12 Where memories live: the project's store, and the global one
+
+A store belongs to a project: its vocabulary is that domain's, and its memories are about that
+work. Some knowledge is about no project at all — how this person wants an explanation written,
+how they want options laid out — and filed in one project's store it reaches only that project's
+sessions, never the ones that do not exist yet.
+
+So a machine may keep one **global store** beside each project's. An agent names which it means
+(`scope`), reads and writes stay within one store, and the standing knowledge a session starts
+with merges both: the global first, the project's last, because where they disagree the nearer
+rule wins. `domain=any` is the test of what belongs there. Sections 03 §9.1.1 and §9.1.2 carry the
+mechanics, including how a write travels to this machine's other projects and to other machines,
+and what each store's own policy says about publishing it.
+
+---
+
 ## 5. Principles
 
 1. **Content and index are separate, and only the index moves.** A memory's title and
@@ -783,6 +799,10 @@ does not require the ones after it.
 | What identifies a memory | the row that created it; content digests may repeat | 03 §2.2 |
 
 ### Still open
+
+- **Encryption at rest** (03 §9.4): stores are pushed to a private repository in the clear, and
+  the direction chosen is an encrypting store strategy rather than a git filter. Key handling, the
+  granularity, and the guard that makes plaintext impossible to commit are undecided.
 
 - **How wide the look-before-writing read is** (07). The write's own hard tags are exact and cheap, but a memory one task over — written under `task=design`, needed under `task=critique` — is invisible to it, which is how Scenario 5.2 of section 00a happens. Softening `task` for the look step would catch it at the cost of a longer candidate list to read.
 - **Whether ingestion runs the look step on the human's behalf** (03, 11). A hand-written block is never read against the store, so an ingested duplicate is found only later (Scenario 5.1). Ingestion could report likely duplicates by hard-tag overlap before landing them; the block would still land, since the human chose its tags.

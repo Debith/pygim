@@ -178,6 +178,26 @@ the view then matches a version again, and the review goes. Either option below 
 | **Take it as a correction** (drafted) | at startup, `memories/frost-ward-typed-resistance.md` differs from \#54's text; the store commits a `corrected` write, author *human, file edit*, superseding \#54, reason *edited in memories/frost-ward-typed-resistance.md* | editing the file you are reading is the most natural correction there is, and it gets a cause on record without a tool | the no-unread-write check does not apply — but a supersede of the current head never needed it |
 | Report only | a review item: *view edited by hand*, the view regenerated from \#54 on next write | nothing changes without an operation | the human's edit is overwritten the next time the chain moves, which will feel like data loss |
 
+### 3.5 What can actually lose a memory
+
+No operation deletes anything: `retire` and a supersede append rows, and nothing removes a row or
+an object. So losing knowledge takes a file-level accident, and the six that matter were measured
+on a scratch store (2026-09-17):
+
+| What happens | What is lost | Told? |
+|---|---|---|
+| `retire`, or a supersede | nothing — the text stays readable through `show`, out of retrieval only | — |
+| every file under `memories/` deleted | nothing: views are derived and regenerate at the next open | — |
+| `local/` deleted | nothing: the clone id is reissued, the cache rebuilt | — |
+| **a content object deleted** | **the memory's text, which comes back empty in `show` and in reads** | **no** |
+| a row hand-edited | that row, dropped from replay, so its memory disappears | yes: *its id does not match its content — edited by hand* |
+| a line removed from an audit file | that row's memory; its object is left orphaned on disk | no |
+
+Two consequences. The silent one is worth closing — a head whose object is missing should be a
+review item at load, since the view file on disk may then hold the only copy of the text. And
+because nothing is ever deleted, a secret written into a memory stays in the row's history and in
+`objects/` after a retire: removing it means rewriting history by hand, which is §9.4's subject.
+
 ---
 
 ## 4. Committing
@@ -356,6 +376,22 @@ point — and then to the derived one; a derived store that falls behind is noti
 head and rebuilt. An MSSQL strategy, for a team that wants its history in a database it already
 runs, would be another derived store over the same rows, built on the persistence module.
 
+**A strategy is also where encryption belongs** (Debith, 2026-09-17: the backend should be
+configurable — "local to be encrypted and file system", a shared one a database — and the code
+above it should not know). An encrypting store is a decorator over any other: it takes the bytes a
+row and an object are made of, seals them, and hands the ciphertext to the store it wraps. The
+service, the snapshot and the vocabulary loader are untouched, and every backend inherits it —
+files, a database, whatever is written next. That is stronger than encrypting on the way into git,
+which protects one transport and leaves the bytes on disk in the clear.
+
+Three things a content decorator cannot hide, which the design has to answer instead:
+
+| What leaks | Why | The answer |
+|---|---|---|
+| file names | `memories/<slug>.md` spells a memory's title; `taxonomy/pack-<domain>.yaml` names the domain | views are derived, so an encrypted store keeps them out of what is committed, as local plaintext a person still reads |
+| commit messages | the global store's automatic commit names the memory it wrote | a store that is encrypted commits under an opaque message |
+| a content digest | content is addressed by the digest of its plaintext, and replay must stay deterministic, so ids cannot depend on a key | fine for prose; a short, guessable secret can still be confirmed by hashing a guess, so the rule is that secrets do not belong in memories at all |
+
 ---
 
 ## 8. Laws
@@ -393,6 +429,17 @@ configuration, so one `oo memory setup` points every worktree at the same store.
 registered once, at user scope and without a root, and finds each project's store from the
 directory the host starts it in. A consequence for sources (02 §5.2): a store outside the checkout
 cannot hold paths relative to itself, so an inventory path is relative to the project's root.
+
+**Several stores, one repository.** A store's history is its own — an orphan branch, or a
+repository made by `git init` — so unrelated stores share a remote without sharing anything else.
+In use since 2026-09-17: one private repository holds `memory` (pygim's store), `global` (the
+machine's, §9.1.1) and `dnd` (the D-D-2024 store), each a branch. Two consequences worth stating.
+A store's remote need not be its project's remote, and for a project whose repository is public it
+must not be: pygim's own store would otherwise publish a person's working habits to the world.
+And a store may live anywhere, so moving one is only a matter of the paths inside it — the dnd
+store moved out of `D-D-2024/.memory` to a directory beside the project, which meant rewriting its
+inventory paths from relative-to-the-inventory-file to relative-to-the-project (02 §5.2), the
+convention every store made since follows.
 
 ### 9.1.1 The global store — settled 2026-09-17
 
@@ -467,6 +514,27 @@ servers on other projects, but only with `--signal`: a server older than this fe
 handler, and SIGHUP's default action is to exit. After reloading, the new process sends
 `notifications/tools/list_changed`, so a host that watches for it re-fetches the tool schemas —
 the other half of §7.5, where a cached schema silently dropped a new parameter.
+
+### 9.4 Encryption at rest — open, direction chosen 2026-09-17
+
+Debith: "I would not want to publish all my hard worked information freely. That data is more
+valuable than code... I need to ensure that whatever is pushed to git, is encrypted." Three stores
+are now pushed to one private repository, in the clear; private is not encrypted, and the threat
+worth naming is not only a stranger but any host, backup and future reader of that repository.
+
+| Option | Where the cipher sits | For | Against |
+|---|---|---|---|
+| **An encrypting store strategy** (direction) | a decorator over any backend (§7) | what reaches disk, git, a database or a backup is already sealed; one implementation covers every backend | the files stop being readable in place; key handling becomes ours |
+| git clean/smudge filter (git-crypt, or our own) | outside the code, in git's config | nothing in the store changes | plaintext on disk; a machine that has not configured the filter commits in the clear; a database backend gains nothing |
+| A private remote only | nowhere | done, and it removed the public exposure | anyone with repository access, and the host, read everything |
+| Whole-disk encryption | the operating system | free, protects a stolen laptop | protects nothing once a store is shared or pushed |
+
+What still has to be decided: where a key lives and how a second machine gets it; whether a store
+is encrypted whole or a memory can be marked sensitive; what `oo memory` shows when the key is
+absent (refuse to open, or open the metadata only); and the guard — a store that says it is
+encrypted must make it impossible to commit plaintext by mistake, which means a check before the
+commit, not a convention. Two consequences to accept in advance: losing the key loses everything
+pushed, and reviewing a change as a diff stops working outside the machine that holds the key.
 
 ### 9.2 Whether head views are committed (11)
 

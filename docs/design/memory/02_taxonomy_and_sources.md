@@ -367,7 +367,10 @@ A path is relative to the project's root, and resolved through a `path_table` ro
 so a hundred locators into one document share one path. `cite` gives a document the id its
 inventory entry already has, found by path, and makes one from the path only for a document the
 inventory lacks — so a vocabulary value and a memory never name one document two ways. The locator
-a memory carries is `<id>:L<line>`, or `<id>:L<first>-<last>` for a passage of several lines. Not relative to the inventory file: a store
+a memory carries is `<id>:L<line>`, or `<id>:L<first>-<last>` for a passage of several lines.
+A path relative to the project also survives the store moving, which is not true of one relative to
+the inventory file: the D-D-2024 store moved out of the project it sat in (03 §9.1) and every
+`../../reference/...` had to be rewritten first. Not relative to the inventory file: a store
 may live outside the checkout — on its own branch, or in a user directory (03 §9.1) — and every
 worktree of the project must resolve the same document from the same path.
 
@@ -462,5 +465,5 @@ The base every repository starts from. Values marked — are added by packs.
 | `domain` | hard | 1.0 | The field the knowledge belongs to. | — one per pack |
 | `artifact` | hard | 1.0 | What is being made or examined. | — the pack says what this domain makes |
 | `task` | hard | 1.0 | What the knowledge is for doing. | **design** — making something new, not judging it · **critique** — judging a thing that exists, not changing it · **evaluate** — measuring against a standard, not an opinion · **troubleshoot** — finding why a thing fails, not improving a working one · **explain** — making a thing understood, not changing it |
-| `kind` | soft | 0.5 | What sort of knowledge this is. | **reference** — a fact that can be looked up · **principle** — a rule of thumb, not a sequence · **procedure** — ordered steps, not a single rule · **example** — one instance, not a generalisation · **decision** — a choice made and why, not a rule for all cases · **preference** — a taste, not a correctness claim |
+| `kind` | soft | 0.5 | What sort of knowledge this is. | **reference** — a fact that can be looked up · **principle** — a rule of thumb, not a sequence · **procedure** — ordered steps, not a single rule · **example** — one instance, not a generalisation · **decision** — a choice made and why, not a rule for all cases · **preference** — a taste, not a correctness claim · **question** — an open question, not a choice already made |
 | `tier` | soft | 1.0 | The level or maturity the knowledge applies to. | — the pack says how this domain bands level |

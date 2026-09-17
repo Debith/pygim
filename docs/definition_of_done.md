@@ -35,6 +35,12 @@ line says so in its description and why.
   edge corpus, cross-platform cases (a Windows path needs a drive to be
   absolute), and parity against the reference the feature mirrors (pathlib,
   the previous module's behaviour) where one exists.
+- **A test names its own world.** Nothing a test reads may come from the machine it runs on —
+  not the user's configuration, a shared directory, a running service, the clock or the working
+  directory — or a green run says only that this machine happens to be in the right state. Where a
+  real dependency *is* the thing under test (a real server over real pipes, a real database), it
+  runs against test data it created: a temporary directory, a throwaway database, a local
+  container. A test pointed at live data does not merely fail; it writes into someone's work.
 - **A performance claim is a measurement.** Every number in a changelog,
   docstring or design note comes from a benchmark under `benchmarks/`,
   recorded through `_results.py` against the commit. An optimisation is
