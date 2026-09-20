@@ -371,6 +371,27 @@ class TestANewProjectsVocabulary:
         assert any("area=basket" in w and "also occurs at L3" in w for w in warnings)
         assert any("area=checkout" in w and "not the cited passage" in w for w in warnings)
 
+    def test_a_store_that_is_its_own_project_resolves_its_own_documents(self, project, isolated):
+        """A knowledge store belongs to no checkout: its sources live inside it, so a citation is
+        relative to the store even when the command runs in some other project."""
+        store = isolated / "ddd-memory"
+        _stores.create(store)
+        (store / "sources").mkdir()
+        (store / "sources" / "book.txt").write_text("Aggregates\nCluster the entities into aggregates.\n", encoding="utf-8")
+        (store / "sources" / "inventory.yaml").write_text('book:\n  kind: text\n  path: "sources/book.txt"\n', encoding="utf-8")
+        cited = _packs.cite(store, "sources/book.txt", 2, store=store)
+        draft = store / "taxonomy" / "studies" / "s" / "proposal" / "pack-ddd.yaml"
+        draft.parent.mkdir(parents=True)
+        draft.write_text(PACK.replace("pack: proj", "pack: ddd").replace(
+            "example: Adding an item.}}",
+            "example: Adding an item.}, source: {doc: %s, line: %d, lines: 1, passage: %s}}"
+            % (cited["source"]["doc"], cited["source"]["line"], cited["source"]["passage"])), encoding="utf-8")
+        checked = _packs.check(store, draft, project=project)      # the project is somewhere else entirely
+        assert checked["ok"] and checked["warnings"] == []
+        (store / "sources" / "book.txt").unlink()
+        gone = _packs.check(store, draft, project=project)["warnings"]
+        assert len(gone) == 1 and "not found under" in gone[0] and str(store) in gone[0]
+
     def test_replacing_a_pack_is_refused_while_memories_carry_what_it_removes(self, project):
         store = project / ".memory"
         Memory.init(str(store))

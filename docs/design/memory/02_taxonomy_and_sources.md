@@ -160,7 +160,10 @@ A drafted pack is checked before a person accepts it (`check_pack`, and again by
 --pack`), and what the loader cannot see comes back beside what it can. Every locator the pack adds
 is resolved against its document, and a warning names each that does not hold: the document is not
 in the store's inventory or the draft's; it is not found; the lines there are not the cited
-passage; or the cited text also occurs on other lines. The last is the field report's case — a
+passage; or the cited text also occurs on other lines. A path is tried against the project's root,
+the store's own root — a store whose subject is a body of knowledge keeps its sources inside itself
+and belongs to no checkout — and the inventory file's directory; a "not found" says which of those
+it looked in, since a check that cannot say where it looked is one people learn to ignore. The last is the field report's case — a
 locator found by matching the text "Attack" took the Action entry's list item (`L61`), not the
 Attack Roll entry (`L131`), and nothing flagged it. They are warnings, not refusals: a repeated
 line can be the right one.

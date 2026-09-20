@@ -135,10 +135,19 @@ def inventory(path: Path) -> Dict[str, str]:
     return out
 
 
-def _resolve(inventory_file: Path, path: str, project: Optional[Path]) -> Optional[Path]:
-    """An inventoried path as a file: relative to the project's root (02 §5.2), or — in stores made
-    before that rule — relative to the inventory file."""
-    for base in ([project] if project else []) + [inventory_file.parent]:
+def _bases(inventory_file: Path, project: Optional[Path], store: Optional[Path]) -> List[Path]:
+    """Where an inventoried path may be relative to: the project's root (02 §5.2); the store's own
+    root, for a store that is its own project — a body of knowledge with its own sources, belonging
+    to no checkout; and the inventory file, for stores written before the first rule."""
+    seen: List[Path] = []
+    for base in (project, store, inventory_file.parent):
+        if base is not None and base not in seen:
+            seen.append(base)
+    return seen
+
+
+def _resolve(inventory_file: Path, path: str, project: Optional[Path], store: Optional[Path] = None) -> Optional[Path]:
+    for base in _bases(inventory_file, project, store):
         candidate = (base / path).resolve()
         if candidate.is_file():
             return candidate
@@ -162,11 +171,12 @@ def _locator_warnings(sources: List[Dict[str, Any]], store: Path, drafted: Path,
             out.append(f"{where}: {s['doc']} is not in the inventory — add it, or cite an inventoried document")
             continue
         if s["doc"] not in texts:
-            file = _resolve(known[s["doc"]][0], known[s["doc"]][1], project)
+            file = _resolve(known[s["doc"]][0], known[s["doc"]][1], project, store)
             texts[s["doc"]] = _lines(file) if file else None
         text = texts[s["doc"]]
         if text is None:
-            out.append(f"{where}: the document {known[s['doc']][1]} was not found")
+            looked = ", ".join(str(b) for b in _bases(known[s["doc"]][0], project, store))
+            out.append(f"{where}: the document {known[s['doc']][1]} was not found under {looked}")
             continue
         first, count = s["line"] - 1, s["lines"]
         if first + count > len(text):
@@ -236,7 +246,7 @@ def cite(project: Path, path: str, line: int, lines: int = 1, store: Optional[Pa
     if store is not None:
         listed = store / "sources" / "inventory.yaml"
         for known, known_path in inventory(listed).items():
-            if _resolve(listed, known_path, project) == file:
+            if _resolve(listed, known_path, project, store) == file:
                 doc = known
                 break
     return {
