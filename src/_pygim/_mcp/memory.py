@@ -29,41 +29,33 @@ STANDING_TOKENS = 2000  # how much preference text the startup instructions may 
 SESSION_ENV = "PYGIM_MEMORY_SESSION"   # a reloaded server resumes the session number it had
 RELOADED_ENV = "PYGIM_MEMORY_RELOADED"  # set on the process a reload exec'd into
 
+INSTRUCTIONS_CAP = 2000  # characters. Claude Code keeps the first 2,048 of a server's instructions and
+#                          drops the rest without a word: the first session to rely on them was sent
+#                          11,900 and received 2,048, to the character. So the instructions carry the
+#                          loop and an index, and `session` carries the knowledge itself.
+
 INSTRUCTIONS = """\
 A problem-space memory: knowledge is found by the kind of problem being solved,
 not by similarity to the prompt.
 
-1. Call `session` once, then `vocabulary`. Every tag is dimension=value from that
-   list; each value's entry says when to use it and when not to.
-2. Before working, `read` the problem space: hard tags filter (every hard
-   dimension of the request), soft tags only order, and `term` keeps only
-   memories that name the subject. Follow the procedure it returns first, if any.
-   When nothing fits, `coverage.not_cited` lists the documents none of the
-   candidates rests on — look there, rather than retrying other tags.
-3. When something outlives the task, decide against what you read: nothing
-   covers it -> `remember` with supersedes empty; a memory covers it but says
-   less or says it wrong -> `remember` with supersedes=[that memory]; a memory
-   already says exactly this -> `learn` instead. Always pass the memories you
-   read as `seen`. A concept with no tag goes in `proposals` — never force a tag.
-   When a memory you read helped, call `learn` on it: usefulness is only counted
-   when reported.
-4. A refusal is information: it names the facts (unread memories, the current
-   head, the missing hard question). Act on them and try again.
-5. Consolidate only when the user asks (the `consolidate` prompt): `review` what
-   the session wrote, find a point several memories make, `remember` it once with
-   `generalises` naming them, and record `lessons`. Nothing is retired, and a
-   generalisation folds its instances only after the user accepts it themselves
-   with `oo memory accept` — there is no tool for that, on purpose.
-6. A project with no vocabulary pack of its own starts with the `prepare-vocabulary`
-   prompt (the user accepts the draft with `oo memory accept --pack`), then
-   `seed-memories`. If a tool says there is no store, tell the user to run
-   `oo memory setup` in the project.
-7. This machine may hold several stores, and `session` lists them: `project` (the
-   default), `global` for knowledge about no single project — how this person wants
-   things written — and any other store found beside a project or in the user data
-   directory, such as a subject others contribute to. Name one with `scope`. A `#n`
-   is a number in one store, so read a scope before writing to it, and tag knowledge
-   that holds everywhere `domain=any`.
+1. Call `session` first. Its `standing` holds the owner's preferences in full.
+   They apply to everything you do here, advice included: read them before
+   anything else. Then call `vocabulary`.
+2. `read` before you work, and before you recommend something, rule something
+   out or propose a design. Hard tags filter, soft tags order, `term` narrows to
+   a subject. Follow the procedure a read returns first; its `standing` names
+   preferences in that space it did not place.
+3. When something outlives the task: nothing covers it -> `remember`; a memory
+   says less or says it wrong -> `remember` with `supersedes`; one already says
+   exactly this -> `learn`. Pass what you read as `seen`. No tag fits ->
+   `proposals`, never a forced tag. When a memory helped, `learn` it.
+4. A refusal names facts. Act on them and try again.
+5. Consolidate only when the user asks (the `consolidate` prompt). Only the user
+   accepts a generalisation or a pack, with `oo memory accept`.
+6. `scope` names another store that `session` lists; `global` holds what is
+   about no single project (tag it domain=any). A #n belongs to one store.
+7. No store: tell the user to run `oo memory setup`. A new project starts with
+   the `prepare-vocabulary` prompt, then `seed-memories`.
 """
 
 CONSOLIDATE = """\
@@ -503,45 +495,49 @@ class MemoryServer:
         except Exception:  # a store that will not load: the tools will say so
             return []
 
-    def _standing(self) -> str:
-        """The standing knowledge appended to the instructions a host loads into every session: each
-        preference in full, and the title of each procedure — a read naming its artifact and task
-        places its steps first anyway. Nothing is recorded as read.
-
-        Two stores contribute: the machine's global store, whose knowledge is about no single
-        project, and this project's. The global comes first and the project's second, because where
-        the two disagree the project's is the nearer rule. Empty when there is neither; capped at
-        STANDING_TOKENS, naming what it leaves out."""
+    def standing(self) -> Dict[str, Any]:
+        """The standing knowledge of a session here: every preference in full and every procedure by
+        title, from the machine's global store and then this project's — global first and the
+        project's last, because where the two disagree the nearer rule wins. Nothing is recorded as
+        read. This is what `session` returns; the instructions carry only an index of it."""
         wide = self._global_if_any()
         near = self._memory if self._memory is not None else self._project_if_any()
         sources = [("global", wide), ("project", near)]
-        preferences = [(origin, p) for origin, m in sources for p in self._heads(m, "kind=preference")]
-        procedures = [(origin, p) for origin, m in sources for p in self._heads(m, "kind=procedure")]
-        self._standing_seen = {p["key"]: p["title"] for origin, p in preferences if origin == "global"}
-        if not preferences and not procedures:
+        preferences = [dict(scope=origin, memory=p["memory"], title=p["title"], text=p["text"].strip(), tokens=p["tokens"])
+                       for origin, m in sources for p in self._heads(m, "kind=preference")]
+        procedures = [dict(scope=origin, memory=p["memory"], title=p["title"],
+                           where=" ".join(t for t in p["tags"] if t.startswith(("artifact=", "task="))))
+                      for origin, m in sources for p in self._heads(m, "kind=procedure")]
+        if self._standing_seen is None:   # the baseline `standing_changed` compares against; only it moves it on
+            self._standing_seen = {p["key"]: p["title"] for p in self._heads(wide, "kind=preference")}
+        return {"note": "These apply to every task here, advice included. Where a global and a project "
+                        "preference disagree, the project's is the rule.",
+                "preferences": preferences, "procedures": procedures}
+
+    def _standing(self) -> str:
+        """The index of standing knowledge that the instructions carry: titles only, and only as many
+        as fit under INSTRUCTIONS_CAP, saying how many were left out. A host truncates a server's
+        instructions without saying so, so nothing a session must not miss is delivered here —
+        the full texts come back from `session`, which every session calls first."""
+        data = self.standing()
+        def line(p: Dict[str, Any]) -> str:
+            title = p["title"] if len(p["title"]) <= 58 else p["title"][:57].rstrip() + "…"
+            return f"- {p['memory']}{' (global)' if p['scope'] == 'global' else ''} {title}"
+
+        # newest first: an old preference has had sessions to sink in, a new one has not
+        entries = [line(p) for p in reversed(data["preferences"])]
+        if not entries:
             return ""
-        out = ["", "Standing knowledge, as of this server's start: this project's memory, and the global",
-               "memory of things that hold in every project. It applies to every task, so it is given",
-               "here instead of waiting for a read; where the two disagree, this project's is the rule."]
-        if preferences:
-            out += ["", "Preferences:"]
-            used, left_out = 0, []
-            for origin, p in preferences:
-                where = " (global)" if origin == "global" else ""
-                if used + p["tokens"] > STANDING_TOKENS:
-                    left_out.append(f"{p['memory']}{where} {p['title']}")
-                    continue
-                used += p["tokens"]
-                body = p["text"].strip().replace("\n", "\n  ")
-                out.append(f"- {p['memory']}{where} {p['title']}: {body}")
-            if left_out:
-                out.append("- not shown, for length (`show` them): " + "; ".join(left_out))
-        if procedures:
-            out += ["", "Procedures — a read naming their artifact and task places the steps first:"]
-            for origin, p in procedures:
-                where = " ".join(t for t in p["tags"] if t.startswith(("artifact=", "task=")))
-                out.append(f"- {p['memory']}{' (global)' if origin == 'global' else ''} {p['title']} — {where}")
-        return "\n".join(out) + "\n"
+        head = "\nThe owner's standing preferences — titles only; `session` returns them in full:\n"
+        room = INSTRUCTIONS_CAP - len(INSTRUCTIONS) - len(head) - 60
+        shown: List[str] = []
+        for entry in entries:
+            if len("\n".join(shown + [entry])) > room:
+                break
+            shown.append(entry)
+        left = len(entries) - len(shown)
+        tail = f"\n- and {left} more, in `session`" if left else ""
+        return head + "\n".join(shown) + tail + "\n"
 
     def _project_if_any(self) -> Any:
         try:
@@ -578,6 +574,7 @@ class MemoryServer:
         self.session = int(info["session"])
         info["root"] = self.memory.root
         info["project"] = str(_stores.project_root(self._cwd))
+        info["standing"] = self.standing()
         info["scopes"] = [{"scope": s.name, "root": str(s.root), "how": s.how,
                            "sharing": _stores.policy(s.root).sharing,
                            **({"also": s.aliases} if s.aliases else {})}

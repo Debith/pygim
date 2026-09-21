@@ -641,7 +641,18 @@ sessions, never the ones that do not exist yet.
 So a machine may keep one **global store** beside each project's. An agent names which it means
 (`scope`), reads and writes stay within one store, and the standing knowledge a session starts
 with merges both: the global first, the project's last, because where they disagree the nearer
-rule wins. `domain=any` is the test of what belongs there. Sections 03 §9.1.1 and §9.1.2 carry the
+rule wins. `domain=any` is the test of what belongs there.
+
+How that knowledge is *delivered* turned out to matter as much as what it says. It first went in
+the server's startup instructions, the one channel that needs nothing from the agent — and the host
+keeps only the first 2,048 characters of those, silently: 11,900 were sent, and a preference
+sitting at character 8,677 never arrived, in the session whose recommendation it would have
+changed. So the instructions now carry the loop and an index of titles, newest first, with the
+count of what the index leaves out; `session` returns every preference in full; a read names under
+`standing` the preferences in its space it did not place; and `oo memory status --standing` prints
+the lot for a host's session-start hook, which is the only delivery that depends on nobody's
+compliance. A test holds the instructions under the cap, because a truncated instruction looks
+exactly like a short one. Sections 03 §9.1.1 and §9.1.2 carry the
 mechanics, including how a write travels to this machine's other projects and to other machines,
 and what each store's own policy says about publishing it.
 

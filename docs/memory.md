@@ -123,9 +123,22 @@ Two prompts do the first work. In Claude Code they appear under `/` as
 The agent reads before it works and writes what outlives the task; the server's instructions teach
 it that loop. A read can narrow by a word (`term`) when tags cannot name the subject, and says which
 documents its candidates cite and which inventoried ones none does, so a question the memory cannot
-answer is sent to the right document. Those instructions also carry the project's *standing knowledge* — every memory of
-kind `preference` in full, and the title of every `procedure` — so it reaches each session without
-a read, as of the server's start. When you want the session's lessons drawn together, run
+answer is sent to the right document.
+
+**Standing knowledge** is what a session should know before it does anything: every memory of kind
+`preference` in full, and the title of every `procedure`, from the global store and the project's.
+It is returned by `session`, the first call every session makes. The server's startup instructions
+carry only an index of titles, newest first — Claude Code keeps the first 2,048 characters of a
+server's instructions and drops the rest without saying so, which is how a preference that would
+have changed a recommendation once never arrived. A read also names, under `standing`, any
+preference in its space that it did not place. To put the full texts in front of an agent without
+depending on it to ask, print them from a session-start hook:
+
+```bash
+oo memory status --standing
+```
+
+When you want the session's lessons drawn together, run
 `/mcp__pygim-memory__consolidate`. The agent writes each pattern it finds as a generalisation and
 records its lessons learnt in `reviews/session-<n>.md` in the store: what it generalised, what it
 left as cases and why, and the gaps it saw. Read it, then accept each pattern you agree with:

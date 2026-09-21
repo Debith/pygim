@@ -71,11 +71,37 @@ class TestProtocol:
         m.remember(title="Releasing", text="1 tag\n2 push", tags=["domain=any", "artifact=any", "task=design", "kind=procedure"],
                    seen=[pref["memory"]])
         receipts = len(m.receipts())
-        text = MemoryServer(Memory(str(root))).handle(
-            {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}})["result"]["instructions"]
-        assert f"- {pref['memory']} Prefer templates: Template it,\n  even with one use." in text
-        assert "Releasing — artifact=any task=design" in text
+        server = MemoryServer(Memory(str(root)), cwd=tmp_path)
+        text = server.handle({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}})["result"]["instructions"]
+        assert f"- {pref['memory']} Prefer templates" in text and "even with one use" not in text   # an index: titles only
+        err, info = call(server, "session")
+        standing = info["standing"]
+        assert [(p["title"], p["text"]) for p in standing["preferences"]] == [("Prefer templates", "Template it,\neven with one use.")]
+        assert [(p["title"], p["where"]) for p in standing["procedures"]] == [("Releasing", "artifact=any task=design")]
         assert len(Memory(str(root)).receipts()) == receipts                       # nothing recorded as read
+
+    def test_the_instructions_fit_what_a_host_keeps_however_much_there_is_to_say(self, tmp_path):
+        """Claude Code keeps 2,048 characters of a server's instructions and drops the rest silently.
+        Standing knowledge once went there in full — 11,900 characters sent, 2,048 received, so a
+        preference that would have changed a recommendation never arrived. The instructions carry an
+        index now, and the count of what it leaves out; `session` carries every text."""
+        from _pygim._mcp.memory import INSTRUCTIONS, INSTRUCTIONS_CAP
+
+        assert len(INSTRUCTIONS) < 1500 and INSTRUCTIONS_CAP <= 2048
+        root = tmp_path / "many"
+        Memory.init(str(root))
+        m = Memory(str(root))
+        seen = []
+        for n in range(30):
+            w = m.remember(title=f"Preference number {n} with a long and descriptive title that goes on", text=f"{n} " + "x" * 900,
+                           tags=["domain=any", "artifact=any", "task=design", "kind=preference"], seen=seen)
+            seen.append(w["memory"])
+        server = MemoryServer(Memory(str(root)), cwd=tmp_path)
+        text = server.handle({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}})["result"]["instructions"]
+        assert len(text) <= INSTRUCTIONS_CAP
+        assert "Preference number 29" in text and "Preference number 0 " not in text   # newest first
+        assert "more, in `session`" in text                                             # and it says what it left out
+        assert len(call(server, "session")[1]["standing"]["preferences"]) == 30         # nothing is lost, only moved
 
     def test_a_store_with_nothing_standing_adds_nothing(self, server):
         text = server.handle({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}})["result"]["instructions"]
@@ -151,6 +177,17 @@ class TestTools:
         assert "learn" in read["next"] and read["skipped"] == 0 and "coverage" in read
         err, empty = call(server, "read", hard=["task=design"], term="invisible")
         assert empty["memories"] == [] and "next" not in empty
+
+    def test_a_read_names_the_preferences_it_did_not_place(self, server):
+        """With no soft tags a read ranks by age, so the newest preference is last and `max` cuts it
+        — the one most likely to be unknown to the reader. It is named, not paid for."""
+        err, a = call(server, "remember", title="An old principle", text="Old.", tags=TAGS)
+        err, b = call(server, "remember", title="Design for the end state", text="Not the current one.",
+                      tags=["domain=any", "artifact=any", "task=design", "kind=preference"], seen=[a["memory"]])
+        err, read = call(server, "read", hard=["task=design"], max=1)
+        assert [m["title"] for m in read["memories"]] == ["An old principle"] and read["skipped"] == 1
+        assert [(s["memory"], s["title"]) for s in read["standing"]] == [(b["memory"], "Design for the end state")]
+        assert "standing" not in call(server, "read", hard=["task=design"], max=5)[1]    # placed, so nothing to name
 
     def test_changes_return_the_tags_and_a_seed_skips_the_unread_check(self, server):
         err, a = call(server, "remember", title="Rule one", text="One.", tags=TAGS)

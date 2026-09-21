@@ -243,11 +243,16 @@ class TestTheGlobalStore:
         monkeypatch.setenv(_stores.GLOBAL_ENV, str(wide))
         Memory(str(wide)).remember(title="Explain in layers", text="Assumed words first.", **self.PREF)
         Memory(str(store)).remember(title="Prefer templates", text="Template it.", **self.PREF)
-        text = MemoryServer(cwd=project).handle(
-            {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}})["result"]["instructions"]
-        assert "(global) Explain in layers: Assumed words first." in text
-        assert "Prefer templates: Template it." in text and "(global) Prefer templates" not in text
-        assert "where the two disagree, this project's is the rule" in text
+        server = MemoryServer(cwd=project)
+        text = server.handle({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}})["result"]["instructions"]
+        assert "(global) Explain in layers" in text and "Prefer templates" in text and "(global) Prefer templates" not in text
+        standing = call(server, "session")[1]["standing"]
+        assert [(p["scope"], p["title"], p["text"]) for p in standing["preferences"]] == [
+            ("global", "Explain in layers", "Assumed words first."), ("project", "Prefer templates", "Template it.")]
+        assert "the project's is the rule" in standing["note"]                     # global first, the nearer rule last
+        monkeypatch.chdir(project)
+        out = CliRunner().invoke(cli_oo, ["memory", "status", "--standing"])
+        assert out.exit_code == 0 and "(global) Explain in layers" in out.output and "Template it." in out.output
 
     def test_a_preference_written_elsewhere_reaches_a_session_already_running(self, project, isolated, monkeypatch):
         self.with_project(project)

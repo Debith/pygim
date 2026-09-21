@@ -172,10 +172,13 @@ def memory_accept(memory_ref, pack, reason, replace, root):
 
 
 @memory.command("status")
+@flag_opt("--standing", "standing",
+          help="Print the standing knowledge instead — every preference in full, as a session receives "
+               "it — and nothing else, so a host's session-start hook can put it in front of an agent.")
 @_ROOT
-def memory_status(root):
+def memory_status(standing, root):
     """Where the store stands: its version, reviews and pending proposals."""
-    GimmicksCliApp().memory_status(root=root)
+    GimmicksCliApp().memory_status(root=root, standing=standing)
 
 
 @cli_oo.group()

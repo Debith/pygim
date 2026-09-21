@@ -193,6 +193,15 @@ public:
         });
         for (std::size_t i = 0; i < ranked.size(); ++i) ranked[i].rank = static_cast<std::uint32_t>(i + 1);
 
+        // A preference is the owner's word on how things are done, so one that applies here must
+        // never go unseen for having ranked low: with no soft tags the rank is age, and the newest
+        // preference is last. Those not placed are named (not paid for), as evidence is.
+        const auto name_standing = [this](context& c) {
+            const auto preference = m_tax->tag("kind=preference");
+            if (!preference) return;
+            for (const auto& m : c.skipped)
+                if (m_forward[m.id.value()]->has(preference->value())) c.standing.push_back(m.id);
+        };
         std::uint32_t used = 0;
         if (slot) {
             used = m_memories[*slot]->tokens;
@@ -200,6 +209,7 @@ public:
                 ctx.over_budget = true;
                 ctx.tokens = used;
                 ctx.skipped = std::move(ranked);
+                name_standing(ctx);
                 return ctx;
             }
         }
@@ -214,6 +224,7 @@ public:
             ctx.selected.push_back(m);
         }
         ctx.tokens = used;
+        name_standing(ctx);
         return ctx;
     }
 

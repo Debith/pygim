@@ -237,9 +237,25 @@ class GimmicksCliApp:
                                        + "".join(f"\n  {fact}" for fact in result["facts"]))
         click.echo(f"accepted {memory} — its instances fold from the next read (report: {result['report']})")
 
-    def memory_status(self, *, root: Optional[str]) -> None:
-        """Print where the repository at *root* stands."""
+    def memory_status(self, *, root: Optional[str], standing: bool = False) -> None:
+        """Print where the repository at *root* stands, or the standing knowledge of a session there."""
         from pygim.memory import Memory
+
+        if standing:
+            from _pygim._mcp.memory import MemoryServer
+
+            data = MemoryServer(root=root, cwd=Path.cwd()).standing()
+            if not data["preferences"] and not data["procedures"]:
+                return
+            click.echo("Standing knowledge from pygim memory. " + data["note"])
+            for p in data["preferences"]:
+                where = " (global)" if p["scope"] == "global" else ""
+                click.echo(f"\n## {p['memory']}{where} {p['title']}\n{p['text']}")
+            if data["procedures"]:
+                click.echo("\nProcedures — a read naming their artifact and task places the steps first:")
+                for p in data["procedures"]:
+                    click.echo(f"- {p['memory']} {p['title']} — {p['where']}")
+            return
 
         store = self._store(root)
         info = Memory(store).session()

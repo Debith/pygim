@@ -52,6 +52,7 @@ struct context {
     std::vector<match> selected;
     std::vector<match> skipped;          // candidates ranked but not included
     std::vector<memory_id> procedure_evidence;  // candidates the procedure generalises, folded under it
+    std::vector<memory_id> standing;     // preferences in this space that were ranked but not placed (04 §3.8)
     std::vector<std::pair<tag_id, std::uint32_t>> facets;          // tags among the candidates, and how many carry each
     std::vector<std::pair<std::string, std::uint32_t>> by_source;  // documents the candidates cite, and how many cite each
     std::uint32_t uncited = 0;           // candidates citing nothing
