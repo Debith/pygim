@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 """Tests for ``oo docs serve`` — the static docs server with the ✎ review layer."""
 
+import io
 import json
 import threading
 import urllib.error
@@ -120,6 +121,101 @@ class TestPages:
             thread.join(timeout=5)
 
 
+class TestMarkdown:
+    def test_opening_markdown_generates_html_beside_it_and_redirects(self, server, site):
+        (site / "design.md").write_text("# Title\n\nSome *text*.\n\n| a | b |\n|---|---|\n| 1 | 2 |\n", encoding="utf-8")
+        status, headers, _ = _get(server + "/design.md", follow=False)
+        assert status == 302 and headers["Location"] == "/design.html"
+        generated = (site / "design.html").read_text(encoding="utf-8")
+        assert "generated from design.md by oo docs serve" in generated
+        assert "<h1" in generated and "<em>text</em>" in generated and "<table>" in generated
+        assert 'id="cmt-tab"' not in generated                         # the commenter is injected when served, not written
+        status, headers, body = _get(server + "/design.md")            # following the redirect: the HTML page, with the commenter
+        assert status == 200 and 'id="cmt-tab"' in body.decode("utf-8") and "<title>design</title>" in body.decode("utf-8")
+
+    def test_regenerated_only_when_the_markdown_is_newer(self, site):
+        import os
+        import time
+        md = site / "note.md"
+        md.write_text("# one\n", encoding="utf-8")
+        root = _docs_serve.pygim.path(site, store=PathStore())
+        out = _docs_serve.materialize_markdown(root / "note.md")
+        first = os.fspath(out)
+        assert "<h1" in (site / "note.html").read_text(encoding="utf-8") and "one" in (site / "note.html").read_text(encoding="utf-8")
+        stamp = os.path.getmtime(first)
+        _docs_serve.materialize_markdown(root / "note.md")
+        assert os.path.getmtime(first) == stamp                        # fresh: untouched
+        time.sleep(0.05)
+        md.write_text("# two\n", encoding="utf-8")
+        os.utime(md, None)
+        _docs_serve.materialize_markdown(root / "note.md")
+        assert "two" in (site / "note.html").read_text(encoding="utf-8")   # stale: regenerated
+
+    def test_a_hand_written_html_is_never_overwritten(self, site):
+        (site / "mine.md").write_text("# from markdown\n", encoding="utf-8")
+        (site / "mine.html").write_text("<body>hand-written</body>", encoding="utf-8")
+        root = _docs_serve.pygim.path(site, store=PathStore())
+        out = _docs_serve.materialize_markdown(root / "mine.md")
+        assert out.name == "mine.html" and (site / "mine.html").read_text(encoding="utf-8") == "<body>hand-written</body>"
+
+    def test_markdown_links_point_at_generated_pages(self, site):
+        (site / "a.md").write_text("see [b](b.md#part) and [ext](https://x.y/z.md) and [raw](/abs.md)\n", encoding="utf-8")
+        root = _docs_serve.pygim.path(site, store=PathStore())
+        html = (site / _docs_serve.materialize_markdown(root / "a.md").name).read_text(encoding="utf-8")
+        assert 'href="b.html#part"' in html and 'href="https://x.y/z.md"' in html and 'href="/abs.md"' in html
+
+    def test_mermaid_fence_becomes_a_live_diagram(self, site):
+        (site / "diagram.md").write_text("```mermaid\nclassDiagram\n  A --> B\n```\n", encoding="utf-8")
+        root = _docs_serve.pygim.path(site, store=PathStore())
+        html = (site / _docs_serve.materialize_markdown(root / "diagram.md").name).read_text(encoding="utf-8")
+        assert '<pre class="mermaid">' in html and "A --> B" in html and "mermaid.esm.min.mjs" in html
+
+    def test_markdown_index_stands_in_for_a_missing_index_html(self, temp_dir):
+        (temp_dir / "README.md").write_text("# Home\n", encoding="utf-8")
+        httpd = _docs_serve.make_server(temp_dir, port=0, host="127.0.0.1")
+        thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+        thread.start()
+        try:
+            base = f"http://127.0.0.1:{httpd.server_address[1]}"
+            status, headers, _ = _get(base + "/", follow=False)
+            assert status == 302 and headers["Location"] == "/README.html"
+            body = _get(base + "/")[2].decode("utf-8")
+            assert "<h1" in body and 'id="cmt-tab"' in body and (temp_dir / "README.html").is_file()
+        finally:
+            httpd.shutdown()
+            httpd.server_close()
+            thread.join(timeout=5)
+
+    def test_pages_list_html_and_unconverted_markdown_only(self, server, site):
+        (site / "notes.md").write_text("x", encoding="utf-8")
+        (site / "done.md").write_text("y", encoding="utf-8")
+        assert _get(server + "/done.md", follow=False)[0] == 302          # generates done.html
+        pages = json.loads(_get(server + "/pages")[2])
+        assert "/notes.md" in pages and "/done.html" in pages and "/done.md" not in pages
+
+    def test_startup_generates_every_markdown_page(self, temp_dir):
+        (temp_dir / "a.md").write_text("# a\n", encoding="utf-8")
+        (temp_dir / "sub").mkdir()
+        (temp_dir / "sub" / "b.md").write_text("# b\n", encoding="utf-8")
+        (temp_dir / "__notes__").mkdir()
+        (temp_dir / "__notes__" / "n.md").write_text("# n\n", encoding="utf-8")
+        httpd = _docs_serve.make_server(temp_dir, port=0, host="127.0.0.1")
+        try:
+            assert (temp_dir / "a.html").is_file() and (temp_dir / "sub" / "b.html").is_file()
+            assert not (temp_dir / "__notes__" / "n.html").exists()          # notes are not pages
+            root = _docs_serve.pygim.path(temp_dir, store=PathStore())
+            assert _docs_serve.pregenerate(root) == 0                         # everything fresh: nothing rewritten
+        finally:
+            httpd.server_close()
+
+    def test_render_without_the_package_is_none(self, monkeypatch):
+        import builtins
+        real = builtins.__import__
+        monkeypatch.setattr(builtins, "__import__",
+                            lambda name, *a, **k: (_ for _ in ()).throw(ImportError()) if name == "markdown" else real(name, *a, **k))
+        assert _docs_serve.render_markdown("# x", "x") is None
+
+
 class TestRootRedirect:
     def test_root_redirects_to_site_index_when_root_has_none(self, server):
         status, headers, _ = _get(server + "/", follow=False)
@@ -214,6 +310,44 @@ class TestComments:
 
     def test_unknown_post_route(self, server):
         assert _post(server + "/nope", {})[0] == 404
+
+
+class TestErrorRepliesDrainTheBody:
+    """An error reply reads the request body first; Windows resets a connection closed
+    with unread bytes and the client then sees WinError 10053 instead of our status."""
+
+    @staticmethod
+    def _handler(site, body: bytes, *, length=None):
+        httpd = _docs_serve.make_server(site, port=0, host="127.0.0.1")
+        try:
+            cls = httpd.RequestHandlerClass
+        finally:
+            httpd.server_close()
+        h = cls.__new__(cls)
+        h.headers = {"Content-Length": str(len(body) if length is None else length)}
+        h.rfile = io.BytesIO(body)
+        h._body_read = False
+        return h
+
+    def test_unread_body_is_consumed(self, site):
+        h = self._handler(site, b"x" * 70_000)
+        h._discard_body()
+        assert h.rfile.tell() == 70_000
+
+    def test_consumed_body_is_not_read_twice(self, site):
+        h = self._handler(site, b"abcde")
+        assert h._read_body(5) == b"abcde"
+        h.rfile = io.BytesIO(b"next request")
+        h._discard_body()
+        assert h.rfile.tell() == 0
+
+    def test_body_over_upload_limit_is_left_alone(self, site):
+        h = self._handler(site, b"y", length=_docs_serve.MAX_BYTES + 1)
+        h._discard_body()
+        assert h.rfile.tell() == 0
+
+    def test_unknown_route_with_large_body(self, server):
+        assert _post(server + "/nope", None, raw=b"z" * 100_000)[0] == 404
 
 
 class TestUpload:
