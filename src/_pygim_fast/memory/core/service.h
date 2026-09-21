@@ -167,6 +167,23 @@ public:
             append_locked(std::move(r));
         }
         link_accepted_proposals();
+        check_objects();
+    }
+
+    /// A head whose text is gone (§3.5): the row still names its content, but the object holding it
+    /// is not there, so `show` and every read answer with an empty text and say nothing. Measured
+    /// as one of the two silent losses a store can suffer, so it is reported at load — the view file
+    /// on disk may hold the only copy left.
+    void check_objects() {
+        const auto s = current();
+        for (std::size_t i = 0; i < s->size(); ++i) {
+            const memory_id m(static_cast<std::uint32_t>(i));
+            if (!s->is_head(m) || text_of(*s, m)) continue;
+            m_load_reviews.push_back({"text missing", describe(*s, m) + " has no text: object " +
+                                                       s->record(m).content.hex().substr(0, 12) +
+                                                       " is not in the store. memories/" + s->record(m).slug +
+                                                       ".md may hold the only copy — write it back as a memory superseding this one."});
+        }
     }
 
     /// The snapshot readers answer from; never waits on a writer for longer

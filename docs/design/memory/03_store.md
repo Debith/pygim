@@ -193,8 +193,9 @@ on a scratch store (2026-09-17):
 | a row hand-edited | that row, dropped from replay, so its memory disappears | yes: *its id does not match its content — edited by hand* |
 | a line removed from an audit file | that row's memory; its object is left orphaned on disk | no |
 
-Two consequences. The silent one is worth closing — a head whose object is missing should be a
-review item at load, since the view file on disk may then hold the only copy of the text. And
+Two consequences. The first silent loss is closed: opening a store checks that every head's object
+is there and reports `text missing` when one is not, naming the view file that may hold the only
+copy. A row removed from an audit file stays unreportable — nothing records that it existed. And
 because nothing is ever deleted, a secret written into a memory stays in the row's history and in
 `objects/` after a retire: removing it means rewriting history by hand, which is §9.4's subject.
 

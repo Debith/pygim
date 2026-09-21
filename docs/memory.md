@@ -175,6 +175,9 @@ pattern.
   (`/mcp`) as well.
 - **A vocabulary edit breaks loading.** The next tool call reports the file and line; fix the file
   and the server reopens it.
+- **A memory's text is empty, and `oo memory status` says `text missing`.** Its content object was
+  deleted. The file under `memories/` may hold the only copy — have the agent write it back as a
+  memory superseding that one.
 - **You edited a file under `memories/`.** It is kept as you left it, and `oo memory status` lists
   it as a review. The file is a view: to make the edit the memory, have the agent write it
   superseding that memory.

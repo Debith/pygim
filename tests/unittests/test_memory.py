@@ -425,6 +425,22 @@ class TestHeadViews:
         Memory(str(root))
         assert '"tier=mid"' in self.view(root, y) and self.view(root, f) is not None
 
+    def test_a_head_whose_text_is_gone_is_reported_at_load(self, root, mem):
+        """Deleting a content object empties a memory's text in `show` and in every read, and said
+        nothing (03 §3.5): one of the two silent ways a store loses knowledge."""
+        from pygim.memory import digest
+
+        p, y, f = seed(mem)
+        text = mem.show(y["memory"])["text"]
+        d = digest(text.encode("utf-8"))
+        (root / "objects" / d[:2] / d[2:]).unlink()
+        again = Memory(str(root))
+        missing = [r for r in again.session()["reviews"] if r["kind"] == "text missing"]
+        assert len(missing) == 1 and y["memory"] in missing[0]["text"] and y["slug"] in missing[0]["text"]
+        assert again.show(y["memory"])["text"] == ""                     # the loss itself is unchanged
+        assert not [r for r in Memory(str(root)).session()["reviews"] if r["kind"] == "text missing"
+                    and f["memory"] in r["text"]]                        # only the memory that lost its object
+
     def test_a_view_edited_by_hand_is_kept_and_reported_until_the_edit_is_written(self, root, mem):
         p, y, f = seed(mem)
         path = root / "memories" / (y["slug"] + ".md")
