@@ -58,6 +58,8 @@ struct counters {
     std::uint32_t admitted = 0;
     std::uint32_t included = 0;
     std::uint32_t useful = 0;
+    std::uint32_t not_needed = 0;   // included, and the reader did not use it
+    std::uint32_t misleading = 0;   // included, and it pointed the reader the wrong way
 };
 
 /// A proposal waiting for a human (02 §3.1), folded across the writes that

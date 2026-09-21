@@ -48,7 +48,8 @@ not by similarity to the prompt.
 3. When something outlives the task: nothing covers it -> `remember`; a memory
    says less or says it wrong -> `remember` with `supersedes`; one already says
    exactly this -> `learn`. Pass what you read as `seen`. No tag fits ->
-   `proposals`, never a forced tag. When a memory helped, `learn` it.
+   `proposals`, never a forced tag. After a read, `learn` what it gave you:
+   `useful`, `not_needed` or `misleading` — all three are evidence.
 4. A refusal names facts. Act on them and try again.
 5. Consolidate only when the user asks (the `consolidate` prompt). Only the user
    accepts a generalisation or a pack, with `oo memory accept`.
@@ -293,11 +294,15 @@ TOOLS: List[Dict[str, Any]] = [
     },
     {
         "name": "learn",
-        "description": "Report that a memory helped. With a tag the memory does not carry, the report counts toward "
-                       "linking that tag (three reports promote it). On a procedure with no tag, it records that its "
-                       "steps held.",
-        "inputSchema": _schema({"memory": _REF, "tag": {"type": "string"}, "reason": {"type": "string"}, "scope": _SCOPE},
-                               ["memory"]),
+        "description": "Report what a memory you were given turned out to be worth. `useful` (the default) with a tag "
+                       "the memory does not carry counts toward linking that tag — three reports promote it; on a "
+                       "procedure with no tag it records that its steps held. `not_needed` and `misleading` are worth "
+                       "as much: without them a memory that wastes every context it enters looks exactly like one "
+                       "nobody has read.",
+        "inputSchema": _schema({"memory": _REF, "tag": {"type": "string"}, "reason": {"type": "string"},
+                                "verdict": {"type": "string", "enum": ["useful", "not_needed", "misleading"],
+                                            "description": "What it was worth here. Default: useful."},
+                                "scope": _SCOPE}, ["memory"]),
     },
     {
         "name": "merge",
@@ -414,7 +419,7 @@ class MemoryServer:
             "read": self._read,
             "remember": self._remember,
             "learn": lambda a: self._mem(a).learn(a["memory"], tag=a.get("tag", ""), reason=a.get("reason", ""),
-                                                 session=self._session_no()),
+                                                 session=self._session_no(), verdict=a.get("verdict", "useful")),
             "merge": lambda a: self.memory.merge(a["memories"], title=a["title"], text=a["text"], reason=a["reason"],
                                                  tags=a.get("tags", []), session=self._session_no()),
             "link": lambda a: self._mem(a).link(a["memory"], a["tag"], reason=a["reason"], author="agent"),
@@ -585,7 +590,8 @@ class MemoryServer:
         result = self._mem(a).read(a["hard"], a.get("soft", []), max=a.get("max", 8), budget=a.get("budget", 0),
                                   term=a.get("term", ""), session=self._session_no())
         if result.get("memories") or result.get("procedure"):
-            result["next"] = "When one of these helps, call learn with it; a read never counts as useful on its own."
+            result["next"] = ("Report each of these with learn when you are done: verdict useful, not_needed or "
+                              "misleading. A read records nothing about what its memories were worth.")
         return result
 
     def _remember(self, a: Dict[str, Any]) -> Any:

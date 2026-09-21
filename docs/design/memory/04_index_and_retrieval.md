@@ -255,6 +255,7 @@ the field report's reads returned up to 135 skipped entries that the agent only 
 | `budget_dropped` | how many of those the budget had no room for, though `max` had room | tells an empty or short context caused by the budget from one caused by an empty store — the A/B's twelve-tokens-too-big case (field report §7.4) |
 | `facets` | for each tag among the candidates, how many carry it — leaving out tags every candidate carries, but always naming the query's soft tags, even at 0 | sees before reading again whether a soft tag can match at all (`pillar=combat: 0`), and which values would split the list |
 | `coverage` | the documents the candidates cite and how many cite each; how many cite nothing; the inventoried documents none of them cites | when nothing placed answers the question, goes to the uncited documents instead of trying another tag combination |
+| `next` | a reminder to report each memory with `learn` — `useful`, `not_needed` or `misleading` — since a read records what it *gave*, never what that was worth |
 | `standing` | the `kind=preference` candidates that were ranked but not placed — key and title, not text, and no budget | reads them with `show` before advising. With no soft tags a rank is age (§3.5), so the newest preference is last and `max` cuts it: the one a reader is least likely to know already |
 
 A write that changes a memory — `remember`, `link`, `unlink`, `retire`, a promoting `learn` —
@@ -296,6 +297,8 @@ a letter nor a digit — and ASCII case is ignored. So a term behaves as a stem,
 *mounted* and *mounts*, while not matching inside a longer word: plain substring matching had
 `mount` return Damage Threshold, Prone and Speed, all for the word *amount* (field report §7.3).
 A term of several words matches that phrase as written.
+
+One limit follows from the rule: a stem does not reach a **prefixed** word. `visible` does not find *Invisible*, though `invisible` finds it five times. Of nine stems probed against the D-D-2024 corpus only that in-/un-/non- shape lost a match, so the answer is guidance, not a looser rule: query the word as a source writes it, not the shortest stem — which is also what avoids the *amount* false positives above (field report §7.8).
 
 | Option | Concretely | For | Against |
 |---|---|---|---|

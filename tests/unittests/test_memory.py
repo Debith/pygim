@@ -341,6 +341,26 @@ class TestLearningAndCurating:
         assert "task=balance" in mem.show(f["memory"])["tags"]
         assert [m["memory"] for m in mem.read(["domain=dnd", "artifact=spell", "task=balance"])["memories"]] == [f["memory"]]
 
+    def test_a_retrieval_that_misled_or_went_unused_is_recorded_too(self, mem):
+        """The first seam of the end state (overview §4.13): without a verdict, a memory that wastes
+        every context it enters looks exactly like one nobody has read."""
+        p, y, f = seed(mem)
+        assert mem.learn(f["memory"], verdict="not_needed", reason="the question was about tiers")["message"] == "recorded not_needed"
+        assert mem.learn(f["memory"], verdict="misleading", reason="read as a rule, it is one case")["message"] == "recorded misleading"
+        assert mem.learn(f["memory"], reason="the niche framing settled it")["message"] == "recorded useful"
+        counters = mem.show(f["memory"])["counters"]
+        assert (counters["useful"], counters["not_needed"], counters["misleading"]) == (1, 1, 1)
+        assert mem.learn(f["memory"], verdict="helpful")["refused"] == "verdict"
+
+    def test_only_usefulness_promotes_a_tag(self, mem):
+        p, y, f = seed(mem)
+        for _ in range(4):
+            assert not mem.learn(f["memory"], tag="task=balance", verdict="misleading", reason="wrong here")["promoted"]
+        assert "task=balance" not in mem.show(f["memory"])["tags"]      # four reports, none of them usefulness
+        for _ in range(2):
+            mem.learn(f["memory"], tag="task=balance", reason="needed")
+        assert mem.learn(f["memory"], tag="task=balance", reason="needed")["promoted"]
+
     def test_learn_on_a_procedure_records_its_steps_held(self, mem):
         p, _, _ = seed(mem)
         assert mem.learn(p["memory"])["message"] == "recorded steps_held"

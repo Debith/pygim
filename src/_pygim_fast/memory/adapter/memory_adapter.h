@@ -239,11 +239,12 @@ public:
         return write_dict(out);
     }
 
-    py::dict learn(const std::string& memory, const std::string& tag, std::string reason, std::uint64_t session) {
+    py::dict learn(const std::string& memory, const std::string& tag, std::string reason, std::uint64_t session,
+                   const std::string& verdict) {
         op_outcome out;
         {
             py::gil_scoped_release nogil;
-            out = m_service->learn(memory, tag, std::move(reason), session);
+            out = m_service->learn(memory, tag, std::move(reason), session, verdict);
         }
         py::dict d = op_dict(out);
         d["promoted"] = out.promoted;
@@ -412,7 +413,8 @@ public:
         d["cites"] = r.cites;
         if (!r.corpus.empty()) d["corpus"] = r.corpus;
         const auto c = m_service->counts(r.key);
-        d["counters"] = py::dict(py::arg("included") = c.included, py::arg("useful") = c.useful);
+        d["counters"] = py::dict(py::arg("included") = c.included, py::arg("useful") = c.useful,
+                                 py::arg("not_needed") = c.not_needed, py::arg("misleading") = c.misleading);
         return d;
     }
 

@@ -435,7 +435,8 @@ public:
     /// A memory helped (overview §4.4). With a tag it does not carry, the
     /// report counts toward promoting that tag; on a procedure with no tag it
     /// means the steps held. A promotion is a row; the report is not.
-    op_outcome learn(std::string_view ref, std::string_view tag, std::string reason, std::uint64_t session) {
+    op_outcome learn(std::string_view ref, std::string_view tag, std::string reason, std::uint64_t session,
+                     std::string_view verdict = "useful") {
         op_outcome out;
         auto snap = current();
         std::vector<memory_id> ms;
@@ -447,13 +448,19 @@ public:
             if (!resolve_query_tags(snap->tax(), {std::string(tag)}, ts, out.why)) return out;
             t = ts[0];
         }
+        if (verdict != "useful" && verdict != "not_needed" && verdict != "misleading") {
+            out.why = {"verdict", "a verdict is `useful`, `not_needed` or `misleading` — not " + std::string(verdict), {}};
+            return out;
+        }
+        // A retrieval that misled, or was never used, is evidence too: without it a memory that wastes
+        // every context it enters looks exactly like one nobody has read (overview §4.13).
         const bool procedure = snap->tax().tag("kind=procedure") && snap->tags_of(m).has(snap->tax().tag("kind=procedure")->value());
-        const std::string kind = (!t && procedure) ? "steps_held" : "useful";
+        const std::string kind = (verdict != "useful") ? std::string(verdict) : (!t && procedure) ? "steps_held" : "useful";
         const auto key = snap->record(m).key;
         m_store.append_usage({key, t ? snap->tax().info(*t).qualified : std::string(), kind, m_store.now(), session, reason});
         out.ok = true;
         out.message = "recorded " + kind;
-        if (t && !snap->tags_of(m).has(t->value())) {
+        if (t && verdict == "useful" && !snap->tags_of(m).has(t->value())) {   // only usefulness promotes a tag
             std::uint32_t count = 0;
             const auto& q = snap->tax().info(*t).qualified;
             for (const auto& u : m_store.usage())
@@ -722,6 +729,8 @@ public:
             if (u.kind == "included") ++c.included;
             else if (u.kind == "admitted") ++c.admitted;
             else if (u.kind == "useful" || u.kind == "steps_held") ++c.useful;
+            else if (u.kind == "not_needed") ++c.not_needed;
+            else if (u.kind == "misleading") ++c.misleading;
         }
         return c;
     }

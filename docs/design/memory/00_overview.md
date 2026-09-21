@@ -680,7 +680,7 @@ stands against it:
 | human knowledge as a second stream (§9) | sources, the inventory, locators with passage digests, seeding (§4.9) | built |
 | proposed kept apart from committed (§13) | the accept gate, held by a person | built |
 | text as a projection of structured state (§10) | memories are the state; views, instructions and reports are projections of it | built |
-| **outcome evidence per retrieval** (§7) | only `useful` is recorded; nothing marks a retrieval unneeded or misleading, and nothing reads the counters | the first gap |
+| **outcome evidence per retrieval** (§7) | `learn` takes a verdict — `useful`, `not_needed` or `misleading` — and each is counted per memory; what is still missing is anything that *reads* those counters | started 2026-09-21 |
 | **a retrieval policy that learns** (§7.1) | the vocabulary and its weights, changed by hand | gap |
 | **evaluation before a change becomes the default** (§13 step 9, principle 10) | receipts can be rerun (04 §5), but never against a proposed vocabulary | gap, and cheap |
 | **a context controller, possibly its own model** (§4.2) | the agent classifies and reads for itself | end state |

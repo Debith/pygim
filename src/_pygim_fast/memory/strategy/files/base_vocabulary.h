@@ -89,8 +89,8 @@ dimensions:
       brief: What sort of knowledge this is.
       full: >
         The epistemic type of a memory: a fact, a rule of thumb, a way of doing
-        something, an instance, a choice made, or a taste. Two memories about
-        the same thing can differ only in kind.
+        something, an instance, a choice made, a choice still open, or a
+        taste. Two memories about the same thing can differ only in kind.
       when: Every memory answers it.
       when_not: Never to say how good the knowledge is — valence is not kind.
       example: '"Measure twice, cut once" is a principle; "the pine shelf that sagged" is an example.'
@@ -134,6 +134,12 @@ dimensions:
           when: The text records how someone likes things done.
           when_not: Not a claim about correctness — that is a principle.
           example: Prefer a written agenda before any meeting.
+      question:
+        entry:
+          brief: An open question.
+          when: The text records something to decide, with what is known so far, and no decision yet.
+          when_not: Not a choice already made — that is decision.
+          example: Whether the shelf should be fixed to the wall or stand free.
 
   tier:
     role: soft

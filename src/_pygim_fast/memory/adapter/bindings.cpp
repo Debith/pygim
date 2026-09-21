@@ -76,7 +76,9 @@ operation returns a plain dict, and a refused write is a result with
              py::arg("reason"), py::arg("tags") = std::vector<std::string>{}, py::arg("session") = 0ull,
              py::arg("author") = "agent", "Joins heads that say one thing into one memory that supersedes them.")
         .def("learn", &Memory::learn, py::arg("memory"), py::kw_only(), py::arg("tag") = "", py::arg("reason") = "",
-             py::arg("session") = 0ull, "Reports that a memory helped; with a tag, counts toward promoting it.")
+             py::arg("session") = 0ull, py::arg("verdict") = "useful",
+             "Reports what a retrieved memory turned out to be worth: `useful` (with a tag, counts toward\n"
+             "promoting it), `not_needed`, or `misleading`. Only usefulness promotes.")
         .def("link", &Memory::link, py::arg("memory"), py::arg("tag"), py::kw_only(), py::arg("reason"),
              py::arg("author") = "human")
         .def("unlink", &Memory::unlink, py::arg("memory"), py::arg("tag"), py::kw_only(), py::arg("reason"),

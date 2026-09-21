@@ -178,6 +178,16 @@ class TestTools:
         err, empty = call(server, "read", hard=["task=design"], term="invisible")
         assert empty["memories"] == [] and "next" not in empty
 
+    def test_a_verdict_goes_through_the_tool_and_a_read_asks_for_one(self, server):
+        err, a = call(server, "remember", title="A rule", text="Rule.", tags=TAGS)
+        err, read = call(server, "read", hard=["task=design"])
+        assert "not_needed" in read["next"] and "misleading" in read["next"]
+        err, told = call(server, "learn", memory=a["memory"], verdict="misleading", reason="it answered another question")
+        assert not err and told["message"] == "recorded misleading"
+        assert call(server, "show", memory=a["memory"])[1]["counters"]["misleading"] == 1
+        learn = next(t for t in TOOLS if t["name"] == "learn")
+        assert learn["inputSchema"]["properties"]["verdict"]["enum"] == ["useful", "not_needed", "misleading"]
+
     def test_a_read_names_the_preferences_it_did_not_place(self, server):
         """With no soft tags a read ranks by age, so the newest preference is last and `max` cuts it
         — the one most likely to be unknown to the reader. It is named, not paid for."""
