@@ -645,6 +645,46 @@ rule wins. `domain=any` is the test of what belongs there. Sections 03 §9.1.1 a
 mechanics, including how a write travels to this machine's other projects and to other machines,
 and what each store's own policy says about publishing it.
 
+### 4.13 Direction: the end state this is built toward
+
+The design is aimed at an end state, not at what the first stores need. Debith, 2026-09-21, on
+his synthesis *Evolving Memory & Context Systems*
+([the report](../../reports/2026-09-20-evolving-memory-and-context-systems.md)): "very important
+discussion of mine on the topic and sets the direction we go... I am not planning this for current
+state but to the end state, whatever the report is pointing us to. I believe it aligns with general
+approach with pygim library." That is the library's standing rule — generality is a feature, not
+something a second consumer has to earn — applied to the memory.
+
+The end state is a closed loop: context chosen for the step at hand; experience captured online;
+a retrospective pass that learns which retrievals helped and which misled; offline consolidation
+into patterns and procedures; a retrieval policy that improves from outcomes; and a context
+controller, possibly a smaller model of its own, deciding what the reasoner sees. Where the design
+stands against it:
+
+| The end state needs | Today | Standing |
+|---|---|---|
+| the task classified before anything is retrieved (report §4.1) | a read *is* that classification: hard tags filter, soft tags order | built |
+| online capture apart from offline consolidation (§8) | concrete memories during work; `consolidate`, `generalises`, the accept gate, the fold (§4.11) | built, started by a person |
+| episodic, semantic and procedural knowledge kept apart (§6) | `kind`, with `generalises` edges keeping the evidence under each pattern | built |
+| human knowledge as a second stream (§9) | sources, the inventory, locators with passage digests, seeding (§4.9) | built |
+| proposed kept apart from committed (§13) | the accept gate, held by a person | built |
+| text as a projection of structured state (§10) | memories are the state; views, instructions and reports are projections of it | built |
+| **outcome evidence per retrieval** (§7) | only `useful` is recorded; nothing marks a retrieval unneeded or misleading, and nothing reads the counters | the first gap |
+| **a retrieval policy that learns** (§7.1) | the vocabulary and its weights, changed by hand | gap |
+| **evaluation before a change becomes the default** (§13 step 9, principle 10) | receipts can be rerun (04 §5), but never against a proposed vocabulary | gap, and cheap |
+| **a context controller, possibly its own model** (§4.2) | the agent classifies and reads for itself | end state |
+| **learned memory management** (§7, Memory-R1 and its kin) | none | end state |
+
+**The rule for getting there.** Nothing learned may cost what the design exists for: the same
+question answered the same way (G1) and every inclusion explained (G2). So a learned component is
+never a hidden one. What it learns is *state* — versioned like the vocabulary, pinned by a receipt
+like a snapshot, and changed through a gate like a pack — so a read made under last month's policy
+can still be rerun and explained under it. A learned weight is a proposal until accepted; a
+controller's choice is recorded with the read it shaped. The small controller and the learned
+memory managers are therefore in scope as direction even though nothing today has the trajectories
+to train them: the work now is to keep the seams they will need — outcome evidence recorded per
+retrieval, policy held as data, evaluation by rerunning receipts — rather than to build them.
+
 ---
 
 ## 5. Principles
