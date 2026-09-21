@@ -5,6 +5,7 @@
 //   audit/<clone>.jsonl        this copy's rows, append-only, hash-chained
 //   usage/<clone>/<day>.jsonl  observations
 //   receipts/<clone>/<day>.jsonl
+//   mailbox/<clone>/<day>.jsonl   messages left for whoever works here next (03 §3.6)
 //   memories/<slug>.md         one head view per chain, regenerated
 //   local/                     never committed: clone id, commit lock, sessions
 //
@@ -39,7 +40,8 @@ public:
     static void init(const fs::path& root) {
         if (fs::exists(root / "taxonomy" / "base.yaml"))
             throw std::runtime_error(root.string() + ": already a memory repository");
-        for (const char* d : {"taxonomy", "objects", "audit", "usage", "receipts", "memories", "reviews", "corpus", "local"})
+        for (const char* d : {"taxonomy", "objects", "audit", "usage", "receipts", "mailbox", "memories", "reviews",
+                              "corpus", "local"})
             fs::create_directories(root / d);
         write_atomically(root / "taxonomy" / "base.yaml", base_vocabulary);
         write_atomically(root / ".gitignore", "local/\n");
@@ -228,6 +230,17 @@ public:
         std::vector<receipt> out;
         for (const auto& line : lines_under(m_root / "receipts"))
             if (auto r = parse_receipt(line)) out.push_back(std::move(*r));
+        return out;
+    }
+
+    /// The mailbox (03 §3.6): one file per clone per day, as usage and receipts are, so two clones
+    /// never write the same file and git merges them by union.
+    void append_mailbox(const mailbox_entry& m) { append_durably(day_file("mailbox"), mailbox_line(m) + "\n"); }
+
+    [[nodiscard]] std::vector<mailbox_entry> mailbox() const {
+        std::vector<mailbox_entry> out;
+        for (const auto& line : lines_under(m_root / "mailbox"))
+            if (auto m = parse_mailbox(line)) out.push_back(std::move(*m));
         return out;
     }
 

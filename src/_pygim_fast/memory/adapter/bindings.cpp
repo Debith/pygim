@@ -84,6 +84,13 @@ operation returns a plain dict, and a refused write is a result with
         .def("unlink", &Memory::unlink, py::arg("memory"), py::arg("tag"), py::kw_only(), py::arg("reason"),
              py::arg("author") = "human")
         .def("retire", &Memory::retire, py::arg("memory"), py::kw_only(), py::arg("reason"), py::arg("author") = "human")
+        .def("post", &Memory::post, py::arg("text"), py::kw_only(), py::arg("kind") = "comment", py::arg("to") = "",
+             py::arg("about") = "", py::arg("reply_to") = "", py::arg("resolves") = "", py::arg("session") = 0ull,
+             py::arg("author") = "agent",
+             "Leaves a message for whoever works in this store next: feedback, a request or a comment.\n"
+             "`resolves` closes an earlier message, so a thread is never closed silently.")
+        .def("mailbox", &Memory::mailbox, py::kw_only(), py::arg("all") = false, py::arg("mine") = "",
+             "The messages left here: what is still open, oldest first, or everything with all=True.")
         .def("show", &Memory::show, py::arg("memory"))
         .def("proposals", &Memory::proposals, "Concepts the vocabulary lacks, folded, waiting for a human.")
         .def("ingest", &Memory::ingest, py::arg("path"), "Ingests a hand-written corpus file, reconciled by slug and digest.")

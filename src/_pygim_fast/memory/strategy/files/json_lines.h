@@ -197,6 +197,42 @@ struct parsed {
     }
 }
 
+[[nodiscard]] inline std::string mailbox_line(const mailbox_entry& m) {
+    std::string out = "{\"id\":";
+    json_string(out, m.id);
+    for (const auto& [name, value] : {std::pair<std::string_view, const std::string&>{"kind", m.kind},
+                                      {"text", m.text}, {"to", m.to}, {"author", m.author}, {"about", m.about},
+                                      {"reply_to", m.reply_to}, {"resolves", m.resolves}, {"time", m.time},
+                                      {"clone", m.clone}}) {
+        if (value.empty()) continue;
+        out += ",\"" + std::string(name) + "\":";
+        json_string(out, value);
+    }
+    out += ",\"session\":" + decimal(m.session) + "}";
+    return out;
+}
+
+[[nodiscard]] inline std::optional<mailbox_entry> parse_mailbox(std::string_view line) {
+    using namespace json_detail;
+    using yaml_detail::child;
+    try {
+        parsed p(line);
+        const auto root = p.tree.crootref();
+        mailbox_entry m;
+        m.id = field(root, "id");
+        if (m.id.empty()) return std::nullopt;
+        for (const auto& [name, target] : {std::pair<std::string_view, std::string*>{"kind", &m.kind},
+                                           {"text", &m.text}, {"to", &m.to}, {"author", &m.author},
+                                           {"about", &m.about}, {"reply_to", &m.reply_to},
+                                           {"resolves", &m.resolves}, {"time", &m.time}, {"clone", &m.clone}})
+            if (const auto c = child(root, name)) *target = str(*c);
+        m.session = number(child(root, "session"));
+        return m;
+    } catch (const std::exception&) {
+        return std::nullopt;
+    }
+}
+
 [[nodiscard]] inline std::string receipt_line(const receipt& r) {
     std::string out = "{\"snapshot\":";
     json_string(out, r.snapshot.hex());

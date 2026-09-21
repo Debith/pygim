@@ -102,6 +102,7 @@ public:
         for (const auto& p : m_store->problems()) reviews.append(py::dict(py::arg("kind") = "file", py::arg("text") = p));
         d["reviews"] = reviews;
         d["proposals"] = proposals();
+        d["mailbox"] = mailbox(false, {});   // what other sessions left here, still open
         return d;
     }
 
@@ -307,6 +308,51 @@ public:
             std::vector<std::string> names;
             for (const auto t : snap->tags_of(m).members()) names.push_back(snap->tax().info(tag_id(t)).qualified);
             d["tags"] = names;
+            out.append(d);
+        }
+        return out;
+    }
+
+    /// Leaves a message in this store's mailbox for whoever works here next.
+    py::dict post(std::string text, std::string kind, std::string to, std::string about, std::string reply_to,
+                  std::string resolves, std::uint64_t session, std::string author) {
+        mailbox_entry m;
+        m.text = std::move(text);
+        m.kind = std::move(kind);
+        m.to = std::move(to);
+        m.about = std::move(about);
+        m.reply_to = std::move(reply_to);
+        m.resolves = std::move(resolves);
+        m.session = session;
+        m.author = std::move(author);
+        op_outcome out;
+        {
+            py::gil_scoped_release nogil;
+            out = m_service->post(std::move(m));
+        }
+        if (!out.ok) return refused(out.why);
+        py::dict d;
+        d["ok"] = true;
+        d["message"] = out.message;   // the new message's id
+        d["waiting"] = m_service->waiting();
+        return d;
+    }
+
+    /// The mailbox: what is still open, oldest first, or everything with `all`.
+    py::list mailbox(bool all, const std::string& mine) {
+        py::list out;
+        for (const auto& m : m_service->mailbox(all, mine)) {
+            py::dict d;
+            d["id"] = m.id;
+            d["kind"] = m.kind;
+            d["text"] = m.text;
+            d["author"] = m.author;
+            d["time"] = m.time;
+            d["session"] = m.session;
+            if (!m.to.empty()) d["to"] = m.to;
+            if (!m.about.empty()) d["about"] = m.about;
+            if (!m.reply_to.empty()) d["reply_to"] = m.reply_to;
+            if (!m.resolves.empty()) d["resolves"] = m.resolves;
             out.append(d);
         }
         return out;

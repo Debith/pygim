@@ -325,6 +325,22 @@ class TestDiscoveringStores:
         assert "not checked out here: memory, global" in out.output
 
 
+class TestTheMailboxReachesASession:
+    def test_the_command_posts_and_lists_and_the_hook_output_names_what_waits(self, project, isolated, monkeypatch):
+        store = project / ".memory"
+        Memory.init(str(store))
+        monkeypatch.chdir(project)
+        posted = CliRunner().invoke(cli_oo, ["memory", "mailbox", "--post", "Finish the rebase", "--kind", "request",
+                                             "--to", "next-session"])
+        assert posted.exit_code == 0 and "1 message(s) waiting" in posted.output
+        listed = CliRunner().invoke(cli_oo, ["memory", "mailbox"])
+        assert "request to next-session" in listed.output and "Finish the rebase" in listed.output
+        standing = CliRunner().invoke(cli_oo, ["memory", "status", "--standing"])   # what the session-start hook prints
+        assert "Waiting in the mailbox (1)" in standing.output and "Finish the rebase" in standing.output
+        Memory(str(store)).post("Done.", resolves=Memory(str(store)).mailbox()[0]["id"], author="human")
+        assert "nothing waiting" in CliRunner().invoke(cli_oo, ["memory", "mailbox"]).output
+
+
 class TestAskingForAReload:
     def test_reload_marks_the_stores_a_server_here_would_serve(self, project, isolated, monkeypatch):
         store = project / ".memory"

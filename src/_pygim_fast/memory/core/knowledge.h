@@ -80,6 +80,24 @@ struct pending_proposal {
     }
 };
 
+/// One message in a store's mailbox (03 §3.6): what a session, an agent or a person left for
+/// whoever works here next. Not a memory — a memory is knowledge that outlives the task, while a
+/// message is addressed, answered and done — so it lives in its own stream, never replayed into
+/// the index and never changing what an old receipt answers.
+struct mailbox_entry {
+    std::string id;         // 12 hex characters, the digest of what was posted
+    std::string kind;       // feedback · request · comment
+    std::string text;
+    std::string to;         // who it is for; empty means whoever reads next
+    std::string author;     // agent, human, or a name a session gave itself
+    std::string about;      // what it concerns: a memory, a path, a report — free text
+    std::string reply_to;   // the message this answers, if any
+    std::string resolves;   // the message this closes, if any
+    std::string time;
+    std::string clone;
+    std::uint64_t session = 0;
+};
+
 /// What the agent learnt from a consolidation, in its own words: the patterns it
 /// wrote, the cases it left and why, and every gap it saw (overview §4.11). The
 /// service keeps and publishes it; it never reads it.

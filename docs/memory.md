@@ -150,6 +150,22 @@ oo memory accept <key> --reason "the cases do share it"
 Only then do that pattern's cases fold under it in reads. The agent has no tool to accept its own
 pattern.
 
+## Leaving messages for other sessions
+
+Several sessions, agents and people work on one project. The store's **mailbox** is where they
+leave each other feedback, requests and comments — separate from memories, which are knowledge that
+outlives a task.
+
+```bash
+oo memory mailbox                                   # what is open, oldest first
+oo memory mailbox --post "Finish the rebase" --kind request --to next-session
+oo memory mailbox --all                             # resolved ones too; nothing is deleted
+```
+
+The agent has `mailbox` and `post`. A message that `resolves` another closes it and must say
+something itself, so a thread is never closed silently. Open messages are listed by `session` and
+printed by the session-start hook, so a new session sees them without being asked.
+
 ## Commands
 
 | Command | What it does |
@@ -157,6 +173,7 @@ pattern.
 | `oo memory setup [--branch \| --user \| --local] [--from DIR]` | find or create the store, point the clone at it, register the server |
 | `oo memory setup --global` | create this machine's global store, read by every project |
 | `oo memory reload` | ask running servers to restart into the installed code (`--signal` reaches other projects') |
+| `oo memory mailbox [--post TEXT]` | read or leave messages for other sessions and agents |
 | `oo memory status` | which store, its version, reviews waiting, proposals |
 | `oo memory accept <key>` | accept a generalisation, so its cases fold |
 | `oo memory accept --pack <proposal>` | make a drafted vocabulary pack live |

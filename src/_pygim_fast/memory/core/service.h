@@ -66,6 +66,8 @@ concept memory_store = requires(S& s, const row& r, const usage_record& u, const
     { s.append_usage(u) } -> std::same_as<void>;
     { s.usage() } -> std::same_as<std::vector<usage_record>>;
     { s.append_receipt(rc) } -> std::same_as<void>;
+    { s.append_mailbox(std::declval<const mailbox_entry&>()) } -> std::same_as<void>;
+    { s.mailbox() } -> std::same_as<std::vector<mailbox_entry>>;
     { s.write_view(mr, sv, names) } -> std::same_as<void>;
     { s.remove_view(sv) } -> std::same_as<void>;
     { s.view_text(sv) } -> std::same_as<std::optional<std::string>>;
@@ -536,6 +538,63 @@ public:
         out.snap = next;
         return out;
     }
+
+    // ── the mailbox (03 §3.6) ─────────────────────────────────────────────
+
+    /// Leaves a message for whoever works here next: another session, an agent, or a person. A
+    /// message that `resolves` another closes it, so saying nothing is not a way to close a thread.
+    /// Messages are their own stream — posting one changes no snapshot and no memory.
+    op_outcome post(mailbox_entry m) {
+        op_outcome out;
+        if (m.text.empty()) {
+            out.why = {"empty", "a message needs text — what is being asked, reported or commented on", {}};
+            return out;
+        }
+        if (m.kind.empty()) m.kind = "comment";
+        if (m.kind != "feedback" && m.kind != "request" && m.kind != "comment") {
+            out.why = {"kind", "a message is `feedback`, `request` or `comment` — not " + m.kind, {}};
+            return out;
+        }
+        const auto known = m_store.mailbox();
+        for (const auto& named : {std::pair<const std::string&, const char*>{m.reply_to, "reply_to"},
+                                  {m.resolves, "resolves"}}) {
+            if (named.first.empty()) continue;
+            if (std::none_of(known.begin(), known.end(), [&](const mailbox_entry& e) { return e.id == named.first; })) {
+                out.why = {"unknown message", std::string(named.second) + " names " + named.first +
+                                                  ", which is not in this mailbox", {}};
+                return out;
+            }
+        }
+        m.clone = m_store.clone();
+        m.time = m_store.now();
+        m.id = digest::of(m.clone + m.time + decimal(m.session) + m.text).hex().substr(0, 12);
+        m_store.append_mailbox(m);
+        out.ok = true;
+        out.message = m.id;
+        return out;
+    }
+
+    /// The mailbox, oldest first. Without `all`, only what is still open: a message no later one
+    /// resolves. `mine` keeps what is addressed to that name, or to nobody in particular.
+    [[nodiscard]] std::vector<mailbox_entry> mailbox(bool all = false, std::string_view mine = {}) const {
+        auto entries = m_store.mailbox();
+        std::sort(entries.begin(), entries.end(), [](const mailbox_entry& a, const mailbox_entry& b) {
+            return a.time != b.time ? a.time < b.time : a.id < b.id;   // one order, whoever merged the clones
+        });
+        std::unordered_set<std::string> closed;
+        for (const auto& e : entries)
+            if (!e.resolves.empty()) closed.insert(e.resolves);
+        std::vector<mailbox_entry> out;
+        for (auto& e : entries) {
+            if (!all && (closed.count(e.id) || !e.resolves.empty())) continue;
+            if (!mine.empty() && !e.to.empty() && e.to != mine) continue;
+            out.push_back(std::move(e));
+        }
+        return out;
+    }
+
+    /// How many messages are open, for a session that has not asked yet.
+    [[nodiscard]] std::size_t waiting() const { return mailbox().size(); }
 
     // ── consolidation review (overview §4.11) ─────────────────────────────
 

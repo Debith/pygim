@@ -214,6 +214,18 @@ class TestTools:
         assert read["vocabulary_changed"]["from"] == before and read["vocabulary_changed"]["to"] == server.memory.taxonomy
         assert "vocabulary_changed" not in call(server, "read", hard=["task=design"])[1]
 
+    def test_the_mailbox_through_the_tools(self, server):
+        err, posted = call(server, "post", text="Please finish the pathlike rebase.", kind="request", to="next")
+        assert not err and posted["ok"] and posted["waiting"] == 1
+        err, box = call(server, "mailbox")
+        assert [(m["kind"], m["to"], m["author"]) for m in box] == [("request", "next", "agent")]
+        err, closed = call(server, "post", text="Done, rebased.", resolves=posted["message"])
+        assert closed["ok"] and call(server, "mailbox")[1] == []
+        assert len(call(server, "mailbox", all=True)[1]) == 2
+        err, info = call(server, "session")
+        assert info["mailbox"] == []                                   # nothing open, so nothing is pressed on it
+        assert "mailbox" in {t["name"] for t in TOOLS} and "post" in {t["name"] for t in TOOLS}
+
     def test_the_agent_has_no_way_to_accept(self, server):
         names = {t["name"] for t in TOOLS}
         assert "accept" not in names and "lessons" in names

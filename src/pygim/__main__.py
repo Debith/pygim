@@ -138,6 +138,22 @@ def memory_stores(remote, root):
     GimmicksCliApp().memory_stores(remote=remote, root=root)
 
 
+@memory.command("mailbox")
+@click.option("--post", "text", default=None, help="Leave a message instead of listing.")
+@click.option("--kind", type=click.Choice(["feedback", "request", "comment"]), default="comment",
+              help="--post: what kind of message it is.")
+@click.option("--to", "to", default=None, help="--post: who it is for (default: whoever reads next).")
+@click.option("--about", default=None, help="--post: what it concerns — a memory, a path, a report.")
+@click.option("--resolves", default=None, help="--post: the message id this closes.")
+@flag_opt("--all", "show_all", help="List resolved messages too.")
+@_ROOT
+def memory_mailbox(text, kind, to, about, resolves, show_all, root):
+    """Messages other sessions, agents and people left in this store — feedback, requests and
+    comments. Lists what is open; `--post` leaves one."""
+    GimmicksCliApp().memory_mailbox(text=text, kind=kind, to=to, about=about, resolves=resolves,
+                                    show_all=show_all, root=root)
+
+
 @memory.command("reload")
 @flag_opt("--signal", "signal_servers",
           help="Also SIGHUP every running server, including other projects'. A server older than "

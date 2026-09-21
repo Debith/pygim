@@ -182,6 +182,28 @@ class GimmicksCliApp:
             if missing:
                 click.echo("not checked out here: " + ", ".join(missing))
 
+    def memory_mailbox(self, *, text: Optional[str], kind: str, to: Optional[str], about: Optional[str],
+                       resolves: Optional[str], show_all: bool, root: Optional[str]) -> None:
+        """List the store's mailbox, or leave a message in it."""
+        from pygim.memory import Memory
+
+        memory = Memory(self._store(root))
+        if text is not None:
+            done = memory.post(text, kind=kind, to=to or "", about=about or "", resolves=resolves or "", author="human")
+            if not done["ok"]:
+                raise click.ClickException(f"{done['refused']}: {done['message']}")
+            click.echo(f"posted {done['message']} — {done['waiting']} message(s) waiting")
+            return
+        messages = memory.mailbox(all=show_all)
+        if not messages:
+            click.echo("nothing waiting" if not show_all else "the mailbox is empty")
+            return
+        for m in messages:
+            who = f" to {m['to']}" if m.get("to") else ""
+            about_it = f" · about {m['about']}" if m.get("about") else ""
+            closed = " · resolved" if show_all and m.get("resolves") else ""
+            click.echo(f"{m['id']}  {m['kind']}{who}{about_it}  ({m['author']}, {m['time']}){closed}\n  {m['text']}")
+
     def memory_reload(self, *, signal_servers: bool = False) -> None:
         """Ask the running MCP servers to restart into the code on disk."""
         from _pygim._mcp import _stores
@@ -244,10 +266,17 @@ class GimmicksCliApp:
         if standing:
             from _pygim._mcp.memory import MemoryServer
 
-            data = MemoryServer(root=root, cwd=Path.cwd()).standing()
-            if not data["preferences"] and not data["procedures"]:
+            server = MemoryServer(root=root, cwd=Path.cwd())
+            data = server.standing()
+            waiting = data.get("waiting") or []
+            if not data["preferences"] and not data["procedures"] and not waiting:
                 return
             click.echo("Standing knowledge from pygim memory. " + data["note"])
+            if waiting:
+                click.echo(f"\nWaiting in the mailbox ({len(waiting)}) — read them with the mailbox tool:")
+                for m in waiting:
+                    who = f" to {m['to']}" if m.get("to") else ""
+                    click.echo(f"- {m['id']} {m['kind']}{who} ({m['author']}): {m['text'].splitlines()[0][:100]}")
             for p in data["preferences"]:
                 where = " (global)" if p["scope"] == "global" else ""
                 click.echo(f"\n## {p['memory']}{where} {p['title']}\n{p['text']}")

@@ -347,6 +347,34 @@ TOOLS: List[Dict[str, Any]] = [
                                ["text"]),
     },
     {
+        "name": "mailbox",
+        "description": "Messages other sessions, agents or people left in this store: feedback, requests and comments. "
+                       "Open ones by default, oldest first; `all` includes what has been resolved. `session` reports "
+                       "how many are waiting, so read this when it does. A message is not a memory — it is addressed, "
+                       "answered and done — so nothing here is knowledge until someone writes it as one.",
+        "inputSchema": _schema({"all": {"type": "boolean", "description": "Include resolved messages. Default: false."},
+                                "mine": {"type": "string", "description": "Keep only messages addressed to this name, "
+                                                                          "or to nobody in particular."},
+                                "scope": _SCOPE}),
+    },
+    {
+        "name": "post",
+        "description": "Leave a message for whoever works in this store next — another session, an agent, or a person. "
+                       "Use it to hand over what you could not finish, to ask for something, or to report what you "
+                       "found. `resolves` closes an earlier message and needs text of its own, so a thread is never "
+                       "closed silently.",
+        "inputSchema": _schema({
+            "text": {"type": "string", "description": "What is being asked, reported or commented on."},
+            "kind": {"type": "string", "enum": ["feedback", "request", "comment"], "description": "Default: comment."},
+            "to": {"type": "string", "description": "Who it is for — a session, an agent, a person. Empty: whoever reads next."},
+            "about": {"type": "string", "description": "What it concerns: a memory (#n or a key), a path, a report."},
+            "reply_to": {"type": "string", "description": "The message id this answers."},
+            "resolves": {"type": "string", "description": "The message id this closes."},
+            "author": {"type": "string", "description": "Who is leaving it, if not this agent."},
+            "scope": _SCOPE,
+        }, ["text"]),
+    },
+    {
         "name": "show",
         "description": "One memory in full: its text, tags, lineage, what it saw, citations and counters.",
         "inputSchema": _schema({"memory": _REF, "scope": _SCOPE}, ["memory"]),
@@ -428,6 +456,11 @@ class MemoryServer:
             "review": lambda a: self.memory.review(a.get("session") or self._session_no()),
             "lessons": lambda a: self.memory.lessons(self._session_no(), a["text"], author="agent"),
             "show": lambda a: self._mem(a).show(a["memory"]),
+            "mailbox": lambda a: self._mem(a).mailbox(all=bool(a.get("all", False)), mine=a.get("mine", "")),
+            "post": lambda a: self._mem(a).post(a["text"], kind=a.get("kind", "comment"), to=a.get("to", ""),
+                                                about=a.get("about", ""), reply_to=a.get("reply_to", ""),
+                                                resolves=a.get("resolves", ""), session=self._session_no(),
+                                                author=a.get("author", "agent")),
             "proposals": lambda a: self.memory.proposals(),
         }
 
@@ -515,9 +548,14 @@ class MemoryServer:
                       for origin, m in sources for p in self._heads(m, "kind=procedure")]
         if self._standing_seen is None:   # the baseline `standing_changed` compares against; only it moves it on
             self._standing_seen = {p["key"]: p["title"] for p in self._heads(wide, "kind=preference")}
+        waiting = []
+        try:
+            waiting = near.mailbox()[:10] if near is not None else []
+        except Exception:   # a store that will not load: the tools will say so
+            waiting = []
         return {"note": "These apply to every task here, advice included. Where a global and a project "
                         "preference disagree, the project's is the rule.",
-                "preferences": preferences, "procedures": procedures}
+                "preferences": preferences, "procedures": procedures, "waiting": waiting}
 
     def _standing(self) -> str:
         """The index of standing knowledge that the instructions carry: titles only, and only as many

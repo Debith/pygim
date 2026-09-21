@@ -491,6 +491,38 @@ class TestHeadViews:
         assert n["slug"] == y["slug"] and "name the niche" in self.view(root, n)
 
 
+class TestTheMailbox:
+    """Messages other sessions leave in the store (03 §3.6): their own stream, not memories."""
+
+    def test_a_message_waits_until_something_resolves_it(self, mem):
+        asked = mem.post("Rebase pathlike before touching PathSet.", kind="request", to="testing",
+                         about="core/pathlike-improvements", session=4)
+        told = mem.post("The report's coverage numbers are stale.", kind="feedback", session=4)
+        assert asked["ok"] and asked["waiting"] == 1 and told["waiting"] == 2
+        assert [m["kind"] for m in mem.mailbox()] == ["request", "feedback"]        # oldest first
+        done = mem.post("Rebased; safe to touch.", resolves=asked["message"], session=5)
+        assert done["ok"] and [m["id"] for m in mem.mailbox()] == [told["message"]]
+        assert len(mem.mailbox(all=True)) == 3                                      # nothing is deleted
+        assert [m["id"] for m in mem.mailbox(mine="testing")] == [told["message"]]  # addressed, or to nobody
+
+    def test_a_message_is_not_a_memory(self, root, mem):
+        before = (mem.version, mem.head)
+        posted = mem.post("A thought for later.", session=1)
+        assert (mem.version, mem.head) == before                    # no row, so no receipt changes its answer
+        assert Memory(str(root)).mailbox()[0]["id"] == posted["message"]   # but it survives a reopen
+        assert mem.read(DESIGN)["corpus"] == 0                      # and it is not knowledge
+
+    def test_what_a_message_must_say(self, mem):
+        assert mem.post("")["refused"] == "empty"
+        assert mem.post("x", kind="shout")["refused"] == "kind"
+        assert mem.post("x", resolves="0123456789ab")["refused"] == "unknown message"
+        assert mem.post("x", reply_to="0123456789ab")["refused"] == "unknown message"
+
+    def test_the_session_says_what_is_waiting(self, mem):
+        mem.post("Look at the release notes.", kind="request", session=2)
+        assert [m["kind"] for m in mem.session()["mailbox"]] == ["request"]
+
+
 class TestMerging:
     def test_a_merge_supersedes_its_sources_and_names_the_failure(self, mem):
         p = write(mem, "Creating a spell", "steps", DESIGN + ["kind=procedure"])

@@ -199,6 +199,38 @@ copy. A row removed from an audit file stays unreportable — nothing records th
 because nothing is ever deleted, a secret written into a memory stays in the row's history and in
 `objects/` after a retire: removing it means rewriting history by hand, which is §9.4's subject.
 
+### 3.6 The mailbox — settled 2026-09-21
+
+Several sessions and agents work on one project, on different branches and machines, and they have
+had no way to leave each other anything: feedback on what another session built, a request to
+finish something, a comment on a report. Debith asked for one ("so that other sessions and agents
+can leave there feedback, requests and comments").
+
+**A message is not a memory.** A memory is knowledge that outlives the task; a message is
+addressed, answered and done. Making messages rows would put transient chatter in the hash chain,
+move the store's version on every note, and change what a rerun of an old receipt has to replay.
+
+| Option | Concretely | For | Against |
+|---|---|---|---|
+| **Its own stream** (chosen) | `mailbox/<clone>/<day>.jsonl`, exactly as `usage/` and `receipts/` are | travels with the store through git, merges by union across clones, and touches neither the snapshot nor any receipt | a second thing to read when asking "what is going on here" |
+| Rows in the audit log | `ops::message` | ordering and provenance for free | the version moves for a comment, and replay carries chatter forever |
+| Memories tagged `kind=message` | one mechanism | nothing new to build | a read's ranking fills with notes; the unread check makes answering a comment a write |
+
+**The shape.** Each message carries `kind` (feedback · request · comment), text, `author`, an
+optional `to` (a session, an agent, a person; empty means whoever reads next), an optional `about`
+(a memory, a path, a report), and `reply_to`. Its id is the digest of who posted it, when, and
+what it says.
+
+**State by appending**, as everywhere else here: a message that carries `resolves` closes the one
+it names, and it needs text of its own, so a thread is never closed silently. `mailbox` returns
+what is open, oldest first by time then id — one order whoever merged the clones — and `all`
+returns everything, since nothing is deleted.
+
+**Delivery.** `session` lists what is open, so the first call of every session shows it; the
+session-start hook prints the same list (§9.1.2), so it arrives without anyone asking; and
+`oo memory mailbox` lists or posts from a terminal. Each store has its own mailbox, addressed like
+any other scope — a community store's mailbox is where its contributors talk.
+
 ---
 
 ## 4. Committing
