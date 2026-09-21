@@ -136,11 +136,15 @@ def inventory(path: Path) -> Dict[str, str]:
 
 
 def _bases(inventory_file: Path, project: Optional[Path], store: Optional[Path]) -> List[Path]:
-    """Where an inventoried path may be relative to: the project's root (02 §5.2); the store's own
-    root, for a store that is its own project — a body of knowledge with its own sources, belonging
-    to no checkout; and the inventory file, for stores written before the first rule."""
+    """Where an inventoried path may be relative to: the project's root (02 §5.2); the checkout the
+    store says it serves, for a store kept outside it; the store's own root, for a body of knowledge
+    with its own sources and no checkout; and the inventory file, for stores written before the
+    first rule."""
+    from . import _stores
+
+    served = _stores.project_of(store) if store is not None else None
     seen: List[Path] = []
-    for base in (project, store, inventory_file.parent):
+    for base in (project, served, store, inventory_file.parent):
         if base is not None and base not in seen:
             seen.append(base)
     return seen

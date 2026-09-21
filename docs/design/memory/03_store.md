@@ -430,6 +430,13 @@ registered once, at user scope and without a root, and finds each project's stor
 directory the host starts it in. A consequence for sources (02 §5.2): a store outside the checkout
 cannot hold paths relative to itself, so an inventory path is relative to the project's root.
 
+**A store says which checkout it serves.** Citation paths are relative to a project's root (02
+§5.2), which a store kept inside the project resolves by itself — one kept beside it cannot, so its
+`policy.yaml` names the checkout (`project: ../D-D-2024`), and failing that the convention answers:
+`<project>-memory` sits beside `<project>`. A store whose subject is a body of knowledge, with its
+own sources and no checkout, needs neither: its paths are relative to itself. Getting this wrong is
+not silent — every locator in a drafted pack is reported as missing, which is how it was found.
+
 **Several stores, one repository.** A store's history is its own — an orphan branch, or a
 repository made by `git init` — so unrelated stores share a remote without sharing anything else.
 In use since 2026-09-17: one private repository holds `memory` (pygim's store), `global` (the

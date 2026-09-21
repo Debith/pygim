@@ -6,7 +6,9 @@ A store is found, in order, by:
 2. ``$PYGIM_MEMORY_ROOT``;
 3. ``git config pygim.memory`` — git keeps it in the clone's shared config, so every worktree of
    the project finds the same store;
-4. a ``.memory`` directory found by walking up from the working directory.
+4. the working directory itself, or an ancestor, being a store — running a command inside a store's
+   own worktree means that store;
+5. a ``.memory`` directory found by walking up from the working directory.
 
 ``oo memory setup`` writes that git config, creates the store — in a user-level directory, or
 on an orphan ``memory`` branch checked out as a worktree of its own — and registers the MCP
@@ -102,6 +104,8 @@ def find(explicit: Optional[str] = None, cwd: Optional[Path] = None) -> Optional
             path = (main_worktree(cwd) or cwd) / path
         return Found(path.resolve(), "git config " + GIT_KEY)
     for directory in (cwd, *cwd.parents):
+        if is_store(directory):          # standing in the store itself, as one does in its own worktree
+            return Found(directory.resolve(), "the working directory is a store")
         if is_store(directory / LOCAL):
             return Found((directory / LOCAL).resolve(), LOCAL + " above the working directory")
     return None
@@ -126,6 +130,7 @@ class Policy:
     sharing: str = "project"   # project · personal (one owner) · community (owners review)
     push: str = "manual"       # auto: each write is committed and pushed · manual: a person does it
     name: str = ""             # what a session calls this store; empty means "take it from the directory"
+    project: str = ""          # the checkout its citations are relative to, when the store lives outside it
 
     @property
     def automatic(self) -> bool:
@@ -145,16 +150,28 @@ def policy(root: Path) -> Policy:
         if sep and not key.startswith((" ", "\t", "#")):
             fields[key.strip()] = value.split("#")[0].strip()
     return Policy(sharing=fields.get("sharing", "project"), push=fields.get("push", "manual"),
-                  name=fields.get("name", ""))
+                  name=fields.get("name", ""), project=fields.get("project", ""))
 
 
 def write_policy(root: Path, p: Policy) -> None:
-    named = f"name: {p.name}\n" if p.name else ""
+    named = (f"name: {p.name}\n" if p.name else "") + (f"project: {p.project}\n" if p.project else "")
     (root / POLICY).write_text(
         "# How this store is shared, and how its writes leave this machine (03 §9.1).\n"
         + named
         + f"sharing: {p.sharing}\n"
         f"push: {p.push}\n", encoding="utf-8")
+
+
+def project_of(root: Path) -> Optional[Path]:
+    """The checkout a store's citations are relative to. A store kept beside the project it serves
+    has to say where that is, or nothing can resolve `reference/rules/...` — its policy names it,
+    and failing that the convention does: `<project>-memory` sits beside `<project>`."""
+    declared = policy(root).project
+    if declared:
+        path = Path(declared).expanduser()
+        return (root / path).resolve() if not path.is_absolute() else path
+    sibling = root.parent / root.name.removesuffix("-memory")
+    return sibling.resolve() if sibling != root and sibling.is_dir() else None
 
 
 def store_name(root: Path) -> str:

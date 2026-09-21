@@ -95,6 +95,19 @@ class TestFinding:
         assert _stores.find(cwd=feature).how == "$PYGIM_MEMORY_ROOT"
         assert _stores.find(str(isolated / "flag"), cwd=feature).how == "--root"
 
+    def test_standing_in_a_store_finds_that_store(self, project, isolated):
+        """A store's own worktree is where `oo memory accept --pack` is run from; before this, a
+        command there said the project had no store at all."""
+        store = isolated / "dnd-memory"
+        _stores.create(store)
+        found = _stores.find(cwd=store)
+        assert found is not None and found.root == store.resolve() and found.exists
+        assert "working directory is a store" in found.how
+        inside = store / "taxonomy" / "studies"
+        inside.mkdir(parents=True, exist_ok=True)
+        assert _stores.find(cwd=inside).root == store.resolve()          # and from anywhere inside it
+        assert _stores.find(cwd=project) is None                          # a project with no store still has none
+
     def test_a_relative_git_config_is_relative_to_the_main_worktree(self, project, isolated):
         sh("git", "config", _stores.GIT_KEY, "../shared", cwd=project)
         assert _stores.find(cwd=isolated / "proj-feature").root == (isolated / "shared").resolve()
@@ -391,6 +404,26 @@ class TestANewProjectsVocabulary:
         (store / "sources" / "book.txt").unlink()
         gone = _packs.check(store, draft, project=project)["warnings"]
         assert len(gone) == 1 and "not found under" in gone[0] and str(store) in gone[0]
+
+    def test_a_store_beside_its_project_resolves_citations_into_it(self, project, isolated):
+        """The store is kept out of the project it serves, so its citations point into a checkout it
+        has to name — by its policy, or by the `<project>-memory` convention."""
+        store = isolated / "proj-memory"
+        _stores.create(store)
+        assert _stores.project_of(store) == project.resolve()                  # the convention alone
+        _stores.write_policy(store, _stores.Policy(name="proj", project="../proj"))
+        assert _stores.project_of(store) == project.resolve()                  # and what it declares
+        (store / "sources").mkdir(exist_ok=True)
+        (store / "sources" / "inventory.yaml").write_text('readme:\n  kind: text\n  path: "README.md"\n', encoding="utf-8")
+        cited = _packs.cite(project, "README.md", 4, store=store)
+        draft = store / "taxonomy" / "studies" / "s" / "proposal" / "pack-proj.yaml"
+        draft.parent.mkdir(parents=True)
+        draft.write_text(PACK.replace(
+            "example: Adding an item.}}",
+            "example: Adding an item.}, source: {doc: %s, line: %d, lines: 1, passage: %s}}"
+            % (cited["source"]["doc"], cited["source"]["line"], cited["source"]["passage"])), encoding="utf-8")
+        checked = _packs.check(store, draft, project=store)     # run from inside the store, as one does
+        assert checked["ok"] and checked["warnings"] == []
 
     def test_replacing_a_pack_is_refused_while_memories_carry_what_it_removes(self, project):
         store = project / ".memory"
