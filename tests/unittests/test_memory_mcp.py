@@ -178,6 +178,28 @@ class TestTools:
         err, empty = call(server, "read", hard=["task=design"], term="invisible")
         assert empty["memories"] == [] and "next" not in empty
 
+    def test_learn_survives_an_extension_older_than_this_server(self, server):
+        """A study's every `learn` failed with TypeError because the server passed a verdict to an
+        installed pygim that had none (feedback, 2026-09-21). A tool must degrade, not break."""
+        err, a = call(server, "remember", title="A rule", text="Rule.", tags=TAGS)
+        real = server.memory
+
+        class Older:                                               # the extension as it was before verdicts
+            def __init__(self, inner):
+                self._inner = inner
+
+            def learn(self, memory, *, tag="", reason="", session=0):
+                return self._inner.learn(memory, tag=tag, reason=reason, session=session)
+
+            def __getattr__(self, name):
+                return getattr(self._inner, name)
+
+        server._memory = Older(real)
+        err, told = call(server, "learn", memory=a["memory"], verdict="misleading", reason="wrong here")
+        assert not err and told["ok"] and "oo memory reload" in told["degraded"]
+        assert call(server, "learn", memory=a["memory"])[1]["ok"]   # and it stops trying the verdict
+        server._memory = real
+
     def test_a_verdict_goes_through_the_tool_and_a_read_asks_for_one(self, server):
         err, a = call(server, "remember", title="A rule", text="Rule.", tags=TAGS)
         err, read = call(server, "read", hard=["task=design"])

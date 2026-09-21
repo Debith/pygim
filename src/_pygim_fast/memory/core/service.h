@@ -19,6 +19,7 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <tuple>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
@@ -567,7 +568,10 @@ public:
         }
         m.clone = m_store.clone();
         m.time = m_store.now();
-        m.id = digest::of(m.clone + m.time + decimal(m.session) + m.text).hex().substr(0, 12);
+        for (const auto& e : known)     // this clone's own counter: a second holds more than one message
+            if (e.clone == m.clone) m.seq = std::max(m.seq, e.seq);
+        ++m.seq;
+        m.id = digest::of(m.clone + m.time + decimal(m.seq) + m.text).hex().substr(0, 12);
         m_store.append_mailbox(m);
         out.ok = true;
         out.message = m.id;
@@ -578,8 +582,10 @@ public:
     /// resolves. `mine` keeps what is addressed to that name, or to nobody in particular.
     [[nodiscard]] std::vector<mailbox_entry> mailbox(bool all = false, std::string_view mine = {}) const {
         auto entries = m_store.mailbox();
+        // Oldest first: by the second it was posted, then by the clone's own counter, so two messages
+        // in one second keep the order they were written in and every clone sorts them the same way.
         std::sort(entries.begin(), entries.end(), [](const mailbox_entry& a, const mailbox_entry& b) {
-            return a.time != b.time ? a.time < b.time : a.id < b.id;   // one order, whoever merged the clones
+            return std::tie(a.time, a.clone, a.seq) < std::tie(b.time, b.clone, b.seq);
         });
         std::unordered_set<std::string> closed;
         for (const auto& e : entries)
@@ -966,18 +972,29 @@ private:
     void drop_settled_proposals(snapshot& s) const {
         const auto& tax = s.tax();
         std::erase_if(s.proposals, [&](const pending_proposal& p) {
-            if (accepted_tag(tax, p)) return true;
+            if (accepted_tag(tax, p) || accepted_dimension(tax, p)) return true;
             const auto k = pending_proposal::key(p.concept_name, "");
             return std::any_of(tax.rejections().begin(), tax.rejections().end(),
                                [&](const rejection& r) { return pending_proposal::key(r.concept_name, "") == k; });
         });
     }
 
+    [[nodiscard]] static std::string as_name(std::string_view concept_name) {
+        std::string out;
+        for (const char c : concept_name) out.push_back(c == ' ' ? '_' : static_cast<char>(std::tolower(static_cast<unsigned char>(c))));
+        return out;
+    }
+
     [[nodiscard]] static std::optional<tag_id> accepted_tag(const taxonomy& tax, const pending_proposal& p) {
         if (p.dimension.empty()) return std::nullopt;
-        std::string value;
-        for (const char c : p.concept_name) value.push_back(c == ' ' ? '_' : static_cast<char>(std::tolower(static_cast<unsigned char>(c))));
-        return tax.tag(p.dimension + "=" + value);
+        return tax.tag(p.dimension + "=" + as_name(p.concept_name));
+    }
+
+    /// A proposal for a whole new dimension is accepted when that dimension exists — it names no
+    /// value, so `accepted_tag` can never see it, and it stayed pending forever after the pack that
+    /// introduced it went live, which made `status` disagree with the vocabulary it reports.
+    [[nodiscard]] static bool accepted_dimension(const taxonomy& tax, const pending_proposal& p) {
+        return p.dimension.empty() && tax.dimension(as_name(p.concept_name)).has_value();
     }
 
     /// Accepting a proposal links every memory that asked for it, with source

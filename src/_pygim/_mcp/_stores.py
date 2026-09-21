@@ -438,10 +438,8 @@ def ask_reload(cwd: Optional[Path] = None, send_signal: bool = False) -> dict:
             except OSError:
                 continue
     marked = []
-    here = find(cwd=cwd)
-    for root in (here.root if here and here.exists else None, find_global()):
-        if root is None or not is_store(root):
-            continue
+    for scope in discover(cwd):          # every store here, not only this project's and the global one
+        root = scope.root
         try:
             (root / "local").mkdir(exist_ok=True)
             (root / "local" / "reload").write_text("asked by oo memory reload\n", encoding="utf-8")

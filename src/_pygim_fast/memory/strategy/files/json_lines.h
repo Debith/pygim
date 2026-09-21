@@ -208,7 +208,7 @@ struct parsed {
         out += ",\"" + std::string(name) + "\":";
         json_string(out, value);
     }
-    out += ",\"session\":" + decimal(m.session) + "}";
+    out += ",\"seq\":" + decimal(m.seq) + ",\"session\":" + decimal(m.session) + "}";
     return out;
 }
 
@@ -226,6 +226,7 @@ struct parsed {
                                            {"about", &m.about}, {"reply_to", &m.reply_to},
                                            {"resolves", &m.resolves}, {"time", &m.time}, {"clone", &m.clone}})
             if (const auto c = child(root, name)) *target = str(*c);
+        m.seq = number(child(root, "seq"));
         m.session = number(child(root, "session"));
         return m;
     } catch (const std::exception&) {

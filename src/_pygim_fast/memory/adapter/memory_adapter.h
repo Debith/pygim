@@ -349,6 +349,7 @@ public:
             d["author"] = m.author;
             d["time"] = m.time;
             d["session"] = m.session;
+            d["seq"] = m.seq;
             if (!m.to.empty()) d["to"] = m.to;
             if (!m.about.empty()) d["about"] = m.about;
             if (!m.reply_to.empty()) d["reply_to"] = m.reply_to;
@@ -632,6 +633,12 @@ private:
             if (std::none_of(ctx.by_source.begin(), ctx.by_source.end(), [&](const auto& x) { return x.first == id; })) not_cited.push_back(id);
         d["cited"] = cited;
         d["uncited"] = ctx.uncited;
+        // A store with fifty sources paid for all fifty names on every read that wanted none of them.
+        const std::size_t shown = 8;
+        if (not_cited.size() > shown) {
+            d["not_cited_count"] = not_cited.size();
+            not_cited.resize(shown);
+        }
         d["not_cited"] = not_cited;
         return d;
     }

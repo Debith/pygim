@@ -95,6 +95,7 @@ struct mailbox_entry {
     std::string resolves;   // the message this closes, if any
     std::string time;
     std::string clone;
+    std::uint64_t seq = 0;  // this clone's counter: two messages in one second still have an order
     std::uint64_t session = 0;
 };
 

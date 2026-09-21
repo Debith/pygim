@@ -375,6 +375,25 @@ class TestLearningAndCurating:
         assert f["memory"] not in [m["memory"] for m in mem.read(DESIGN)["memories"]]
         assert not (mem.show(f["memory"])["head"])
 
+    def test_a_new_dimension_proposal_settles_when_the_dimension_arrives(self, root, mem):
+        """It names no value, so nothing could ever mark it accepted: `status` kept reporting
+        dimensions as pending that the vocabulary already had (study feedback, 2026-09-21)."""
+        p = write(mem, "Creating a spell", "steps", DESIGN + ["kind=procedure"])
+        write(mem, "Corruption spreads", "Blight grows by whole cubes.", DESIGN + ["kind=principle"], seen=[p["memory"]],
+              proposals=[{"concept": "Sign", "dimension": "", "brief": "Whether a spell leaves a sign.",
+                          "when": "The knowledge is about a lasting mark.", "when_not": "Not plain damage.",
+                          "example": "Spreading Blight."}])
+        assert [x["concept"] for x in mem.proposals()] == ["Sign"]
+        path = root / "taxonomy" / "pack-dnd.yaml"
+        path.write_text(path.read_text(encoding="utf-8").replace(
+            "  action_economy:",
+            "  sign:\n    role: soft\n    weight: 1.0\n"
+            "    entry: {brief: Whether a lasting mark is left., full: Whether the thing leaves a sign behind.,"
+            " when: About a lasting mark., when_not: Not plain damage., example: Spreading Blight.}\n"
+            "    values:\n      lasting: {entry: {brief: A mark that stays., when: It lasts beyond the turn.,"
+            " when_not: Not a momentary effect., example: Blight.}}\n  action_economy:"), encoding="utf-8")
+        assert Memory(str(root)).proposals() == []                       # the dimension exists, so it is settled
+
     def test_a_proposal_is_pending_until_the_pack_has_it(self, root, mem):
         p, y, f = seed(mem)
         w = write(mem, "Spreading a sign", "Grow the sign by whole cubes.", DESIGN + ["purpose=control", "kind=principle"],
@@ -500,6 +519,7 @@ class TestTheMailbox:
         told = mem.post("The report's coverage numbers are stale.", kind="feedback", session=4)
         assert asked["ok"] and asked["waiting"] == 1 and told["waiting"] == 2
         assert [m["kind"] for m in mem.mailbox()] == ["request", "feedback"]        # oldest first
+        assert [m["seq"] for m in mem.mailbox()] == [1, 2]                          # even within one second
         done = mem.post("Rebased; safe to touch.", resolves=asked["message"], session=5)
         assert done["ok"] and [m["id"] for m in mem.mailbox()] == [told["message"]]
         assert len(mem.mailbox(all=True)) == 3                                      # nothing is deleted

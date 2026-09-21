@@ -430,6 +430,7 @@ class MemoryServer:
         self._standing_seen: Optional[Dict[str, str]] = None  # global preference key → title, as last told
         self.signalled = False        # set by SIGHUP; acted on between messages
         self._stores_open: Dict[str, Any] = {}   # stores opened by name this session
+        self._verdicts: Any = None    # whether the installed pygim takes a learn verdict; None until tried
         self._started = time.time_ns()
         self._code = self._code_stamp()
         self._told_stale = False
@@ -446,8 +447,7 @@ class MemoryServer:
             "vocabulary": lambda a: self._mem(a).vocabulary(),
             "read": self._read,
             "remember": self._remember,
-            "learn": lambda a: self._mem(a).learn(a["memory"], tag=a.get("tag", ""), reason=a.get("reason", ""),
-                                                 session=self._session_no(), verdict=a.get("verdict", "useful")),
+            "learn": self._learn,
             "merge": lambda a: self.memory.merge(a["memories"], title=a["title"], text=a["text"], reason=a["reason"],
                                                  tags=a.get("tags", []), session=self._session_no()),
             "link": lambda a: self._mem(a).link(a["memory"], a["tag"], reason=a["reason"], author="agent"),
@@ -624,6 +624,26 @@ class MemoryServer:
                           for s in self.scopes()]
         return info
 
+    def _learn(self, a: Dict[str, Any]) -> Any:
+        """A tool must not fail because this server's Python is newer than the extension it imported.
+        The first `verdict` a stale build rejects is the last one passed: the call is retried without
+        it, and every answer afterwards says the loop is not recording until the server is replaced."""
+        memory = self._mem(a)
+        fixed = dict(tag=a.get("tag", ""), reason=a.get("reason", ""), session=self._session_no())
+        verdict = a.get("verdict", "useful")
+        if self._verdicts is not False:
+            try:
+                out = memory.learn(a["memory"], verdict=verdict, **fixed)
+                self._verdicts = True
+                return out
+            except TypeError:
+                self._verdicts = False   # the installed pygim predates verdicts
+        out = memory.learn(a["memory"], **fixed)
+        if isinstance(out, dict):
+            out["degraded"] = ("this server's pygim has no verdicts, so `" + verdict + "` was not recorded — "
+                               "run `oo memory reload`, and reconnect if it does not clear")
+        return out
+
     def _read(self, a: Dict[str, Any]) -> Any:
         result = self._mem(a).read(a["hard"], a.get("soft", []), max=a.get("max", 8), budget=a.get("budget", 0),
                                   term=a.get("term", ""), session=self._session_no())
@@ -797,8 +817,9 @@ class MemoryServer:
             return
         self._told_stale = True
         result["server_stale"] = {"running": _version(),
-                                  "next": "the installed pygim has changed since this server started — "
-                                          "tell the user to run `oo memory reload` (or reconnect the server)"}
+                                  "next": "the installed pygim has changed since this server started — run "
+                                          "`oo memory reload`. If it keeps coming back, this server is older than "
+                                          "the reload feature and only reconnecting the client replaces it."}
 
     def serve(self, stdin: IO[str], stdout: IO[str]) -> None:
         if os.environ.pop(RELOADED_ENV, None):  # a host that watches for it re-fetches the schemas

@@ -217,6 +217,8 @@ class GimmicksCliApp:
             click.echo("no running server found and no store to mark — reconnect the server in your editor instead")
         else:
             click.echo("each server reloads between messages; the call in flight finishes on the old code")
+            click.echo("a server older than this feature ignores the marker — if `server_stale` keeps coming back, "
+                       "reconnect the client instead")
 
     def memory_ingest(self, *, corpus: str, root: Optional[str]) -> None:
         """Ingest a hand-written corpus file into the project's store."""
