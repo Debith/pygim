@@ -158,3 +158,35 @@ class TestTheHookAHostRuns:
         bare.mkdir()
         assert hook({"hook_event_name": "PreToolUse", "cwd": str(bare),
                      "tool_input": {"file_path": "tests/x.py"}}, bare, env) is None
+
+
+class TestCheckingTheMapItself:
+    """A trigger that delivers nothing fails silently: the hook fires, the command says nothing, and
+    the rule that should have arrived never does, with no failure anywhere to notice. Hard tags
+    intersect, so emptying a trigger by making it more precise is the common way to get it wrong —
+    three of this project's own ten did it on the first draft."""
+
+    def run(self, project, env):
+        done = subprocess.run([str(OO), "enact", "status", "--triggers"], cwd=str(project), env=env,
+                              capture_output=True, text=True, timeout=120)
+        assert done.returncode == 0, done.stderr
+        return done.stdout
+
+    def test_it_names_the_triggers_that_deliver_nothing(self, project, env):
+        (project / ".enact" / "triggers.yaml").write_text(
+            '"tests/**": [artifact=test, task=design]\n'
+            '"src/**": [artifact=test, task=troubleshoot]\n', encoding="utf-8")
+        said = self.run(project, env)
+        assert "A test names its own world" in said              # the one that works, with what it gives
+        assert "delivers nothing" in said
+        assert "1 of 2 deliver nothing" in said
+
+    def test_a_map_that_all_works_says_so_by_not_complaining(self, project, env):
+        (project / ".enact" / "triggers.yaml").write_text(
+            '"tests/**": [artifact=test, task=design]\n', encoding="utf-8")
+        said = self.run(project, env)
+        assert "delivers nothing" not in said and "A test names its own world" in said
+
+    def test_no_map_at_all_is_said_plainly(self, project, env):
+        (project / ".enact" / "triggers.yaml").unlink()
+        assert "no trigger map" in self.run(project, env)

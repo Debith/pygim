@@ -193,6 +193,40 @@ class GimmicksCliApp:
                 return ""
         return buffer.getvalue()
 
+    def enact_triggers(self, *, where: Environment) -> None:
+        """What every trigger in the map would deliver, by running the delivery itself.
+
+        A trigger map that quietly delivers nothing is worse than none: the hook fires, the command
+        says nothing, and the rule that was supposed to arrive never does — with no failure anywhere
+        to notice. Hard tags intersect, so this is the common way to get it wrong, and the count is
+        the only thing that shows it."""
+        from _pygim._mcp import _triggers
+
+        stores = self._stores(where)
+        found = stores.find()
+        if found is None or not found.exists:
+            raise click.ClickException(stores.guidance())
+        triggers = _triggers.load(found.root)
+        if not triggers:
+            click.echo(f"no trigger map: {found.root / _triggers.TRIGGERS} does not exist")
+            return
+        click.echo(_style.title(f"{len(triggers)} trigger(s) in {found.root / _triggers.TRIGGERS}") + "\n")
+        empty = 0
+        for pattern, raw in triggers.items():
+            example = pattern.replace("**", "x").replace("*", "x")
+            said = self._capture(lambda: self._standing_for(where, example))
+            rules = [line for line in said.splitlines() if line.startswith("  ")]
+            if rules:
+                click.echo(f"  {_style.strong(pattern)}  {_style.muted(', '.join(raw))}")
+                for line in rules:
+                    click.echo(f"  {line}")
+            else:
+                empty += 1
+                click.echo(f"  {_style.bad(pattern)}  {_style.muted(', '.join(raw))}\n"
+                           f"      {_style.bad('delivers nothing')} — hard tags intersect, so try fewer")
+        if empty:
+            click.echo("\n" + _style.bad(f"{empty} of {len(triggers)} deliver nothing"))
+
     def _standing_for(self, where: Environment, path: str, most: int = 3) -> None:
         """What applies to the space *path* is in — for a hook, at the moment of a write.
 

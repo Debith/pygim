@@ -231,14 +231,20 @@ def enact_accept(where, memory_ref, pack, reason, replace, walk, assume_yes, roo
 @flag_opt("--standing", "standing",
           help="Print the standing knowledge instead — every preference in full, as a session receives "
                "it — and nothing else, so a host's session-start hook can put it in front of an agent.")
+@flag_opt("--triggers", "triggers",
+          help="Check the store's trigger map: what each pattern would actually deliver, and which "
+               "deliver nothing. A trigger that is silent fails silently.")
 @click.option("--for", "for_path", default=None, metavar="PATH",
               help="Print only what applies to the space PATH is in, as the store's "
                    "taxonomy/triggers.yaml maps it. Silent when the path is in no space it names, "
                    "so a hook may call it before every write.")
 @_ROOT
 @click.pass_obj
-def enact_status(where, standing, for_path, root):
+def enact_status(where, standing, triggers, for_path, root):
     """Where the store stands: its version, reviews and pending proposals."""
+    if triggers:
+        GimmicksCliApp().enact_triggers(where=where.with_root(root))
+        return
     GimmicksCliApp().enact_status(where=where.with_root(root), standing=standing, for_path=for_path)
 
 
