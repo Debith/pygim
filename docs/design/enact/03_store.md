@@ -199,6 +199,31 @@ copy. A row removed from an audit file stays unreportable — nothing records th
 because nothing is ever deleted, a secret written into a memory stays in the row's history and in
 `objects/` after a retire: removing it means rewriting history by hand, which is §9.4's subject.
 
+### 3.4.1 `Stores`: what this machine holds — settled 2026-09-22
+
+Discovery began as module functions, each taking the environment as its first argument: `find`,
+`discover`, `find_global`, `guidance`, four `setup_*`, `ask_reload`. Nine of them, `discover`
+reaching into that argument ten times. That is Feature Envy — a method list written outside its
+object — and it has a cost beyond reading: a free function cannot remember, so every scoped tool
+call re-walked the filesystem and shelled out to git.
+
+`Stores` is that object. It is built from an `Environment` where the program is wired, and it lives
+as long as the session does, which is exactly as long as its answer stays true.
+
+| | Before | After |
+|---|---|---|
+| naming every store, first call | 6.6 ms | 7.0 ms |
+| naming them again, same session | 6.6 ms, each time | 0.08 us |
+| what a reader sees | nine functions and a value | one object with a reason to exist |
+
+The lifetime is the justification, not the milliseconds: **an object with a lifetime can hold what
+it found, and a free function cannot.** That is also the test for whether an object earns its name
+— what does it hold between calls? Nothing means a namespace; its own arguments means a DTO.
+
+Nothing is looked up until it is asked for, and `refresh` drops it: a setup creates a store, and
+what was true a moment ago is not. What remains a module function takes only paths — `is_store`,
+`policy`, `publish`, `create`, `project_of` — and is genuinely free.
+
 ### 3.5.1 A citation moves like a tag — settled 2026-09-22
 
 A memory's `cites` were fixed at the write that made it, so correcting one line number meant

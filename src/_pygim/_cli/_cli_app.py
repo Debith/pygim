@@ -150,13 +150,20 @@ class GimmicksCliApp:
             click.echo(body)
 
     @staticmethod
-    def _store(where: Environment) -> str:
-        """The store for this project, or a ClickException that says how to make one."""
+    def _stores(where: Environment):
+        """The machine's stores, built here: one object for the command's whole run, so a command
+        that asks twice walks the filesystem once."""
         from _pygim._mcp import _stores
 
-        found = _stores.find(where)
+        return _stores.Stores(where)
+
+    @classmethod
+    def _store(cls, where: Environment) -> str:
+        """The store for this project, or a ClickException that says how to make one."""
+        stores = cls._stores(where)
+        found = stores.find()
         if found is None or not found.exists:
-            raise click.ClickException(_stores.guidance(where))
+            raise click.ClickException(stores.guidance())
         return str(found.root)
 
     def enact_setup(self, *, where: Environment, kind: Optional[str], name: Optional[str], path: Optional[str], source: Optional[str],
@@ -164,10 +171,11 @@ class GimmicksCliApp:
         """Find or create the project's store, point the clone at it, and register the server."""
         from _pygim._mcp import _stores
 
-        cwd = Path.cwd()
+        stores = self._stores(where)
+        cwd = Path(where.cwd)
         try:
             if kind == "global":
-                root = _stores.setup_global(where, Path(source) if source else None, Path(path) if path else None)
+                root = stores.setup_global(Path(source) if source else None, Path(path) if path else None)
                 policy = _stores.policy(root)
                 click.echo(f"global store: {root} (sharing: {policy.sharing}, push: {policy.push})")
                 click.echo("every project on this machine reads it; write `domain=any` knowledge there with scope global")
@@ -175,16 +183,16 @@ class GimmicksCliApp:
                            f"`git config --global {_stores.GLOBAL_KEY} <path>`")
                 return
             if kind == "user":
-                root = _stores.setup_user(where, name, Path(source) if source else None)
+                root = stores.setup_user(name, Path(source) if source else None)
                 how = "a user-level store"
             elif kind == "local":
-                root = _stores.setup_local(where, Path(source) if source else None)
+                root = stores.setup_local(Path(source) if source else None)
                 how = "the project's own .enact"
             elif kind == "branch":
-                root = _stores.setup_branch(where, Path(path) if path else None, Path(source) if source else None)
+                root = stores.setup_branch(Path(path) if path else None, Path(source) if source else None)
                 how = f"the `{_stores.BRANCH}` branch"
             else:
-                found = _stores.find(where)
+                found = stores.find()
                 if found is None or not found.exists:
                     raise click.ClickException("no store yet — choose where it lives: `oo enact setup --user` "
                                                "(your user data directory) or `oo enact setup --branch` "
@@ -193,7 +201,7 @@ class GimmicksCliApp:
         except RuntimeError as exc:
             raise click.ClickException(str(exc)) from exc
         click.echo(f"store: {root} ({how})")
-        if (wide := _stores.find_global(where)) is not None:
+        if (wide := stores.global_root()) is not None:
             click.echo(f"global store: {wide} — read by every project on this machine")
         if _stores.git(["config", "--get", _stores.GIT_KEY], cwd):
             click.echo(f"every worktree of this clone finds it through `git config {_stores.GIT_KEY}`")
@@ -210,7 +218,8 @@ class GimmicksCliApp:
         """List the stores a session can name here."""
         from _pygim._mcp import _stores
 
-        scopes = _stores.discover(where)
+        stores = self._stores(where)
+        scopes = stores.scopes()
         if not scopes:
             click.echo("no store found — run `oo enact setup` in a project, or `oo enact setup --global`")
             return
@@ -257,7 +266,7 @@ class GimmicksCliApp:
         """Ask the running MCP servers to restart into the code on disk."""
         from _pygim._mcp import _stores
 
-        asked = _stores.ask_reload(where, send_signal=signal_servers)
+        asked = self._stores(where).ask_reload(send_signal=signal_servers)
         if asked["signalled"]:
             click.echo(_style.good("signalled ") + _style.strong(f"{len(asked['signalled'])} server(s)") + ": "
                        + ", ".join(str(p) for p in asked["signalled"]))
@@ -405,7 +414,7 @@ class GimmicksCliApp:
             click.echo("  " + _style.bad(f"{len(info['mailbox'])} message(s)") + " — `oo enact mailbox`")
         from _pygim._mcp import _stores
 
-        if (wide := _stores.find_global(where)) is not None and Path(wide) != Path(store):
+        if (wide := self._stores(where).global_root()) is not None and Path(wide) != Path(store):
             policy = _stores.policy(wide)
             wide_info = Enact(str(wide)).session()
             click.echo(f"{wide}: v{wide_info['version']}, {wide_info['memories']} memories "

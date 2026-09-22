@@ -42,7 +42,7 @@ import subprocess
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import List, Optional, Sequence
+from typing import Any, List, Optional, Sequence
 
 from .._config import Environment
 
@@ -71,6 +71,9 @@ def without_suffix(name: str) -> str:
         if name.endswith(suffix):
             return name[:-len(suffix)]
     return name
+
+
+_UNASKED = object()   # asked-and-nothing is not the same as not-asked-yet
 
 
 @dataclass(frozen=True)
@@ -112,38 +115,10 @@ def project_root(cwd: Path) -> Path:
     return Path(top) if top else cwd
 
 
-def find(where: Environment) -> Optional[Found]:
-    """The store for *where*, by the order in the module docstring, or None when nothing names one.
-    A root named on the command line or in the environment is returned whether or not a store
-    exists there yet — setup creates it. Nothing here consults the environment: `where` was filled
-    at the composition root, which is the only place that does."""
-    cwd = Path(where.cwd).resolve()
-    if where.store_root:
-        return Found(Path(where.store_root).expanduser().resolve(), where.store_root_from or "--root")
-    for key in GIT_KEYS:
-        configured = git(["config", "--get", key], cwd)
-        if configured:
-            path = Path(configured).expanduser()
-            if not path.is_absolute():
-                path = (main_worktree(cwd) or cwd) / path
-            return Found(path.resolve(), "git config " + key)
-    for directory in (cwd, *cwd.parents):
-        if is_store(directory):          # standing in the store itself, as one does in its own worktree
-            return Found(directory.resolve(), "the working directory is a store")
-        for local in LOCALS:
-            if is_store(directory / local):
-                return Found((directory / local).resolve(), local + " above the working directory")
-    return None
 
 
-def guidance(where: Environment) -> str:
-    """What to tell someone whose project has no store yet."""
-    found = find(where)
-    if found and not found.exists:
-        return f"{found.root} (from {found.how}) is not an ENACT store yet — run `oo enact setup` in the project"
-    return ("no ENACT store for this project — run `oo enact setup --user` (a store in your user directory) "
-            "or `oo enact setup --branch` (an orphan `memory` branch shared through git) in the project; "
-            "`--local` keeps one inside the project instead")
+
+
 
 
 # ── how a store's writes leave the machine ────────────────────────────────────
@@ -242,54 +217,267 @@ class Scope:
     aliases: List[str]
 
 
-def discover(where: Environment) -> List[Scope]:
-    """Every store this machine holds, as scopes a session can name. Nothing is configured: a store
-    declares its name in its policy or takes it from its directory, and stores are looked for where
-    the conventions put them — the project's own (`project`), the machine's global one (`global`),
-    the stores kept in the user data directory, and the `<name>-memory` directories beside the
-    project, which is where a store lives when it is kept out of the project it serves (03 §9.1).
+class Stores:
+    """What this machine holds, and how one is found.
 
-    Order matters: the first entry for a root keeps it, later ones only add aliases, so the
-    project's store answers to `project` as well as to its own name."""
-    cwd = Path(where.cwd).resolve()
-    found: List[Scope] = []
+    Built from an `Environment` where the program is wired, and given the session's lifetime. That
+    lifetime is the point: within one session the answer to "which stores are there" cannot change,
+    and an object can hold what it found where a free function must re-walk the filesystem and shell
+    out to git on every call — 6.6 ms a time, on every scoped tool call, before this existed.
 
-    def add(root: Optional[Path], how: str, name: Optional[str] = None) -> None:
-        if root is None or not is_store(root):
-            return
-        root = root.resolve()
-        called = (name or store_name(root)).lower()
-        for scope in found:
-            if scope.root == root:
-                if called != scope.name and called not in scope.aliases:
-                    scope.aliases.append(called)
+    Everything here was a module function taking `where` as its first argument. Nine of them, each
+    reaching into it: that is the method list of an object, written in the wrong place (global
+    memory #14). What is still a module function below takes only paths, and is genuinely free.
+
+    Nothing is cached until it is asked for, and `refresh` drops it all — a setup creates a store,
+    and what was true a moment ago is not."""
+
+    def __init__(self, where: Environment) -> None:
+        self.where = where
+        self._found: Any = _UNASKED
+        self._scopes: Optional[List[Scope]] = None
+        self._global: Any = _UNASKED
+
+    def at(self, cwd: Path) -> "Stores":
+        """The same machine seen from another directory. A new object: what was found from here
+        says nothing about what is found from there."""
+        return Stores(self.where.at(cwd))
+
+    def refresh(self) -> None:
+        """Forget what was found. Called after anything that creates or moves a store."""
+        self._found = _UNASKED
+        self._scopes = None
+        self._global = _UNASKED
+
+    # ── finding ───────────────────────────────────────────────────────────
+
+    def find(self) -> Optional[Found]:
+        """The store for this environment, by the order in the module docstring, or None when
+        nothing names one. A root named on the command line or in the environment is returned
+        whether or not a store exists there yet — setup creates it."""
+        if self._found is _UNASKED:
+            self._found = self._look()
+        return self._found
+
+    def _look(self) -> Optional[Found]:
+        cwd = Path(self.where.cwd).resolve()
+        if self.where.store_root:
+            return Found(Path(self.where.store_root).expanduser().resolve(),
+                         self.where.store_root_from or "--root")
+        for key in GIT_KEYS:
+            configured = git(["config", "--get", key], cwd)
+            if configured:
+                path = Path(configured).expanduser()
+                if not path.is_absolute():
+                    path = (main_worktree(cwd) or cwd) / path
+                return Found(path.resolve(), "git config " + key)
+        for directory in (cwd, *cwd.parents):
+            if is_store(directory):      # standing in the store itself, as one does in its own worktree
+                return Found(directory.resolve(), "the working directory is a store")
+            for local in LOCALS:
+                if is_store(directory / local):
+                    return Found((directory / local).resolve(), local + " above the working directory")
+        return None
+
+    def root(self) -> Optional[Path]:
+        """The project's store, if there is one there."""
+        found = self.find()
+        return found.root if found is not None and found.exists else None
+
+    def guidance(self) -> str:
+        """What to tell someone whose project has no store yet."""
+        found = self.find()
+        if found and not found.exists:
+            return f"{found.root} (from {found.how}) is not an ENACT store yet — run `oo enact setup` in the project"
+        return ("no ENACT store for this project — run `oo enact setup --user` (a store in your user directory) "
+                "or `oo enact setup --branch` (an orphan `enact` branch shared through git) in the project; "
+                "`--local` keeps one inside the project instead")
+
+    def global_root(self) -> Optional[Path]:
+        """The global store, or None when this machine has none: ``$PYGIM_ENACT_GLOBAL``, then
+        ``git config --global pygim.enact.global``, then the default place if a store is there."""
+        if self._global is _UNASKED:
+            self._global = self._look_global()
+        return self._global
+
+    def _look_global(self) -> Optional[Path]:
+        if self.where.global_root is not None:
+            return self.where.global_root
+        for key in GLOBAL_KEYS:
+            configured = git(["config", "--global", "--get", key], self.where.home)
+            if configured:
+                return Path(configured).expanduser().resolve()
+        default = self.where.user_data / GLOBAL_NAME
+        return default if is_store(default) else None
+
+    # ── every store, by name ──────────────────────────────────────────────
+
+    def scopes(self) -> List[Scope]:
+        """Every store this machine holds, as scopes a session can name. Nothing is configured: a
+        store declares its name in its policy or takes it from its directory, and stores are looked
+        for where the conventions put them — the project's own (`project`), the machine's global one
+        (`global`), the stores in the user data directory, and the `<name>-enact` directories beside
+        the project, which is where a store lives when kept out of the project it serves (03 §9.1).
+
+        Order matters: the first entry for a root keeps it, later ones only add aliases, so the
+        project's store answers to `project` as well as to its own name.
+
+        Walked once and held. This is the method the object exists for."""
+        if self._scopes is None:
+            self._scopes = self._walk()
+        return self._scopes
+
+    def _walk(self) -> List[Scope]:
+        cwd = Path(self.where.cwd).resolve()
+        found: List[Scope] = []
+
+        def add(root: Optional[Path], how: str, name: Optional[str] = None) -> None:
+            if root is None or not is_store(root):
                 return
-            if called == scope.name:            # two stores of one name: the second keeps its path
-                called = f"{called}@{root.parent.name}"
-        found.append(Scope(called, root, how, []))
+            root = root.resolve()
+            called = (name or store_name(root)).lower()
+            for scope in found:
+                if scope.root == root:
+                    if called != scope.name and called not in scope.aliases:
+                        scope.aliases.append(called)
+                    return
+                if called == scope.name:        # two stores of one name: the second keeps its path
+                    called = f"{called}@{root.parent.name}"
+            found.append(Scope(called, root, how, []))
 
-    here = find(where)
-    if here is not None:
-        add(here.root, here.how, "project")
-        add(here.root, here.how)                 # and by its own name
-    add(find_global(where), "global store", "global")
-    if where.user_data.is_dir():
-        for child in sorted(where.user_data.iterdir()):
-            add(child, f"in {where.user_data}")
-    project = project_root(cwd)
-    siblings = {s for suffix in SUFFIXES for s in project.parent.glob("*" + suffix)} if project.parent.is_dir() else set()
-    for sibling in sorted(siblings):
-        add(sibling, f"beside {project.name}")
-    return found
+        here = self.find()
+        if here is not None:
+            add(here.root, here.how, "project")
+            add(here.root, here.how)             # and by its own name
+        add(self.global_root(), "global store", "global")
+        if self.where.user_data.is_dir():
+            for child in sorted(self.where.user_data.iterdir()):
+                add(child, f"in {self.where.user_data}")
+        project = project_root(cwd)
+        siblings = ({s for suffix in SUFFIXES for s in project.parent.glob("*" + suffix)}
+                    if project.parent.is_dir() else set())
+        for sibling in sorted(siblings):
+            add(sibling, f"beside {project.name}")
+        return found
+
+    def named(self, name: str) -> Optional[Scope]:
+        """The store a session means by *name*, matched on its name or an alias."""
+        wanted = name.strip().lower()
+        for s in self.scopes():
+            if wanted == s.name or wanted in s.aliases:
+                return s
+        return None
+
+    # ── making one ────────────────────────────────────────────────────────
+
+    def setup_global(self, source: Optional[Path] = None, path: Optional[Path] = None) -> Path:
+        """The machine's global store: created under the user data directory unless *path* says
+        otherwise, marked personal so every write is committed, and recorded in the user's git
+        config so every project on this machine finds it."""
+        root = (path or self.where.user_data / GLOBAL_NAME).expanduser().resolve()
+        if not is_store(root):
+            create(root, source)
+        if not (root / POLICY).is_file():
+            write_policy(root, Policy(sharing="personal", push="auto"))
+        if git(["rev-parse", "--git-dir"], root) is None:
+            git(["init", "-q"], root)
+        git(["config", "--global", GLOBAL_KEY, str(root)], root)
+        publish(root, "memory: the global store, as initialised by oo enact setup --global")
+        self.refresh()
+        return root
+
+    def setup_user(self, name: Optional[str] = None, source: Optional[Path] = None) -> Path:
+        """A store under the user data directory, named for the project, and git pointed at it."""
+        cwd = Path(self.where.cwd)
+        root = self.where.user_data / (name or project_name(cwd))
+        if not is_store(root):
+            create(root, source)
+        point_git_at(root, cwd)
+        self.refresh()
+        return root
+
+    def setup_local(self, source: Optional[Path] = None) -> Path:
+        """A store inside the project, as ``.enact`` at this worktree's top, committed with the
+        code. Git config is left alone: this store belongs to the branch that carries it, and other
+        worktrees on other branches find theirs, or none."""
+        root = project_root(Path(self.where.cwd)) / LOCAL
+        if not is_store(root):
+            create(root, source)
+        self.refresh()
+        return root
+
+    def setup_branch(self, path: Optional[Path] = None, source: Optional[Path] = None) -> Path:
+        """A store on the orphan ``enact`` branch, checked out as its own worktree beside the main
+        one. An existing branch under any name the system has had is checked out rather than created
+        — a second machine gets the project's memory with ``git fetch`` and this call."""
+        cwd = Path(self.where.cwd)
+        main = main_worktree(cwd)
+        if main is None:
+            raise RuntimeError(f"{cwd} is not in a git repository — use `oo enact setup --user` instead")
+        branch = next((b for b in BRANCHES
+                       if git(["show-ref", "--verify", "--quiet", f"refs/heads/{b}"], cwd) is not None
+                       or git(["show-ref", "--verify", "--quiet", f"refs/remotes/origin/{b}"], cwd) is not None),
+                      BRANCH)
+        root = (path or main.parent / f"{main.name}-{branch}").expanduser().resolve()
+        self.refresh()
+        if is_store(root):
+            point_git_at(root, cwd)
+            return root
+        if root.exists() and any(root.iterdir()):
+            raise RuntimeError(f"{root} exists and is not an ENACT store — choose another --path")
+        has_local = git(["show-ref", "--verify", "--quiet", f"refs/heads/{branch}"], cwd) is not None
+        has_remote = git(["show-ref", "--verify", "--quiet", f"refs/remotes/origin/{branch}"], cwd) is not None
+        if has_local:
+            _require(git(["worktree", "add", str(root), branch], cwd), f"git worktree add {root} {branch}")
+        elif has_remote:
+            _require(git(["worktree", "add", "--track", "-b", branch, str(root), f"origin/{branch}"], cwd),
+                     f"git worktree add --track -b {branch} {root} origin/{branch}")
+        else:
+            _require(git(["worktree", "add", "--orphan", "-b", branch, str(root)], cwd),
+                     f"git worktree add --orphan -b {branch} {root}")
+            create(root, source)
+            git(["add", "-A"], root)
+            if git(["commit", "-m", "memory: the store, as initialised by oo enact setup"], root) is None:
+                raise RuntimeError(f"created the store in {root}, but could not commit it — commit it there yourself")
+        if not is_store(root):
+            raise RuntimeError(f"the {branch} branch checked out in {root} holds no ENACT store")
+        point_git_at(root, cwd)
+        return root
+
+    # ── asking the servers to reload ──────────────────────────────────────
+
+    def ask_reload(self, send_signal: bool = False) -> dict:
+        """Asks the servers on every store this machine holds to restart into the code on disk: a
+        `local/reload` marker each server checks between messages, so it acts at a quiet moment and
+        the host's connection survives.
+
+        SIGHUP does the same for a server serving any other project, but only on request: a server
+        older than this feature has no handler for it, and the default action for SIGHUP is to die."""
+        signalled = []
+        if send_signal and hasattr(signal, "SIGHUP"):
+            for pid in server_pids():
+                try:
+                    os.kill(pid, signal.SIGHUP)
+                    signalled.append(pid)
+                except OSError:
+                    continue
+        marked = []
+        for scope in self.scopes():      # every store here, not only this project's and the global one
+            root = scope.root
+            try:
+                (root / "local").mkdir(exist_ok=True)
+                (root / "local" / "reload").write_text("asked by oo enact reload\n", encoding="utf-8")
+                marked.append(root)
+            except OSError:
+                continue
+        return {"signalled": signalled, "marked": marked}
 
 
-def scope(name: str, where: Environment) -> Optional[Scope]:
-    """The store a session means by *name*, matched on its name or an alias."""
-    wanted = name.strip().lower()
-    for s in discover(where):
-        if wanted == s.name or wanted in s.aliases:
-            return s
-    return None
+
+
+
+
+
 
 
 def remote_stores(root: Path) -> List[str]:
@@ -305,34 +493,10 @@ def remote_stores(root: Path) -> List[str]:
 # ── setup ─────────────────────────────────────────────────────────────────────
 
 
-def find_global(where: Environment) -> Optional[Path]:
-    """The global store, or None when this machine has none: ``$PYGIM_ENACT_GLOBAL``, then
-    ``git config --global pygim.enact.global``, then the default place if a store is there."""
-    if where.global_root is not None:
-        return where.global_root
-    for key in GLOBAL_KEYS:
-        configured = git(["config", "--global", "--get", key], where.home)
-        if configured:
-            return Path(configured).expanduser().resolve()
-    default = where.user_data / GLOBAL_NAME
-    return default if is_store(default) else None
 
 
-def setup_global(where: Environment, source: Optional[Path] = None, path: Optional[Path] = None) -> Path:
-    """The machine's global store: created under the user data directory unless *path* says
-    otherwise, marked personal so every write is committed, and recorded in the user's git config so
-    every project on this machine finds it."""
-    root = (path or where.user_data / GLOBAL_NAME).expanduser().resolve()
-    fresh = not is_store(root)
-    if fresh:
-        create(root, source)
-    if not (root / POLICY).is_file():
-        write_policy(root, Policy(sharing="personal", push="auto"))
-    if git(["rev-parse", "--git-dir"], root) is None:
-        git(["init", "-q"], root)
-    git(["config", "--global", GLOBAL_KEY, str(root)], root)
-    publish(root, "memory: the global store, as initialised by oo enact setup --global")
-    return root
+
+
 
 
 def project_name(cwd: Path) -> str:
@@ -362,62 +526,13 @@ def create(root: Path, source: Optional[Path] = None) -> None:
     (root / "local").mkdir(exist_ok=True)
 
 
-def setup_user(where: Environment, name: Optional[str] = None, source: Optional[Path] = None) -> Path:
-    """A store under the user data directory, named for the project, and git pointed at it."""
-    cwd = Path(where.cwd)
-    root = where.user_data / (name or project_name(cwd))
-    if not is_store(root):
-        create(root, source)
-    point_git_at(root, cwd)
-    return root
 
 
-def setup_local(where: Environment, source: Optional[Path] = None) -> Path:
-    """A store inside the project, as ``.enact`` at this worktree's top, committed with the code. Git
-    config is left alone: this store belongs to the branch that carries it, and other worktrees on
-    other branches find theirs, or none."""
-    root = project_root(Path(where.cwd)) / LOCAL
-    if not is_store(root):
-        create(root, source)
-    return root
 
 
-def setup_branch(where: Environment, path: Optional[Path] = None, source: Optional[Path] = None) -> Path:
-    """A store on the orphan ``enact`` branch, checked out as its own worktree beside the main one.
-    An existing branch under any name the system has had is checked out rather than created — a
-    second machine gets the project's memory with ``git fetch`` and this call."""
-    cwd = Path(where.cwd)
-    main = main_worktree(cwd)
-    if main is None:
-        raise RuntimeError(f"{cwd} is not in a git repository — use `oo enact setup --user` instead")
-    branch = next((b for b in BRANCHES
-                   if git(["show-ref", "--verify", "--quiet", f"refs/heads/{b}"], cwd) is not None
-                   or git(["show-ref", "--verify", "--quiet", f"refs/remotes/origin/{b}"], cwd) is not None),
-                  BRANCH)
-    root = (path or main.parent / f"{main.name}-{branch}").expanduser().resolve()
-    if is_store(root):
-        point_git_at(root, cwd)
-        return root
-    if root.exists() and any(root.iterdir()):
-        raise RuntimeError(f"{root} exists and is not an ENACT store — choose another --path")
-    has_local = git(["show-ref", "--verify", "--quiet", f"refs/heads/{branch}"], cwd) is not None
-    has_remote = git(["show-ref", "--verify", "--quiet", f"refs/remotes/origin/{branch}"], cwd) is not None
-    if has_local:
-        _require(git(["worktree", "add", str(root), branch], cwd), f"git worktree add {root} {branch}")
-    elif has_remote:
-        _require(git(["worktree", "add", "--track", "-b", branch, str(root), f"origin/{branch}"], cwd),
-                 f"git worktree add --track -b {branch} {root} origin/{branch}")
-    else:
-        _require(git(["worktree", "add", "--orphan", "-b", branch, str(root)], cwd),
-                 f"git worktree add --orphan -b {branch} {root}")
-        create(root, source)
-        git(["add", "-A"], root)
-        if git(["commit", "-m", "memory: the store, as initialised by oo enact setup"], root) is None:
-            raise RuntimeError(f"created the store in {root}, but could not commit it — commit it there yourself")
-    if not is_store(root):
-        raise RuntimeError(f"the {branch} branch checked out in {root} holds no ENACT store")
-    point_git_at(root, cwd)
-    return root
+
+
+
 
 
 def _require(result: Optional[str], what: str) -> None:
@@ -442,31 +557,7 @@ def server_pids() -> List[int]:
     return out
 
 
-def ask_reload(where: Environment, send_signal: bool = False) -> dict:
-    """Asks the servers on this project's store, and on the global one, to restart into the code on
-    disk: a `local/reload` marker each server checks between messages, so it acts at a quiet moment
-    and the host's connection survives.
 
-    SIGHUP does the same for a server serving any other project, but only on request: a server
-    older than this feature has no handler for it, and the default action for SIGHUP is to die."""
-    signalled = []
-    if send_signal and hasattr(signal, "SIGHUP"):
-        for pid in server_pids():
-            try:
-                os.kill(pid, signal.SIGHUP)
-                signalled.append(pid)
-            except OSError:
-                continue
-    marked = []
-    for scope in discover(where):        # every store here, not only this project's and the global one
-        root = scope.root
-        try:
-            (root / "local").mkdir(exist_ok=True)
-            (root / "local" / "reload").write_text("asked by oo enact reload\n", encoding="utf-8")
-            marked.append(root)
-        except OSError:
-            continue
-    return {"signalled": signalled, "marked": marked}
 
 
 # ── registration ──────────────────────────────────────────────────────────────

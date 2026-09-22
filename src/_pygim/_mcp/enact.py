@@ -431,13 +431,14 @@ class EnactServer:
     store when a vocabulary file under taxonomy/ changes, so an accepted pack is live
     at the next call without restarting the server."""
 
-    def __init__(self, where: Environment, memory: Any = None, *, started: int = 0,
+    def __init__(self, stores: _stores.Stores, memory: Any = None, *, started: int = 0,
                  code: Any = None, taxonomy: Any = None) -> None:
         """Values only. Everything that had to be read — the environment, the clock, the files this
         process was loaded from, the vocabulary on disk — was read by `build`, which is the wiring
         and the only place allowed to. A server can therefore be constructed from plain values,
         which is what makes a test able to build the same object production does."""
-        self.where = where
+        self.stores = stores
+        self.where = stores.where
         self._memory = memory
         self._global: Any = None
         self._standing_seen: Optional[Dict[str, str]] = None  # global preference key → title, as last told
@@ -448,7 +449,7 @@ class EnactServer:
         self._code = code
         self._told_stale = False
         self._said_reloaded = False
-        self.session: Optional[int] = where.session
+        self.session: Optional[int] = stores.where.session
         self._stamp = taxonomy
         self._vocabulary: Optional[str] = None  # the vocabulary version the agent last saw
         self.turn = 0
@@ -492,7 +493,7 @@ class EnactServer:
             return self._stores_open[name]
         from pygim.enact import Enact
 
-        found = _stores.scope(name, self.where)
+        found = self.stores.named(name)
         if found is None:
             known = ", ".join(s.name for s in self.scopes()) or "project"
             raise NoStore(f"no store called `{name}` — this machine has: {known}. A store is found by its "
@@ -502,7 +503,7 @@ class EnactServer:
 
     def scopes(self) -> List[Any]:
         """Every store a session can name here, the project's first."""
-        return _stores.discover(self.where)
+        return self.stores.scopes()
 
     @property
     def global_memory(self) -> Any:
@@ -510,7 +511,7 @@ class EnactServer:
         from pygim.enact import Enact
 
         if self._global is None:
-            root = _stores.find_global(self.where)
+            root = self.stores.global_root()
             if root is None or not _stores.is_store(root):
                 raise NoStore("this machine has no global store — run `oo enact setup --global` to make one; "
                               "knowledge about one project belongs in its own store")
@@ -530,9 +531,9 @@ class EnactServer:
         from pygim.enact import Enact
 
         if self._memory is None:
-            found = _stores.find(self.where)
+            found = self.stores.find()
             if found is None or not found.exists:
-                raise NoStore(_stores.guidance(self.where))
+                raise NoStore(self.stores.guidance())
             self._memory = Enact(str(found.root))
             self._stamp = self._taxonomy_stamp()
         elif self._taxonomy_stamp() != self._stamp:
@@ -985,8 +986,11 @@ def build(where: Environment, memory: Any = None) -> EnactServer:
 
     Configuration arrives as *where*, already read (`_pygim._config`). Nothing below this line
     looks at the environment, so a test that passes a different `Environment` is running the same
-    code production runs, not a variant of it."""
-    return EnactServer(where, memory, started=time.time_ns(), code=code_stamp(),
+    code production runs, not a variant of it.
+
+    It is also where `Stores` is made, and the server keeps it for its whole life: which stores this
+    machine holds cannot change within a session, and an object can hold what it found."""
+    return EnactServer(_stores.Stores(where), memory, started=time.time_ns(), code=code_stamp(),
                        taxonomy=taxonomy_stamp(memory))
 
 
@@ -995,12 +999,12 @@ def run(where: Environment, stdin: Optional[IO[str]] = None, stdout: Optional[IO
     from the working directory the host started the server in; with none at all the server still
     starts, and answers with how to create one. SIGHUP asks it to reload into the code on disk,
     which it does between messages — `oo enact reload` sends it."""
-    found = _stores.find(where)
+    server = build(where)
+    found = server.stores.find()
     if found and found.exists:
         print(f"{SERVER_NAME}: serving {found.root} (from {found.how})", file=sys.stderr)
     else:
-        print(f"{SERVER_NAME}: {_stores.guidance(where)}", file=sys.stderr)
-    server = build(where)
+        print(f"{SERVER_NAME}: {server.stores.guidance()}", file=sys.stderr)
     if hasattr(signal, "SIGHUP"):
         signal.signal(signal.SIGHUP, lambda *_: setattr(server, "signalled", True))
     server.serve(stdin or sys.stdin, stdout or sys.stdout)
