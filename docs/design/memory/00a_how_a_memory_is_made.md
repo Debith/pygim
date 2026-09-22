@@ -1,4 +1,4 @@
-# Problem-Space Memory — Technical Specification
+# ENACT — Technical Specification
 
 **Section 00a: How a memory is made — features and scenarios**
 Status: draft · Owner: Debith · Last updated: 2026-09-13

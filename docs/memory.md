@@ -1,8 +1,11 @@
-# pygim memory: setting up and using it
+# ENACT: setting up and using it
 
-pygim's problem-space memory gives an agent knowledge found by the *kind of problem* it is
-working on, rather than by similarity to the prompt. It runs as an MCP server; Claude Code starts
-it for each session. The design is [docs/design/memory/](design/memory/00_overview.md).
+ENACT is pygim's adaptive cognitive layer. It gives an agent knowledge found by the *kind of
+problem* it is working on rather than by similarity to the prompt, remembers what happened, and
+learns from whether what it offered helped. It runs as an MCP server; Claude Code starts it for
+each session. The design is [docs/design/memory/](design/memory/00_overview.md), whose overview
+lists the seven parts — Memory, Knowledge, Vocabulary, Adaptive Context, Retrieval Policy,
+Consolidation and Experience Learning.
 
 ## Set up a project
 

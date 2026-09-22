@@ -1,4 +1,4 @@
-# Problem-Space Memory — Technical Specification
+# ENACT — Technical Specification
 
 **Section 03: Store**
 Status: draft · Owner: Debith · Last updated: 2026-09-15

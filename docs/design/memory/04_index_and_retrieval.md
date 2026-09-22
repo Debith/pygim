@@ -1,4 +1,4 @@
-# Problem-Space Memory — Technical Specification
+# ENACT — Technical Specification
 
 **Section 04: Index and retrieval**
 Status: draft · Owner: Debith · Last updated: 2026-09-11

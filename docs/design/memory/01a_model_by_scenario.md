@@ -1,4 +1,4 @@
-# Problem-Space Memory — Technical Specification
+# ENACT — Technical Specification
 
 **Section 01a: The model, scenario by scenario**
 Status: draft · Owner: Debith · Last updated: 2026-09-13

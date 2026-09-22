@@ -1,10 +1,10 @@
-# Problem-Space Memory — Technical Specification
+# ENACT — Technical Specification
 
 **Section 00: Overview**
 Status: draft · Owner: Debith · Last updated: 2026-09-15
 
-This series specifies a memory system for AI agents in which retrieval is driven by the
-*kind of problem being solved* rather than by semantic similarity to the prompt. It is
+This series specifies ENACT, an adaptive cognitive layer for AI agents in which retrieval is
+driven by the *kind of problem being solved* rather than by semantic similarity to the prompt. It is
 implemented in pygim's C++ core, exposed through a thin pybind11 adapter, and consumed by
 an MCP server so that any agent host (Claude Code first) can use it directly.
 
@@ -15,6 +15,67 @@ since been removed, its behaviour having passed into this specification and the 
 rest of this specification goes beyond it: the prototype had no WRITE operation, no
 vocabulary study, no sources and no procedures. Where the two differ in naming, §4.1 records
 the mapping.
+
+### The system and its parts
+
+This system is **ENACT**, and the approach it embodies is **adaptive cognition**: knowledge is
+indexed by the situation being acted in, and what is learned from acting changes what is given
+next time. The name is meant in both its senses. Enactivism — Varela, Thompson and Rosch, *The
+Embodied Mind*, 1991 — holds that cognition arises through an agent's interaction with its
+environment, so knowledge is *enacted* rather than stored and looked up. And *to enact* is to put
+into force, which is what a person does at the accept gate (§4.11.1). It is not an acronym.
+
+Until 2026-09-22 the whole of it was called "the memory". That name merged three parts this
+design keeps apart, and spent a word the end state needs (§4.13): episodic memory is one part of
+ENACT, not the name of it. The parts group by when they run — what is kept, what happens in the
+loop, and what happens between tasks.
+
+| Group | Part | What it holds or does | Specified in | State |
+|---|---|---|---|---|
+| **Persistent** | **Memory** | what happened: audit rows, receipts, usage, the mailbox | [03](03_store.md) | built |
+| **Persistent** | **Knowledge** | what is true, and how a kind of problem is approached | [01](01_domain_model.md), §4.10 | built |
+| **Persistent** | **Vocabulary** | the dimensions a situation is named in, and the gate that changes them | [02](02_taxonomy_and_sources.md), §4.6 | built |
+| **Live** | **Adaptive Context** | what the model should see now — hard, soft, `term`, budget | [04](04_index_and_retrieval.md) | built |
+| **Live** | **Retrieval Policy** | the mapping Adaptive Context applies | [04](04_index_and_retrieval.md) | written, not learned |
+| **Offline** | **Consolidation** | integrate, abstract, validate, prune | §4.11 | human-triggered |
+| **Offline** | **Experience Learning** | outcomes into the policy | §4.13 | recording only |
+
+```mermaid
+flowchart LR
+    subgraph persistent["Persistent"]
+        mem["Memory<br/>what happened"]
+        know["Knowledge<br/>what is true"]
+        voc["Vocabulary<br/>how a situation is named"]
+    end
+    subgraph live["Live"]
+        ctx["Adaptive Context<br/>what to see now"]
+        pol["Retrieval Policy"]
+    end
+    subgraph offline["Offline"]
+        cons["Consolidation"]
+        exp["Experience Learning"]
+    end
+    know --> ctx
+    voc --> ctx
+    pol --> ctx
+    ctx --> work["the work"]
+    work --> mem
+    mem --> cons --> know
+    mem --> exp --> pol
+```
+
+Three notes on the shape, because each was a choice. **Adaptive cognition is the approach, not a
+part** — given a box of its own it reads as a subsystem containing everything, which tells a
+reader nothing. **Retrieval Policy belongs to Adaptive Context**, not beside it: it is the state
+the selector applies, and modelling a component's parameters as its sibling hides that the two
+change together. And **Vocabulary earns its own part** — it is neither memory nor knowledge nor
+consolidation, it is what makes retrieval by situation possible at all, and it is the part of this
+design with the fewest equivalents elsewhere.
+
+Two rules follow from the grouping, and both are already principles here: offline work is a
+lifecycle stage, never a step inside a read (§4.11); and episodic evidence stays separate from
+generalised knowledge and reusable procedures (§4.4), which is what lets a receipt be rerun long
+after the knowledge above it has changed.
 
 ### The series
 
