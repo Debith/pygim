@@ -1,9 +1,24 @@
-"""ENACT end to end, through the commands and nothing else.
+"""ENACT end to end, through its two shipped surfaces and nothing else.
 
-Every step here is a process: `oo enact ...` in, JSON out, assertions on what comes back and on
-what the store looks like afterwards. Nothing imports pygim, so these tests see the system the way
-a shell script or an agent host sees it — the CLI, the MCP dispatch, the pybind adapter, the C++
-service and the files store, in one round trip each (about 90 ms).
+Every step here is a process. Nothing imports pygim, so these tests see the system the way a shell
+script or an agent host sees it — the CLI, the MCP dispatch, the pybind adapter, the C++ service
+and the files store, in one round trip each.
+
+**Two surfaces, and they are not the same path.** `oo enact call` reaches the server\'s dispatch and
+stops there; the MCP server also has a loop around it. Both are production — a person\'s scripts and
+session-start hook use the first, an agent host uses the second — so both are tested as themselves,
+and neither stands in for the other:
+
+| | `oo enact call` | `oo enact mcp` |
+|---|---|---|
+| tool dispatch, refusals, the store | yes | yes |
+| JSON-RPC framing, `initialize`, `tools/list` | no | yes |
+| recovering from a bad line and serving on | no | yes |
+| several calls in one process — one session, turn counts, said-once notices | no | yes |
+| a reload asked for between messages | no | yes |
+
+`TestOverTheRealProtocol` drives the second: the installed `oo enact mcp` as a subprocess, one JSON
+line in and one out, which is exactly what an agent host does to it. The rest drive the first.
 
 They are deliberately about the *negative* scenarios. A refusal is this system\'s most distinctive
 behaviour: it is a result, not an exception, it names the facts that would make the call succeed,
@@ -11,7 +26,8 @@ and it must leave the store exactly as it was. The last of those is the one noth
 every refusal here is followed by a look at the places it must not have touched.
 
 The world is the test\'s own (global memory #2): a store under tmp_path, a user data directory and
-a git configuration that point nowhere near this machine\'s.
+a git configuration that point nowhere near this machine\'s. Nothing is monkeypatched — a process
+cannot be — so the isolation is the one a person gets from the same environment variables.
 """
 from __future__ import annotations
 
@@ -88,6 +104,57 @@ def fingerprint(store):
             if file.is_file():
                 out[str(file.relative_to(store))] = hashlib.sha256(file.read_bytes()).hexdigest()
     return out
+
+
+class Serving:
+    """The installed `oo enact mcp` as a subprocess, spoken to the way an agent host speaks to it:
+    one JSON line in, one JSON line out, over its stdin and stdout. Nothing here is a stand-in —
+    this is the command registered with the host."""
+
+    def __init__(self, cwd, env, root=None):
+        self.proc = subprocess.Popen([str(OO), "enact", "mcp", *(["--root", str(root)] if root else [])],
+                                     cwd=str(cwd), env=env, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                                     stderr=subprocess.PIPE, text=True, bufsize=1)
+        self.id = 0
+        self.notifications = []
+
+    def send(self, method, **params):
+        """A request, and the reply that carries its id — notifications on the way are kept."""
+        self.id += 1
+        self.proc.stdin.write(json.dumps({"jsonrpc": "2.0", "id": self.id, "method": method,
+                                          "params": params}) + "\n")
+        self.proc.stdin.flush()
+        while True:
+            line = self.proc.stdout.readline()
+            assert line, f"the server stopped before answering {method}"
+            message = json.loads(line)
+            if message.get("id") == self.id:
+                return message
+            self.notifications.append(message)
+
+    def raw(self, line):
+        self.proc.stdin.write(line + "\n")
+        self.proc.stdin.flush()
+        return json.loads(self.proc.stdout.readline())
+
+    def tool(self, name, **arguments):
+        reply = self.send("tools/call", name=name, arguments=arguments)
+        result = reply["result"]
+        assert not result.get("isError"), result["content"][0]["text"]
+        return json.loads(result["content"][0]["text"])
+
+    def close(self):
+        self.proc.stdin.close()
+        self.proc.wait(timeout=30)
+        return self.proc.stderr.read()
+
+
+@pytest.fixture
+def serving(project, env):
+    server = Serving(project, env)
+    server.send("initialize", protocolVersion="2025-06-18", capabilities={})
+    yield server
+    server.close()
 
 
 @pytest.fixture
@@ -217,6 +284,55 @@ class TestReferringToSomethingThatIsNotThere:
             out = call(name, project, env, **arguments)
             assert out.get("refused") == "unknown memory", (name, out)
         assert fingerprint(store) == was
+
+
+class TestOverTheRealProtocol:
+    """The surface an agent host actually uses: `oo enact mcp` as a subprocess, JSON-RPC over its
+    pipes. Everything here needs the loop, so none of it is reachable through `oo enact call`."""
+
+    def test_it_introduces_itself_and_offers_the_tools_it_dispatches(self, serving):
+        started = serving.send("initialize", protocolVersion="2025-03-26", capabilities={})
+        assert started["result"]["protocolVersion"] == "2025-03-26"
+        listed = {tool["name"] for tool in serving.send("tools/list")["result"]["tools"]}
+        assert {"read", "remember", "link", "unlink", "cite", "session"} <= listed
+        for name in sorted(listed):                       # every offered tool is dispatchable
+            reply = serving.send("tools/call", name=name, arguments={})
+            text = reply["result"]["content"][0]["text"]
+            assert "unknown tool" not in text, name
+
+    def test_one_process_is_one_session_and_review_gathers_it(self, serving, seeded):
+        opened = serving.tool("session")["session"]
+        serving.tool("read", hard=TAGS)
+        seen = [seeded]
+        for title in ("Frost Ward", "Absorb"):
+            made = serving.tool("remember", title=title, text=f"{title} is a case.",
+                                tags=TAGS + ["kind=example"], reason="a case", seen=seen)
+            assert made["ok"], made
+            seen.append(made["memory"])
+        reviewed = serving.tool("review")
+        assert reviewed["session"] == opened                      # the process never opened a second
+        assert [m["title"] for m in reviewed["written"]] == ["Frost Ward", "Absorb"]
+
+    def test_a_refusal_reads_the_same_here_as_through_the_command(self, serving, project, env, seeded, store):
+        was = fingerprint(store)
+        over_pipes = serving.tool("link", memory=seeded, tag="task=design", reason="already there")
+        through_cli = call("link", project, env, memory=seeded, tag="task=design", reason="already there")
+        assert over_pipes["refused"] == through_cli["refused"] == "already carried"
+        assert over_pipes["message"] == through_cli["message"]
+        assert fingerprint(store) == was
+
+    def test_a_line_that_is_not_json_is_answered_and_the_server_serves_on(self, serving, seeded):
+        """Only the loop can be wrong about this, and getting it wrong ends the session: a host that
+        sends one bad line would find the server gone rather than complaining."""
+        broken = serving.raw("{ this is not json")
+        assert broken["error"]["code"] == -32700 and broken["id"] is None
+        assert serving.tool("read", hard=TAGS)["corpus"] == 1      # still answering
+
+    def test_the_banner_goes_to_stderr_so_stdout_carries_only_the_protocol(self, serving, seeded):
+        serving.tool("read", hard=TAGS)
+        noise = [m for m in serving.notifications if "jsonrpc" not in m]
+        assert noise == []
+        assert "serving" in serving.close()
 
 
 class TestSeveralCallsAsOneSession:

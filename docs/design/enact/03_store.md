@@ -257,6 +257,19 @@ the other kind: every step is `oo enact ...` as a process, JSON in and JSON out,
 It sees the CLI, the MCP dispatch, the adapter, the service and the files store in one round trip,
 which costs about 90 ms — cheap enough that being black box is not a sacrifice.
 
+Two surfaces are shipped and they are not one path. `oo enact call` reaches the server's dispatch
+and stops; the MCP server has a loop around it — framing, `initialize`, `tools/list`, recovery from
+a bad line, and everything that needs more than one message in one process: a session, turn counts,
+notices said once, a reload taken between messages. Both are production, so both are driven as
+themselves and neither stands in for the other. `TestOverTheRealProtocol` runs the installed
+`oo enact mcp` as a subprocess and speaks JSON-RPC over its pipes, which is what an agent host
+does; one test asserts the same refusal reads identically through both.
+
+Nothing in the shipped code knows it is under test: no branch on an environment variable, no import
+from `tests/`, no seam that exists for a fixture. The isolation is the one a person gets from
+`$PYGIM_ENACT_GLOBAL`, `$XDG_DATA_HOME` and `$GIT_CONFIG_GLOBAL` — a process cannot be
+monkeypatched, which is part of what makes this suite worth its cost.
+
 It is deliberately about refusals, because a refusal is this design's most distinctive behaviour:
 it is a result rather than an exception, it names the facts that would make the call succeed, and
 it must leave the store exactly as it was. That last clause is the one no other test states, so
