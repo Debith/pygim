@@ -262,6 +262,79 @@ class TestADimensionThatOffersOnlyAny:
         assert "domain=dnd" in r["facts"]                     # and it names what to say instead
 
 
+class TestWhichProcedureIsPlaced:
+    """The slot holds one procedure, placed before everything else. Which one is chosen was, until
+    2026-09-22, the lowest id among everything the hard tags admitted — so in a space with fifteen
+    to forty procedures, one early narrow memory answered every question there. The D-D-2024 study
+    measured it at four moments and reported it (ranking rules v2)."""
+
+    def three_procedures(self, mem):
+        first = write(mem, "Creating a spell", "1 read the space\n2 name it", DESIGN + ["kind=procedure"])
+        frost = write(mem, "Warding against cold", "1 pick the damage type\n2 set the duration",
+                      DESIGN + ["kind=procedure", "purpose=defensive"], seen=[first["memory"]])
+        blast = write(mem, "Shaping a blast", "1 pick the area\n2 set the save",
+                      DESIGN + ["kind=procedure", "purpose=offensive"],
+                      seen=[first["memory"], frost["memory"]])
+        return first, frost, blast
+
+    def test_the_slot_is_ranked_now_and_not_the_oldest(self, mem):
+        first, frost, _ = self.three_procedures(mem)
+        plain = mem.read(DESIGN)
+        assert plain["procedure"]["memory"] == first["memory"]      # nothing to rank by: age still decides
+        asked = mem.read(DESIGN, ["purpose=defensive"])
+        assert asked["procedure"]["memory"] == frost["memory"]      # a soft tag now reaches the slot
+        assert "ranks first" in asked["procedure_note"]
+
+    def test_the_term_narrows_the_slot_before_it_is_chosen(self, mem):
+        first, _, blast = self.three_procedures(mem)
+        out = mem.read(DESIGN, term="blast")
+        assert out["procedure"]["memory"] == blast["memory"]
+        assert first["memory"] != blast["memory"]
+
+    def test_a_term_that_no_procedure_matches_falls_back_and_says_so(self, mem):
+        """A procedure that does not mention the word can still be the steps to follow."""
+        first, _, _ = self.three_procedures(mem)
+        out = mem.read(DESIGN, term="Shield")
+        assert out["procedure"]["memory"] == first["memory"]
+        assert "no procedure matches the term" in out["procedure_note"]
+
+    def test_an_accepted_generalisation_takes_the_slot_over_a_better_scoring_instance(self, mem):
+        """A person accepted it for exactly this: it is the pattern its instances share."""
+        first, frost, blast = self.three_procedures(mem)
+        both = write(mem, "Shaping any spell", "1 name the space\n2 pick the shape\n3 weigh it",
+                     DESIGN + ["kind=procedure", "purpose=defensive"],
+                     generalises=[frost["memory"], blast["memory"]],
+                     seen=[first["memory"], frost["memory"], blast["memory"]])
+        assert mem.read(DESIGN, ["purpose=defensive"])["procedure"]["memory"] == frost["memory"]
+        assert mem.accept(both["memory"], reason="it covers both")["ok"]
+        assert mem.read(DESIGN, ["purpose=defensive"])["procedure"]["memory"] == both["memory"]
+
+    def test_a_slot_too_large_for_the_budget_is_named_and_takes_nothing_down_with_it(self, mem):
+        """It used to end the read: over_budget, nothing selected, every ranked match skipped — one
+        long procedure in place of everything that was asked for."""
+        long_steps = "\n".join(f"{n} do the {n}th thing, carefully and at length" for n in range(1, 40))
+        steps = write(mem, "Creating a spell", long_steps, DESIGN + ["kind=procedure"])
+        short = write(mem, "Shield is the yardstick", "It beats Shield, or it is a niche.",
+                      DESIGN + ["kind=principle"], seen=[steps["memory"]])
+        full = mem.read(DESIGN, budget=0)
+        big, small = full["procedure"]["tokens"], full["memories"][0]["tokens"]
+        assert small < big, "the case needs a procedure larger than a memory"
+
+        out = mem.read(DESIGN, budget=big - 1)
+        assert out["procedure"]["title"] == "Creating a spell"
+        assert out["procedure"]["text"] == "" and out["procedure"]["over_budget"] is True
+        assert "its title only" in out["procedure_note"] and out["over_budget"] is True
+        assert [m["memory"] for m in out["memories"]] == [short["memory"]]   # the budget reached it
+        assert out["tokens"] == small                                       # and the slot cost nothing
+
+    def test_the_receipt_pins_the_rules_that_ordered_it(self, mem):
+        """A receipt pinned the snapshot and the vocabulary, so the same question got the same
+        answer — unless the rules turning candidates into an order had changed underneath it, which
+        nothing recorded."""
+        seed(mem)
+        assert mem.read(DESIGN)["receipt"]["rules"] >= 2
+
+
 class TestWhatAReadSays:
     """Beyond the ranked memories: counts instead of the list of the rest, the tags the candidates
     carry, the documents they cite, and a term to narrow them (04 §3.8)."""

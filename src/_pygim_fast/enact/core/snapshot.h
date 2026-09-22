@@ -150,10 +150,6 @@ public:
         const memory_set admitted = candidates(q.hard);
         ctx.candidates = static_cast<std::uint32_t>(admitted.size());
 
-        // The procedure slot answers the artifact and task, not the term: it is chosen from
-        // everything the hard tags admit. Everything after it works on the term's matches.
-        const std::optional<std::uint32_t> slot = procedure_slot(q, admitted, ctx.procedure_note);
-        if (slot) ctx.procedure = memory_id(*slot);
         memory_set cand = admitted;
         if (q.within) {
             memory_set kept;
@@ -162,6 +158,17 @@ public:
             cand = std::move(kept);
             ctx.term_matched = static_cast<std::uint32_t>(cand.size());
         }
+        // The slot is chosen from what the term left, so a narrowed read gets a procedure about the
+        // same subject; only if the term leaves no procedure at all does it fall back to everything
+        // the hard tags admit, since a procedure that does not mention the word can still be the
+        // steps to follow (rules v2; before it, the slot was the lowest id of the latter).
+        std::optional<std::uint32_t> slot = procedure_slot(q, cand, ctx.procedure_note);
+        if (!slot && q.within) {
+            std::string ignored;
+            slot = procedure_slot(q, admitted, ignored);
+            if (slot) ctx.procedure_note = "no procedure matches the term; the one for this space is placed";
+        }
+        if (slot) ctx.procedure = memory_id(*slot);
         std::vector<std::uint32_t> ids(cand.members().begin(), cand.members().end());
         std::sort(ids.begin(), ids.end());
         describe_candidates(ids, q, ctx);
@@ -210,15 +217,21 @@ public:
             for (const auto& m : c.skipped)
                 if (m_forward[m.id.value()]->has(preference->value())) c.standing.push_back(m.id);
         };
+        // A slot larger than the whole budget used to end the read: over_budget, nothing selected,
+        // every ranked match skipped — one long procedure in place of everything that was asked for.
+        // It is now named and not paid for, as standing preferences are, and the budget goes to the
+        // matches (rules v2). The reader is told it exists and can ask again with room for it.
         std::uint32_t used = 0;
         if (slot) {
-            used = m_memories[*slot]->tokens;
-            if (q.budget && used > q.budget) {
+            const std::uint32_t cost = m_memories[*slot]->tokens;
+            if (q.budget && cost > q.budget) {
                 ctx.over_budget = true;
-                ctx.tokens = used;
-                ctx.skipped = std::move(ranked);
-                name_standing(ctx);
-                return ctx;
+                ctx.procedure_oversized = true;
+                ctx.procedure_note = "the procedure for this space needs " + decimal(cost) +
+                                     " tokens and the budget is " + decimal(q.budget) +
+                                     ": its title only — ask again with room for it";
+            } else {
+                used = cost;
             }
         }
         for (auto& m : ranked) {
@@ -352,11 +365,22 @@ private:
             note = "no procedure yet for " + pair;
             return std::nullopt;
         }
+        // Rank them, rather than take the oldest. With 15 to 41 procedures in one space, lowest-id
+        // meant one early narrow memory answered every question there — the defect the D-D-2024
+        // study measured at four moments (rules v2). An accepted generalisation wins first: it is
+        // the pattern its instances share, and a person accepted it for exactly this purpose.
         std::vector<std::uint32_t> ids(p.members().begin(), p.members().end());
         std::sort(ids.begin(), ids.end());
+        std::stable_sort(ids.begin(), ids.end(), [&](std::uint32_t a, std::uint32_t b) {
+            const bool ga = m_accepted->has(a), gb = m_accepted->has(b);
+            if (ga != gb) return ga;
+            const match ma = score(memory_id(a), q), mb = score(memory_id(b), q);
+            if (ma.final_score != mb.final_score) return ma.final_score > mb.final_score;
+            return ma.soft_hits > mb.soft_hits;
+        });
         if (ids.size() > 1)
             note = pair + " have " + decimal(ids.size()) + " procedures: #" + decimal(ids[0]) +
-                   " is placed, the others rank — merge them";
+                   " ranks first and is placed, the others rank below — merge them";
         return ids[0];
     }
 

@@ -198,6 +198,37 @@ And `any` never
 scores — in a query that softens its dimension it simply does not match — or generic memories
 would outrank specific ones on every read.
 
+### 3.2.1 Which procedure is placed, and what the rules version is for — settled 2026-09-22
+
+The slot holds one procedure, placed before everything else. Which one was, until now, the lowest
+id among everything the hard tags admitted — chosen before the term, and regardless of score. In a
+space with fifteen to forty-one procedures that means one early narrow memory answers every
+question in it. The D-D-2024 study measured it at four moments and reported it.
+
+| | Before | After |
+|---|---|---|
+| chosen from | everything the hard tags admit | what the term left, falling back if that has no procedure |
+| chosen by | lowest id | an accepted generalisation first, then rank, then id |
+| a slot larger than the whole budget | `over_budget`, nothing selected, every match skipped | named and not paid for; the budget goes to the matches |
+
+An accepted generalisation wins first because a person accepted it for exactly this: it is the
+pattern its instances share. The term applies first because a narrowed read should get a procedure
+about the same subject — but a procedure that never mentions the word can still be the steps to
+follow, so an empty result falls back and the note says so.
+
+The oversized case is the one that cost most. A 444-token procedure against a 120-token budget
+returned that procedure and nothing else, dropping all thirty-five ranked matches: the smallest ask
+got the longest answer. It is now named the way standing preferences are — title, token count, and
+a note saying to ask again with room for it — and the ranked matches get the whole budget.
+
+**The rules version.** A receipt pins the snapshot and the vocabulary, so the same question gets the
+same answer — but only if the rules that turn candidates into an order have not changed underneath
+it, and until now nothing recorded them. `receipt.rules` does: the change above is version 2. A
+rerun compares it, so a read answered last month can be explained under the rules it was answered
+by rather than under today's. This is the seam §4.13 needs for anything learned: what a policy
+learns is state, and state that orders answers has to be versioned like the vocabulary it sits
+beside.
+
 ### 3.3 Scores — step 6
 
 For each candidate, the soft score is the sum of the weights of the dimensions its matched soft

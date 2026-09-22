@@ -63,12 +63,26 @@ struct context {
     std::uint32_t budget_dropped = 0;    // of the skipped, those the budget had no room for
     std::uint32_t tokens = 0;
     bool over_budget = false;
+    bool procedure_oversized = false;  // named, not placed: it alone exceeded the budget
 };
 
 /// What a read depended on, so it can be rerun later (01 §3.1, 04 §5).
+/// Which version of the ranking rules answered a read. A receipt pins the snapshot and the
+/// vocabulary, so the same question gets the same answer — but only if the rules that turned
+/// candidates into an order have not changed underneath it, and until now nothing recorded them.
+/// Bump it whenever selection or ordering changes, and say why here.
+///
+///   1  the rules as first shipped
+///   2  2026-09-22: the procedure slot is chosen by rank among the term's matches, preferring an
+///      accepted generalisation, instead of by lowest id among everything the hard tags admit; and
+///      a slot that alone exceeds the budget is named rather than placed, instead of emptying the
+///      whole answer.
+inline constexpr std::uint32_t ranking_rules = 2;
+
 struct receipt {
     row_id snapshot;
     std::uint64_t version = 0;
+    std::uint32_t rules = ranking_rules;   // what ordered it; a rerun under other rules is not the same run
     digest taxonomy;
     query asked;
     std::vector<row_id> keys;            // the procedure first, then the selected, in order

@@ -585,6 +585,7 @@ private:
         py::dict d;
         d["snapshot"] = r.snapshot.hex();
         d["version"] = r.version;
+        d["rules"] = r.rules;          // a rerun under other ranking rules is not the same run
         d["taxonomy"] = r.taxonomy.hex();
         d["hard"] = r.asked.hard;
         d["soft"] = r.asked.soft;
@@ -651,8 +652,11 @@ private:
             pd["memory"] = ref(pm.id);
             pd["key"] = s.record(pm.id).key.hex().substr(0, 12);
             pd["title"] = s.record(pm.id).title;
-            pd["text"] = m_service->text_of(s, pm.id).value_or("");
+            // Named, not paid for, when it alone is larger than the budget: the reader learns the
+            // procedure exists without it swallowing everything that was asked for.
+            pd["text"] = out.ctx.procedure_oversized ? std::string() : m_service->text_of(s, pm.id).value_or("");
             pd["tokens"] = pm.tokens;
+            if (out.ctx.procedure_oversized) pd["over_budget"] = true;
             if (!out.ctx.procedure_evidence.empty()) pd["evidence"] = evidence_list(s, out.ctx.procedure_evidence);
             d["procedure"] = pd;
         } else {
