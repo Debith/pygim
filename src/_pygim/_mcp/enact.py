@@ -792,18 +792,37 @@ class EnactServer:
         except OSError:
             return False
 
+    @staticmethod
+    def _argv_still_runs() -> bool:
+        """Whether this process could start itself again. A reload re-execs the argv it was started
+        with, so a command that has since been renamed would exec into `No such command` and take
+        the server down instead of refreshing it — which is exactly what `oo memory mcp` became
+        when the system was renamed to enact. Re-exec only when some argument still names a command
+        this installation has."""
+        try:
+            from pygim.__main__ import cli_oo
+            known = set(cli_oo.commands)
+        except Exception:
+            return True                      # cannot tell: behave as before rather than refuse
+        return any(arg in known for arg in sys.argv)
+
     def reload(self, stdout: IO[str]) -> None:
         """Replaces this process with a fresh one, between messages. The pipes are file descriptors,
         and exec keeps them, so the host's connection survives; the session number travels in the
-        environment so the audit log does not split a session in two. Never returns."""
-        print(f"{SERVER_NAME}: reloading into the code on disk", file=sys.stderr)
-        stdout.flush()
-        try:
+        environment so the audit log does not split a session in two. Returns only when it refused."""
+        try:                             # first, so a refusal below is not asked again on every message
             marker = Path(self._memory.root) / "local" / "reload" if self._memory is not None else None
             if marker is not None and marker.is_file():
                 marker.unlink()
         except OSError:
             pass
+        if not self._argv_still_runs():
+            print(f"{SERVER_NAME}: not reloading — this server was started as "
+                  f"`{' '.join(sys.argv[1:])}`, which this installation no longer has. "
+                  f"Reconnect the client to replace it.", file=sys.stderr)
+            return
+        print(f"{SERVER_NAME}: reloading into the code on disk", file=sys.stderr)
+        stdout.flush()
         os.environ[RELOADED_ENV] = "1"
         if self.session is not None:
             os.environ[SESSION_ENV] = str(self.session)

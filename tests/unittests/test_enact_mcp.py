@@ -284,6 +284,18 @@ class TestReloading:
         server.signalled = True                                        # what the SIGHUP handler sets
         assert server._reload_asked()
 
+    def test_it_refuses_to_exec_into_a_command_this_installation_no_longer_has(self, server, monkeypatch, capsys):
+        """A reload re-execs the argv the server was started with. When `oo memory mcp` became
+        `oo enact mcp`, every running server's argv named a command that had ceased to exist, so a
+        reload would have exec'd into `No such command` and taken the server down. It refuses
+        instead, and clears the marker so it does not refuse again on every message."""
+        marker = Path(server.memory.root) / "local" / "reload"
+        marker.write_text("asked", encoding="utf-8")
+        monkeypatch.setattr(sys, "argv", ["oo", "memory", "mcp"])      # the name it was started under
+        server.reload(io.StringIO())                                   # returns rather than exec'ing
+        assert "not reloading" in capsys.readouterr().err
+        assert not marker.exists() and not server._reload_asked()
+
     def test_a_reloaded_server_resumes_its_session_and_says_the_tools_may_have_moved(self, tmp_path, monkeypatch):
         root = tmp_path / "repo"
         Enact.init(str(root))
