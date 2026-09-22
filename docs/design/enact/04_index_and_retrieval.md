@@ -183,7 +183,18 @@ codebook entry. It exists for memories only: a *query* naming `any` is refused, 
 answer this question somehow" is a different request that nobody has needed. The refusal says
 what to do instead — name the value the work is — because the first field report (D-D-2024,
 2026-09-15) showed an agent reaching for `task=any` when reference facts did not depend on the
-task: those facts should carry `task=any`, and then any task in the query finds them. And `any` never
+task: those facts should carry `task=any`, and then any task in the query finds them.
+
+The refusal has one exception, and it is forced: a dimension may offer nothing *but* `any`. A store
+initialised from the base vocabulary has only `domain=any` and `artifact=any` until a pack lands,
+and the machine's global store stays that way for good, because nothing in it is about one project
+or one kind of thing. Refusing `any` there leaves the dimension unqueryable — a new store cannot be
+read on two of its three hard dimensions, and the global store cannot be read on `domain` at all.
+So `any` is nameable exactly when it is the only live value its dimension has, and the procedure
+slot reads it the same way: `artifact=any` anchors a slot there and nowhere else. The two rules
+have to agree, or a query that is accepted would return no procedure.
+
+And `any` never
 scores — in a query that softens its dimension it simply does not match — or generic memories
 would outrank specific ones on every read.
 

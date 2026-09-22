@@ -326,7 +326,7 @@ private:
         if (!artifact || !task || !procedure) return std::nullopt;
         std::vector<tag_id> arts, tasks;
         for (const auto t : q.hard) {
-            if (m_tax->info(t).any) continue;
+            if (m_tax->info(t).any && !m_tax->only_any(m_tax->dimension_of(t))) continue;
             if (m_tax->dimension_of(t) == *artifact) arts.push_back(t);
             if (m_tax->dimension_of(t) == *task) tasks.push_back(t);
         }

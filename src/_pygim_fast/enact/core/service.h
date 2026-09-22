@@ -1103,9 +1103,9 @@ private:
                 why = {"retired", n + " is retired" + (tax.info(*t).see.empty() ? "" : " — see " + tax.info(*t).see), {}};
                 return false;
             }
-            if (tax.info(*t).any) {
+            if (tax.info(*t).any && !tax.only_any(tax.dimension_of(*t))) {
                 why = {"any in a query", n + ": `any` is for memories that apply to every value, not for queries — name the value your work is; "
-                                            "memories tagged `any` answer every value, so they are found too", {}};
+                                            "memories tagged `any` answer every value, so they are found too", tax.suggestions(n)};
                 return false;
             }
             if (std::find(out.begin(), out.end(), *t) == out.end()) out.push_back(*t);

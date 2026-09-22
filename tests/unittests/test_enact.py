@@ -229,6 +229,39 @@ class TestReading:
         assert mem.show(f["memory"])["superseded_by"] == [v2["memory"]]
 
 
+class TestADimensionThatOffersOnlyAny:
+    """`any` is refused in a query, because it means "every value" and a query should name the value
+    its work is. But a dimension can have nothing else: a store initialised from the base vocabulary
+    has only `domain=any` and `artifact=any` until a pack lands, and the machine's global store stays
+    that way for good, because nothing in it is about one project. The refusal lifts exactly there."""
+
+    def test_a_fresh_store_can_be_read_on_the_dimensions_it_has_no_values_for(self, tmp_path):
+        bare = tmp_path / "bare"
+        Enact.init(str(bare))
+        m = Enact(str(bare))
+        m.remember(title="Explain in layers", text="the assumed words first", reason="a preference",
+                   tags=["domain=any", "artifact=any", "task=explain", "kind=preference"])
+        r = m.read(hard=["domain=any", "artifact=any", "task=explain"])
+        assert "refused" not in r and r["candidates"] == 1
+        assert [x["title"] for x in r["memories"]] == ["Explain in layers"]
+
+    def test_the_slot_fills_on_any_where_any_is_the_only_artifact_there_is(self, tmp_path):
+        bare = tmp_path / "bare"
+        Enact.init(str(bare))
+        m = Enact(str(bare))
+        m.remember(title="How to explain", text="1 the words\n2 one line\n3 a table", reason="the procedure",
+                   tags=["domain=any", "artifact=any", "task=explain", "kind=procedure"])
+        r = m.read(hard=["domain=any", "artifact=any", "task=explain"])
+        assert r["procedure"] is not None and r["procedure"]["title"] == "How to explain"
+
+    def test_it_is_refused_again_as_soon_as_the_dimension_has_a_value_to_name(self, mem):
+        """The dnd pack gives `domain` and `artifact` real values, so `any` stops being nameable."""
+        seed(mem)
+        r = mem.read(hard=["domain=any", "artifact=spell", "task=design"])
+        assert r["refused"] == "any in a query" and "domain=any" in r["message"]
+        assert "domain=dnd" in r["facts"]                     # and it names what to say instead
+
+
 class TestWhatAReadSays:
     """Beyond the ranked memories: counts instead of the list of the rest, the tags the candidates
     carry, the documents they cite, and a term to narrow them (04 §3.8)."""

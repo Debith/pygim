@@ -193,6 +193,16 @@ public:
         return out;
     }
 
+    /// Whether `d` offers nothing a query could name: no live value but `any`. A vocabulary
+    /// starts this way and a store may stay this way — the global store's `domain` has only
+    /// `any`, because nothing in it is about one project. Refusing `any` in a query then leaves
+    /// that dimension unqueryable, so the refusal lifts exactly here (04 §3.2).
+    [[nodiscard]] bool only_any(dimension_id d) const {
+        for (const auto t : values_of(d))
+            if (!m_tags[t.value()].any && !m_tags[t.value()].retired) return false;
+        return true;
+    }
+
     /// The hard-by-default dimensions a memory in `domains` must answer: every
     /// base one, and those of the packs named for its domains.
     [[nodiscard]] std::vector<dimension_id> hard_dimensions_for(const std::vector<std::string>& domains) const {
