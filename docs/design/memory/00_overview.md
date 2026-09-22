@@ -631,6 +631,24 @@ what it guards is the only operation that takes memories out of a reader's sight
 the instances are placed on their own; a person who disagrees retires the generalisation or
 asks for a narrower one.
 
+### 4.11.1 The gate has to be readable
+
+The fold is the one operation that hides memories from a reader, so a person opens it — and for a
+week that person was asked to approve a twelve-character key. Debith, 2026-09-21, with thirteen
+waiting in the D-D-2024 store: "it is impossible to me to review it. Entry 930c278ad2ec means
+nothing to me."
+
+A gate that cannot be read is not a gate; it is a rubber stamp with extra steps. So the command
+shows what it is asking about: `oo memory accept` with no argument lists what is waiting by title
+with the number each would fold; `--all` walks them one at a time, showing the text, the tags and
+every memory that would stop being placed on its own, and asks. Enter accepts, because by then the
+reader has the whole thing in front of them, and a wrong yes costs one retire — which unfolds the
+instances again. `--yes` skips the display, which is what a script should have to say out loud.
+
+The general rule this is a case of: **wherever the design reserves a step for a person, that step
+owes them the content, not an identifier.** The same is true of a vocabulary pack (its study report
+is the reading surface) and of a message in the mailbox.
+
 ### 4.12 Where memories live: the project's store, and the global one
 
 A store belongs to a project: its vocabulary is that domain's, and its memories are about that

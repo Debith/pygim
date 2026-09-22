@@ -4,27 +4,11 @@ Python Gimmicks Command-Line Interface.
 """
 
 import click
+from _pygim._cli._banner import BannerGroup
 from _pygim._cli._cli_app import GimmicksCliApp, flag_opt
 
 
-# "PyGim" in figlet's small font. Click rewraps help text unless a paragraph
-# starts with a line holding only \b (the backspace character), so the banner
-# is passed as help= with a real one; a raw docstring would carry a literal
-# backslash and b instead.
-_PYGIM = r"""
- ___       ___ _
-| _ \_  _ / __(_)_ __
-|  _/ || | (_ | | '  \
-|_|  \_, |\___|_|_|_|_|
-     |__/ """
-
-
-def _banner(tagline):
-    """Help text: the PyGim banner with *tagline*, kept verbatim by click."""
-    return "\b" + _PYGIM + tagline
-
-
-@click.group(help=_banner("Python Gimmicks"))
+@click.group(cls=BannerGroup, tagline="Python Gimmicks")
 def cli():
     pass
 
@@ -63,7 +47,7 @@ def stubs(check):
     GimmicksCliApp().stubs(check=check)
 
 
-class _OoGroup(click.Group):
+class _OoGroup(BannerGroup):
     """`oo <verb> ...` runs a verb (``docs serve``); anything else is free text
     for the assistant; nothing at all shows the help."""
 
@@ -81,7 +65,7 @@ class _OoGroup(click.Group):
         return super().invoke(ctx)
 
 
-@click.group(cls=_OoGroup, invoke_without_command=True, help=_banner("AI powered Python Gimmicks"))
+@click.group(cls=_OoGroup, invoke_without_command=True, tagline="AI powered Python Gimmicks")
 @click.pass_context
 def cli_oo(ctx):
     if ctx.invoked_subcommand is None and ctx.meta.get("free_text") is None:
@@ -179,12 +163,15 @@ def memory_ingest(corpus, root):
               help="Accept a drafted vocabulary pack instead: check it, make it live, add its cited documents.")
 @click.option("--reason", default="", help="MEMORY: why the pattern holds; kept in the audit log.")
 @click.option("--replace", is_flag=True, help="--pack: replace a pack of the same name that is already live.")
+@flag_opt("--all", "walk", help="Read every generalisation waiting for you, one at a time, and answer each.")
+@flag_opt("-y", "--yes", "assume_yes", help="Accept without showing it first. For scripts; a person should read it.")
 @_ROOT
-def memory_accept(memory_ref, pack, reason, replace, root):
-    """Accept what the agent drafted, after reading it: a generalisation (MEMORY, from
-    reviews/session-<n>.md), whose instances then fold under it; or a vocabulary pack (--pack, from
-    its study report), which then becomes the vocabulary. A person runs this — the agent has no tool for it."""
-    GimmicksCliApp().memory_accept(memory=memory_ref, pack=pack, reason=reason, replace=replace, root=root)
+def memory_accept(memory_ref, pack, reason, replace, walk, assume_yes, root):
+    """Accept what the agent drafted, after reading it: a generalisation, whose instances then fold
+    under it; or a vocabulary pack (--pack), which then becomes the vocabulary. With no argument it
+    shows what is waiting, in words rather than keys. A person runs this — the agent has no tool for it."""
+    GimmicksCliApp().memory_accept(memory=memory_ref, pack=pack, reason=reason, replace=replace,
+                                   walk=walk, assume_yes=assume_yes, root=root)
 
 
 @memory.command("status")

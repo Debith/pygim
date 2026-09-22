@@ -158,12 +158,16 @@ class TestSetup:
         assert _stores.git(["config", "--get", _stores.GIT_KEY], project) is None
         assert _stores.find(cwd=isolated / "proj-feature") is None       # another branch's worktree has its own, or none
 
-    def test_one_command_per_job(self):
+    def test_one_command_per_job(self, project, isolated, monkeypatch):
         for gone in ("init", "accept-pack"):
             out = CliRunner().invoke(cli_oo, ["memory", gone])
             assert out.exit_code != 0 and "No such command" in out.output, gone
-        neither = CliRunner().invoke(cli_oo, ["memory", "accept"])
-        assert neither.exit_code != 0 and "accept one thing" in neither.output
+        Memory.init(str(project / ".memory"))
+        monkeypatch.chdir(project)
+        nothing = CliRunner().invoke(cli_oo, ["memory", "accept"])       # no argument asks, it does not fail
+        assert nothing.exit_code == 0 and "nothing is waiting" in nothing.output
+        both = CliRunner().invoke(cli_oo, ["memory", "accept", "abcdef123456", "--pack", str(project / "README.md")])
+        assert both.exit_code != 0 and "accept one thing" in both.output
 
     def test_outside_git_a_branch_store_is_refused_with_the_alternative(self, isolated):
         plain = isolated / "plain"

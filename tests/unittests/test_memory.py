@@ -10,7 +10,9 @@ import shutil
 import textwrap
 
 import pytest
+from click.testing import CliRunner
 
+from pygim.__main__ import cli_oo
 from pygim.memory import Memory, VocabularyError
 
 PACK = textwrap.dedent("""\
@@ -628,17 +630,47 @@ class TestGeneralising:
         assert "**Accepted**" in path.read_text(encoding="utf-8")
 
     def test_acceptance_survives_a_reopen_and_is_a_person_s_command(self, root, mem):
-        from click.testing import CliRunner
-        from pygim.__main__ import cli_oo
-
         p, y, f = seed(mem)
         e = ember_ward(mem, p, y, f)
         g = write(mem, "Reactions are niches", PATTERN, DESIGN + ["kind=principle"],
                   generalises=[f["memory"], e["memory"]], seen=[p["memory"], y["memory"]])
         key = mem.show(g["memory"])["key"][:12]
-        out = CliRunner().invoke(cli_oo, ["memory", "accept", key, "--reason", "checked", "--root", str(root)])
+        out = CliRunner().invoke(cli_oo, ["memory", "accept", key, "--reason", "checked", "--root", str(root)],
+                                 input="\n")                       # it shows the pattern; Enter accepts
         assert out.exit_code == 0, out.output
+        assert "Reactions are niches" in out.output and "Frost Ward" in out.output
         assert Memory(str(root)).read(DESIGN, max=10)["folded"] == 2
+
+    def test_accepting_shows_what_it_is_before_asking(self, root, mem):
+        """Debith, 2026-09-21: \"it is impossible to me to review it. Entry 930c278ad2ec means nothing
+        to me.\" The one step reserved for a person showed only a key."""
+        p, y, f = seed(mem)
+        e = ember_ward(mem, p, y, f)
+        g = write(mem, "Reactions are niches", PATTERN, DESIGN + ["kind=principle"],
+                  generalises=[f["memory"], e["memory"]], seen=[p["memory"], y["memory"]])
+        waiting = mem.waiting_acceptance()
+        assert [(w["memory"], w["title"], [x["title"] for x in w["folds"]]) for w in waiting] == [
+            (g["memory"], "Reactions are niches", ["Frost Ward", "Ember Ward"])]
+        assert PATTERN.splitlines()[0] in waiting[0]["text"] and "kind=principle" in waiting[0]["tags"]
+
+        listed = CliRunner().invoke(cli_oo, ["memory", "accept", "--root", str(root)])
+        assert listed.exit_code == 0 and "Reactions are niches" in listed.output and "folds 2" in listed.output
+        walked = CliRunner().invoke(cli_oo, ["memory", "accept", "--all", "--root", str(root)], input="\n")
+        assert walked.exit_code == 0, walked.output
+        assert "Frost Ward" in walked.output and "accepted 1 of 1" in walked.output      # Enter accepts
+        assert Memory(str(root)).waiting_acceptance() == []
+        assert Memory(str(root)).read(DESIGN, max=10)["folded"] == 2
+
+    def test_nothing_is_accepted_by_answering_no(self, root, mem):
+        p, y, f = seed(mem)
+        e = ember_ward(mem, p, y, f)
+        g = write(mem, "Reactions are niches", PATTERN, DESIGN + ["kind=principle"],
+                  generalises=[f["memory"], e["memory"]], seen=[p["memory"], y["memory"]])
+        out = CliRunner().invoke(cli_oo, ["memory", "accept", g["key"][:12], "--root", str(root)], input="n\n")
+        assert out.exit_code == 0 and "left as it is" in out.output
+        assert len(Memory(str(root)).waiting_acceptance()) == 1
+        forced = CliRunner().invoke(cli_oo, ["memory", "accept", g["key"][:12], "--yes", "--root", str(root)])
+        assert forced.exit_code == 0 and "fold from the next read" in forced.output       # scripts say so
 
     def test_a_read_folds_instances_under_their_generalisation(self, mem):
         p, y, f = seed(mem)

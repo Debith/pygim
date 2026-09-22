@@ -150,6 +150,16 @@ oo memory accept <key> --reason "the cases do share it"
 Only then do that pattern's cases fold under it in reads. The agent has no tool to accept its own
 pattern.
 
+Reading them is the point, so the command shows rather than asks for a key:
+
+```bash
+oo memory accept              # what is waiting, by title, and how many memories each would fold
+oo memory accept --all        # each one in full — text, tags, what it folds — answered y / n / q
+```
+
+Enter accepts. A wrong yes is not a trap: retiring an entry procedure unfolds its instances again.
+`--yes` skips the display, for scripts.
+
 ## Leaving messages for other sessions
 
 Several sessions, agents and people work on one project. The store's **mailbox** is where they
@@ -175,7 +185,7 @@ printed by the session-start hook, so a new session sees them without being aske
 | `oo memory reload` | ask running servers to restart into the installed code (`--signal` reaches other projects') |
 | `oo memory mailbox [--post TEXT]` | read or leave messages for other sessions and agents |
 | `oo memory status` | which store, its version, reviews waiting, proposals |
-| `oo memory accept <key>` | accept a generalisation, so its cases fold |
+| `oo memory accept [--all]` | see what is waiting, in words, and accept what you agree with |
 | `oo memory accept --pack <proposal>` | make a drafted vocabulary pack live |
 | `oo memory ingest <file>` | bring in hand-written memories |
 | `oo memory mcp` | the server itself; Claude Code runs this |

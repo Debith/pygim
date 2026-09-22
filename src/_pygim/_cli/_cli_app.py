@@ -231,13 +231,56 @@ class GimmicksCliApp:
         if result["refused"]:
             raise click.exceptions.Exit(1)
 
+    @staticmethod
+    def _show_waiting(waiting: dict, index: str = "") -> None:
+        """One generalisation as a person needs to see it before answering for it: what it says, and
+        which memories stop being placed on their own once it is accepted."""
+        click.echo(f"\n{index}{waiting['memory']}  {waiting['title']}")
+        click.echo("  " + "\n  ".join(waiting["text"].strip().splitlines()))
+        click.echo(f"  tags: {' '.join(waiting['tags'])}")
+        click.echo(f"  folds {len(waiting['folds'])} memories, listed under it instead of placed on their own:")
+        for f in waiting["folds"]:
+            click.echo(f"    {f['memory']} {f['title']}")
+        click.echo(f"  key: {waiting['key']}")
+
     def memory_accept(self, *, memory: Optional[str], pack: Optional[str], reason: str, replace: bool,
-                      root: Optional[str]) -> None:
+                      walk: bool = False, assume_yes: bool = False, root: Optional[str]) -> None:
         """Accept a generalisation (*memory*) or a drafted vocabulary pack (*pack*) in the project's store."""
         from pygim.memory import Memory
 
-        if (memory is None) == (pack is None):
+        if memory is not None and pack is not None:
             raise click.UsageError("accept one thing: a generalisation as MEMORY, or a vocabulary draft with --pack")
+        if memory is None and pack is None:
+            store = Memory(self._store(root))
+            waiting = store.waiting_acceptance()
+            if not waiting:
+                click.echo("nothing is waiting for you")
+                return
+            if not walk:
+                click.echo(f"{len(waiting)} waiting for you. Read them with `oo memory accept --all`, "
+                           f"which shows each and asks:")
+                for w in waiting:
+                    click.echo(f"  {w['memory']} {w['title']}  (folds {len(w['folds'])})")
+                return
+            accepted = 0
+            for n, w in enumerate(waiting, 1):
+                self._show_waiting(w, index=f"[{n}/{len(waiting)}] ")
+                # Enter accepts: by the time this prompt appears the reader has the whole thing in front
+                # of them, and a wrong yes costs one retire, which unfolds the instances again.
+                answer = click.prompt("  accept this one? Enter accepts", type=click.Choice(["y", "n", "q"]),
+                                      default="y", show_choices=True)
+                if answer == "q":
+                    break
+                if answer == "n":
+                    continue
+                done = store.accept(w["key"], reason=reason or "read and accepted")
+                if not done["ok"]:
+                    click.echo(f"  refused: {done['message']}")
+                    continue
+                accepted += 1
+                click.echo(f"  accepted — {len(w['folds'])} memories now fold under it")
+            click.echo(f"\naccepted {accepted} of {len(waiting)}; the rest are still waiting")
+            return
         if pack is not None:
             from _pygim._mcp import _packs
 
@@ -255,7 +298,15 @@ class GimmicksCliApp:
                 click.echo(f"  locator: {warning}")
             click.echo("a running MCP server picks it up at its next call")
             return
-        result = Memory(self._store(root)).accept(memory, reason=reason)
+        store = Memory(self._store(root))
+        if not assume_yes:                       # a key says nothing; show what is being approved
+            match = [w for w in store.waiting_acceptance() if memory in (w["key"], w["memory"]) or w["key"].startswith(memory)]
+            if match:
+                self._show_waiting(match[0])
+                if not click.confirm("  accept this one? Enter accepts", default=True):
+                    click.echo("left as it is")
+                    return
+        result = store.accept(memory, reason=reason or "read and accepted")
         if not result["ok"]:
             raise click.ClickException(f"{result['refused']}: {result['message']}"
                                        + "".join(f"\n  {fact}" for fact in result["facts"]))

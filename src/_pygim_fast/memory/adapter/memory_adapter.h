@@ -103,6 +103,7 @@ public:
         d["reviews"] = reviews;
         d["proposals"] = proposals();
         d["mailbox"] = mailbox(false, {});   // what other sessions left here, still open
+        d["waiting_acceptance"] = waiting_acceptance().size();
         return d;
     }
 
@@ -354,6 +355,38 @@ public:
             if (!m.about.empty()) d["about"] = m.about;
             if (!m.reply_to.empty()) d["reply_to"] = m.reply_to;
             if (!m.resolves.empty()) d["resolves"] = m.resolves;
+            out.append(d);
+        }
+        return out;
+    }
+
+    /// Everything waiting for a person to accept it, with what each would fold. The gate is the one
+    /// step no agent may take, so it must be the most readable thing here — a key alone tells a
+    /// reader nothing about what they are approving.
+    py::list waiting_acceptance() {
+        const auto snap = m_service->current();
+        py::list out;
+        for (std::size_t i = 0; i < snap->size(); ++i) {
+            const memory_id m(static_cast<std::uint32_t>(i));
+            const auto& r = snap->record(m);
+            if (r.generalises.empty() || !snap->is_head(m) || snap->is_accepted(m)) continue;
+            py::dict d;
+            d["memory"] = ref(m);
+            d["key"] = r.key.hex().substr(0, 12);
+            d["title"] = r.title;
+            d["text"] = m_service->text_of(*snap, m).value_or("");
+            d["session"] = r.session;
+            std::vector<std::string> tags;
+            for (const auto t : snap->tags_of(m).members()) tags.push_back(snap->tax().info(tag_id(t)).qualified);
+            d["tags"] = tags;
+            py::list folds;
+            for (const auto& k : r.generalises) {
+                const auto x = snap->find(k);
+                if (!x) continue;
+                folds.append(py::dict(py::arg("memory") = ref(*x), py::arg("key") = snap->record(*x).key.hex().substr(0, 12),
+                                      py::arg("title") = snap->record(*x).title));
+            }
+            d["folds"] = folds;
             out.append(d);
         }
         return out;

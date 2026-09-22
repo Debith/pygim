@@ -60,6 +60,8 @@ operation returns a plain dict, and a refused write is a result with
              "identical content. With `generalises`, it states the pattern two or more heads share: they\n"
              "stay heads, and it must cover them on every hard dimension. `origin=\"seed\"` marks a store\n"
              "being seeded from existing documents, which has nothing to have read: no unread check.")
+        .def("waiting_acceptance", &Memory::waiting_acceptance,
+             "Every generalisation waiting for a person, with its text and the memories it would fold.")
         .def("accept", &Memory::accept, py::arg("memory"), py::kw_only(), py::arg("reason") = "", py::arg("author") = "human",
              "A human accepts a generalisation: from the next read its instances fold under it. Returns the\n"
              "refreshed report's path as `report`.")
