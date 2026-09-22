@@ -47,6 +47,9 @@ public:
     [[nodiscard]] const row_id& head() const noexcept { return m_head; }
     [[nodiscard]] std::uint64_t version() const noexcept { return m_version; }
     [[nodiscard]] const taxonomy& tax() const noexcept { return *m_tax; }
+    /// The vocabulary version the newest taxonomy row records — the one the rows after it were
+    /// written against, not necessarily the one loaded now.
+    [[nodiscard]] const digest& recorded_taxonomy() const noexcept { return m_recorded_taxonomy; }
     [[nodiscard]] const std::shared_ptr<const taxonomy>& tax_ptr() const noexcept { return m_tax; }
 
     // ── contents ──────────────────────────────────────────────────────────
@@ -109,7 +112,10 @@ public:
         else if (r.op == ops::retire) apply_retire(r);
         else if (r.op == ops::accept) apply_accept(r);
         else if (r.op == ops::lessons) apply_lessons(r);
-        // taxonomy and merge rows are history: they move the head, nothing else
+        // a taxonomy row records which vocabulary the rows after it were written against; merge rows
+        // are history. Replay is causal, so the last one applied is the last one recorded — which is
+        // what a scan of the rows cannot tell, once several share a second.
+        else if (r.op == ops::taxonomy) m_recorded_taxonomy = digest::from_hex(r.get("version")).value_or(digest{});
         m_head = r.id;
         ++m_version;
     }
@@ -560,6 +566,7 @@ private:
 
     std::shared_ptr<const taxonomy> m_tax;
     row_id m_head;
+    digest m_recorded_taxonomy{};   // the version the newest taxonomy row names
     std::uint64_t m_version = 0;
     std::vector<std::shared_ptr<const memory_record>> m_memories;
     std::vector<std::shared_ptr<const tag_set>> m_forward;

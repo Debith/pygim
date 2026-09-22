@@ -224,6 +224,56 @@ inventory before it is recorded, and the passage comes back with the result. Tha
 about its limit: it proves the document is known here and the lines exist, not that they say what
 they are cited for. Both of this design's own wrong locators were in range.
 
+### 3.5.2 A timestamp is not an order — found 2026-09-22
+
+Rows carry a second-resolution time, a clone and a per-clone `seq`. Anything that needs *the latest*
+row of some kind has to say what latest means, and twice now the answer was "the greatest time,
+ties broken by row id" — which inside one second is a coin toss between unrelated digests.
+
+The mailbox hit it first and was given `seq` (§3.6). The vocabulary hit it next. Opening a store
+appends a `taxonomy` row when the loaded vocabulary differs from the one the last such row records,
+and that row was found by scanning for the greatest time. A store created, given a pack and written
+to inside the same second could have its *first* taxonomy row win the tie for good — and then every
+open, for ever, appended another row claiming a change that had not happened.
+
+| | Before | After |
+|---|---|---|
+| after `setup`, a pack and one write | a taxonomy row per open, without end | none |
+| what decides which row is latest | `time`, ties by row id | the order replay applied them in |
+
+Replay is already causal — it topologically sorts on `parents` — so the snapshot records the
+version as it applies each taxonomy row, and nothing has to guess. The rule, stated once: **a row's
+time is for people; only replay order is an order.** Any future "the latest row that…" belongs in
+the snapshot, not in a scan.
+
+It was invisible from inside one process, which is why it survived a suite that exercised every
+operation. It showed on the first test that asked what an operation had left behind (§3.5.3).
+
+### 3.5.3 Tested from outside, on what is left behind — settled 2026-09-22
+
+The suite drives ENACT in-process, which is the only way to test most of it quickly, and which
+cannot see anything a *process* does on its way in or out. `tests/unittests/test_enact_cli.py` is
+the other kind: every step is `oo enact ...` as a process, JSON in and JSON out, nothing imported.
+It sees the CLI, the MCP dispatch, the adapter, the service and the files store in one round trip,
+which costs about 90 ms — cheap enough that being black box is not a sacrifice.
+
+It is deliberately about refusals, because a refusal is this design's most distinctive behaviour:
+it is a result rather than an exception, it names the facts that would make the call succeed, and
+it must leave the store exactly as it was. That last clause is the one no other test states, so
+each scenario ends by fingerprinting `audit/`, `memories/`, `objects/` and `taxonomy/` and
+requiring them byte-identical. Usage and receipts are left out on purpose: being read is a thing
+that happened, and it is right that it is recorded.
+
+Writing it found §3.5.2 within the hour, in a place no in-process test could reach.
+
+A note on what "a fake repository" can mean here. The store is a strategy (§7), so an in-memory one
+is buildable — but a test that speaks only through commands runs a new process per step, and a
+store held in one process's memory is gone before the next one starts. The two cannot both hold.
+What these tests need from a fake is isolation, not speed, and that is what a store under the
+test's own temporary directory gives: the real strategy, exercised in full, over data that is the
+test's own and nobody else's (global memory #2). Where speed does matter, pointing the temporary
+directory at a RAM-backed filesystem costs no code at all.
+
 ### 3.6 The mailbox — settled 2026-09-21
 
 Several sessions and agents work on one project, on different branches and machines, and they have

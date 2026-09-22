@@ -161,7 +161,7 @@ public:
             append_locked(std::move(r));
         }
         const digest version = m_tax->version();
-        if (last_taxonomy_version(rows) != version) {
+        if (current()->recorded_taxonomy() != version) {
             m_store.freeze_taxonomy(version);
             row r;
             r.op = std::string(ops::taxonomy);
@@ -935,14 +935,6 @@ private:
             if (!parents.count(r.id)) out.push_back(r.id);
         std::sort(out.begin(), out.end());
         return out;
-    }
-
-    [[nodiscard]] static digest last_taxonomy_version(const std::vector<row>& rows) {
-        // the latest by time among taxonomy rows; replay order is not needed for one field
-        const row* best = nullptr;
-        for (const auto& r : rows)
-            if (r.op == ops::taxonomy && (!best || r.time > best->time || (r.time == best->time && best->id < r.id))) best = &r;
-        return best ? digest::from_hex(best->get("version")).value_or(digest{}) : digest{};
     }
 
     /// Folds in rows another process appended. Holds the lock (callers take it).

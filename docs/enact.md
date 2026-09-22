@@ -222,3 +222,20 @@ without asking.
 - **You edited a file under `memories/`.** It is kept as you left it, and `oo enact status` lists
   it as a review. The file is a view: to make the edit the memory, have the agent write it
   superseding that memory.
+
+## Driving it from a shell
+
+Everything the agent can do, `oo enact call` can do, through the same dispatch the MCP server uses:
+
+```bash
+oo enact call read --json '{"hard": ["domain=pygim", "artifact=store", "task=implement"]}'
+echo '{"memory": "#12", "cite": "design-03:L451", "reason": "where it is said"}' | oo enact call link
+```
+
+It prints the tool's JSON result. A refusal is a result here as everywhere else — it prints with
+`refused` and exits **0**. Exit **1** means the call could not be made at all: no such tool, or the
+arguments were not JSON. `oo enact call nonesuch --json '{}'` lists the tools there are.
+
+This is what the end-to-end tests use: a process per step, nothing imported, so they see the CLI,
+the MCP dispatch, the adapter, the C++ service and the files store the way a shell script does.
+One round trip is about 90 ms.

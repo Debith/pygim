@@ -111,6 +111,24 @@ def enact_setup(kind, name, path, source, no_register):
     GimmicksCliApp().enact_setup(kind=kind, name=name, path=path, source=source, register=not no_register)
 
 
+@enact.command("call")
+@click.argument("name")
+@click.option("--json", "arguments", default=None,
+              help="The tool's arguments as a JSON object. Without it, they are read from stdin.")
+@_ROOT
+def enact_call(name, arguments, root):
+    """Call one tool of the agent surface from a shell, and print its JSON result.
+
+    The same dispatch the MCP server uses, so a script drives the whole stack through commands:
+
+        oo enact call read --json '{"hard": ["domain=pygim", "artifact=store", "task=implement"]}'
+
+    A refusal is a result: it prints with `refused` and exits 0. Exit 1 means the call could not be
+    made at all — no such tool, or the arguments were not JSON.
+    """
+    GimmicksCliApp().enact_call(name=name, arguments=arguments, root=root)
+
+
 @enact.command("mcp")
 @_ROOT
 def enact_mcp(root):

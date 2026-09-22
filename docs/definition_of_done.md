@@ -76,6 +76,15 @@ line says so in its description and why.
 - **The changelog bullet describes what ships**, not the path to it, and says
   BREAKING when it is.
 
+## What it leaves behind
+
+An operation is not done when it returns the right answer; it is done when what it wrote is right
+and what it did not write is absent. For anything that refuses, a test says so explicitly: the
+audit log, the head views, the content objects and the vocabulary are byte-identical afterwards.
+Prefer to check this from outside the process — `oo enact call` makes every operation reachable
+from a shell, and the defects that survive in-process tests live in what a process does on its way
+in and out (design 03 §3.5.2, §3.5.3).
+
 ## What it looks like
 
 - **Output is read at a glance.** Anything a person reads — a command's output, a served page —

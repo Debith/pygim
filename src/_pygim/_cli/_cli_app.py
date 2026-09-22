@@ -106,6 +106,42 @@ class GimmicksCliApp:
         except (RuntimeError, VocabularyError) as exc:
             raise click.ClickException(str(exc)) from exc
 
+    def enact_call(self, *, name: str, arguments: Optional[str], root: Optional[str]) -> None:
+        """One tool of the agent surface, from a shell. The same dispatch the MCP server uses, so a
+        script — or a test — drives the whole stack through the commands, with no Python import of
+        its own: `oo enact call read --json '{"hard": ["domain=dnd", "artifact=spell",
+        "task=design"]}'`. Arguments come from --json or, without it, from stdin.
+
+        A refusal is a result here, as everywhere else in this system: it prints as JSON with
+        `refused` and exits 0. Exit 1 means the call could not be made at all — the tool does not
+        exist, or the arguments were not JSON."""
+        import json as _json
+
+        from _pygim._mcp import enact as server
+
+        text = arguments if arguments is not None else sys.stdin.read()
+        try:
+            parsed = _json.loads(text or "{}")
+        except ValueError as bad:
+            raise click.ClickException(f"--json is not JSON: {bad}") from bad
+        if not isinstance(parsed, dict):
+            raise click.ClickException("--json must be an object of the tool's arguments")
+        if name not in {tool["name"] for tool in server.TOOLS}:
+            known = ", ".join(sorted(tool["name"] for tool in server.TOOLS))
+            raise click.ClickException(f"no tool called `{name}` — this server offers: {known}")
+
+        made = server.EnactServer(root=root)
+        reply = made.handle({"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+                             "params": {"name": name, "arguments": parsed}})
+        result = reply.get("result") or {}
+        body = (result.get("content") or [{}])[0].get("text", "")
+        if result.get("isError"):
+            raise click.ClickException(body)
+        try:
+            click.echo(_json.dumps(_json.loads(body), indent=2, ensure_ascii=False))
+        except ValueError:
+            click.echo(body)
+
     @staticmethod
     def _store(root: Optional[str]) -> str:
         """The store for this project, or a ClickException that says how to make one."""
