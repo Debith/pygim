@@ -225,6 +225,23 @@ class GimmicksCliApp:
             if point:
                 click.echo(f"      {_style.muted(point)}")
 
+    def _proposals_waiting(self, where: Environment):
+        """Concepts waiting for a human, in every store this machine holds — a proposal raised in
+        the global store was invisible here until `proposals` was taught to read its scope."""
+        import json as _json
+
+        from _pygim._mcp.enact import build
+
+        server = build(where)
+        out = []
+        for scope in ("project", "global"):
+            answer = server.call("proposals", {"scope": scope})
+            if answer.get("isError"):
+                continue
+            for concept in _json.loads(answer["content"][0]["text"]):
+                out.append((scope, concept))
+        return out
+
     @staticmethod
     def _rules_in(server, scope: str, tags, most: int, term: str = ""):
         """What one store has for this space. A store is asked only with tags its own vocabulary
@@ -232,10 +249,10 @@ class GimmicksCliApp:
         tag it has never heard of is a refusal, not a narrower question."""
         import json as _json
 
-        known = server.call("vocabulary", {"scope": scope})
+        known = server.call("vocabulary", {"scope": scope, "brief": True})
         if known.get("isError"):
             return []
-        live = {v["tag"] for d in _json.loads(known["content"][0]["text"])["dimensions"] for v in d["values"]}
+        live = {tag for d in _json.loads(known["content"][0]["text"])["dimensions"] for tag in d["values"]}
         mine = [tag for tag in tags if tag in live]
         if not mine:
             return []
@@ -421,9 +438,25 @@ class GimmicksCliApp:
         if memory is None and pack is None:
             store = Enact(self._store(where))
             waiting = store.waiting_acceptance()
-            if not waiting:
+            proposed = self._proposals_waiting(where)
+            if not waiting and not proposed:
                 click.echo("nothing is waiting for you")
                 return
+            if proposed and not walk:
+                # A proposal is not accepted by this command — it is accepted by adding the value to
+                # a pack file — but saying nothing about it is how it stays pending for a week.
+                click.echo(_style.title(f"{len(proposed)} concept(s) the vocabulary lacks") +
+                           " — add the value to a pack under taxonomy/, then `oo enact accept --pack`:\n")
+                for scope, concept in proposed:
+                    where_from = f" ({scope})" if scope != "project" else ""
+                    click.echo(f"  {_style.strong(concept['concept'])}{where_from}"
+                               f"  {_style.muted((concept.get('dimension') or 'a new dimension') + ' — ' + concept['entry']['brief'])}")
+                    asked = concept.get("asked_by") or []
+                    if asked:
+                        click.echo(f"      {_style.muted('asked by ' + ', '.join(asked))}")
+                if not waiting:
+                    return
+                click.echo("")
             if not walk:
                 click.echo(_style.title(f"{len(waiting)} waiting for you") +
                            " — read them with `oo enact accept --all`, which shows each and asks:\n")

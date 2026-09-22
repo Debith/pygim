@@ -44,7 +44,10 @@ operation returns a plain dict, and a refused write is a result with
         .def_property_readonly("taxonomy", &Enact::taxonomy_version, "The live vocabulary's version, as 32 hex characters.")
         .def("refresh", &Enact::refresh, "Folds in rows other processes committed.")
         .def("session", &Enact::session, "Opens a session: its number, where the store stands, reviews and proposals.")
-        .def("vocabulary", &Enact::vocabulary, "Every live dimension and value with its codebook entry.")
+        .def("vocabulary", &Enact::vocabulary, py::kw_only(), py::arg("dimension") = "", py::arg("brief") = false,
+             "Every live dimension and value with its codebook entry. `dimension` keeps one of them;\n"
+             "`brief` gives the tag names alone, which is a twentieth of the size when all a caller\n"
+             "needs to know is which tags exist.")
         .def("read", &Enact::read, py::arg("hard"), py::arg("soft") = std::vector<std::string>{}, py::kw_only(),
              py::arg("max") = 8u, py::arg("budget") = 0u, py::arg("term") = "", py::arg("session") = 0ull,
              "Retrieves the context for a problem space: the procedure first, then ranked memories, with\n"

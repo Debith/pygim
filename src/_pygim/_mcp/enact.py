@@ -314,7 +314,7 @@ TOOLS: List[Dict[str, Any]] = [
                        "recollection failure that made the duplicate.",
         "inputSchema": _schema({
             "memories": _REFS, "title": {"type": "string"}, "text": {"type": "string"},
-            "reason": {"type": "string"}, "tags": _TAGS,
+            "reason": {"type": "string"}, "tags": _TAGS, "scope": _SCOPE,
         }, ["memories", "title", "text", "reason"]),
     },
     {
@@ -342,7 +342,8 @@ TOOLS: List[Dict[str, Any]] = [
         "name": "review",
         "description": "What this session has written so far, in order: each memory's tags, whether it is still a head, "
                        "and what already generalises it. Where a consolidation starts. `session` names an earlier one.",
-        "inputSchema": _schema({"session": {"type": "integer", "minimum": 1, "description": "Default: this session."}}),
+        "inputSchema": _schema({"session": {"type": "integer", "minimum": 1, "description": "Default: this session."},
+                                "scope": _SCOPE}),
     },
     {
         "name": "lessons",
@@ -350,7 +351,8 @@ TOOLS: List[Dict[str, Any]] = [
                        "gap you saw — and publish the session's report, reviews/session-<n>.md, for the user. "
                        "Returns the report's path. The user accepts each generalisation themselves.",
         "inputSchema": _schema({"text": {"type": "string",
-                                         "description": "Markdown with three sections: Patterns written, Left as cases, Gaps."}},
+                                         "description": "Markdown with three sections: Patterns written, Left as cases, Gaps."},
+                                "scope": _SCOPE},
                                ["text"]),
     },
     {
@@ -458,24 +460,25 @@ class EnactServer:
             "check_pack": lambda a: _packs.check(Path(self.memory.root), self._store_path(a["path"]),
                                                  project=_stores.project_root(self.where.cwd), memory=self.memory),
             "session": self._session,
-            "vocabulary": lambda a: self._mem(a).vocabulary(),
+            "vocabulary": lambda a: self._mem(a).vocabulary(dimension=a.get("dimension", ""),
+                                                              brief=bool(a.get("brief", False))),
             "read": self._read,
             "remember": self._remember,
             "learn": self._learn,
-            "merge": lambda a: self.memory.merge(a["memories"], title=a["title"], text=a["text"], reason=a["reason"],
+            "merge": lambda a: self._mem(a).merge(a["memories"], title=a["title"], text=a["text"], reason=a["reason"],
                                                  tags=a.get("tags", []), session=self._session_no()),
             "link": lambda a: self._attach(a, add=True),
             "unlink": lambda a: self._attach(a, add=False),
             "retire": lambda a: self._mem(a).retire(a["memory"], reason=a["reason"], author="agent"),
-            "review": lambda a: self.memory.review(a.get("session") or self._session_no()),
-            "lessons": lambda a: self.memory.lessons(self._session_no(), a["text"], author="agent"),
+            "review": lambda a: self._mem(a).review(a.get("session") or self._session_no()),
+            "lessons": lambda a: self._mem(a).lessons(self._session_no(), a["text"], author="agent"),
             "show": lambda a: self._mem(a).show(a["memory"]),
             "mailbox": lambda a: self._mem(a).mailbox(all=bool(a.get("all", False)), mine=a.get("mine", "")),
             "post": lambda a: self._mem(a).post(a["text"], kind=a.get("kind", "comment"), to=a.get("to", ""),
                                                 about=a.get("about", ""), reply_to=a.get("reply_to", ""),
                                                 resolves=a.get("resolves", ""), session=self._session_no(),
                                                 author=a.get("author", "agent")),
-            "proposals": lambda a: self.memory.proposals(),
+            "proposals": lambda a: self._mem(a).proposals(),
         }
 
     # ── the stores ──────────────────────────────────────────────────────────

@@ -62,6 +62,55 @@ def call(server, name, **arguments):
     return result["isError"], (result["content"][0]["text"] if result["isError"] else json.loads(result["content"][0]["text"]))
 
 
+class TestAskingAStoreByName:
+    """`scope` names the store a call works on. Four tools took it in their schema, or should have,
+    and used the project's store regardless — so a proposal raised in the global store was invisible
+    from here, and a consolidation could not review what it had written there."""
+
+    def test_proposals_answer_for_the_store_they_were_asked_about(self, server, tmp_path):
+        other = tmp_path / "user-data" / "ddd"
+        Enact.init(str(other))
+        call(server, "remember", title="A rule", text="It holds.", tags=TAGS, reason="a rule",
+             proposals=[{"concept": "here", "dimension": "", "brief": "This store.",
+                         "when": "About this store.", "when_not": "Not another.", "example": "A note."}])
+        call(server, "remember", scope="ddd", title="Another", text="Elsewhere.", tags=TAGS, reason="a rule",
+             proposals=[{"concept": "there", "dimension": "", "brief": "That store.",
+                         "when": "About that store.", "when_not": "Not this one.", "example": "A note."}])
+        assert [p["concept"] for p in call(server, "proposals")[1]] == ["here"]
+        assert [p["concept"] for p in call(server, "proposals", scope="ddd")[1]] == ["there"]
+
+    def test_review_reports_the_store_it_was_asked_about(self, server, tmp_path):
+        Enact.init(str(tmp_path / "user-data" / "ddd"))
+        call(server, "remember", title="Here", text="In the project.", tags=TAGS, reason="a rule")
+        call(server, "remember", scope="ddd", title="There", text="In the other.", tags=TAGS, reason="a rule")
+        assert [m["title"] for m in call(server, "review")[1]["written"]] == ["Here"]
+        assert [m["title"] for m in call(server, "review", scope="ddd")[1]["written"]] == ["There"]
+
+
+class TestAskingForLessOfTheVocabulary:
+    """The whole taxonomy came back on every call — about 6,000 tokens in pygim's own store — however
+    little of it was wanted. Reported by the D-D-2024 study as item 12, and then paid on a hot path
+    when a hook began asking, before every write, only which tags were live."""
+
+    def test_brief_gives_the_names_without_the_entries(self, server):
+        err, whole = call(server, "vocabulary")
+        err, brief = call(server, "vocabulary", brief=True)
+        assert len(json.dumps(brief)) * 4 < len(json.dumps(whole))     # a fraction of the size
+        names = {tag for d in brief["dimensions"] for tag in d["values"]}
+        assert {v["tag"] for d in whole["dimensions"] for v in d["values"]} == names
+        assert all(isinstance(tag, str) for tag in names)
+        assert "entry" not in brief["dimensions"][0]
+
+    def test_one_dimension_is_returned_alone(self, server):
+        err, one = call(server, "vocabulary", dimension="kind")
+        assert [d["name"] for d in one["dimensions"]] == ["kind"]
+        assert one["dimensions"][0]["values"][0]["entry"]["brief"]     # still the whole entry
+
+    def test_a_dimension_that_is_not_there_refuses_and_names_the_ones_that_are(self, server):
+        err, none = call(server, "vocabulary", dimension="colour")
+        assert none["refused"] == "unknown dimension" and "kind" in none["facts"]
+
+
 class TestAttachingAndQuoting:
     """`link` and `unlink` move either of a memory's two attachments — a tag or a citation — because
     that is one job on two targets. A locator is checked against the store's own inventory before it

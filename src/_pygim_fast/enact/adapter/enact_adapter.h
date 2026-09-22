@@ -109,7 +109,11 @@ public:
 
     /// The vocabulary the agent classifies against: every live dimension and
     /// value with its codebook entry, and the rejections (02 §3.2).
-    py::dict vocabulary() const {
+    /// The vocabulary, whole or in part. `dimension` keeps one; `brief` drops the codebook entries,
+    /// which are most of the weight — pygim's own taxonomy is 24,700 characters entire and 900 as
+    /// names. A caller that only needs to know which tags are live paid for all of it, on every
+    /// call, which is what the D-D-2024 study reported as item 12.
+    py::dict vocabulary(const std::string& dimension, bool brief) const {
         const auto s = m_service->current();
         const auto& tax = s->tax();
         py::dict d;
@@ -118,16 +122,21 @@ public:
         for (std::size_t i = 0; i < tax.dimensions(); ++i) {
             const dimension_id di(static_cast<dimension_id::value_type>(i));
             const auto& info = tax.info(di);
+            if (!dimension.empty() && info.name != dimension) continue;
             py::dict dd;
             dd["name"] = info.name;
             dd["role"] = std::string(role_name(info.default_role));
             dd["weight"] = weight_text(info.weight);
             dd["pack"] = info.pack;
-            dd["entry"] = entry_dict(info.entry);
+            if (!brief) dd["entry"] = entry_dict(info.entry);
             py::list values;
             for (const auto t : tax.values_of(di)) {
                 const auto& ti = tax.info(t);
                 if (ti.retired) continue;
+                if (brief) {
+                    values.append(ti.qualified);
+                    continue;
+                }
                 py::dict vd;
                 vd["tag"] = ti.qualified;
                 vd["entry"] = entry_dict(ti.entry);
@@ -137,6 +146,14 @@ public:
             }
             dd["values"] = values;
             dims.append(dd);
+        }
+        if (!dimension.empty() && py::len(dims) == 0) {
+            std::vector<std::string> names;
+            for (std::size_t i = 0; i < tax.dimensions(); ++i)
+                names.push_back(tax.info(dimension_id(static_cast<dimension_id::value_type>(i))).name);
+            d["refused"] = "unknown dimension";
+            d["message"] = dimension + " is not a dimension here";
+            d["facts"] = names;
         }
         d["dimensions"] = dims;
         py::list rejected;
