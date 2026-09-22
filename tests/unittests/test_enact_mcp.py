@@ -54,6 +54,65 @@ def call(server, name, **arguments):
     return result["isError"], (result["content"][0]["text"] if result["isError"] else json.loads(result["content"][0]["text"]))
 
 
+class TestAttachingAndQuoting:
+    """`link` and `unlink` move either of a memory's two attachments — a tag or a citation — because
+    that is one job on two targets. A locator is checked against the store's own inventory before it
+    is recorded, and the passage comes back so the writer can read what they just cited."""
+
+    @pytest.fixture
+    def sourced(self, server, tmp_path):
+        """A store that carries its own source, as the ddd one does: no separate project checkout."""
+        root = Path(server.memory.root)
+        (root / "sources").mkdir(exist_ok=True)
+        (root / "sources" / "book.txt").write_text("one\ntwo\nthree\nfour\n", encoding="utf-8")
+        (root / "sources" / "inventory.yaml").write_text(
+            'book:\n  kind: text\n  path: "sources/book.txt"\n', encoding="utf-8")
+        err, made = call(server, "remember", title="A rule", text="It holds.", tags=TAGS, reason="a rule")
+        assert not err and made["ok"]
+        return made["memory"]
+
+    def test_a_locator_is_added_and_the_passage_comes_back_to_be_read(self, server, sourced):
+        err, out = call(server, "link", memory=sourced, cite="book:L2-3", reason="where it is said")
+        assert not err and out["ok"] and out["passage"] == "two\nthree"
+        err, shown = call(server, "show", memory=sourced)
+        assert shown["cites"] == ["book:L2-3"] and shown["tags"] == TAGS       # the tags are untouched
+        err, out = call(server, "unlink", memory=sourced, cite="book:L2-3", reason="wrong lines")
+        assert not err and out["ok"]
+        assert call(server, "show", memory=sourced)[1]["cites"] == []
+
+    def test_a_locator_that_does_not_resolve_is_refused_and_nothing_is_recorded(self, server, sourced):
+        err, out = call(server, "link", memory=sourced, cite="ch9:L1", reason="a guess")
+        assert out["refused"] == "unknown locator" and "book" in out["message"]     # and it names what it has
+        err, past = call(server, "link", memory=sourced, cite="book:L9-12", reason="past the end")
+        assert past["refused"] == "unknown locator" and "runs past its end" in past["message"]
+        err, shape = call(server, "link", memory=sourced, cite="book 2", reason="not a locator")
+        assert shape["refused"] == "unknown locator"
+        assert call(server, "show", memory=sourced)[1]["cites"] == []               # none of the three landed
+
+    def test_naming_both_a_tag_and_a_cite_or_neither_is_refused(self, server, sourced):
+        err, both = call(server, "link", memory=sourced, tag="kind=example", cite="book:L1", reason="r")
+        assert both["refused"] == "one of tag or cite"
+        err, neither = call(server, "link", memory=sourced, reason="r")
+        assert neither["refused"] == "one of tag or cite"
+        assert call(server, "show", memory=sourced)[1]["tags"] == TAGS
+
+    def test_cite_reaches_another_store_that_carries_its_own_sources(self, server, tmp_path):
+        """Without a scope the tool resolved paths only under *this* project, so a store built
+        entirely from its own documents — the ddd one — could not be quoted at all, and its
+        citations went unverified. Two of that store's eight locators were wrong because of it."""
+        other = tmp_path / "user-data" / "ddd"
+        Enact.init(str(other))
+        (other / "sources").mkdir(exist_ok=True)
+        (other / "sources" / "ref.txt").write_text("alpha\nbeta\ngamma\n", encoding="utf-8")
+        (other / "sources" / "inventory.yaml").write_text(
+            'ref:\n  kind: text\n  path: "sources/ref.txt"\n', encoding="utf-8")
+        err, out = call(server, "cite", path="sources/ref.txt", line=2, lines=2, scope="ddd")
+        assert not err, out
+        assert out["locator"] == "ref:L2-3" and out["text"] == "beta\ngamma"
+        err, blind = call(server, "cite", path="sources/ref.txt", line=2)
+        assert err                                        # the project scope cannot see it at all
+
+
 class TestProtocol:
     def test_initialize_echoes_the_version_and_offers_tools(self, server):
         resp = server.handle({"jsonrpc": "2.0", "id": 1, "method": "initialize",

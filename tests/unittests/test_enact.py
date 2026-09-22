@@ -447,6 +447,53 @@ class TestLearningAndCurating:
         assert "purpose=corruption" in again.show(w["memory"])["tags"]   # the asker is linked, source proposed
 
 
+class TestMovingACitation:
+    """A citation is evidence *about* a memory, not part of what it says, so it moves the way a tag
+    does. Before this, correcting one line number meant superseding the whole memory and spending a
+    number on it — the adventure-craft study left fifteen precision fixes unmade for that reason,
+    and this store's own second memory was superseded to move two locators."""
+
+    def test_a_locator_is_added_and_removed_without_a_new_version_of_the_memory(self, mem):
+        p, _, _ = seed(mem)
+        before = mem.show(p["memory"])
+        assert before["cites"] == []
+        assert mem.cite(p["memory"], "phb-ch1:L10-12", reason="where the steps come from")["ok"]
+        after = mem.show(p["memory"])
+        assert after["cites"] == ["phb-ch1:L10-12"]
+        assert after["key"] == before["key"] and after["memory"] == before["memory"]  # same memory, same number
+        assert mem.uncite(p["memory"], "phb-ch1:L10-12", reason="cited the wrong page")["ok"]
+        assert mem.show(p["memory"])["cites"] == []
+
+    def test_a_correction_replaces_one_locator_and_leaves_the_others_alone(self, mem):
+        p, _, _ = seed(mem)
+        for loc in ("phb-ch1:L10", "phb-ch2:L40-41", "phb-ch3:L7"):
+            assert mem.cite(p["memory"], loc, reason="evidence")["ok"]
+        assert mem.uncite(p["memory"], "phb-ch2:L40-41", reason="off by two lines")["ok"]
+        assert mem.cite(p["memory"], "phb-ch2:L42-43", reason="the passage actually quoted")["ok"]
+        assert mem.show(p["memory"])["cites"] == ["phb-ch1:L10", "phb-ch3:L7", "phb-ch2:L42-43"]
+
+    def test_the_refusals_name_the_fact(self, mem):
+        p, y, _ = seed(mem)
+        assert mem.cite(p["memory"], "", reason="r")["refused"] == "no locator"
+        assert mem.cite(p["memory"], "phb-ch1:L1", reason="r")["ok"]
+        again = mem.cite(p["memory"], "phb-ch1:L1", reason="r")
+        assert again["refused"] == "already cited" and "phb-ch1:L1" in again["message"]
+        missing = mem.uncite(y["memory"], "phb-ch1:L1", reason="r")
+        assert missing["refused"] == "not cited" and missing["facts"] == []
+        assert mem.cite("#404", "phb-ch1:L1", reason="r")["refused"] == "unknown memory"
+
+    def test_a_superseded_memory_keeps_the_citations_it_was_written_with(self, mem):
+        p, _, _ = seed(mem)
+        assert mem.cite(p["memory"], "phb-ch1:L10", reason="evidence")["ok"]
+        newer = write(mem, "Creating a spell", "1 read the space\n2 name it\n3 weigh it", DESIGN + ["kind=procedure"],
+                      supersedes=[p["memory"]], seen=[p["memory"]])
+        old = mem.show(p["memory"])
+        assert old["head"] is False and old["cites"] == ["phb-ch1:L10"]      # history is not rewritten
+        refused = mem.cite(p["memory"], "phb-ch1:L11", reason="r")
+        assert refused["refused"] == "not a head" and "current head" in refused["message"]
+        assert mem.show(newer["memory"])["cites"] == []
+
+
 class TestHeadViews:
     """memories/<slug>.md follows the index, whatever changed it (03 §3.3)."""
 

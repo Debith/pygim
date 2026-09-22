@@ -271,6 +271,24 @@ public:
         return op_dict(out);
     }
 
+    py::dict cite(const std::string& memory, const std::string& locator, std::string reason, std::string author) {
+        op_outcome out;
+        {
+            py::gil_scoped_release nogil;
+            out = m_service->cite(memory, locator, std::move(reason), std::move(author));
+        }
+        return op_dict(out);
+    }
+
+    py::dict uncite(const std::string& memory, const std::string& locator, std::string reason, std::string author) {
+        op_outcome out;
+        {
+            py::gil_scoped_release nogil;
+            out = m_service->uncite(memory, locator, std::move(reason), std::move(author));
+        }
+        return op_dict(out);
+    }
+
     py::dict retire(const std::string& memory, std::string reason, std::string author) {
         op_outcome out;
         {

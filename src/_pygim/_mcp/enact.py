@@ -215,6 +215,8 @@ _SCOPE = {"type": "string",
                          "project — or the name of any other store this machine holds, as `session` lists them. A #n "
                          "numbers memories within one store, so read a scope before writing to it."}
 _REF = {"type": "string", "description": "A memory: #n from a read or show, or at least 8 characters of its key."}
+_LOCATOR = {"type": "string", "description": "One source locator, as `cite` returns it: document:L<line> or "
+                                             "document:L<from>-<to>."}
 _TAGS = {"type": "array", "items": {"type": "string"}, "description": "Qualified tags, dimension=value, from the vocabulary."}
 _REFS = {"type": "array", "items": _REF}
 
@@ -316,15 +318,19 @@ TOOLS: List[Dict[str, Any]] = [
     },
     {
         "name": "link",
-        "description": "Add a tag to a memory, with a reason. Returns the memory's tags as they now stand.",
-        "inputSchema": _schema({"memory": _REF, "tag": {"type": "string"}, "reason": {"type": "string"}, "scope": _SCOPE},
-                               ["memory", "tag", "reason"]),
+        "description": "Attach something to a memory, with a reason: a `tag` from the vocabulary, or a `cite` — one "
+                       "locator as the `cite` tool returns it. Exactly one of the two. A citation moves this way so "
+                       "that correcting a line number costs a row, not a new memory and a new number.",
+        "inputSchema": _schema({"memory": _REF, "tag": {"type": "string"}, "cite": _LOCATOR,
+                                "reason": {"type": "string"}, "scope": _SCOPE},
+                               ["memory", "reason"]),
     },
     {
         "name": "unlink",
-        "description": "Remove a tag from a memory, with a reason. Returns the memory's tags as they now stand.",
-        "inputSchema": _schema({"memory": _REF, "tag": {"type": "string"}, "reason": {"type": "string"}, "scope": _SCOPE},
-                               ["memory", "tag", "reason"]),
+        "description": "Take a `tag` or a `cite` off a memory, with a reason. Exactly one of the two.",
+        "inputSchema": _schema({"memory": _REF, "tag": {"type": "string"}, "cite": _LOCATOR,
+                                "reason": {"type": "string"}, "scope": _SCOPE},
+                               ["memory", "reason"]),
     },
     {
         "name": "retire",
@@ -387,13 +393,15 @@ TOOLS: List[Dict[str, Any]] = [
     },
     {
         "name": "cite",
-        "description": "A locator into one of this project's documents: `locator` for a memory's `cites`, `source` for "
-                       "a vocabulary value, the document's inventory entry (under the id the inventory already gives "
-                       "it), and the passage's text. Paths are relative to the project root.",
+        "description": "A locator into a document: `locator` for a memory's `cites`, `source` for a vocabulary value, "
+                       "the document's inventory entry (under the id the inventory already gives it), and the "
+                       "passage's text — read it, and check it says what you are about to cite it for. Paths are "
+                       "relative to the project the store serves, which for a store of its own sources is the store.",
         "inputSchema": _schema({
             "path": {"type": "string", "description": "The document, relative to the project root."},
             "line": {"type": "integer", "minimum": 1},
             "lines": {"type": "integer", "minimum": 1, "description": "How many lines the passage spans (default 1)."},
+            "scope": _SCOPE,
         }, ["path", "line"]),
     },
     {
@@ -439,8 +447,7 @@ class EnactServer:
         self._vocabulary: Optional[str] = None  # the vocabulary version the agent last saw
         self.turn = 0
         self._calls: Dict[str, Callable[[Dict[str, Any]], Any]] = {
-            "cite": lambda a: _packs.cite(_stores.project_root(self._cwd), a["path"], int(a["line"]), int(a.get("lines", 1)),
-                                          store=self._store_root()),
+            "cite": self._cite,
             "check_pack": lambda a: _packs.check(Path(self.memory.root), self._store_path(a["path"]),
                                                  project=_stores.project_root(self._cwd), memory=self.memory),
             "session": self._session,
@@ -450,8 +457,8 @@ class EnactServer:
             "learn": self._learn,
             "merge": lambda a: self.memory.merge(a["memories"], title=a["title"], text=a["text"], reason=a["reason"],
                                                  tags=a.get("tags", []), session=self._session_no()),
-            "link": lambda a: self._mem(a).link(a["memory"], a["tag"], reason=a["reason"], author="agent"),
-            "unlink": lambda a: self._mem(a).unlink(a["memory"], a["tag"], reason=a["reason"], author="agent"),
+            "link": lambda a: self._attach(a, add=True),
+            "unlink": lambda a: self._attach(a, add=False),
             "retire": lambda a: self._mem(a).retire(a["memory"], reason=a["reason"], author="agent"),
             "review": lambda a: self.memory.review(a.get("session") or self._session_no()),
             "lessons": lambda a: self.memory.lessons(self._session_no(), a["text"], author="agent"),
@@ -585,6 +592,63 @@ class EnactServer:
     def _project_if_any(self) -> Any:
         try:
             return self.memory
+        except Exception:
+            return None
+
+    def _cite(self, a: Dict[str, Any]) -> Any:
+        """A locator into a document of the project a store serves. For `project` that is this
+        worktree; for any other store it is what its policy declares, else the sibling the
+        convention names, else the store itself — which is where a store that carries its own
+        sources, such as the ddd one, keeps them. Without this the tool reached only the project's
+        own documents, so a store built entirely from its own sources could not be quoted at all
+        and its citations went unchecked."""
+        project, store = self._cite_roots(a)
+        return _packs.cite(project, a["path"], int(a["line"]), int(a.get("lines", 1)), store=store)
+
+    def _cite_roots(self, a: Dict[str, Any]) -> Any:
+        name = (a.get("scope") or "project").strip().lower()
+        if name == "project":
+            return _stores.project_root(self._cwd), self._store_root()
+        root = Path(self._mem(a).root)
+        return (_stores.project_of(root) or root), root
+
+    def _attach(self, a: Dict[str, Any], *, add: bool) -> Any:
+        """`link` and `unlink` on either of a memory's two attachments: a tag, or a citation. One
+        job on two targets is one command with an option, not two commands (#17)."""
+        tag, locator = a.get("tag"), a.get("cite")
+        if bool(tag) == bool(locator):
+            return {"ok": False, "refused": "one of tag or cite",
+                    "message": "name exactly one: `tag` to move a tag, `cite` to move a source locator",
+                    "facts": []}
+        mem = self._mem(a)
+        if tag:
+            op = mem.link if add else mem.unlink
+            return op(a["memory"], tag, reason=a["reason"], author="agent")
+        if add:
+            checked = self._locator_facts(a, locator)
+            if checked is not None:
+                return checked
+        op = mem.cite if add else mem.uncite
+        result = op(a["memory"], locator, reason=a["reason"], author="agent")
+        if result.get("ok") and add:
+            result["passage"] = self._passage(a, locator)
+        return result
+
+    def _locator_facts(self, a: Dict[str, Any], locator: str) -> Any:
+        """Refuses a locator that does not resolve in this store's inventory, naming what does. It
+        cannot tell whether the passage says what it is cited for — only that it exists — so the
+        text comes back beside the result for the writer to read."""
+        try:
+            project, store = self._cite_roots(a)
+            _packs.passage(project, store, locator)
+            return None
+        except (ValueError, KeyError, OSError) as bad:
+            return {"ok": False, "refused": "unknown locator", "message": str(bad), "facts": []}
+
+    def _passage(self, a: Dict[str, Any], locator: str) -> Any:
+        try:
+            project, store = self._cite_roots(a)
+            return _packs.passage(project, store, locator)
         except Exception:
             return None
 

@@ -485,6 +485,18 @@ public:
         return link_impl(std::string(ref), std::string(tag), std::move(reason), "curated", std::move(author), {});
     }
 
+    /// Adds a locator to a memory's citations. Correcting one line number used to mean superseding
+    /// the whole memory and spending a number on it, so precision fixes went unmade (the
+    /// adventure-craft field report, 2026-09-21, item 6). A citation is evidence about a memory,
+    /// not part of what it says, so it moves the way a tag does.
+    op_outcome cite(std::string_view ref, std::string_view locator, std::string reason, std::string author = "human") {
+        return cite_impl(std::string(ref), std::string(locator), std::move(reason), std::move(author), true);
+    }
+
+    op_outcome uncite(std::string_view ref, std::string_view locator, std::string reason, std::string author = "human") {
+        return cite_impl(std::string(ref), std::string(locator), std::move(reason), std::move(author), false);
+    }
+
     op_outcome unlink(std::string_view ref, std::string_view tag, std::string reason, std::string author = "human") {
         op_outcome out;
         auto guard = m_store.lock();
@@ -1021,6 +1033,46 @@ private:
                 append_locked(std::move(r));
             }
         }
+    }
+
+    op_outcome cite_impl(std::string ref, std::string locator, std::string reason, std::string author, bool add) {
+        op_outcome out;
+        if (locator.empty()) {
+            out.why = {"no locator", "name the passage, as `cite` returns it — document:L<line> or document:L<from>-<to>", {}};
+            return out;
+        }
+        auto guard = m_store.lock();
+        catch_up();
+        const auto snap = current();
+        std::vector<memory_id> ms;
+        if (!resolve_refs(*snap, {ref}, ms, out.why)) return out;
+        if (!snap->is_head(ms[0])) {
+            out.why = {"not a head", describe(*snap, ms[0]) + " has been superseded — cite its current head", {}};
+            return out;
+        }
+        const auto& have = snap->record(ms[0]).cites;
+        const bool carried = std::find(have.begin(), have.end(), locator) != have.end();
+        if (add && carried) {
+            out.why = {"already cited", describe(*snap, ms[0]) + " already cites " + locator, {}};
+            return out;
+        }
+        if (!add && !carried) {
+            out.why = {"not cited", describe(*snap, ms[0]) + " does not cite " + locator, have};
+            return out;
+        }
+        row r;
+        r.op = std::string(add ? ops::cite : ops::uncite);
+        r.add("memory", snap->record(ms[0]).key.hex());
+        r.add("locator", std::move(locator));
+        r.add("reason", std::move(reason));
+        r.add("author", std::move(author));
+        const auto next = append_locked(std::move(r));
+        out.ok = true;
+        out.version = next->version();
+        out.message = add ? "cited" : "uncited";
+        out.id = ms[0];
+        out.snap = next;
+        return out;
     }
 
     op_outcome link_impl(std::string ref, std::string tag, std::string reason, std::string source, std::string author,

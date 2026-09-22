@@ -85,6 +85,12 @@ operation returns a plain dict, and a refused write is a result with
              py::arg("author") = "human")
         .def("unlink", &Enact::unlink, py::arg("memory"), py::arg("tag"), py::kw_only(), py::arg("reason"),
              py::arg("author") = "human")
+        .def("cite", &Enact::cite, py::arg("memory"), py::arg("locator"), py::kw_only(), py::arg("reason"),
+             py::arg("author") = "human",
+             "Adds a locator to a memory's citations, without superseding it — a precision fix costs a\n"
+             "row, not a new memory and a new number.")
+        .def("uncite", &Enact::uncite, py::arg("memory"), py::arg("locator"), py::kw_only(), py::arg("reason"),
+             py::arg("author") = "human", "Takes a locator off a memory's citations.")
         .def("retire", &Enact::retire, py::arg("memory"), py::kw_only(), py::arg("reason"), py::arg("author") = "human")
         .def("post", &Enact::post, py::arg("text"), py::kw_only(), py::arg("kind") = "comment", py::arg("to") = "",
              py::arg("about") = "", py::arg("reply_to") = "", py::arg("resolves") = "", py::arg("session") = 0ull,

@@ -104,6 +104,8 @@ public:
         if (r.op == ops::write) apply_write(r);
         else if (r.op == ops::link) apply_link(r);
         else if (r.op == ops::unlink) apply_unlink(r);
+        else if (r.op == ops::cite) apply_cite(r, true);
+        else if (r.op == ops::uncite) apply_cite(r, false);
         else if (r.op == ops::retire) apply_retire(r);
         else if (r.op == ops::accept) apply_accept(r);
         else if (r.op == ops::lessons) apply_lessons(r);
@@ -448,6 +450,25 @@ private:
             m_generalised_by[*instance] = std::move(by);
         }
         fold_proposals(r);
+    }
+
+    /// A locator added to or taken off a memory, without a new version of it (03 §5). The record
+    /// is shared with every earlier snapshot, so it is copied before it changes — a reader holding
+    /// the old snapshot must keep seeing the old citations.
+    void apply_cite(const row& r, bool add) {
+        const auto m = resolve(r.get("memory"), r);
+        if (!m) return;
+        const std::string locator(r.get("locator"));
+        auto rec = std::make_shared<memory_record>(*m_memories[*m]);
+        const auto at = std::find(rec->cites.begin(), rec->cites.end(), locator);
+        if (add) {
+            if (at != rec->cites.end()) return;
+            rec->cites.push_back(locator);
+        } else {
+            if (at == rec->cites.end()) return;
+            rec->cites.erase(at);
+        }
+        m_memories[*m] = std::move(rec);
     }
 
     void apply_link(const row& r) {

@@ -228,6 +228,35 @@ def doc_id(relative: Path) -> str:
     return re.sub(r"[^A-Za-z0-9_.]+", "-", stem.as_posix()).strip("-").lower()
 
 
+_LOCATOR = re.compile(r"^(?P<doc>[^:\s]+):L(?P<from>\d+)(?:-(?P<to>\d+))?$")
+
+
+def passage(project: Optional[Path], store: Optional[Path], locator: str) -> str:
+    """The text a locator names, for a writer to check before citing it — and, by raising, the only
+    check available at write time: that the document is inventoried here and the lines exist. It
+    cannot tell whether the passage says what it is cited *for*; two of this store's own eight
+    locators were in range and still quoted the wrong sentence."""
+    m = _LOCATOR.match(locator.strip())
+    if not m:
+        raise ValueError(f"{locator!r} is not a locator — write document:L<line> or document:L<from>-<to>")
+    doc, first = m.group("doc"), int(m.group("from"))
+    last = int(m.group("to") or first)
+    if last < first:
+        raise ValueError(f"{locator}: the range ends before it starts")
+    listed = (store / "sources" / "inventory.yaml") if store is not None else None
+    known = inventory(listed) if listed is not None else {}
+    if doc not in known:
+        have = ", ".join(sorted(known)) or "nothing"
+        raise KeyError(f"{doc} is not in this store's source inventory — it lists: {have}")
+    file = _resolve(listed, known[doc], project, store)
+    if file is None:
+        raise ValueError(f"{doc} is inventoried as {known[doc]!r}, which is not a file under this store or its project")
+    text = file.read_bytes().replace(b"\r\n", b"\n").decode("utf-8").split("\n")
+    if last > len(text):
+        raise ValueError(f"{doc} has {len(text)} lines; {locator} runs past its end")
+    return "\n".join(text[first - 1:last])
+
+
 def cite(project: Path, path: str, line: int, lines: int = 1, store: Optional[Path] = None) -> Dict[str, Any]:
     """A locator into a project document: the passage at *line* (1-based) for *lines* lines. A document
     the *store*'s inventory already lists keeps that id; any other gets one made from its path.

@@ -199,6 +199,31 @@ copy. A row removed from an audit file stays unreportable — nothing records th
 because nothing is ever deleted, a secret written into a memory stays in the row's history and in
 `objects/` after a retire: removing it means rewriting history by hand, which is §9.4's subject.
 
+### 3.5.1 A citation moves like a tag — settled 2026-09-22
+
+A memory's `cites` were fixed at the write that made it, so correcting one line number meant
+superseding the whole memory: a new version, a new number, and every text that named the old one
+left pointing at a superseded head. The adventure-craft field report (2026-09-21, item 6) left
+fifteen precision fixes unmade for that reason, and this design's own DDD store had to supersede a
+memory to move two locators — three lines after the report was answered.
+
+A citation is evidence *about* a memory, not part of what it says. So it moves the way a tag does:
+two more ops, `cite` and `uncite`, each naming the memory and one locator, with the same refusals —
+not a head, already cited, not cited. Replay copies the record before changing it, because earlier
+snapshots share it and a reader holding one must keep seeing the citations it was given.
+
+| What changes | Before | After |
+|---|---|---|
+| fixing one line number | `remember` with `supersedes` — #1 becomes #2 | `unlink --cite`, `link --cite` — still #1 |
+| what a reader's receipt replays | a different memory | the same memory, its old citations |
+| what names the memory elsewhere | strands on the old number | unaffected |
+
+The agent surface is `link` and `unlink` with `cite` instead of `tag` — one job on two targets is
+one command with an option, not two commands. A locator is checked against the store's own
+inventory before it is recorded, and the passage comes back with the result. That check is honest
+about its limit: it proves the document is known here and the lines exist, not that they say what
+they are cited for. Both of this design's own wrong locators were in range.
+
 ### 3.6 The mailbox — settled 2026-09-21
 
 Several sessions and agents work on one project, on different branches and machines, and they have
