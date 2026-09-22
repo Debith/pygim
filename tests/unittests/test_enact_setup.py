@@ -15,8 +15,9 @@ import pytest
 from click.testing import CliRunner
 
 from _pygim._cli import _style
+from _pygim import _config
 from _pygim._mcp import _packs, _stores
-from _pygim._mcp.enact import PROMPTS, EnactServer
+from _pygim._mcp.enact import PROMPTS, build
 from pygim.__main__ import cli_oo
 from pygim.enact import Enact, digest
 
@@ -60,13 +61,27 @@ def call(server, name, **arguments):
 
 @pytest.fixture
 def isolated(tmp_path, monkeypatch):
+    """Nothing about pygim is patched here. What is set is what a *subprocess* reads for itself:
+    git's identity and configuration, and — for the tests that run the real command, whose
+    composition root reads the environment exactly as a person's shell gives it — where this
+    machine's stores would be."""
     for key, value in {"GIT_AUTHOR_NAME": "Test", "GIT_AUTHOR_EMAIL": "test@example.com",
                        "GIT_COMMITTER_NAME": "Test", "GIT_COMMITTER_EMAIL": "test@example.com",
-                       "GIT_CONFIG_GLOBAL": str(tmp_path / "gitconfig"), "GIT_CONFIG_NOSYSTEM": "1"}.items():
+                       "GIT_CONFIG_GLOBAL": str(tmp_path / "gitconfig"), "GIT_CONFIG_NOSYSTEM": "1",
+                       "HOME": str(tmp_path / "home"), "XDG_DATA_HOME": str(tmp_path),
+                       "PYGIM_ENACT_GLOBAL": str(tmp_path / "no-global-store")}.items():
         monkeypatch.setenv(key, value)
-    monkeypatch.delenv(_stores.ENV, raising=False)
-    monkeypatch.setattr(_stores, "user_data_dir", lambda: tmp_path / "user-data")
+    (tmp_path / "home").mkdir(exist_ok=True)
     return tmp_path
+
+
+def at(cwd, isolated, **overrides):
+    """The configuration, as a value. Production fills this same object from the environment at its
+    composition root (`_config.from_process`); a test fills it with plain values. Everything below
+    the root — discovery, the server, the store — is then the very same code, not a variant of it,
+    and no production function has to be replaced for a test to say where to look."""
+    return _config.Environment(cwd=Path(cwd), home=isolated / "home",
+                               user_data=isolated / "pygim" / "enact", **overrides)
 
 
 @pytest.fixture
@@ -84,34 +99,37 @@ def project(isolated):
 class TestFinding:
     def test_the_order_is_flag_environment_git_config_then_dot_memory(self, project, isolated, monkeypatch):
         feature = isolated / "proj-feature"
-        assert _stores.find(cwd=feature) is None
+        assert _stores.find(at(feature, isolated)) is None
         Enact.init(str(project / ".enact"))
-        assert _stores.find(cwd=project).how.startswith(".enact")
-        assert _stores.find(cwd=feature) is None                        # an untracked .memory is one worktree's only
+        assert _stores.find(at(project, isolated)).how.startswith(".enact")
+        assert _stores.find(at(feature, isolated)) is None                        # an untracked .memory is one worktree's only
         shared = isolated / "shared"
         sh("git", "config", _stores.GIT_KEY, str(shared), cwd=project)
-        found = _stores.find(cwd=feature)
+        found = _stores.find(at(feature, isolated))
         assert found.root == shared.resolve() and found.how == "git config pygim.enact"
-        monkeypatch.setenv(_stores.ENV, str(isolated / "from-env"))
-        assert _stores.find(cwd=feature).how == "$PYGIM_ENACT_ROOT"
-        assert _stores.find(str(isolated / "flag"), cwd=feature).how == "--root"
+        # The remaining two are decided before `find` ever runs: the environment and the command
+        # line are read once, by the composition root, and arrive as values.
+        from_env = _config.read({_config.ROOT: str(isolated / "from-env")}, cwd=feature,
+                                home=isolated / "home", platform="linux")
+        assert _stores.find(from_env).how == "$PYGIM_ENACT_ROOT"
+        assert _stores.find(from_env.with_root(str(isolated / "flag"))).how == "--root"     # a flag wins
 
     def test_standing_in_a_store_finds_that_store(self, project, isolated):
         """A store's own worktree is where `oo enact accept --pack` is run from; before this, a
         command there said the project had no store at all."""
         store = isolated / "dnd-enact"
         _stores.create(store)
-        found = _stores.find(cwd=store)
+        found = _stores.find(at(store, isolated))
         assert found is not None and found.root == store.resolve() and found.exists
         assert "working directory is a store" in found.how
         inside = store / "taxonomy" / "studies"
         inside.mkdir(parents=True, exist_ok=True)
-        assert _stores.find(cwd=inside).root == store.resolve()          # and from anywhere inside it
-        assert _stores.find(cwd=project) is None                          # a project with no store still has none
+        assert _stores.find(at(inside, isolated)).root == store.resolve()          # and from anywhere inside it
+        assert _stores.find(at(project, isolated)) is None                          # a project with no store still has none
 
     def test_a_relative_git_config_is_relative_to_the_main_worktree(self, project, isolated):
         sh("git", "config", _stores.GIT_KEY, "../shared", cwd=project)
-        assert _stores.find(cwd=isolated / "proj-feature").root == (isolated / "shared").resolve()
+        assert _stores.find(at(isolated / "proj-feature", isolated)).root == (isolated / "shared").resolve()
 
 
 class TestTheNameItHadBefore:
@@ -119,49 +137,50 @@ class TestTheNameItHadBefore:
     in their directory, their branch and the git config that points at them. Nothing was moved, so
     every lookup asks for each spelling it has had — and a store found under the old one is a store."""
 
-    def test_a_dot_memory_directory_above_the_working_directory_is_still_a_store(self, project):
+    def test_a_dot_memory_directory_above_the_working_directory_is_still_a_store(self, project, isolated):
         Enact.init(str(project / ".memory"))
-        found = _stores.find(cwd=project)
+        found = _stores.find(at(project, isolated))
         assert found is not None and found.root == (project / ".memory").resolve()
         assert found.how.startswith(".memory")
 
     def test_the_old_git_config_key_and_environment_variable_still_point_at_one(self, project, isolated, monkeypatch):
         shared = isolated / "shared"
         sh("git", "config", "pygim.memory", str(shared), cwd=project)
-        assert _stores.find(cwd=project).how == "git config pygim.memory"
-        monkeypatch.setenv("PYGIM_MEMORY_ROOT", str(isolated / "from-env"))
-        assert _stores.find(cwd=project).how == "$PYGIM_MEMORY_ROOT"
+        assert _stores.find(at(project, isolated)).how == "git config pygim.memory"
+        older = _config.read({"PYGIM_MEMORY_ROOT": str(isolated / "from-env")}, cwd=project,
+                             home=isolated / "home", platform="linux")
+        assert _stores.find(older).how == "$PYGIM_MEMORY_ROOT"
 
     def test_a_sibling_under_either_suffix_is_discovered_and_named_without_it(self, project, isolated):
         _stores.create(isolated / "proj-memory")
         _stores.create(isolated / "ddd-enact")
-        names = {s.name for s in _stores.discover(cwd=project)}
+        names = {s.name for s in _stores.discover(at(project, isolated))}
         assert {"proj", "ddd"} <= names, names
 
 
 class TestSetup:
     def test_a_user_store_is_found_from_every_worktree(self, project, isolated):
-        root = _stores.setup_user(project)
-        assert root == isolated / "user-data" / "proj" and _stores.is_store(root)
-        assert _stores.find(cwd=isolated / "proj-feature").root == root.resolve()
-        assert _stores.setup_user(project) == root                      # a second run changes nothing
+        root = _stores.setup_user(at(project, isolated))
+        assert root == isolated / "pygim" / "enact" / "proj" and _stores.is_store(root)
+        assert _stores.find(at(isolated / "proj-feature", isolated)).root == root.resolve()
+        assert _stores.setup_user(at(project, isolated)) == root                      # a second run changes nothing
 
     @pytest.mark.skipif(not git_at_least(2, 42), reason="git worktree add --orphan needs git 2.42")
     def test_a_branch_store_is_an_orphan_worktree_shared_through_git(self, project, isolated):
-        root = _stores.setup_branch(project)
+        root = _stores.setup_branch(at(project, isolated))
         assert root == (isolated / "proj-enact").resolve() and _stores.is_store(root)
         assert sh("git", "rev-list", "--count", _stores.BRANCH, cwd=project) == "1"
         with pytest.raises(subprocess.CalledProcessError):             # shares no history with the code
             sh("git", "merge-base", "main", _stores.BRANCH, cwd=project)
-        assert _stores.find(cwd=isolated / "proj-feature").root == root
-        assert _stores.setup_branch(project) == root
+        assert _stores.find(at(isolated / "proj-feature", isolated)).root == root
+        assert _stores.setup_branch(at(project, isolated)) == root
 
     @pytest.mark.skipif(not git_at_least(2, 42), reason="git worktree add --orphan needs git 2.42")
     def test_another_clone_joins_the_existing_memory_branch(self, project, isolated):
-        first = _stores.setup_branch(project)
+        first = _stores.setup_branch(at(project, isolated))
         other = isolated / "elsewhere"
         sh("git", "clone", "-q", str(project), str(other), cwd=isolated)
-        joined = _stores.setup_branch(other, isolated / "elsewhere-enact")
+        joined = _stores.setup_branch(at(other, isolated), isolated / "elsewhere-enact")
         assert _stores.is_store(joined)
         assert (joined / "taxonomy" / "base.yaml").read_bytes() == (first / "taxonomy" / "base.yaml").read_bytes()
 
@@ -171,18 +190,18 @@ class TestSetup:
         Enact.init(str(old))
         before = Enact(str(old))
         before.remember(title="Kept", text="This memory moves with the store.", tags=["domain=any", "artifact=any", "task=design"])
-        root = _stores.setup_branch(project, source=old)
+        root = _stores.setup_branch(at(project, isolated), source=old)
         moved = Enact(str(root))
         assert [w["title"] for w in moved.review(0)["written"]] == ["Kept"]
         assert not (root / "local" / "clone").exists() or (root / "local" / "clone").read_text() != (old / "local" / "clone").read_text()
         assert sh("git", "status", "--porcelain", cwd=root) == ""                    # committed, local/ ignored
 
     def test_a_local_store_is_the_project_s_own_and_leaves_git_config_alone(self, project, isolated):
-        root = _stores.setup_local(project)
+        root = _stores.setup_local(at(project, isolated))
         assert root == project / ".enact" and _stores.is_store(root)
-        assert _stores.find(cwd=project).how.startswith(".enact")
+        assert _stores.find(at(project, isolated)).how.startswith(".enact")
         assert _stores.git(["config", "--get", _stores.GIT_KEY], project) is None
-        assert _stores.find(cwd=isolated / "proj-feature") is None       # another branch's worktree has its own, or none
+        assert _stores.find(at(isolated / "proj-feature", isolated)) is None       # another branch's worktree has its own, or none
 
     def test_one_command_per_job(self, project, isolated, monkeypatch):
         for gone in ("init", "accept-pack"):
@@ -199,7 +218,7 @@ class TestSetup:
         plain = isolated / "plain"
         plain.mkdir()
         with pytest.raises(RuntimeError, match="setup --user"):
-            _stores.setup_branch(plain)
+            _stores.setup_branch(at(plain, isolated))
 
     def test_without_claude_on_path_registration_prints_the_command(self, monkeypatch):
         monkeypatch.setattr(_stores.shutil, "which", lambda name: None)
@@ -216,7 +235,7 @@ class TestSetup:
 
 class TestTheServerWithoutAStore:
     def test_it_starts_and_says_how_to_set_up(self, isolated):
-        server = EnactServer(cwd=isolated)
+        server = build(at(isolated, isolated))
         assert server.handle({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}})["result"]
         result = server.call("vocabulary", {})
         assert result["isError"] and "oo enact setup" in result["content"][0]["text"]
@@ -224,7 +243,7 @@ class TestTheServerWithoutAStore:
         assert [p["name"] for p in listed] == ["consolidate", "prepare-vocabulary", "seed-memories"]
 
     def test_it_finds_a_store_created_after_it_started(self, isolated):
-        server = EnactServer(cwd=isolated)
+        server = build(at(isolated, isolated))
         Enact.init(str(isolated / ".enact"))
         result = server.call("session", {})
         assert not result["isError"] and json.loads(result["content"][0]["text"])["root"] == str((isolated / ".enact").resolve())
@@ -245,18 +264,18 @@ class TestTheGlobalStore:
     def test_setup_makes_it_personal_published_and_found_from_any_project(self, project, isolated):
         out = CliRunner().invoke(cli_oo, ["enact", "setup", "--global"])
         assert out.exit_code == 0, out.output
-        root = isolated / "user-data" / "global"
+        root = isolated / "pygim" / "enact" / "global"
         assert _stores.is_store(root) and "sharing: personal" in out.output
         assert _stores.policy(root) == _stores.Policy(sharing="personal", push="auto")
         assert sh("git", "log", "--oneline", "-1", cwd=root)                       # committed as it was made
-        assert _stores.find_global() == root                                       # through git's global config
-        assert _stores.find(cwd=project) is None or _stores.find(cwd=project).root != root   # not the project's store
+        assert _stores.find_global(at(project, isolated)) == root                                       # through git's global config
+        assert _stores.find(at(project, isolated)) is None or _stores.find(at(project, isolated)).root != root   # not the project's store
 
     def test_a_write_with_scope_global_lands_there_and_is_committed(self, project, isolated, monkeypatch):
         store = self.with_project(project)
-        wide = _stores.setup_global()
-        monkeypatch.setenv(_stores.GLOBAL_ENV, str(wide))
-        server = EnactServer(cwd=project)
+        wide = _stores.setup_global(at(project, isolated))
+        monkeypatch.setenv(_config.GLOBAL, str(wide))
+        server = build(at(project, isolated))
         err, written = call(server, "remember", scope="global", title="Explain in layers",
                             text="Assumed words first, then one line.", **self.PREF)
         assert not err and written["ok"] and written["store"] == "global"
@@ -269,11 +288,11 @@ class TestTheGlobalStore:
 
     def test_both_stores_reach_the_session_and_the_global_ones_say_so(self, project, isolated, monkeypatch):
         store = self.with_project(project)
-        wide = _stores.setup_global()
-        monkeypatch.setenv(_stores.GLOBAL_ENV, str(wide))
+        wide = _stores.setup_global(at(project, isolated))
+        monkeypatch.setenv(_config.GLOBAL, str(wide))
         Enact(str(wide)).remember(title="Explain in layers", text="Assumed words first.", **self.PREF)
         Enact(str(store)).remember(title="Prefer templates", text="Template it.", **self.PREF)
-        server = EnactServer(cwd=project)
+        server = build(at(project, isolated))
         text = server.handle({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}})["result"]["instructions"]
         assert "(global) Explain in layers" in text and "Prefer templates" in text and "(global) Prefer templates" not in text
         standing = call(server, "session")[1]["standing"]
@@ -286,9 +305,9 @@ class TestTheGlobalStore:
 
     def test_a_preference_written_elsewhere_reaches_a_session_already_running(self, project, isolated, monkeypatch):
         self.with_project(project)
-        wide = _stores.setup_global()
-        monkeypatch.setenv(_stores.GLOBAL_ENV, str(wide))
-        server = EnactServer(cwd=project)
+        wide = _stores.setup_global(at(project, isolated))
+        monkeypatch.setenv(_config.GLOBAL, str(wide))
+        server = build(at(project, isolated))
         call(server, "session")                                                     # the baseline it will compare against
         Enact(str(wide)).remember(title="Lay options out as a table", text="With a recommendation.", **self.PREF)
         err, info = call(server, "session")
@@ -306,8 +325,8 @@ class TestTheGlobalStore:
 
     def test_without_a_global_store_the_scope_says_how_to_make_one(self, project, isolated, monkeypatch):
         self.with_project(project)
-        monkeypatch.delenv(_stores.GLOBAL_ENV, raising=False)
-        err, text = call(EnactServer(cwd=project), "remember", scope="global", title="t", text="x", **self.PREF)
+        monkeypatch.delenv(_config.GLOBAL, raising=False)
+        err, text = call(build(at(project, isolated)), "remember", scope="global", title="t", text="x", **self.PREF)
         assert err and "oo enact setup --global" in text
 
 
@@ -319,12 +338,12 @@ class TestDiscoveringStores:
         subject = isolated / "ddd-memory"                       # the convention: <name>-memory beside the project
         _stores.create(subject)
         _stores.write_policy(subject, _stores.Policy(sharing="community", push="manual"))
-        named = {s.name: s for s in _stores.discover(project)}
+        named = {s.name: s for s in _stores.discover(at(project, isolated))}
         assert named["ddd"].root == subject.resolve() and "beside" in named["ddd"].how
         assert named["project"].root == (project / ".enact").resolve()
         Enact(str(subject)).remember(title="Value objects compare by value", text="And carry no identity.",
                                       tags=["domain=any", "artifact=any", "task=design", "kind=principle"])
-        err, read = call(EnactServer(cwd=project), "read", scope="ddd", hard=["task=design"])
+        err, read = call(build(at(project, isolated)), "read", scope="ddd", hard=["task=design"])
         assert not err and [m["title"] for m in read["memories"]] == ["Value objects compare by value"]
 
     def test_a_policy_name_wins_over_the_directory(self, project, isolated):
@@ -332,12 +351,12 @@ class TestDiscoveringStores:
         _stores.create(store)
         _stores.write_policy(store, _stores.Policy(sharing="project", push="manual", name="dnd"))
         assert _stores.store_name(store) == "dnd"
-        assert {s.name for s in _stores.discover(project)} >= {"dnd"}
+        assert {s.name for s in _stores.discover(at(project, isolated))} >= {"dnd"}
 
     def test_session_lists_them_and_an_unknown_scope_names_what_there_is(self, project, isolated):
         Enact.init(str(project / ".enact"))
         _stores.create(isolated / "ddd-memory")
-        server = EnactServer(cwd=project)
+        server = build(at(project, isolated))
         err, info = call(server, "session")
         assert [s["scope"] for s in info["scopes"]] == ["project", "ddd"]
         assert info["scopes"][0]["also"] == ["proj"]                       # the project directory's own name
@@ -388,7 +407,7 @@ class TestHowTheOutputReads:
     def test_colour_marks_the_heading_and_the_count_and_never_stands_alone(self, project, monkeypatch):
         self.waiting(project)
         monkeypatch.delenv("NO_COLOR", raising=False)
-        monkeypatch.delenv(_style.NO_COLOR, raising=False)
+        monkeypatch.delenv(_config.NO_COLOUR, raising=False)
         monkeypatch.setenv("TERM", "xterm")
         out = CliRunner().invoke(cli_oo, ["enact", "accept", "--root", str(project / ".enact")], color=True)
         assert out.exit_code == 0 and "\x1b[" in out.output
@@ -399,7 +418,7 @@ class TestHowTheOutputReads:
         self.waiting(project)
         monkeypatch.setenv("TERM", "xterm")
         monkeypatch.delenv("NO_COLOR", raising=False)
-        monkeypatch.delenv(_style.NO_COLOR, raising=False)
+        monkeypatch.delenv(_config.NO_COLOUR, raising=False)
         where = ["enact", "accept", "--root", str(project / ".enact")]
         assert "\x1b[" not in CliRunner().invoke(cli_oo, where).output                       # not a terminal
         assert "\x1b[" not in CliRunner().invoke(cli_oo, ["--no-color"] + where, color=True).output
@@ -414,8 +433,8 @@ class TestAskingForAReload:
     def test_reload_marks_the_stores_a_server_here_would_serve(self, project, isolated, monkeypatch):
         store = project / ".enact"
         Enact.init(str(store))
-        wide = _stores.setup_global()
-        monkeypatch.setenv(_stores.GLOBAL_ENV, str(wide))
+        wide = _stores.setup_global(at(project, isolated))
+        monkeypatch.setenv(_config.GLOBAL, str(wide))
         def never(*_):                                                   # signals are opt-in: a server
             raise AssertionError("no signal without --signal")            # too old to handle SIGHUP dies of it
         monkeypatch.setattr(_stores, "server_pids", never)
@@ -429,8 +448,8 @@ class TestAskingForAReload:
 
 
 class TestANewProjectsVocabulary:
-    def test_prepare_vocabulary_names_the_pack_and_the_person_s_step(self, project):
-        server = EnactServer(cwd=project)
+    def test_prepare_vocabulary_names_the_pack_and_the_person_s_step(self, project, isolated):
+        server = build(at(project, isolated))
         got = server.handle({"jsonrpc": "2.0", "id": 1, "method": "prompts/get",
                              "params": {"name": "prepare-vocabulary", "arguments": {"domain": "Shop Front"}}})
         text = got["result"]["messages"][0]["content"]["text"]
@@ -439,24 +458,24 @@ class TestANewProjectsVocabulary:
         assert "pack-proj.yaml" in default["result"]["messages"][0]["content"]["text"]
         assert {p["name"] for p in PROMPTS} >= {"prepare-vocabulary", "seed-memories"}
 
-    def test_cite_gives_the_passage_digest_and_the_inventory_entry(self, project):
-        result = EnactServer(cwd=project).call("cite", {"path": "README.md", "line": 4})
+    def test_cite_gives_the_passage_digest_and_the_inventory_entry(self, project, isolated):
+        result = build(at(project, isolated)).call("cite", {"path": "README.md", "line": 4})
         cited = json.loads(result["content"][0]["text"])
         assert cited["text"] == "The basket keeps items for a week."
         assert cited["source"] == {"doc": "readme", "line": 4, "lines": 1, "passage": digest(cited["text"].encode("utf-8"))}
         assert cited["inventory"]["path"] == "README.md"
         assert cited["inventory"]["version"] == digest((project / "README.md").read_bytes().replace(b"\r\n", b"\n"))
 
-    def test_cite_keeps_the_inventory_s_id_and_gives_a_locator_for_a_span(self, project):
+    def test_cite_keeps_the_inventory_s_id_and_gives_a_locator_for_a_span(self, project, isolated):
         store = project / ".enact"
         Enact.init(str(store))
         (store / "sources").mkdir(exist_ok=True)
         (store / "sources" / "inventory.yaml").write_text('proj-readme:\n  kind: text\n  path: "README.md"\n', encoding="utf-8")
-        cited = json.loads(EnactServer(cwd=project).call("cite", {"path": "README.md", "line": 3, "lines": 2})["content"][0]["text"])
+        cited = json.loads(build(at(project, isolated)).call("cite", {"path": "README.md", "line": 3, "lines": 2})["content"][0]["text"])
         assert cited["source"]["doc"] == "proj-readme" and cited["inventory"]["id"] == "proj-readme"
         assert cited["locator"] == "proj-readme:L3-4"
 
-    def test_check_pack_warns_of_locators_that_do_not_hold(self, project):
+    def test_check_pack_warns_of_locators_that_do_not_hold(self, project, isolated):
         store = project / ".enact"
         Enact.init(str(store))
         (project / "GUIDE.md").write_text("Basket\nSome text.\nBasket\nCheckout\n", encoding="utf-8")
@@ -467,10 +486,10 @@ class TestANewProjectsVocabulary:
         source = lambda s: "source: {doc: %s, line: %d, lines: 1, passage: %s}" % (s["doc"], s["line"], s["passage"])
         draft.write_text(PACK.replace("example: Adding an item.}}", "example: Adding an item.}, " + source(basket) + "}")
                              .replace("example: Paying by card.}}", "example: Paying by card.}, " + source(checkout) + "}"), encoding="utf-8")
-        checked = json.loads(EnactServer(cwd=project).call("check_pack", {"path": str(draft)})["content"][0]["text"])
+        checked = json.loads(build(at(project, isolated)).call("check_pack", {"path": str(draft)})["content"][0]["text"])
         assert checked["ok"] and len(checked["warnings"]) == 2 and all("not in the inventory" in w for w in checked["warnings"])
         (draft.parent / "inventory.yaml").write_text("guide:\n  kind: text\n  path: GUIDE.md\n", encoding="utf-8")
-        warnings = json.loads(EnactServer(cwd=project).call("check_pack", {"path": str(draft)})["content"][0]["text"])["warnings"]
+        warnings = json.loads(build(at(project, isolated)).call("check_pack", {"path": str(draft)})["content"][0]["text"])["warnings"]
         assert any("area=basket" in w and "also occurs at L3" in w for w in warnings)
         assert any("area=checkout" in w and "not the cited passage" in w for w in warnings)
 
@@ -515,7 +534,7 @@ class TestANewProjectsVocabulary:
         checked = _packs.check(store, draft, project=store)     # run from inside the store, as one does
         assert checked["ok"] and checked["warnings"] == []
 
-    def test_replacing_a_pack_is_refused_while_memories_carry_what_it_removes(self, project):
+    def test_replacing_a_pack_is_refused_while_memories_carry_what_it_removes(self, project, isolated):
         store = project / ".enact"
         Enact.init(str(store))
         (store / "taxonomy" / "pack-proj.yaml").write_text(PACK, encoding="utf-8")
@@ -526,34 +545,34 @@ class TestANewProjectsVocabulary:
         draft.parent.mkdir(parents=True)
         draft.write_text(PACK.replace("      checkout: {entry: {brief: Paying., when: About payment., when_not: Not the basket., example: Paying by card.}}\n", ""),
                          encoding="utf-8")
-        checked = json.loads(EnactServer(cwd=project).call("check_pack", {"path": str(draft)})["content"][0]["text"])
+        checked = json.loads(build(at(project, isolated)).call("check_pack", {"path": str(draft)})["content"][0]["text"])
         assert checked["removed"] == [{"tag": "area=checkout", "carried_by": [f"{carrier['memory']} Checkout"]}]
         refused = _packs.accept(store, draft, replace=True)
         assert not refused["ok"] and "area=checkout" in refused["errors"] and "unlink" in refused["errors"]
         memory.unlink(carrier["memory"], "area=checkout", reason="the value goes")
         assert _packs.accept(store, draft, replace=True)["ok"]
 
-    def test_windows_line_endings_cite_the_same_passage_and_version(self, project):
-        lf = EnactServer(cwd=project).call("cite", {"path": "README.md", "line": 4})
+    def test_windows_line_endings_cite_the_same_passage_and_version(self, project, isolated):
+        lf = build(at(project, isolated)).call("cite", {"path": "README.md", "line": 4})
         (project / "README.md").write_bytes((project / "README.md").read_bytes().replace(b"\r\n", b"\n").replace(b"\n", b"\r\n"))
-        crlf = EnactServer(cwd=project).call("cite", {"path": "README.md", "line": 4})
+        crlf = build(at(project, isolated)).call("cite", {"path": "README.md", "line": 4})
         assert json.loads(crlf["content"][0]["text"]) == json.loads(lf["content"][0]["text"])
 
-    def test_a_broken_draft_is_named_by_its_own_path(self, project):
+    def test_a_broken_draft_is_named_by_its_own_path(self, project, isolated):
         store = project / ".enact"
         Enact.init(str(store))
         draft = store / "taxonomy" / "studies" / "s" / "proposal" / "pack-proj.yaml"
         draft.parent.mkdir(parents=True)
         draft.write_text(PACK.replace("      checkout: {entry: {brief: Paying., when: About payment., when_not: Not the basket., example: Paying by card.}}\n",
                                       "      checkout: {entry: {brief: Paying.}}\n"), encoding="utf-8")
-        checked = json.loads(EnactServer(cwd=project).call("check_pack", {"path": str(draft.relative_to(store))})["content"][0]["text"])
+        checked = json.loads(build(at(project, isolated)).call("check_pack", {"path": str(draft.relative_to(store))})["content"][0]["text"])
         assert not checked["ok"] and str(draft) in checked["errors"] and "checkout" in checked["errors"]
         assert not (store / "taxonomy" / "pack-proj.yaml").exists()
 
-    def test_an_accepted_pack_is_live_at_a_running_server_s_next_call(self, project):
+    def test_an_accepted_pack_is_live_at_a_running_server_s_next_call(self, project, isolated):
         store = project / ".enact"
         Enact.init(str(store))
-        server = EnactServer(cwd=project)
+        server = build(at(project, isolated))
         assert "area" not in [d["name"] for d in json.loads(server.call("vocabulary", {})["content"][0]["text"])["dimensions"]]
         draft = store / "taxonomy" / "studies" / "s" / "proposal" / "pack-proj.yaml"
         draft.parent.mkdir(parents=True)

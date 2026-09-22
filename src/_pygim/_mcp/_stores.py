@@ -29,7 +29,9 @@ pushes each write (a personal store, one owner), ``push: manual`` leaves that to
 project's store, or one a community shares and whose owners review what enters). The file is
 committed, so a clone of a shared store knows not to push before anyone has to remember.
 
-Nothing here imports click; the CLI and the MCP server both use it.
+Nothing here imports click, and nothing here reads the environment: every function that needs to
+know where to look is given an `Environment`, filled once at a composition root (`_pygim._config`).
+The CLI and the MCP server both use this module, and both wire it the same way.
 """
 from __future__ import annotations
 
@@ -42,12 +44,12 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Optional, Sequence
 
-ENV = "PYGIM_ENACT_ROOT"
+from .._config import Environment
+
 GIT_KEY = "pygim.enact"
 LOCAL = ".enact"
 BRANCH = "enact"
 SERVER = "pygim-enact"
-GLOBAL_ENV = "PYGIM_ENACT_GLOBAL"
 GLOBAL_KEY = "pygim.enact.global"
 GLOBAL_NAME = "global"
 POLICY = "policy.yaml"
@@ -56,22 +58,11 @@ POLICY = "policy.yaml"
 # the stores already on disk carry that name in their directory, their branch and the git config
 # that points at them; nothing is moved, so every lookup asks for each spelling in turn. A tuple
 # rather than a pair of constants, so the next name costs one entry instead of a search.
-ENVS = (ENV, "PYGIM_MEMORY_ROOT")
 GIT_KEYS = (GIT_KEY, "pygim.memory")
 LOCALS = (LOCAL, ".memory")
 BRANCHES = (BRANCH, "memory")
-GLOBAL_ENVS = (GLOBAL_ENV, "PYGIM_MEMORY_GLOBAL")
 GLOBAL_KEYS = (GLOBAL_KEY, "pygim.memory.global")
 SUFFIXES = ("-enact", "-memory")
-
-
-def from_env(names: Sequence[str]) -> Optional[tuple]:
-    """The first of *names* set in the environment, as (name, value)."""
-    for name in names:
-        value = os.environ.get(name)
-        if value:
-            return name, value
-    return None
 
 
 def without_suffix(name: str) -> str:
@@ -121,15 +112,14 @@ def project_root(cwd: Path) -> Path:
     return Path(top) if top else cwd
 
 
-def find(explicit: Optional[str] = None, cwd: Optional[Path] = None) -> Optional[Found]:
-    """The store for *cwd*, by the order in the module docstring, or None when nothing names one.
-    The first three are returned whether or not a store exists there yet — setup creates it."""
-    cwd = Path(cwd or os.getcwd()).resolve()
-    if explicit:
-        return Found(Path(explicit).expanduser().resolve(), "--root")
-    named = from_env(ENVS)
-    if named:
-        return Found(Path(named[1]).expanduser().resolve(), "$" + named[0])
+def find(where: Environment) -> Optional[Found]:
+    """The store for *where*, by the order in the module docstring, or None when nothing names one.
+    A root named on the command line or in the environment is returned whether or not a store
+    exists there yet — setup creates it. Nothing here consults the environment: `where` was filled
+    at the composition root, which is the only place that does."""
+    cwd = Path(where.cwd).resolve()
+    if where.store_root:
+        return Found(Path(where.store_root).expanduser().resolve(), where.store_root_from or "--root")
     for key in GIT_KEYS:
         configured = git(["config", "--get", key], cwd)
         if configured:
@@ -146,11 +136,11 @@ def find(explicit: Optional[str] = None, cwd: Optional[Path] = None) -> Optional
     return None
 
 
-def guidance(cwd: Optional[Path] = None) -> str:
+def guidance(where: Environment) -> str:
     """What to tell someone whose project has no store yet."""
-    where = find(cwd=cwd)
-    if where and not where.exists:
-        return f"{where.root} (from {where.how}) is not an ENACT store yet — run `oo enact setup` in the project"
+    found = find(where)
+    if found and not found.exists:
+        return f"{found.root} (from {found.how}) is not an ENACT store yet — run `oo enact setup` in the project"
     return ("no ENACT store for this project — run `oo enact setup --user` (a store in your user directory) "
             "or `oo enact setup --branch` (an orphan `memory` branch shared through git) in the project; "
             "`--local` keeps one inside the project instead")
@@ -252,7 +242,7 @@ class Scope:
     aliases: List[str]
 
 
-def discover(cwd: Optional[Path] = None, explicit: Optional[str] = None) -> List[Scope]:
+def discover(where: Environment) -> List[Scope]:
     """Every store this machine holds, as scopes a session can name. Nothing is configured: a store
     declares its name in its policy or takes it from its directory, and stores are looked for where
     the conventions put them — the project's own (`project`), the machine's global one (`global`),
@@ -261,7 +251,7 @@ def discover(cwd: Optional[Path] = None, explicit: Optional[str] = None) -> List
 
     Order matters: the first entry for a root keeps it, later ones only add aliases, so the
     project's store answers to `project` as well as to its own name."""
-    cwd = Path(cwd or os.getcwd()).resolve()
+    cwd = Path(where.cwd).resolve()
     found: List[Scope] = []
 
     def add(root: Optional[Path], how: str, name: Optional[str] = None) -> None:
@@ -278,15 +268,14 @@ def discover(cwd: Optional[Path] = None, explicit: Optional[str] = None) -> List
                 called = f"{called}@{root.parent.name}"
         found.append(Scope(called, root, how, []))
 
-    here = find(explicit, cwd)
+    here = find(where)
     if here is not None:
         add(here.root, here.how, "project")
         add(here.root, here.how)                 # and by its own name
-    add(find_global(), "global store", "global")
-    home = user_data_dir()
-    if home.is_dir():
-        for child in sorted(home.iterdir()):
-            add(child, f"in {home}")
+    add(find_global(where), "global store", "global")
+    if where.user_data.is_dir():
+        for child in sorted(where.user_data.iterdir()):
+            add(child, f"in {where.user_data}")
     project = project_root(cwd)
     siblings = {s for suffix in SUFFIXES for s in project.parent.glob("*" + suffix)} if project.parent.is_dir() else set()
     for sibling in sorted(siblings):
@@ -294,10 +283,10 @@ def discover(cwd: Optional[Path] = None, explicit: Optional[str] = None) -> List
     return found
 
 
-def scope(name: str, cwd: Optional[Path] = None, explicit: Optional[str] = None) -> Optional[Scope]:
+def scope(name: str, where: Environment) -> Optional[Scope]:
     """The store a session means by *name*, matched on its name or an alias."""
     wanted = name.strip().lower()
-    for s in discover(cwd, explicit):
+    for s in discover(where):
         if wanted == s.name or wanted in s.aliases:
             return s
     return None
@@ -316,38 +305,24 @@ def remote_stores(root: Path) -> List[str]:
 # ── setup ─────────────────────────────────────────────────────────────────────
 
 
-def user_data_dir() -> Path:
-    """Where user-level stores live: the platform's per-user data directory, under pygim/memory."""
-    if sys.platform == "win32":
-        base = Path(os.environ.get("LOCALAPPDATA") or Path.home() / "AppData" / "Local")
-    elif sys.platform == "darwin":
-        base = Path.home() / "Library" / "Application Support"
-    else:
-        base = Path(os.environ.get("XDG_DATA_HOME") or Path.home() / ".local" / "share")
-    here = base / "pygim" / "enact"
-    was = base / "pygim" / "memory"
-    return here if here.is_dir() or not was.is_dir() else was
-
-
-def find_global() -> Optional[Path]:
+def find_global(where: Environment) -> Optional[Path]:
     """The global store, or None when this machine has none: ``$PYGIM_ENACT_GLOBAL``, then
     ``git config --global pygim.enact.global``, then the default place if a store is there."""
-    named = from_env(GLOBAL_ENVS)
-    if named:
-        return Path(named[1]).expanduser().resolve()
+    if where.global_root is not None:
+        return where.global_root
     for key in GLOBAL_KEYS:
-        configured = git(["config", "--global", "--get", key], Path.home())
+        configured = git(["config", "--global", "--get", key], where.home)
         if configured:
             return Path(configured).expanduser().resolve()
-    default = user_data_dir() / GLOBAL_NAME
+    default = where.user_data / GLOBAL_NAME
     return default if is_store(default) else None
 
 
-def setup_global(source: Optional[Path] = None, path: Optional[Path] = None) -> Path:
+def setup_global(where: Environment, source: Optional[Path] = None, path: Optional[Path] = None) -> Path:
     """The machine's global store: created under the user data directory unless *path* says
     otherwise, marked personal so every write is committed, and recorded in the user's git config so
     every project on this machine finds it."""
-    root = (path or user_data_dir() / GLOBAL_NAME).expanduser().resolve()
+    root = (path or where.user_data / GLOBAL_NAME).expanduser().resolve()
     fresh = not is_store(root)
     if fresh:
         create(root, source)
@@ -387,29 +362,31 @@ def create(root: Path, source: Optional[Path] = None) -> None:
     (root / "local").mkdir(exist_ok=True)
 
 
-def setup_user(cwd: Path, name: Optional[str] = None, source: Optional[Path] = None) -> Path:
+def setup_user(where: Environment, name: Optional[str] = None, source: Optional[Path] = None) -> Path:
     """A store under the user data directory, named for the project, and git pointed at it."""
-    root = user_data_dir() / (name or project_name(cwd))
+    cwd = Path(where.cwd)
+    root = where.user_data / (name or project_name(cwd))
     if not is_store(root):
         create(root, source)
     point_git_at(root, cwd)
     return root
 
 
-def setup_local(cwd: Path, source: Optional[Path] = None) -> Path:
+def setup_local(where: Environment, source: Optional[Path] = None) -> Path:
     """A store inside the project, as ``.enact`` at this worktree's top, committed with the code. Git
     config is left alone: this store belongs to the branch that carries it, and other worktrees on
     other branches find theirs, or none."""
-    root = project_root(cwd) / LOCAL
+    root = project_root(Path(where.cwd)) / LOCAL
     if not is_store(root):
         create(root, source)
     return root
 
 
-def setup_branch(cwd: Path, path: Optional[Path] = None, source: Optional[Path] = None) -> Path:
+def setup_branch(where: Environment, path: Optional[Path] = None, source: Optional[Path] = None) -> Path:
     """A store on the orphan ``enact`` branch, checked out as its own worktree beside the main one.
     An existing branch under any name the system has had is checked out rather than created — a
     second machine gets the project's memory with ``git fetch`` and this call."""
+    cwd = Path(where.cwd)
     main = main_worktree(cwd)
     if main is None:
         raise RuntimeError(f"{cwd} is not in a git repository — use `oo enact setup --user` instead")
@@ -465,14 +442,13 @@ def server_pids() -> List[int]:
     return out
 
 
-def ask_reload(cwd: Optional[Path] = None, send_signal: bool = False) -> dict:
+def ask_reload(where: Environment, send_signal: bool = False) -> dict:
     """Asks the servers on this project's store, and on the global one, to restart into the code on
     disk: a `local/reload` marker each server checks between messages, so it acts at a quiet moment
     and the host's connection survives.
 
     SIGHUP does the same for a server serving any other project, but only on request: a server
     older than this feature has no handler for it, and the default action for SIGHUP is to die."""
-    cwd = Path(cwd or os.getcwd())
     signalled = []
     if send_signal and hasattr(signal, "SIGHUP"):
         for pid in server_pids():
@@ -482,7 +458,7 @@ def ask_reload(cwd: Optional[Path] = None, send_signal: bool = False) -> dict:
             except OSError:
                 continue
     marked = []
-    for scope in discover(cwd):          # every store here, not only this project's and the global one
+    for scope in discover(where):        # every store here, not only this project's and the global one
         root = scope.root
         try:
             (root / "local").mkdir(exist_ok=True)

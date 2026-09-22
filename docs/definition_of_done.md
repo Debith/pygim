@@ -76,6 +76,28 @@ line says so in its description and why.
 - **The changelog bullet describes what ships**, not the path to it, and says
   BREAKING when it is.
 
+## How it is wired
+
+Configuration is read in one place — the composition root — and passed down as a value. For the
+commands that is `cli_oo`, for the server `enact.run`; both call `_pygim._config.from_process`,
+and nothing below either of them looks at the environment, the working directory or the platform.
+`_pygim._config.read` is the only function that inspects environment variables at all.
+
+Three rules follow, and two of them are tests rather than conventions (`test_layering.py`):
+
+- **Nothing reads configuration except the wiring.** A component that reads the environment cannot
+  be built in a test without arranging the machine around it, and a test that has to arrange the
+  machine is no longer exercising the code that ships.
+- **A constructor sets values.** No logic, no loops, no IO. Anything that must be read is read by
+  a builder — `enact.build` reads the clock, the files this process loaded and the vocabulary on
+  disk, then hands the server plain values.
+- **Tests wire with the same function production uses.** `build(where)` in a test, `build(where)`
+  in `run`. What differs is the `Environment` passed in, which is configuration, which is exactly
+  what is meant to differ.
+
+Environment variables are legitimate at a process boundary — a reloading server cannot pass an
+argument to its own successor — and the boundary is the wiring, never one layer in.
+
 ## What it leaves behind
 
 An operation is not done when it returns the right answer; it is done when what it wrote is right

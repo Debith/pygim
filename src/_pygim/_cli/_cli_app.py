@@ -16,6 +16,7 @@ from dataclasses import dataclass
 from importlib import import_module
 import click
 
+from _pygim._config import Environment
 from _pygim._cli import _style
 
 __all__ = ["GimmicksCliApp", "flag_opt"]
@@ -97,18 +98,17 @@ class GimmicksCliApp:
         except (FileNotFoundError, _docs_serve.ServeError) as exc:
             raise click.ClickException(str(exc)) from exc
 
-    def enact_mcp(self, *, root: Optional[str]) -> None:
+    def enact_mcp(self, *, where: Environment) -> None:
         """Serve the project's store over MCP on stdio; the server starts even without one."""
         from _pygim._mcp import enact as server
         from pygim.enact import VocabularyError
 
         try:
-            server.run(root)
+            server.run(where)
         except (RuntimeError, VocabularyError) as exc:
             raise click.ClickException(str(exc)) from exc
 
-    def enact_call(self, *, name: str, arguments: Optional[str], session: Optional[int],
-                   root: Optional[str]) -> None:
+    def enact_call(self, *, where: Environment, name: str, arguments: Optional[str]) -> None:
         """One tool of the agent surface, from a shell. The same dispatch the MCP server uses, so a
         script — or a test — drives the whole stack through the commands, with no Python import of
         its own: `oo enact call read --json '{"hard": ["domain=dnd", "artifact=spell",
@@ -137,9 +137,7 @@ class GimmicksCliApp:
             known = ", ".join(sorted(tool["name"] for tool in server.TOOLS))
             raise click.ClickException(f"no tool called `{name}` — this server offers: {known}")
 
-        if session is not None:      # every process is its own session unless one is named
-            os.environ[server.SESSION_ENV] = str(session)
-        made = server.EnactServer(root=root)
+        made = server.build(where)   # the same wiring the MCP server itself uses
         reply = made.handle({"jsonrpc": "2.0", "id": 1, "method": "tools/call",
                              "params": {"name": name, "arguments": parsed}})
         result = reply.get("result") or {}
@@ -152,16 +150,16 @@ class GimmicksCliApp:
             click.echo(body)
 
     @staticmethod
-    def _store(root: Optional[str]) -> str:
+    def _store(where: Environment) -> str:
         """The store for this project, or a ClickException that says how to make one."""
         from _pygim._mcp import _stores
 
-        found = _stores.find(root)
+        found = _stores.find(where)
         if found is None or not found.exists:
-            raise click.ClickException(_stores.guidance())
+            raise click.ClickException(_stores.guidance(where))
         return str(found.root)
 
-    def enact_setup(self, *, kind: Optional[str], name: Optional[str], path: Optional[str], source: Optional[str],
+    def enact_setup(self, *, where: Environment, kind: Optional[str], name: Optional[str], path: Optional[str], source: Optional[str],
                      register: bool) -> None:
         """Find or create the project's store, point the clone at it, and register the server."""
         from _pygim._mcp import _stores
@@ -169,7 +167,7 @@ class GimmicksCliApp:
         cwd = Path.cwd()
         try:
             if kind == "global":
-                root = _stores.setup_global(Path(source) if source else None, Path(path) if path else None)
+                root = _stores.setup_global(where, Path(source) if source else None, Path(path) if path else None)
                 policy = _stores.policy(root)
                 click.echo(f"global store: {root} (sharing: {policy.sharing}, push: {policy.push})")
                 click.echo("every project on this machine reads it; write `domain=any` knowledge there with scope global")
@@ -177,16 +175,16 @@ class GimmicksCliApp:
                            f"`git config --global {_stores.GLOBAL_KEY} <path>`")
                 return
             if kind == "user":
-                root = _stores.setup_user(cwd, name, Path(source) if source else None)
+                root = _stores.setup_user(where, name, Path(source) if source else None)
                 how = "a user-level store"
             elif kind == "local":
-                root = _stores.setup_local(cwd, Path(source) if source else None)
+                root = _stores.setup_local(where, Path(source) if source else None)
                 how = "the project's own .enact"
             elif kind == "branch":
-                root = _stores.setup_branch(cwd, Path(path) if path else None, Path(source) if source else None)
+                root = _stores.setup_branch(where, Path(path) if path else None, Path(source) if source else None)
                 how = f"the `{_stores.BRANCH}` branch"
             else:
-                found = _stores.find(cwd=cwd)
+                found = _stores.find(where)
                 if found is None or not found.exists:
                     raise click.ClickException("no store yet — choose where it lives: `oo enact setup --user` "
                                                "(your user data directory) or `oo enact setup --branch` "
@@ -195,7 +193,7 @@ class GimmicksCliApp:
         except RuntimeError as exc:
             raise click.ClickException(str(exc)) from exc
         click.echo(f"store: {root} ({how})")
-        if (wide := _stores.find_global()) is not None:
+        if (wide := _stores.find_global(where)) is not None:
             click.echo(f"global store: {wide} — read by every project on this machine")
         if _stores.git(["config", "--get", _stores.GIT_KEY], cwd):
             click.echo(f"every worktree of this clone finds it through `git config {_stores.GIT_KEY}`")
@@ -208,11 +206,11 @@ class GimmicksCliApp:
             if not r.ran and not r.message.startswith(f"`{_stores.SERVER}` is already"):
                 click.echo("  " + " ".join(r.command))
 
-    def enact_stores(self, *, remote: bool, root: Optional[str]) -> None:
+    def enact_stores(self, *, where: Environment, remote: bool) -> None:
         """List the stores a session can name here."""
         from _pygim._mcp import _stores
 
-        scopes = _stores.discover(Path.cwd(), root)
+        scopes = _stores.discover(where)
         if not scopes:
             click.echo("no store found — run `oo enact setup` in a project, or `oo enact setup --global`")
             return
@@ -230,12 +228,12 @@ class GimmicksCliApp:
             if missing:
                 click.echo(_style.bad("not checked out here: ") + _style.strong(", ".join(missing)))
 
-    def enact_mailbox(self, *, text: Optional[str], kind: str, to: Optional[str], about: Optional[str],
-                       resolves: Optional[str], show_all: bool, root: Optional[str]) -> None:
+    def enact_mailbox(self, *, where: Environment, text: Optional[str], kind: str, to: Optional[str], about: Optional[str],
+                       resolves: Optional[str], show_all: bool) -> None:
         """List the store's mailbox, or leave a message in it."""
         from pygim.enact import Enact
 
-        memory = Enact(self._store(root))
+        memory = Enact(self._store(where))
         if text is not None:
             done = memory.post(text, kind=kind, to=to or "", about=about or "", resolves=resolves or "", author="human")
             if not done["ok"]:
@@ -255,11 +253,11 @@ class GimmicksCliApp:
             click.echo(f"\n{_style.muted(m['id'])}  {_style.title(m['kind'] + who)}{about_it}  {stamp}{closed}")
             click.echo("  " + "\n  ".join(m["text"].splitlines()))
 
-    def enact_reload(self, *, signal_servers: bool = False) -> None:
+    def enact_reload(self, *, where: Environment, signal_servers: bool = False) -> None:
         """Ask the running MCP servers to restart into the code on disk."""
         from _pygim._mcp import _stores
 
-        asked = _stores.ask_reload(Path.cwd(), send_signal=signal_servers)
+        asked = _stores.ask_reload(where, send_signal=signal_servers)
         if asked["signalled"]:
             click.echo(_style.good("signalled ") + _style.strong(f"{len(asked['signalled'])} server(s)") + ": "
                        + ", ".join(str(p) for p in asked["signalled"]))
@@ -272,11 +270,11 @@ class GimmicksCliApp:
             click.echo("a server older than this feature ignores the marker — if `server_stale` keeps coming back, "
                        "reconnect the client instead")
 
-    def enact_ingest(self, *, corpus: str, root: Optional[str]) -> None:
+    def enact_ingest(self, *, where: Environment, corpus: str) -> None:
         """Ingest a hand-written corpus file into the project's store."""
         from pygim.enact import Enact
 
-        result = Enact(self._store(root)).ingest(corpus)
+        result = Enact(self._store(where)).ingest(corpus)
         click.echo(f"{result['added']} added, {result['superseded']} superseded, {result['unchanged']} unchanged")
         for line in result["refused"]:
             click.echo(f"  refused {line}")
@@ -297,15 +295,15 @@ class GimmicksCliApp:
             click.echo(f"    {f['memory']} {f['title']}")
         click.echo(f"  key: {_style.muted(waiting['key'])}")
 
-    def enact_accept(self, *, memory: Optional[str], pack: Optional[str], reason: str, replace: bool,
-                      walk: bool = False, assume_yes: bool = False, root: Optional[str]) -> None:
+    def enact_accept(self, *, where: Environment, memory: Optional[str], pack: Optional[str], reason: str, replace: bool,
+                      walk: bool = False, assume_yes: bool = False) -> None:
         """Accept a generalisation (*memory*) or a drafted vocabulary pack (*pack*) in the project's store."""
         from pygim.enact import Enact
 
         if memory is not None and pack is not None:
             raise click.UsageError("accept one thing: a generalisation as MEMORY, or a vocabulary draft with --pack")
         if memory is None and pack is None:
-            store = Enact(self._store(root))
+            store = Enact(self._store(where))
             waiting = store.waiting_acceptance()
             if not waiting:
                 click.echo("nothing is waiting for you")
@@ -340,8 +338,8 @@ class GimmicksCliApp:
 
             from _pygim._mcp import _stores
 
-            done = _packs.accept(Path(self._store(root)), Path(pack).resolve(), replace=replace,
-                                 project=_stores.project_root(Path.cwd()))
+            done = _packs.accept(Path(self._store(where)), Path(pack).resolve(), replace=replace,
+                                 project=_stores.project_root(Path(where.cwd)))
             if not done["ok"]:
                 raise click.ClickException(done["errors"])
             click.echo(f"accepted pack `{done['pack']}`: {len(done['dimensions'])} dimension(s), {done['values']} value(s)"
@@ -352,7 +350,7 @@ class GimmicksCliApp:
                 click.echo(f"  locator: {warning}")
             click.echo("a running MCP server picks it up at its next call")
             return
-        store = Enact(self._store(root))
+        store = Enact(self._store(where))
         if not assume_yes:                       # a key says nothing; show what is being approved
             match = [w for w in store.waiting_acceptance() if memory in (w["key"], w["memory"]) or w["key"].startswith(memory)]
             if match:
@@ -367,14 +365,14 @@ class GimmicksCliApp:
         click.echo(_style.good("accepted ") + f"{memory} — its instances fold from the next read "
                    f"{_style.muted('(report: ' + result['report'] + ')')}")
 
-    def enact_status(self, *, root: Optional[str], standing: bool = False) -> None:
+    def enact_status(self, *, where: Environment, standing: bool = False) -> None:
         """Print where the repository at *root* stands, or the standing knowledge of a session there."""
         from pygim.enact import Enact
 
         if standing:
-            from _pygim._mcp.enact import EnactServer
+            from _pygim._mcp.enact import build
 
-            server = EnactServer(root=root, cwd=Path.cwd())
+            server = build(where)
             data = server.standing()
             waiting = data.get("waiting") or []
             if not data["preferences"] and not data["procedures"] and not waiting:
@@ -395,7 +393,7 @@ class GimmicksCliApp:
                     click.echo(f"- {p['memory']} {p['title']} — {p['where']}")
             return
 
-        store = self._store(root)
+        store = self._store(where)
         info = Enact(store).session()
         click.echo(_style.title(str(store)) + f": v{info['version']}, "
                    + _style.strong(f"{info['memories']} memories")
@@ -407,7 +405,7 @@ class GimmicksCliApp:
             click.echo("  " + _style.bad(f"{len(info['mailbox'])} message(s)") + " — `oo enact mailbox`")
         from _pygim._mcp import _stores
 
-        if (wide := _stores.find_global()) is not None and Path(wide) != Path(store):
+        if (wide := _stores.find_global(where)) is not None and Path(wide) != Path(store):
             policy = _stores.policy(wide)
             wide_info = Enact(str(wide)).session()
             click.echo(f"{wide}: v{wide_info['version']}, {wide_info['memories']} memories "

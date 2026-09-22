@@ -19,6 +19,7 @@ import signal
 import sys
 import time
 from pathlib import Path
+from .._config import Environment
 from typing import Any, Callable, Dict, IO, List, Optional
 
 from . import _packs, _stores
@@ -198,7 +199,7 @@ PROMPTS: List[Dict[str, Any]] = [
 
 def _domain_of(arguments: Dict[str, Any], server: "EnactServer") -> str:
     given = str(arguments.get("domain") or "").strip()
-    name = given or _stores.project_name(server._cwd)
+    name = given or _stores.project_name(server.where.cwd)
     return "".join(c if c.isalnum() else "_" for c in name.lower()).strip("_") or "project"
 
 
@@ -430,26 +431,31 @@ class EnactServer:
     store when a vocabulary file under taxonomy/ changes, so an accepted pack is live
     at the next call without restarting the server."""
 
-    def __init__(self, memory: Any = None, *, root: Optional[str] = None, cwd: Optional[Path] = None) -> None:
+    def __init__(self, where: Environment, memory: Any = None, *, started: int = 0,
+                 code: Any = None, taxonomy: Any = None) -> None:
+        """Values only. Everything that had to be read — the environment, the clock, the files this
+        process was loaded from, the vocabulary on disk — was read by `build`, which is the wiring
+        and the only place allowed to. A server can therefore be constructed from plain values,
+        which is what makes a test able to build the same object production does."""
+        self.where = where
         self._memory = memory
-        self._root = root
-        self._cwd = Path(cwd or os.getcwd())
         self._global: Any = None
         self._standing_seen: Optional[Dict[str, str]] = None  # global preference key → title, as last told
         self.signalled = False        # set by SIGHUP; acted on between messages
         self._stores_open: Dict[str, Any] = {}   # stores opened by name this session
         self._verdicts: Any = None    # whether the installed pygim takes a learn verdict; None until tried
-        self._started = time.time_ns()
-        self._code = self._code_stamp()
+        self._started = started
+        self._code = code
         self._told_stale = False
-        self.session: Optional[int] = int(os.environ[SESSION_ENV]) if os.environ.get(SESSION_ENV) else None
-        self._stamp = self._taxonomy_stamp() if memory is not None else None
+        self._said_reloaded = False
+        self.session: Optional[int] = where.session
+        self._stamp = taxonomy
         self._vocabulary: Optional[str] = None  # the vocabulary version the agent last saw
         self.turn = 0
         self._calls: Dict[str, Callable[[Dict[str, Any]], Any]] = {
             "cite": self._cite,
             "check_pack": lambda a: _packs.check(Path(self.memory.root), self._store_path(a["path"]),
-                                                 project=_stores.project_root(self._cwd), memory=self.memory),
+                                                 project=_stores.project_root(self.where.cwd), memory=self.memory),
             "session": self._session,
             "vocabulary": lambda a: self._mem(a).vocabulary(),
             "read": self._read,
@@ -486,7 +492,7 @@ class EnactServer:
             return self._stores_open[name]
         from pygim.enact import Enact
 
-        found = _stores.scope(name, self._cwd, self._root)
+        found = _stores.scope(name, self.where)
         if found is None:
             known = ", ".join(s.name for s in self.scopes()) or "project"
             raise NoStore(f"no store called `{name}` — this machine has: {known}. A store is found by its "
@@ -496,7 +502,7 @@ class EnactServer:
 
     def scopes(self) -> List[Any]:
         """Every store a session can name here, the project's first."""
-        return _stores.discover(self._cwd, self._root)
+        return _stores.discover(self.where)
 
     @property
     def global_memory(self) -> Any:
@@ -504,7 +510,7 @@ class EnactServer:
         from pygim.enact import Enact
 
         if self._global is None:
-            root = _stores.find_global()
+            root = _stores.find_global(self.where)
             if root is None or not _stores.is_store(root):
                 raise NoStore("this machine has no global store — run `oo enact setup --global` to make one; "
                               "knowledge about one project belongs in its own store")
@@ -524,9 +530,9 @@ class EnactServer:
         from pygim.enact import Enact
 
         if self._memory is None:
-            found = _stores.find(self._root, self._cwd)
+            found = _stores.find(self.where)
             if found is None or not found.exists:
-                raise NoStore(_stores.guidance(self._cwd))
+                raise NoStore(_stores.guidance(self.where))
             self._memory = Enact(str(found.root))
             self._stamp = self._taxonomy_stamp()
         elif self._taxonomy_stamp() != self._stamp:
@@ -608,7 +614,7 @@ class EnactServer:
     def _cite_roots(self, a: Dict[str, Any]) -> Any:
         name = (a.get("scope") or "project").strip().lower()
         if name == "project":
-            return _stores.project_root(self._cwd), self._store_root()
+            return _stores.project_root(self.where.cwd), self._store_root()
         root = Path(self._mem(a).root)
         return (_stores.project_of(root) or root), root
 
@@ -659,15 +665,14 @@ class EnactServer:
             return None
 
     def _taxonomy_stamp(self) -> Any:
-        files = sorted(Path(self._memory.root, "taxonomy").glob("*.yaml"))
-        return tuple((f.name, f.stat().st_mtime_ns, f.stat().st_size) for f in files)
+        return taxonomy_stamp(self._memory)
 
     def _store_path(self, path: str) -> Path:
         p = Path(path).expanduser()
         if p.is_absolute():
             return p
         in_store = Path(self.memory.root) / p
-        return in_store if in_store.exists() else _stores.project_root(self._cwd) / p
+        return in_store if in_store.exists() else _stores.project_root(self.where.cwd) / p
 
     # ── tools ───────────────────────────────────────────────────────────────
 
@@ -680,7 +685,7 @@ class EnactServer:
         info = self.memory.session()
         self.session = int(info["session"])
         info["root"] = self.memory.root
-        info["project"] = str(_stores.project_root(self._cwd))
+        info["project"] = str(_stores.project_root(self.where.cwd))
         info["standing"] = self.standing()
         info["scopes"] = [{"scope": s.name, "root": str(s.root), "how": s.how,
                            "sharing": _stores.policy(s.root).sharing,
@@ -825,28 +830,6 @@ class EnactServer:
 
     # ── reloading (03 §9.1.3) ───────────────────────────────────────────────
 
-    def _code_stamp(self) -> Any:
-        """What the server is running: the version, and every source file it had loaded when it
-        started. A reinstall or an edited file changes it, and the process cannot pick that up by
-        itself — Python has already imported what it has, and the extension cannot be re-imported.
-
-        Only the files loaded *at start* are recorded, and only those are looked at again. Imports
-        here are lazy — `_packs` arrives with the first `cite`, the extension with the first call
-        that opens a store — so a stamp taken over `sys.modules` as it stands grows during the
-        process's life and then differs from itself. That is not the code moving on; nothing about a
-        module arriving says the code on disk changed."""
-        files = {}
-        for module in list(sys.modules.values()):
-            path = getattr(module, "__file__", None)
-            if not path or ("_pygim" not in path and "pygim" not in path):
-                continue
-            try:
-                stat = os.stat(path)
-            except OSError:
-                continue
-            files[path] = (stat.st_mtime_ns, stat.st_size)
-        return (_version(), files)
-
     def stale(self) -> bool:
         """Whether the code on disk has moved on since this process started: a different version, or
         one of the files it started with changed or went away."""
@@ -904,6 +887,8 @@ class EnactServer:
             return
         print(f"{SERVER_NAME}: reloading into the code on disk", file=sys.stderr)
         stdout.flush()
+        # A process cannot pass an argument to its own successor, so these cross the exec in the
+        # environment — the one place that is legitimate, because the successor's wiring reads it.
         os.environ[RELOADED_ENV] = "1"
         if self.session is not None:
             os.environ[SESSION_ENV] = str(self.session)
@@ -922,7 +907,8 @@ class EnactServer:
                                           "the reload feature and only reconnecting the client replaces it."}
 
     def serve(self, stdin: IO[str], stdout: IO[str]) -> None:
-        if os.environ.pop(RELOADED_ENV, None):  # a host that watches for it re-fetches the schemas
+        if self.where.reloaded and not self._said_reloaded:  # a host that watches re-fetches schemas
+            self._said_reloaded = True
             _write(stdout, {"jsonrpc": "2.0", "method": "notifications/tools/list_changed"})
         for line in stdin:
             line = line.strip()
@@ -961,17 +947,60 @@ def _version() -> str:
         return "0"
 
 
-def run(root: Optional[str] = None, stdin: Optional[IO[str]] = None, stdout: Optional[IO[str]] = None) -> None:
+def taxonomy_stamp(memory: Any) -> Any:
+    """The vocabulary files as they are on disk. IO, so a constructor never does it."""
+    if memory is None:
+        return None
+    files = sorted(Path(memory.root, "taxonomy").glob("*.yaml"))
+    return tuple((f.name, f.stat().st_mtime_ns, f.stat().st_size) for f in files)
+
+
+def code_stamp() -> Any:
+    """What this process is running: the version, and every source file it had loaded when it
+    started. A reinstall or an edited file changes it, and the process cannot pick that up by
+    itself — Python has already imported what it has, and the extension cannot be re-imported.
+
+    Only the files loaded *at start* are recorded, and only those are looked at again. Imports here
+    are lazy — `_packs` arrives with the first `cite`, the extension with the first call that opens
+    a store — so a stamp taken over `sys.modules` as it stands grows during the process's life and
+    then differs from itself. That is not the code moving on; nothing about a module arriving says
+    the code on disk changed."""
+    files = {}
+    for module in list(sys.modules.values()):
+        path = getattr(module, "__file__", None)
+        if not path or ("_pygim" not in path and "pygim" not in path):
+            continue
+        try:
+            stat = os.stat(path)
+        except OSError:
+            continue
+        files[path] = (stat.st_mtime_ns, stat.st_size)
+    return (_version(), files)
+
+
+def build(where: Environment, memory: Any = None) -> EnactServer:
+    """The wiring: the one function that builds a server, used by `run`, by `oo enact call`, and by
+    every test. It does what a constructor must not — reads the clock, stats the files this process
+    was loaded from and the vocabulary on disk — and hands the server plain values.
+
+    Configuration arrives as *where*, already read (`_pygim._config`). Nothing below this line
+    looks at the environment, so a test that passes a different `Environment` is running the same
+    code production runs, not a variant of it."""
+    return EnactServer(where, memory, started=time.time_ns(), code=code_stamp(),
+                       taxonomy=taxonomy_stamp(memory))
+
+
+def run(where: Environment, stdin: Optional[IO[str]] = None, stdout: Optional[IO[str]] = None) -> None:
     """Serves this project's store over stdio until stdin closes. With no *root*, the store is found
     from the working directory the host started the server in; with none at all the server still
     starts, and answers with how to create one. SIGHUP asks it to reload into the code on disk,
     which it does between messages — `oo enact reload` sends it."""
-    found = _stores.find(root)
+    found = _stores.find(where)
     if found and found.exists:
         print(f"{SERVER_NAME}: serving {found.root} (from {found.how})", file=sys.stderr)
     else:
-        print(f"{SERVER_NAME}: {_stores.guidance()}", file=sys.stderr)
-    server = EnactServer(root=root)
+        print(f"{SERVER_NAME}: {_stores.guidance(where)}", file=sys.stderr)
+    server = build(where)
     if hasattr(signal, "SIGHUP"):
         signal.signal(signal.SIGHUP, lambda *_: setattr(server, "signalled", True))
     server.serve(stdin or sys.stdin, stdout or sys.stdout)

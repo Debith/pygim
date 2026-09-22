@@ -13,23 +13,23 @@ identifiers they only need when they act. Rules from clig.dev, Output.
 """
 from __future__ import annotations
 
-import os
-
 import click
 
-NO_COLOR = "PYGIM_NO_COLOR"
+_colour = True   # what the wiring last said; click removes colour again for a stream that is a pipe
+
+
+def use(colour: bool) -> None:
+    """Told once, by the wiring, what the environment and the command line decided between them
+    (`_pygim._config`). Nothing here reads `NO_COLOR`, `TERM` or `--no-color`: a module that
+    consults the environment each time it renders cannot be told anything by a test, and is a
+    different module in a test than in production."""
+    global _colour
+    _colour = bool(colour)
 
 
 def enabled() -> bool:
     """Whether to emit colour at all. click removes it again when the stream is not a terminal."""
-    if os.environ.get("NO_COLOR") is not None or os.environ.get(NO_COLOR) is not None:
-        return False
-    return os.environ.get("TERM") != "dumb"
-
-
-def off() -> None:
-    """Turn colour off for this process — what ``oo --no-color`` does."""
-    os.environ[NO_COLOR] = "1"
+    return _colour
 
 
 def _paint(text: str, **style: object) -> str:

@@ -70,10 +70,13 @@ class _OoGroup(BannerGroup):
                                          "not a terminal, when NO_COLOR is set, or when TERM is dumb.")
 @click.pass_context
 def cli_oo(ctx, no_color):
-    if no_color:
-        from _pygim._cli import _style
+    """The composition root for the commands: the environment is read once, here, and every command
+    is handed the result. Nothing below reads it again (see `_pygim._config`)."""
+    from _pygim import _config
+    from _pygim._cli import _style
 
-        _style.off()
+    ctx.obj = _config.from_process(colour=False if no_color else None)
+    _style.use(ctx.obj.colour)
     if ctx.invoked_subcommand is None and ctx.meta.get("free_text") is None:
         click.echo(ctx.get_help())
 
@@ -104,11 +107,12 @@ _ROOT = click.option("--root", default=None, type=click.Path(file_okay=False),
 @click.option("--from", "source", default=None, type=click.Path(exists=True, file_okay=False),
               help="Start the new store as a copy of an existing one, such as a project's .memory.")
 @click.option("--no-register", is_flag=True, help="Do not register the MCP server with Claude Code.")
-def enact_setup(kind, name, path, source, no_register):
+@click.pass_obj
+def enact_setup(where, kind, name, path, source, no_register):
     """Set this project and machine up to use a memory store: find or create the store, point every
     worktree of the clone at it, and register the MCP server with Claude Code at user scope.
     Run it again on another machine to join a project whose store already exists."""
-    GimmicksCliApp().enact_setup(kind=kind, name=name, path=path, source=source, register=not no_register)
+    GimmicksCliApp().enact_setup(where=where, kind=kind, name=name, path=path, source=source, register=not no_register)
 
 
 @enact.command("call")
@@ -119,7 +123,8 @@ def enact_setup(kind, name, path, source, no_register):
               help="Write as this session, so several calls belong together and `review` can gather "
                    "them. Default: each call is a session of its own.")
 @_ROOT
-def enact_call(name, arguments, session, root):
+@click.pass_obj
+def enact_call(where, name, arguments, session, root):
     """Call one tool of the agent surface from a shell, and print its JSON result.
 
     The same dispatch the MCP server uses, so a script drives the whole stack through commands:
@@ -133,24 +138,26 @@ def enact_call(name, arguments, session, root):
     A refusal is a result: it prints with `refused` and exits 0. Exit 1 means the call could not be
     made at all — no such tool, or the arguments were not JSON.
     """
-    GimmicksCliApp().enact_call(name=name, arguments=arguments, session=session, root=root)
+    GimmicksCliApp().enact_call(where=where.with_root(root).with_session(session), name=name, arguments=arguments)
 
 
 @enact.command("mcp")
 @_ROOT
-def enact_mcp(root):
+@click.pass_obj
+def enact_mcp(where, root):
     """Serve the project's store to an agent over MCP (stdio). With no --root it is found from the
     directory the host starts it in, so one registration serves every project and worktree."""
-    GimmicksCliApp().enact_mcp(root=root)
+    GimmicksCliApp().enact_mcp(where=where.with_root(root))
 
 
 @enact.command("stores")
 @flag_opt("--remote", "remote", help="Also list the stores kept in the remote that are not checked out here.")
 @_ROOT
-def enact_stores(remote, root):
+@click.pass_obj
+def enact_stores(where, remote, root):
     """List the stores this machine holds, as a session can name them with `scope`. Nothing is
     configured: a store is found by its policy's name or its directory's."""
-    GimmicksCliApp().enact_stores(remote=remote, root=root)
+    GimmicksCliApp().enact_stores(where=where.with_root(root), remote=remote)
 
 
 @enact.command("mailbox")
@@ -162,30 +169,33 @@ def enact_stores(remote, root):
 @click.option("--resolves", default=None, help="--post: the message id this closes.")
 @flag_opt("--all", "show_all", help="List resolved messages too.")
 @_ROOT
-def enact_mailbox(text, kind, to, about, resolves, show_all, root):
+@click.pass_obj
+def enact_mailbox(where, text, kind, to, about, resolves, show_all, root):
     """Messages other sessions, agents and people left in this store — feedback, requests and
     comments. Lists what is open; `--post` leaves one."""
-    GimmicksCliApp().enact_mailbox(text=text, kind=kind, to=to, about=about, resolves=resolves,
-                                    show_all=show_all, root=root)
+    GimmicksCliApp().enact_mailbox(where=where.with_root(root), text=text, kind=kind, to=to, about=about, resolves=resolves,
+                                    show_all=show_all)
 
 
 @enact.command("reload")
 @flag_opt("--signal", "signal_servers",
           help="Also SIGHUP every running server, including other projects'. A server older than "
                "this feature has no handler for SIGHUP and will exit instead of reloading.")
-def enact_reload(signal_servers):
+@click.pass_obj
+def enact_reload(where, signal_servers):
     """Ask the MCP servers on this project's store, and on the global one, to restart into the
     installed code — after upgrading pygim, or editing the server. Each reloads between messages,
     so the host's connection survives."""
-    GimmicksCliApp().enact_reload(signal_servers=signal_servers)
+    GimmicksCliApp().enact_reload(where=where, signal_servers=signal_servers)
 
 
 @enact.command("ingest")
 @click.argument("corpus", type=click.Path(exists=True, dir_okay=False))
 @_ROOT
-def enact_ingest(corpus, root):
+@click.pass_obj
+def enact_ingest(where, corpus, root):
     """Ingest a hand-written corpus file, reconciled by slug and digest."""
-    GimmicksCliApp().enact_ingest(corpus=corpus, root=root)
+    GimmicksCliApp().enact_ingest(where=where.with_root(root), corpus=corpus)
 
 
 @enact.command("accept")
@@ -197,12 +207,13 @@ def enact_ingest(corpus, root):
 @flag_opt("--all", "walk", help="Read every generalisation waiting for you, one at a time, and answer each.")
 @flag_opt("-y", "--yes", "assume_yes", help="Accept without showing it first. For scripts; a person should read it.")
 @_ROOT
-def enact_accept(memory_ref, pack, reason, replace, walk, assume_yes, root):
+@click.pass_obj
+def enact_accept(where, memory_ref, pack, reason, replace, walk, assume_yes, root):
     """Accept what the agent drafted, after reading it: a generalisation, whose instances then fold
     under it; or a vocabulary pack (--pack), which then becomes the vocabulary. With no argument it
     shows what is waiting, in words rather than keys. A person runs this — the agent has no tool for it."""
-    GimmicksCliApp().enact_accept(memory=memory_ref, pack=pack, reason=reason, replace=replace,
-                                   walk=walk, assume_yes=assume_yes, root=root)
+    GimmicksCliApp().enact_accept(where=where.with_root(root), memory=memory_ref, pack=pack, reason=reason, replace=replace,
+                                   walk=walk, assume_yes=assume_yes)
 
 
 @enact.command("status")
@@ -210,9 +221,10 @@ def enact_accept(memory_ref, pack, reason, replace, walk, assume_yes, root):
           help="Print the standing knowledge instead — every preference in full, as a session receives "
                "it — and nothing else, so a host's session-start hook can put it in front of an agent.")
 @_ROOT
-def enact_status(standing, root):
+@click.pass_obj
+def enact_status(where, standing, root):
     """Where the store stands: its version, reviews and pending proposals."""
-    GimmicksCliApp().enact_status(root=root, standing=standing)
+    GimmicksCliApp().enact_status(where=where.with_root(root), standing=standing)
 
 
 @cli_oo.group()

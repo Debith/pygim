@@ -14,7 +14,8 @@ from pathlib import Path
 import pytest
 
 from _pygim._mcp import _stores
-from _pygim._mcp.enact import TOOLS, EnactServer
+from _pygim import _config
+from _pygim._mcp.enact import TOOLS, build
 from pygim.enact import Enact
 
 TAGS = ["domain=any", "artifact=any", "task=design", "kind=principle"]
@@ -34,18 +35,25 @@ dimensions:
 @pytest.fixture(autouse=True)
 def no_machine_state(tmp_path, monkeypatch):
     """Nothing here reads this machine's own stores: a server merges the global store into standing
-    knowledge, and a test that found the developer's would pass or fail by what is in it."""
-    monkeypatch.setenv("PYGIM_ENACT_GLOBAL", str(tmp_path / "no-global-store"))
+    knowledge, and a test that found the developer's would pass or fail by what is in it. Only
+    git's own environment is set — git is a subprocess and reads it itself. Where *pygim* looks is
+    a value, built by `at` below and passed to the same wiring production uses."""
     monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(tmp_path / "gitconfig"))
     monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
-    monkeypatch.setattr(_stores, "user_data_dir", lambda: tmp_path / "user-data")
+
+
+def at(cwd, tmp_path, **overrides):
+    """The configuration as a value — see the note on the same helper in test_enact_setup.py."""
+    return _config.Environment(cwd=Path(cwd), home=tmp_path / "home",
+                               user_data=tmp_path / "user-data",
+                               global_root=tmp_path / "no-global-store", **overrides)
 
 
 @pytest.fixture
 def server(tmp_path):
     root = tmp_path / "repo"
     Enact.init(str(root))
-    return EnactServer(Enact(str(root)), cwd=tmp_path)   # cwd matters: stores are discovered around it
+    return build(at(tmp_path, tmp_path), Enact(str(root)))   # cwd matters: stores are discovered around it
 
 
 def call(server, name, **arguments):
@@ -130,7 +138,7 @@ class TestProtocol:
         m.remember(title="Releasing", text="1 tag\n2 push", tags=["domain=any", "artifact=any", "task=design", "kind=procedure"],
                    seen=[pref["memory"]])
         receipts = len(m.receipts())
-        server = EnactServer(Enact(str(root)), cwd=tmp_path)
+        server = build(at(tmp_path, tmp_path), Enact(str(root)))
         text = server.handle({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}})["result"]["instructions"]
         assert f"- {pref['memory']} Prefer templates" in text and "even with one use" not in text   # an index: titles only
         err, info = call(server, "session")
@@ -155,7 +163,7 @@ class TestProtocol:
             w = m.remember(title=f"Preference number {n} with a long and descriptive title that goes on", text=f"{n} " + "x" * 900,
                            tags=["domain=any", "artifact=any", "task=design", "kind=preference"], seen=seen)
             seen.append(w["memory"])
-        server = EnactServer(Enact(str(root)), cwd=tmp_path)
+        server = build(at(tmp_path, tmp_path), Enact(str(root)))
         text = server.handle({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}})["result"]["instructions"]
         assert len(text) <= INSTRUCTIONS_CAP
         assert "Preference number 29" in text and "Preference number 0 " not in text   # newest first
@@ -383,9 +391,11 @@ class TestReloading:
     def test_a_reloaded_server_resumes_its_session_and_says_the_tools_may_have_moved(self, tmp_path, monkeypatch):
         root = tmp_path / "repo"
         Enact.init(str(root))
-        monkeypatch.setenv("PYGIM_ENACT_SESSION", "7")
-        monkeypatch.setenv("PYGIM_ENACT_RELOADED", "1")
-        resumed = EnactServer(Enact(str(root)))
+        # What a reloaded process is handed: its predecessor put these in the environment across
+        # the exec, and its composition root read them — here, `read` is called with them directly.
+        resumed = build(_config.read({"PYGIM_ENACT_SESSION": "7", "PYGIM_ENACT_RELOADED": "1"},
+                                     cwd=tmp_path, home=tmp_path / "home", platform="linux"),
+                        Enact(str(root)))
         assert resumed.session == 7                                    # the audit log keeps one session
         out = io.StringIO()
         resumed.serve(io.StringIO(""), out)
