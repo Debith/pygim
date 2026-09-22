@@ -1,9 +1,0 @@
-Debith's direction (2026-09-12, settled 2026-09-13): during work, memories record what was learned, concretely and with the case. When the user asks for a consolidation — at any point — the agent reads back what the session wrote and states once, at the level the cases support, a pattern several of them share. Design: overview §4.11, section 04 §3.9, section 00a Feature 7, section 01 §4, §7 and §8.
-
-Built: `remember` takes `generalises` (two or more heads, kept as heads, counted as read, covered on every hard dimension; `any` passes the check). `review(session)` lists a session's writes. The MCP `consolidate` prompt carries the steps and is started by the user.
-
-Reads fold a generalisation's instances under it as `evidence` (key and title, no budget), decided before scoring — but only once a person has accepted the generalisation.
-
-Review (Debith chose a report file and a gated fold): the consolidation ends with `lessons` — patterns written, cases left and why, gaps — and the service publishes reviews/session-<n>.md with what it can list itself (waiting generalisations, `any` claims, cases left, proposals). A person accepts with `oo memory accept <key>`; it is deliberately not an MCP tool, so the agent cannot open its own gate. This is the system's one approval step, kept narrow because the fold is the only operation that hides memories from a reader; it is a conscious exception to the earlier rejection of approval ceremony.
-
-Still open (overview §10): what a later contradicting case should trigger.

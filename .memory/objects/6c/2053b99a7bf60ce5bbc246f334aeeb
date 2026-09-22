@@ -1,8 +1,0 @@
-Debith's direction (2026-09-12): during work, memories record what was learned in that session, concretely and with the case. At the session's close the agent reads back what it wrote and states once, at the level the cases support, a pattern several of them share. This is now the design — overview §4.11, section 00a Feature 7, section 01 §4 and §8 (commit 0362cba).
-
-What was decided:
-- A generalisation carries a `generalises` edge and retires nothing: its instances stay heads, as its evidence. A merge, by contrast, joins memories that say one thing and supersedes them.
-- The service checks only what needs no prose: every generalised memory is a head, and the generalisation covers its instances on every hard dimension, so it is findable wherever they are. `any` passes that check, so overreach is caught in review.
-- Generalise only as far as the cases reach; a wider suspicion waits for a case in the wider space.
-
-Still open (overview §10): what makes a close happen reliably, given the server only learns a session ended once the connection is gone; whether a context spends budget on a generalisation's instances; what a later contradicting case should trigger. Not implemented: no `generalises` field on remember and no `review(session)` tool yet — until then, a generalisation cites its instances by key in its text.
