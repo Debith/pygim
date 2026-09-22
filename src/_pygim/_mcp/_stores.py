@@ -1,25 +1,28 @@
-"""Where a project's memory lives, and how a machine is set up to use it.
+"""Where a project's ENACT store lives, and how a machine is set up to use it.
 
 A store is found, in order, by:
 
 1. an explicit root (``--root``);
-2. ``$PYGIM_MEMORY_ROOT``;
-3. ``git config pygim.memory`` — git keeps it in the clone's shared config, so every worktree of
+2. ``$PYGIM_ENACT_ROOT``;
+3. ``git config pygim.enact`` — git keeps it in the clone's shared config, so every worktree of
    the project finds the same store;
 4. the working directory itself, or an ancestor, being a store — running a command inside a store's
    own worktree means that store;
-5. a ``.memory`` directory found by walking up from the working directory.
+5. a ``.enact`` directory found by walking up from the working directory.
 
-``oo memory setup`` writes that git config, creates the store — in a user-level directory, or
-on an orphan ``memory`` branch checked out as a worktree of its own — and registers the MCP
+Each of those is asked for under every name the system has had, newest first: it was called
+``memory`` until 2026-09-22 and the stores on disk still say so, and none of them is moved.
+
+``oo enact setup`` writes that git config, creates the store — in a user-level directory, or
+on an orphan ``enact`` branch checked out as a worktree of its own — and registers the MCP
 server with Claude Code at user scope, without a root, so it finds each project's store from the
 directory it is started in.
 
 Beside a project's store there may be one **global store**: what holds knowledge that is about no
 single project, tagged ``domain=any`` — how to write for this person, how they like options laid
 out. Every session reads it, whatever project it is in, so a preference written once reaches
-projects that do not exist yet. It is found by ``$PYGIM_MEMORY_GLOBAL``, then
-``git config --global pygim.memory.global``, then the default place under the user data directory.
+projects that do not exist yet. It is found by ``$PYGIM_ENACT_GLOBAL``, then
+``git config --global pygim.enact.global``, then the default place under the user data directory.
 
 A store says in ``policy.yaml`` how its writes leave the machine: ``push: auto`` commits and
 pushes each write (a personal store, one owner), ``push: manual`` leaves that to a person (a
@@ -39,15 +42,44 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Optional, Sequence
 
-ENV = "PYGIM_MEMORY_ROOT"
-GIT_KEY = "pygim.memory"
-LOCAL = ".memory"
-BRANCH = "memory"
-SERVER = "pygim-memory"
-GLOBAL_ENV = "PYGIM_MEMORY_GLOBAL"
-GLOBAL_KEY = "pygim.memory.global"
+ENV = "PYGIM_ENACT_ROOT"
+GIT_KEY = "pygim.enact"
+LOCAL = ".enact"
+BRANCH = "enact"
+SERVER = "pygim-enact"
+GLOBAL_ENV = "PYGIM_ENACT_GLOBAL"
+GLOBAL_KEY = "pygim.enact.global"
 GLOBAL_NAME = "global"
 POLICY = "policy.yaml"
+
+# Spellings that are still read, newest first. The system was called "memory" until 2026-09-22 and
+# the stores already on disk carry that name in their directory, their branch and the git config
+# that points at them; nothing is moved, so every lookup asks for each spelling in turn. A tuple
+# rather than a pair of constants, so the next name costs one entry instead of a search.
+ENVS = (ENV, "PYGIM_MEMORY_ROOT")
+GIT_KEYS = (GIT_KEY, "pygim.memory")
+LOCALS = (LOCAL, ".memory")
+BRANCHES = (BRANCH, "memory")
+GLOBAL_ENVS = (GLOBAL_ENV, "PYGIM_MEMORY_GLOBAL")
+GLOBAL_KEYS = (GLOBAL_KEY, "pygim.memory.global")
+SUFFIXES = ("-enact", "-memory")
+
+
+def from_env(names: Sequence[str]) -> Optional[tuple]:
+    """The first of *names* set in the environment, as (name, value)."""
+    for name in names:
+        value = os.environ.get(name)
+        if value:
+            return name, value
+    return None
+
+
+def without_suffix(name: str) -> str:
+    """*name* with whichever store suffix it carries removed — `ddd-memory` and `ddd-enact` are both `ddd`."""
+    for suffix in SUFFIXES:
+        if name.endswith(suffix):
+            return name[:-len(suffix)]
+    return name
 
 
 @dataclass(frozen=True)
@@ -95,19 +127,22 @@ def find(explicit: Optional[str] = None, cwd: Optional[Path] = None) -> Optional
     cwd = Path(cwd or os.getcwd()).resolve()
     if explicit:
         return Found(Path(explicit).expanduser().resolve(), "--root")
-    if os.environ.get(ENV):
-        return Found(Path(os.environ[ENV]).expanduser().resolve(), "$" + ENV)
-    configured = git(["config", "--get", GIT_KEY], cwd)
-    if configured:
-        path = Path(configured).expanduser()
-        if not path.is_absolute():
-            path = (main_worktree(cwd) or cwd) / path
-        return Found(path.resolve(), "git config " + GIT_KEY)
+    named = from_env(ENVS)
+    if named:
+        return Found(Path(named[1]).expanduser().resolve(), "$" + named[0])
+    for key in GIT_KEYS:
+        configured = git(["config", "--get", key], cwd)
+        if configured:
+            path = Path(configured).expanduser()
+            if not path.is_absolute():
+                path = (main_worktree(cwd) or cwd) / path
+            return Found(path.resolve(), "git config " + key)
     for directory in (cwd, *cwd.parents):
         if is_store(directory):          # standing in the store itself, as one does in its own worktree
             return Found(directory.resolve(), "the working directory is a store")
-        if is_store(directory / LOCAL):
-            return Found((directory / LOCAL).resolve(), LOCAL + " above the working directory")
+        for local in LOCALS:
+            if is_store(directory / local):
+                return Found((directory / local).resolve(), local + " above the working directory")
     return None
 
 
@@ -115,9 +150,9 @@ def guidance(cwd: Optional[Path] = None) -> str:
     """What to tell someone whose project has no store yet."""
     where = find(cwd=cwd)
     if where and not where.exists:
-        return f"{where.root} (from {where.how}) is not a memory store yet — run `oo memory setup` in the project"
-    return ("no memory store for this project — run `oo memory setup --user` (a store in your user directory) "
-            "or `oo memory setup --branch` (an orphan `memory` branch shared through git) in the project; "
+        return f"{where.root} (from {where.how}) is not an ENACT store yet — run `oo enact setup` in the project"
+    return ("no ENACT store for this project — run `oo enact setup --user` (a store in your user directory) "
+            "or `oo enact setup --branch` (an orphan `memory` branch shared through git) in the project; "
             "`--local` keeps one inside the project instead")
 
 
@@ -170,20 +205,20 @@ def project_of(root: Path) -> Optional[Path]:
     if declared:
         path = Path(declared).expanduser()
         return (root / path).resolve() if not path.is_absolute() else path
-    sibling = root.parent / root.name.removesuffix("-memory")
+    sibling = root.parent / without_suffix(root.name)
     return sibling.resolve() if sibling != root and sibling.is_dir() else None
 
 
 def store_name(root: Path) -> str:
     """What a session calls a store: the name its policy declares, else its directory's — with a
-    trailing `-memory` dropped, so ~/projects/ddd-memory is `ddd`, and `.memory` named for its
+    trailing store suffix dropped, so ~/projects/ddd-memory is `ddd`, and a `.enact` named for its
     project. Lowercase; a session addresses a store by this."""
     declared = policy(root).name
     if declared:
         return declared.strip().lower()
-    if root.name == LOCAL:
+    if root.name in LOCALS:
         return root.parent.name.lower()
-    return root.name.removesuffix("-memory").lower() or root.name.lower()
+    return without_suffix(root.name).lower() or root.name.lower()
 
 
 def publish(root: Path, message: str) -> str:
@@ -253,7 +288,8 @@ def discover(cwd: Optional[Path] = None, explicit: Optional[str] = None) -> List
         for child in sorted(home.iterdir()):
             add(child, f"in {home}")
     project = project_root(cwd)
-    for sibling in sorted(project.parent.glob("*-memory")) if project.parent.is_dir() else []:
+    siblings = {s for suffix in SUFFIXES for s in project.parent.glob("*" + suffix)} if project.parent.is_dir() else set()
+    for sibling in sorted(siblings):
         add(sibling, f"beside {project.name}")
     return found
 
@@ -288,17 +324,21 @@ def user_data_dir() -> Path:
         base = Path.home() / "Library" / "Application Support"
     else:
         base = Path(os.environ.get("XDG_DATA_HOME") or Path.home() / ".local" / "share")
-    return base / "pygim" / "memory"
+    here = base / "pygim" / "enact"
+    was = base / "pygim" / "memory"
+    return here if here.is_dir() or not was.is_dir() else was
 
 
 def find_global() -> Optional[Path]:
-    """The global store, or None when this machine has none: ``$PYGIM_MEMORY_GLOBAL``, then
-    ``git config --global pygim.memory.global``, then the default place if a store is there."""
-    if os.environ.get(GLOBAL_ENV):
-        return Path(os.environ[GLOBAL_ENV]).expanduser().resolve()
-    configured = git(["config", "--global", "--get", GLOBAL_KEY], Path.home())
-    if configured:
-        return Path(configured).expanduser().resolve()
+    """The global store, or None when this machine has none: ``$PYGIM_ENACT_GLOBAL``, then
+    ``git config --global pygim.enact.global``, then the default place if a store is there."""
+    named = from_env(GLOBAL_ENVS)
+    if named:
+        return Path(named[1]).expanduser().resolve()
+    for key in GLOBAL_KEYS:
+        configured = git(["config", "--global", "--get", key], Path.home())
+        if configured:
+            return Path(configured).expanduser().resolve()
     default = user_data_dir() / GLOBAL_NAME
     return default if is_store(default) else None
 
@@ -316,7 +356,7 @@ def setup_global(source: Optional[Path] = None, path: Optional[Path] = None) -> 
     if git(["rev-parse", "--git-dir"], root) is None:
         git(["init", "-q"], root)
     git(["config", "--global", GLOBAL_KEY, str(root)], root)
-    publish(root, "memory: the global store, as initialised by oo memory setup --global")
+    publish(root, "memory: the global store, as initialised by oo enact setup --global")
     return root
 
 
@@ -336,10 +376,10 @@ def create(root: Path, source: Optional[Path] = None) -> None:
     """A new store at *root*: empty, or a copy of the store at *source* — every file but ``local/``,
     which is one clone's alone. The copy is a new clone of the same history: its next write starts a
     new audit file, and the old ones keep replaying beside it."""
-    from pygim.memory import Memory
+    from pygim.enact import Enact
 
     if source is None:
-        Memory.init(str(root))
+        Enact.init(str(root))
         return
     if not is_store(source):
         raise RuntimeError(f"{source} is not a memory store — nothing to copy")
@@ -357,7 +397,7 @@ def setup_user(cwd: Path, name: Optional[str] = None, source: Optional[Path] = N
 
 
 def setup_local(cwd: Path, source: Optional[Path] = None) -> Path:
-    """A store inside the project, as ``.memory`` at this worktree's top, committed with the code. Git
+    """A store inside the project, as ``.enact`` at this worktree's top, committed with the code. Git
     config is left alone: this store belongs to the branch that carries it, and other worktrees on
     other branches find theirs, or none."""
     root = project_root(cwd) / LOCAL
@@ -367,34 +407,38 @@ def setup_local(cwd: Path, source: Optional[Path] = None) -> Path:
 
 
 def setup_branch(cwd: Path, path: Optional[Path] = None, source: Optional[Path] = None) -> Path:
-    """A store on the orphan ``memory`` branch, checked out as its own worktree beside the main one.
-    An existing local or remote-tracking ``memory`` branch is checked out rather than created — a
+    """A store on the orphan ``enact`` branch, checked out as its own worktree beside the main one.
+    An existing branch under any name the system has had is checked out rather than created — a
     second machine gets the project's memory with ``git fetch`` and this call."""
     main = main_worktree(cwd)
     if main is None:
-        raise RuntimeError(f"{cwd} is not in a git repository — use `oo memory setup --user` instead")
-    root = (path or main.parent / f"{main.name}-{BRANCH}").expanduser().resolve()
+        raise RuntimeError(f"{cwd} is not in a git repository — use `oo enact setup --user` instead")
+    branch = next((b for b in BRANCHES
+                   if git(["show-ref", "--verify", "--quiet", f"refs/heads/{b}"], cwd) is not None
+                   or git(["show-ref", "--verify", "--quiet", f"refs/remotes/origin/{b}"], cwd) is not None),
+                  BRANCH)
+    root = (path or main.parent / f"{main.name}-{branch}").expanduser().resolve()
     if is_store(root):
         point_git_at(root, cwd)
         return root
     if root.exists() and any(root.iterdir()):
-        raise RuntimeError(f"{root} exists and is not a memory store — choose another --path")
-    has_local = git(["show-ref", "--verify", "--quiet", f"refs/heads/{BRANCH}"], cwd) is not None
-    has_remote = git(["show-ref", "--verify", "--quiet", f"refs/remotes/origin/{BRANCH}"], cwd) is not None
+        raise RuntimeError(f"{root} exists and is not an ENACT store — choose another --path")
+    has_local = git(["show-ref", "--verify", "--quiet", f"refs/heads/{branch}"], cwd) is not None
+    has_remote = git(["show-ref", "--verify", "--quiet", f"refs/remotes/origin/{branch}"], cwd) is not None
     if has_local:
-        _require(git(["worktree", "add", str(root), BRANCH], cwd), f"git worktree add {root} {BRANCH}")
+        _require(git(["worktree", "add", str(root), branch], cwd), f"git worktree add {root} {branch}")
     elif has_remote:
-        _require(git(["worktree", "add", "--track", "-b", BRANCH, str(root), f"origin/{BRANCH}"], cwd),
-                 f"git worktree add --track -b {BRANCH} {root} origin/{BRANCH}")
+        _require(git(["worktree", "add", "--track", "-b", branch, str(root), f"origin/{branch}"], cwd),
+                 f"git worktree add --track -b {branch} {root} origin/{branch}")
     else:
-        _require(git(["worktree", "add", "--orphan", "-b", BRANCH, str(root)], cwd),
-                 f"git worktree add --orphan -b {BRANCH} {root}")
+        _require(git(["worktree", "add", "--orphan", "-b", branch, str(root)], cwd),
+                 f"git worktree add --orphan -b {branch} {root}")
         create(root, source)
         git(["add", "-A"], root)
-        if git(["commit", "-m", "memory: the store, as initialised by oo memory setup"], root) is None:
+        if git(["commit", "-m", "memory: the store, as initialised by oo enact setup"], root) is None:
             raise RuntimeError(f"created the store in {root}, but could not commit it — commit it there yourself")
     if not is_store(root):
-        raise RuntimeError(f"the {BRANCH} branch checked out in {root} holds no memory store")
+        raise RuntimeError(f"the {branch} branch checked out in {root} holds no ENACT store")
     point_git_at(root, cwd)
     return root
 
@@ -408,7 +452,7 @@ def _require(result: Optional[str], what: str) -> None:
 
 
 def server_pids() -> List[int]:
-    """The `oo memory mcp` processes running for this user, however they were started."""
+    """The `oo enact mcp` processes running for this user, however they were started."""
     try:
         done = subprocess.run(["ps", "-eo", "pid,args"], capture_output=True, text=True, timeout=20)
     except (OSError, subprocess.TimeoutExpired):
@@ -442,7 +486,7 @@ def ask_reload(cwd: Optional[Path] = None, send_signal: bool = False) -> dict:
         root = scope.root
         try:
             (root / "local").mkdir(exist_ok=True)
-            (root / "local" / "reload").write_text("asked by oo memory reload\n", encoding="utf-8")
+            (root / "local" / "reload").write_text("asked by oo enact reload\n", encoding="utf-8")
             marked.append(root)
         except OSError:
             continue
@@ -458,8 +502,8 @@ def server_command() -> List[str]:
     scripts = Path(sys.executable).parent
     for candidate in (scripts / "oo", scripts / "oo.exe", scripts / "Scripts" / "oo.exe"):
         if candidate.is_file():
-            return [str(candidate), "memory", "mcp"]
-    return [sys.executable, "-c", "from pygim.__main__ import cli_oo; cli_oo()", "memory", "mcp"]
+            return [str(candidate), "enact", "mcp"]
+    return [sys.executable, "-c", "from pygim.__main__ import cli_oo; cli_oo()", "enact", "mcp"]
 
 
 @dataclass(frozen=True)

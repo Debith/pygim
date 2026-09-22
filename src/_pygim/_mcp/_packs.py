@@ -32,16 +32,16 @@ def pack_name(text: str) -> str:
 
 def _scratch(tmp: str, name: str, store: Path, skip: str, add: Optional[str] = None) -> Any:
     """A scratch store holding the store's vocabulary files, less *skip*, plus *add* as *skip*."""
-    from pygim.memory import Memory
+    from pygim.enact import Enact
 
     scratch = Path(tmp) / name
-    Memory.init(str(scratch))
+    Enact.init(str(scratch))
     for existing in sorted((store / "taxonomy").glob("*.yaml")):
         if existing.name != skip:
             shutil.copyfile(existing, scratch / "taxonomy" / existing.name)
     if add is not None:
         (scratch / "taxonomy" / skip).write_text(add, encoding="utf-8")
-    return Memory(str(scratch))
+    return Enact(str(scratch))
 
 
 def _tags(vocabulary: Dict[str, Any]) -> List[str]:
@@ -58,7 +58,7 @@ def check(store: Path, proposal: Path, *, project: Optional[Path] = None, memory
     that is not the cited one, or text that also occurs elsewhere, so a locator found by matching
     text may point at the wrong occurrence. ``removed``: each value live now that the pack would
     remove, with the heads of *memory* (the live store) still carrying it."""
-    from pygim.memory import VocabularyError
+    from pygim.enact import VocabularyError
 
     text = proposal.read_text(encoding="utf-8")
     try:
@@ -100,9 +100,9 @@ def accept(store: Path, proposal: Path, replace: bool = False, *, project: Optio
     already live is replaced only when asked, and never while a memory still carries a value the
     replacement removes: those memories would lose the tag without a word, and on a hard dimension
     no read could find them. Retag them first."""
-    from pygim.memory import Memory
+    from pygim.enact import Enact
 
-    memory = Memory(str(store))
+    memory = Enact(str(store))
     result = check(store, proposal, project=project, memory=memory)
     if not result["ok"]:
         return result
@@ -163,7 +163,7 @@ def _lines(file: Path) -> List[str]:
 
 
 def _locator_warnings(sources: List[Dict[str, Any]], store: Path, drafted: Path, project: Optional[Path]) -> List[str]:
-    from pygim.memory import digest
+    from pygim.enact import digest
 
     known = {doc: (store / "sources" / "inventory.yaml", path) for doc, path in inventory(store / "sources" / "inventory.yaml").items()}
     known.update({doc: (drafted, path) for doc, path in inventory(drafted).items()})
@@ -232,7 +232,7 @@ def cite(project: Path, path: str, line: int, lines: int = 1, store: Optional[Pa
     """A locator into a project document: the passage at *line* (1-based) for *lines* lines. A document
     the *store*'s inventory already lists keeps that id; any other gets one made from its path.
     ``locator`` is the form a memory's ``cites`` takes."""
-    from pygim.memory import digest
+    from pygim.enact import digest
 
     file = (project / path).resolve() if not Path(path).is_absolute() else Path(path).resolve()
     try:

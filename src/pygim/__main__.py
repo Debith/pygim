@@ -79,16 +79,16 @@ def cli_oo(ctx, no_color):
 
 
 @cli_oo.group()
-def memory():
-    """Problem-space memory: retrieval by the kind of problem being solved."""
+def enact():
+    """ENACT: knowledge found by the kind of problem being solved, and what is learned from using it."""
 
 
 _ROOT = click.option("--root", default=None, type=click.Path(file_okay=False),
-                     help="The memory store. Default: $PYGIM_MEMORY_ROOT, then `git config pygim.memory` "
-                          "(shared by every worktree), then a .memory above the working directory.")
+                     help="The ENACT store. Default: $PYGIM_ENACT_ROOT, then `git config pygim.enact` "
+                          "(shared by every worktree), then a .enact above the working directory.")
 
 
-@memory.command("setup")
+@enact.command("setup")
 @click.option("--user", "kind", flag_value="user", help="Create the store in your user data directory.")
 @click.option("--branch", "kind", flag_value="branch",
               help="Keep the store on an orphan `memory` branch, checked out as a worktree of its own.")
@@ -104,31 +104,31 @@ _ROOT = click.option("--root", default=None, type=click.Path(file_okay=False),
 @click.option("--from", "source", default=None, type=click.Path(exists=True, file_okay=False),
               help="Start the new store as a copy of an existing one, such as a project's .memory.")
 @click.option("--no-register", is_flag=True, help="Do not register the MCP server with Claude Code.")
-def memory_setup(kind, name, path, source, no_register):
+def enact_setup(kind, name, path, source, no_register):
     """Set this project and machine up to use a memory store: find or create the store, point every
     worktree of the clone at it, and register the MCP server with Claude Code at user scope.
     Run it again on another machine to join a project whose store already exists."""
-    GimmicksCliApp().memory_setup(kind=kind, name=name, path=path, source=source, register=not no_register)
+    GimmicksCliApp().enact_setup(kind=kind, name=name, path=path, source=source, register=not no_register)
 
 
-@memory.command("mcp")
+@enact.command("mcp")
 @_ROOT
-def memory_mcp(root):
+def enact_mcp(root):
     """Serve the project's store to an agent over MCP (stdio). With no --root it is found from the
     directory the host starts it in, so one registration serves every project and worktree."""
-    GimmicksCliApp().memory_mcp(root=root)
+    GimmicksCliApp().enact_mcp(root=root)
 
 
-@memory.command("stores")
+@enact.command("stores")
 @flag_opt("--remote", "remote", help="Also list the stores kept in the remote that are not checked out here.")
 @_ROOT
-def memory_stores(remote, root):
+def enact_stores(remote, root):
     """List the stores this machine holds, as a session can name them with `scope`. Nothing is
     configured: a store is found by its policy's name or its directory's."""
-    GimmicksCliApp().memory_stores(remote=remote, root=root)
+    GimmicksCliApp().enact_stores(remote=remote, root=root)
 
 
-@memory.command("mailbox")
+@enact.command("mailbox")
 @click.option("--post", "text", default=None, help="Leave a message instead of listing.")
 @click.option("--kind", type=click.Choice(["feedback", "request", "comment"]), default="comment",
               help="--post: what kind of message it is.")
@@ -137,33 +137,33 @@ def memory_stores(remote, root):
 @click.option("--resolves", default=None, help="--post: the message id this closes.")
 @flag_opt("--all", "show_all", help="List resolved messages too.")
 @_ROOT
-def memory_mailbox(text, kind, to, about, resolves, show_all, root):
+def enact_mailbox(text, kind, to, about, resolves, show_all, root):
     """Messages other sessions, agents and people left in this store — feedback, requests and
     comments. Lists what is open; `--post` leaves one."""
-    GimmicksCliApp().memory_mailbox(text=text, kind=kind, to=to, about=about, resolves=resolves,
+    GimmicksCliApp().enact_mailbox(text=text, kind=kind, to=to, about=about, resolves=resolves,
                                     show_all=show_all, root=root)
 
 
-@memory.command("reload")
+@enact.command("reload")
 @flag_opt("--signal", "signal_servers",
           help="Also SIGHUP every running server, including other projects'. A server older than "
                "this feature has no handler for SIGHUP and will exit instead of reloading.")
-def memory_reload(signal_servers):
+def enact_reload(signal_servers):
     """Ask the MCP servers on this project's store, and on the global one, to restart into the
     installed code — after upgrading pygim, or editing the server. Each reloads between messages,
     so the host's connection survives."""
-    GimmicksCliApp().memory_reload(signal_servers=signal_servers)
+    GimmicksCliApp().enact_reload(signal_servers=signal_servers)
 
 
-@memory.command("ingest")
+@enact.command("ingest")
 @click.argument("corpus", type=click.Path(exists=True, dir_okay=False))
 @_ROOT
-def memory_ingest(corpus, root):
+def enact_ingest(corpus, root):
     """Ingest a hand-written corpus file, reconciled by slug and digest."""
-    GimmicksCliApp().memory_ingest(corpus=corpus, root=root)
+    GimmicksCliApp().enact_ingest(corpus=corpus, root=root)
 
 
-@memory.command("accept")
+@enact.command("accept")
 @click.argument("memory_ref", metavar="[MEMORY]", required=False)
 @click.option("--pack", "pack", default=None, type=click.Path(exists=True, dir_okay=False),
               help="Accept a drafted vocabulary pack instead: check it, make it live, add its cited documents.")
@@ -172,22 +172,22 @@ def memory_ingest(corpus, root):
 @flag_opt("--all", "walk", help="Read every generalisation waiting for you, one at a time, and answer each.")
 @flag_opt("-y", "--yes", "assume_yes", help="Accept without showing it first. For scripts; a person should read it.")
 @_ROOT
-def memory_accept(memory_ref, pack, reason, replace, walk, assume_yes, root):
+def enact_accept(memory_ref, pack, reason, replace, walk, assume_yes, root):
     """Accept what the agent drafted, after reading it: a generalisation, whose instances then fold
     under it; or a vocabulary pack (--pack), which then becomes the vocabulary. With no argument it
     shows what is waiting, in words rather than keys. A person runs this — the agent has no tool for it."""
-    GimmicksCliApp().memory_accept(memory=memory_ref, pack=pack, reason=reason, replace=replace,
+    GimmicksCliApp().enact_accept(memory=memory_ref, pack=pack, reason=reason, replace=replace,
                                    walk=walk, assume_yes=assume_yes, root=root)
 
 
-@memory.command("status")
+@enact.command("status")
 @flag_opt("--standing", "standing",
           help="Print the standing knowledge instead — every preference in full, as a session receives "
                "it — and nothing else, so a host's session-start hook can put it in front of an agent.")
 @_ROOT
-def memory_status(standing, root):
+def enact_status(standing, root):
     """Where the store stands: its version, reviews and pending proposals."""
-    GimmicksCliApp().memory_status(root=root, standing=standing)
+    GimmicksCliApp().enact_status(root=root, standing=standing)
 
 
 @cli_oo.group()
