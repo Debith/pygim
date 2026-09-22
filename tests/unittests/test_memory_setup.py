@@ -14,6 +14,7 @@ from pathlib import Path
 import pytest
 from click.testing import CliRunner
 
+from _pygim._cli import _style
 from _pygim._mcp import _packs, _stores
 from _pygim._mcp.memory import PROMPTS, MemoryServer
 from pygim.__main__ import cli_oo
@@ -343,6 +344,45 @@ class TestTheMailboxReachesASession:
         assert "Waiting in the mailbox (1)" in standing.output and "Finish the rebase" in standing.output
         Memory(str(store)).post("Done.", resolves=Memory(str(store)).mailbox()[0]["id"], author="human")
         assert "nothing waiting" in CliRunner().invoke(cli_oo, ["memory", "mailbox"]).output
+
+
+class TestHowTheOutputReads:
+    """Colour is conditional output and never the only signal (global memory: glance value)."""
+
+    def waiting(self, project):
+        store = project / ".memory"
+        Memory.init(str(store))
+        m = Memory(str(store))
+        tags = ["domain=any", "artifact=any", "task=design", "kind=principle"]
+        a = m.remember(title="One case", text="First.", tags=tags)
+        b = m.remember(title="Another case", text="Second.", tags=tags, seen=[a["memory"]])
+        m.remember(title="What they share", text="The pattern.", tags=tags,
+                   generalises=[a["memory"], b["memory"]], seen=[a["memory"], b["memory"]])
+        return store
+
+    def test_colour_marks_the_heading_and_the_count_and_never_stands_alone(self, project, monkeypatch):
+        self.waiting(project)
+        monkeypatch.delenv("NO_COLOR", raising=False)
+        monkeypatch.delenv(_style.NO_COLOR, raising=False)
+        monkeypatch.setenv("TERM", "xterm")
+        out = CliRunner().invoke(cli_oo, ["memory", "accept", "--root", str(project / ".memory")], color=True)
+        assert out.exit_code == 0 and "\x1b[" in out.output
+        assert "\x1b[1m1 waiting for you\x1b[0m" in out.output              # the count is bold, and it is a word too
+        assert "What they share" in out.output                              # the title reads the same without colour
+
+    def test_every_switch_that_must_turn_colour_off(self, project, monkeypatch):
+        self.waiting(project)
+        monkeypatch.setenv("TERM", "xterm")
+        monkeypatch.delenv("NO_COLOR", raising=False)
+        monkeypatch.delenv(_style.NO_COLOR, raising=False)
+        where = ["memory", "accept", "--root", str(project / ".memory")]
+        assert "\x1b[" not in CliRunner().invoke(cli_oo, where).output                       # not a terminal
+        assert "\x1b[" not in CliRunner().invoke(cli_oo, ["--no-color"] + where, color=True).output
+        monkeypatch.setenv("NO_COLOR", "")                                                   # any value, even empty
+        assert "\x1b[" not in CliRunner().invoke(cli_oo, where, color=True).output
+        monkeypatch.delenv("NO_COLOR")
+        monkeypatch.setenv("TERM", "dumb")
+        assert "\x1b[" not in CliRunner().invoke(cli_oo, where, color=True).output
 
 
 class TestAskingForAReload:

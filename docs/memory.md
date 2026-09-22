@@ -190,6 +190,17 @@ printed by the session-start hook, so a new session sees them without being aske
 | `oo memory ingest <file>` | bring in hand-written memories |
 | `oo memory mcp` | the server itself; Claude Code runs this |
 
+## How the output reads
+
+The memory commands follow the project's rule for glance value: a visible title, indentation that
+means something, a blank line where the subject changes, and colour on the few things worth acting
+on — a count, a refusal, a change that happened. Colour is never the only signal; every coloured
+thing also carries a word.
+
+It turns itself off when the output is not a terminal, when `NO_COLOR` is set to any value, when
+`TERM=dumb`, and when you pass `oo --no-color`. So piping into `grep` or a CI log gives plain text
+without asking.
+
 ## When something is off
 
 - **A tool says there is no store.** Run `oo memory setup` in the project.

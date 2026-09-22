@@ -66,8 +66,14 @@ class _OoGroup(BannerGroup):
 
 
 @click.group(cls=_OoGroup, invoke_without_command=True, tagline="AI powered Python Gimmicks")
+@flag_opt("--no-color", "no_color", help="Never colour the output. Colour is already off when the output is "
+                                         "not a terminal, when NO_COLOR is set, or when TERM is dumb.")
 @click.pass_context
-def cli_oo(ctx):
+def cli_oo(ctx, no_color):
+    if no_color:
+        from _pygim._cli import _style
+
+        _style.off()
     if ctx.invoked_subcommand is None and ctx.meta.get("free_text") is None:
         click.echo(ctx.get_help())
 

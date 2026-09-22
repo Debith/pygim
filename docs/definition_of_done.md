@@ -76,6 +76,18 @@ line says so in its description and why.
 - **The changelog bullet describes what ships**, not the path to it, and says
   BREAKING when it is.
 
+## What it looks like
+
+- **Output is read at a glance.** Anything a person reads — a command's output, a served page —
+  gets a visible title, indentation that means something, and a blank line where the subject
+  changes. Colour marks the few things worth acting on and is never the only signal: every
+  coloured thing carries a word as well, because roughly one man in twelve cannot tell red from
+  green (WCAG 2.2, Use of Color).
+- **Colour is conditional output.** Off when the stream is not a terminal, when `NO_COLOR` is set
+  to any value, when `TERM=dumb`, or when `--no-color` is passed — checked for stdout and stderr
+  separately. The result goes to stdout, logs and errors to stderr, so a pipe carries the answer
+  and the person still sees the rest (clig.dev, Output).
+
 ## What it says when it fails
 
 - **Every error names its subject.** A parse error carries the file and the

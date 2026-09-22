@@ -15,6 +15,8 @@ from dataclasses import dataclass
 from importlib import import_module
 import click
 
+from _pygim._cli import _style
+
 __all__ = ["GimmicksCliApp", "flag_opt"]
 
 
@@ -172,7 +174,8 @@ class GimmicksCliApp:
         for s in scopes:
             policy = _stores.policy(s.root)
             also = f" (also: {', '.join(s.aliases)})" if s.aliases else ""
-            click.echo(f"{s.name:12} {s.root}{also}\n{'':12} {s.how} · sharing: {policy.sharing} · push: {policy.push}")
+            click.echo(f"{_style.title(f'{s.name:12}')} {s.root}{also}")
+            click.echo(_style.muted(f"{'':12} {s.how} · sharing: {policy.sharing} · push: {policy.push}"))
         if remote:
             here = scopes[0].root
             branches = _stores.remote_stores(here)
@@ -180,7 +183,7 @@ class GimmicksCliApp:
             missing = [b for b in branches if b.lower() not in have]
             click.echo(f"in the remote of {here}: {', '.join(branches) or 'nothing'}")
             if missing:
-                click.echo("not checked out here: " + ", ".join(missing))
+                click.echo(_style.bad("not checked out here: ") + _style.strong(", ".join(missing)))
 
     def memory_mailbox(self, *, text: Optional[str], kind: str, to: Optional[str], about: Optional[str],
                        resolves: Optional[str], show_all: bool, root: Optional[str]) -> None:
@@ -192,7 +195,8 @@ class GimmicksCliApp:
             done = memory.post(text, kind=kind, to=to or "", about=about or "", resolves=resolves or "", author="human")
             if not done["ok"]:
                 raise click.ClickException(f"{done['refused']}: {done['message']}")
-            click.echo(f"posted {done['message']} — {done['waiting']} message(s) waiting")
+            click.echo(_style.good("posted ") + _style.muted(done["message"]) +
+                       f" — {_style.strong(str(done['waiting']) + ' message(s)')} waiting")
             return
         messages = memory.mailbox(all=show_all)
         if not messages:
@@ -201,8 +205,10 @@ class GimmicksCliApp:
         for m in messages:
             who = f" to {m['to']}" if m.get("to") else ""
             about_it = f" · about {m['about']}" if m.get("about") else ""
-            closed = " · resolved" if show_all and m.get("resolves") else ""
-            click.echo(f"{m['id']}  {m['kind']}{who}{about_it}  ({m['author']}, {m['time']}){closed}\n  {m['text']}")
+            closed = _style.good(" · resolved") if show_all and m.get("resolves") else ""
+            stamp = _style.muted(f"({m['author']}, {m['time']})")
+            click.echo(f"\n{_style.muted(m['id'])}  {_style.title(m['kind'] + who)}{about_it}  {stamp}{closed}")
+            click.echo("  " + "\n  ".join(m["text"].splitlines()))
 
     def memory_reload(self, *, signal_servers: bool = False) -> None:
         """Ask the running MCP servers to restart into the code on disk."""
@@ -210,9 +216,10 @@ class GimmicksCliApp:
 
         asked = _stores.ask_reload(Path.cwd(), send_signal=signal_servers)
         if asked["signalled"]:
-            click.echo(f"signalled {len(asked['signalled'])} server(s): " + ", ".join(str(p) for p in asked["signalled"]))
+            click.echo(_style.good("signalled ") + _style.strong(f"{len(asked['signalled'])} server(s)") + ": "
+                       + ", ".join(str(p) for p in asked["signalled"]))
         for root in asked["marked"]:
-            click.echo(f"marked {root} — a server on it reloads at its next call")
+            click.echo(_style.good("marked ") + f"{root} {_style.muted('— a server on it reloads at its next call')}")
         if not asked["signalled"] and not asked["marked"]:
             click.echo("no running server found and no store to mark — reconnect the server in your editor instead")
         else:
@@ -234,14 +241,16 @@ class GimmicksCliApp:
     @staticmethod
     def _show_waiting(waiting: dict, index: str = "") -> None:
         """One generalisation as a person needs to see it before answering for it: what it says, and
-        which memories stop being placed on their own once it is accepted."""
-        click.echo(f"\n{index}{waiting['memory']}  {waiting['title']}")
+        which memories stop being placed on their own once it is accepted. The title is the heading,
+        the fold count is the thing to weigh, and the key is dim — needed only to act."""
+        click.echo(f"\n{_style.muted(index)}{_style.title(waiting['memory'] + '  ' + waiting['title'])}")
         click.echo("  " + "\n  ".join(waiting["text"].strip().splitlines()))
-        click.echo(f"  tags: {' '.join(waiting['tags'])}")
-        click.echo(f"  folds {len(waiting['folds'])} memories, listed under it instead of placed on their own:")
+        click.echo(f"\n  tags: {_style.muted(' '.join(waiting['tags']))}")
+        click.echo(f"  folds {_style.strong(str(len(waiting['folds'])) + ' memories')}, "
+                   f"listed under it instead of placed on their own:")
         for f in waiting["folds"]:
             click.echo(f"    {f['memory']} {f['title']}")
-        click.echo(f"  key: {waiting['key']}")
+        click.echo(f"  key: {_style.muted(waiting['key'])}")
 
     def memory_accept(self, *, memory: Optional[str], pack: Optional[str], reason: str, replace: bool,
                       walk: bool = False, assume_yes: bool = False, root: Optional[str]) -> None:
@@ -257,10 +266,10 @@ class GimmicksCliApp:
                 click.echo("nothing is waiting for you")
                 return
             if not walk:
-                click.echo(f"{len(waiting)} waiting for you. Read them with `oo memory accept --all`, "
-                           f"which shows each and asks:")
+                click.echo(_style.title(f"{len(waiting)} waiting for you") +
+                           " — read them with `oo memory accept --all`, which shows each and asks:\n")
                 for w in waiting:
-                    click.echo(f"  {w['memory']} {w['title']}  (folds {len(w['folds'])})")
+                    click.echo(f"  {w['memory']} {w['title']}  {_style.muted('folds ' + str(len(w['folds'])))}")
                 return
             accepted = 0
             for n, w in enumerate(waiting, 1):
@@ -275,11 +284,11 @@ class GimmicksCliApp:
                     continue
                 done = store.accept(w["key"], reason=reason or "read and accepted")
                 if not done["ok"]:
-                    click.echo(f"  refused: {done['message']}")
+                    click.echo(_style.bad(f"  refused: {done['message']}"))
                     continue
                 accepted += 1
-                click.echo(f"  accepted — {len(w['folds'])} memories now fold under it")
-            click.echo(f"\naccepted {accepted} of {len(waiting)}; the rest are still waiting")
+                click.echo(_style.good(f"  accepted") + f" — {len(w['folds'])} memories now fold under it")
+            click.echo(f"\n{_style.strong(f'accepted {accepted} of {len(waiting)}')}; the rest are still waiting")
             return
         if pack is not None:
             from _pygim._mcp import _packs
@@ -310,7 +319,8 @@ class GimmicksCliApp:
         if not result["ok"]:
             raise click.ClickException(f"{result['refused']}: {result['message']}"
                                        + "".join(f"\n  {fact}" for fact in result["facts"]))
-        click.echo(f"accepted {memory} — its instances fold from the next read (report: {result['report']})")
+        click.echo(_style.good("accepted ") + f"{memory} — its instances fold from the next read "
+                   f"{_style.muted('(report: ' + result['report'] + ')')}")
 
     def memory_status(self, *, root: Optional[str], standing: bool = False) -> None:
         """Print where the repository at *root* stands, or the standing knowledge of a session there."""
@@ -326,13 +336,14 @@ class GimmicksCliApp:
                 return
             click.echo("Standing knowledge from pygim memory. " + data["note"])
             if waiting:
-                click.echo(f"\nWaiting in the mailbox ({len(waiting)}) — read them with the mailbox tool:")
+                click.echo("\n" + _style.bad(f"Waiting in the mailbox ({len(waiting)})") +
+                           " — read them with the mailbox tool:")
                 for m in waiting:
                     who = f" to {m['to']}" if m.get("to") else ""
                     click.echo(f"- {m['id']} {m['kind']}{who} ({m['author']}): {m['text'].splitlines()[0][:100]}")
             for p in data["preferences"]:
                 where = " (global)" if p["scope"] == "global" else ""
-                click.echo(f"\n## {p['memory']}{where} {p['title']}\n{p['text']}")
+                click.echo("\n" + _style.title(f"## {p['memory']}{where} {p['title']}") + f"\n{p['text']}")
             if data["procedures"]:
                 click.echo("\nProcedures — a read naming their artifact and task places the steps first:")
                 for p in data["procedures"]:
@@ -341,7 +352,14 @@ class GimmicksCliApp:
 
         store = self._store(root)
         info = Memory(store).session()
-        click.echo(f"{store}: v{info['version']}, {info['memories']} memories, vocabulary {info['taxonomy'][:12]}")
+        click.echo(_style.title(str(store)) + f": v{info['version']}, "
+                   + _style.strong(f"{info['memories']} memories")
+                   + f", vocabulary {_style.muted(info['taxonomy'][:12])}")
+        if info.get("waiting_acceptance"):
+            click.echo("  " + _style.bad(f"{info['waiting_acceptance']} waiting for you") +
+                       " — `oo memory accept --all`")
+        if info.get("mailbox"):
+            click.echo("  " + _style.bad(f"{len(info['mailbox'])} message(s)") + " — `oo memory mailbox`")
         from _pygim._mcp import _stores
 
         if (wide := _stores.find_global()) is not None and Path(wide) != Path(store):
@@ -350,7 +368,7 @@ class GimmicksCliApp:
             click.echo(f"{wide}: v{wide_info['version']}, {wide_info['memories']} memories "
                        f"(global, sharing: {policy.sharing}, push: {policy.push})")
         for r in info["reviews"]:
-            click.echo(f"  review ({r['kind']}): {r['text']}")
+            click.echo(f"  {_style.bad('review')} ({r['kind']}): {r['text']}")
         for p in info["proposals"]:
             click.echo(f"  proposal: {p['dimension'] or '(new dimension)'}={p['concept']} — asked by {', '.join(p['asked_by'])}")
 
