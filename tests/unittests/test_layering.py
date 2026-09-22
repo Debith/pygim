@@ -14,7 +14,15 @@ ROOT = pathlib.Path(__file__).resolve().parents[2] / "src" / "_pygim_fast"
 # CI removes src/ before running the suite against the installed package: this
 # is a source-tree check, so it skips there rather than fail.
 pytestmark = pytest.mark.skipif(not ROOT.is_dir(), reason="source tree not present (testing the installed package)")
-CORE = sorted(ROOT.glob("mapping/*.h")) + [
+def _headers(pattern):
+    """The headers matching *pattern*, through pygim's own walker — see `sources` below on why the
+    project's components are used by the project even where the milliseconds do not matter."""
+    from pygim.pathlike import path
+
+    return sorted(pathlib.Path(str(p)) for p in path(str(ROOT)).glob(pattern))
+
+
+CORE = _headers("mapping/*.h") + [
     ROOT / "utils" / "hash.h",
     ROOT / "utils" / "memory.h",
     ROOT / "pathlike" / "core.h",
@@ -27,7 +35,16 @@ PYBIND = re.compile(r'#\s*include\s*[<"]pybind11/')
 
 def _code(header):
     """The header's text with line comments removed (a comment may quote an include)."""
-    return "\n".join(re.sub(r"//.*$", "", line) for line in header.read_text(encoding="utf-8").splitlines())
+    return "\n".join(re.sub(r"//.*$", "", line) for line in _text(header).splitlines())
+
+
+def _text(header):
+    """One header, read through PathSet — the same path every other read in this file takes."""
+    from pygim.pathlike import PathSet, path
+
+    read = PathSet([path(str(header))]).read_all_files()
+    assert read, f"{header} is not a readable file"
+    return read[0]
 
 
 @pytest.mark.parametrize("header", CORE or [ROOT], ids=lambda p: str(p.relative_to(ROOT.parent)))
@@ -163,3 +180,59 @@ def test_no_test_can_reach_this_machines_own_stores(tmp_path):
     assert where.home.is_relative_to(tmp_path), where.home
     assert where.user_data.is_relative_to(tmp_path), where.user_data
     assert where.store_root is None and where.session is None
+
+
+# ── the project uses what the project ships ──────────────────────────────────
+
+BY_HAND = {"rglob", "iterdir", "glob"}          # pathlib's walkers
+OS_WALKS = {"walk", "listdir", "scandir"}       # and os's
+# `test_pathlike` and `test_path_store` walk with pathlib on purpose: it is the oracle they hold
+# PathSet to. Benchmarks compare the two by definition.
+ORACLE = ("test_pathlike.py", "test_path_store.py", "benchmarks/")
+
+# What is still walked by hand, counted on 2026-09-22. It may fall; it may not rise. A ratchet
+# rather than a ban, because banning it today would mean converting nineteen call sites in one
+# commit, and a rule that has to be obeyed all at once is a rule that gets turned off.
+WALKS_BY_HAND = 19
+
+
+def _hand_walks(text):
+    """Where *text* walks a filesystem itself. `ast.walk` is not a filesystem walk, and saying so
+    in the checker rather than in a comment is the difference between a rule and a nuisance."""
+    import ast
+
+    out = []
+    for node in ast.walk(ast.parse(text)):
+        if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)):
+            continue
+        receiver = getattr(node.func.value, "id", None)
+        if node.func.attr in BY_HAND and receiver != "ast":
+            out.append((node.lineno, node.func.attr))
+        elif node.func.attr in OS_WALKS and receiver == "os":
+            out.append((node.lineno, "os." + node.func.attr))
+    return out
+
+
+@pytest.mark.skipif(not PY_ROOT.is_dir(), reason="source tree not present (testing the installed package)")
+def test_the_project_walks_with_its_own_walker():
+    """pygim ships PathSet, so pygim uses PathSet. The argument is not consistency and not speed —
+    it is that using a component is the only cheap way to find out what is wrong with it. Converting
+    one test on 2026-09-22 found a latent bug in the test and an API sharpness in `read_all_files`
+    within the hour; neither was going to be found by admiring it from outside (global memory #12).
+
+    This counts what is left and refuses to let it grow. When the count falls, lower the number —
+    the second assertion makes that non-optional, so the budget cannot quietly become a licence."""
+    repo = PY_ROOT.parent
+    found = []
+    for area in ("src", "tests"):
+        for file, text in sources(repo / area, "*.py", least=5):
+            relative = file.relative_to(repo).as_posix()
+            if "third_party" in relative or any(o in relative for o in ORACLE):
+                continue
+            found += [f"{relative}:{line}: {how}()" for line, how in _hand_walks(text)]
+    assert len(found) <= WALKS_BY_HAND, (
+        f"{len(found)} hand-written walks, up from {WALKS_BY_HAND}. Use PathSet:\n"
+        + "\n".join(found))
+    assert len(found) >= WALKS_BY_HAND - 2, (
+        f"only {len(found)} hand-written walks are left, and WALKS_BY_HAND still says "
+        f"{WALKS_BY_HAND} — lower it, or the budget stops meaning anything")
