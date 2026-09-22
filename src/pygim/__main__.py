@@ -141,6 +141,17 @@ def enact_call(where, name, arguments, session, root):
     GimmicksCliApp().enact_call(where=where.with_root(root).with_session(session), name=name, arguments=arguments)
 
 
+@enact.command("hook")
+@click.pass_obj
+def enact_hook(where):
+    """Answer an agent host's hook, reading its JSON on stdin and writing JSON on stdout.
+
+    Handles SessionStart (the standing knowledge) and PreToolUse (only what the path being written
+    is about). Silent when there is nothing to say, so it can be wired to every write.
+    """
+    GimmicksCliApp().enact_hook(where=where)
+
+
 @enact.command("mcp")
 @_ROOT
 @click.pass_obj
@@ -220,11 +231,15 @@ def enact_accept(where, memory_ref, pack, reason, replace, walk, assume_yes, roo
 @flag_opt("--standing", "standing",
           help="Print the standing knowledge instead — every preference in full, as a session receives "
                "it — and nothing else, so a host's session-start hook can put it in front of an agent.")
+@click.option("--for", "for_path", default=None, metavar="PATH",
+              help="Print only what applies to the space PATH is in, as the store's "
+                   "taxonomy/triggers.yaml maps it. Silent when the path is in no space it names, "
+                   "so a hook may call it before every write.")
 @_ROOT
 @click.pass_obj
-def enact_status(where, standing, root):
+def enact_status(where, standing, for_path, root):
     """Where the store stands: its version, reviews and pending proposals."""
-    GimmicksCliApp().enact_status(where=where.with_root(root), standing=standing)
+    GimmicksCliApp().enact_status(where=where.with_root(root), standing=standing, for_path=for_path)
 
 
 @cli_oo.group()

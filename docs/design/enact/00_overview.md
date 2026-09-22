@@ -735,6 +735,45 @@ exactly like a short one. Sections 03 §9.1.1 and §9.1.2 carry the
 mechanics, including how a write travels to this machine's other projects and to other machines,
 and what each store's own policy says about publishing it.
 
+### 4.12.1 Delivering at the moment — settled 2026-09-22
+
+Standing knowledge answers *was it delivered*. It does not answer *was it delivered near*, and the
+difference decides whether a rule has any effect. An agent does not consult what it knows; it is
+conditioned by what is in its context, and salience falls with distance — a rule delivered at a
+session's door is inert two hundred calls later, when the decision it governs is made (global #16).
+
+Measured on 2026-09-22, in one session: three rules were broken, all three by *recall*, none by
+choice. A store was created in the owner's real user data directory while the rule forbidding it sat
+in that session's standing knowledge — unrecognised, because the rule says "a test names its own
+world" and the moment said `monkeypatch.setattr`.
+
+So a second delivery, at the only other moment a host offers: immediately before a file is written.
+
+| | Session start | Before a write |
+|---|---|---|
+| what is known about the work | nothing | the path |
+| how much is delivered | everything | at most three, often none |
+| where the text lands | the conversation's opening | beside the tool call, the most salient position there is |
+
+`triggers.yaml` in the store maps a path to a problem space, and `oo enact status --standing --for
+PATH` returns only what that space holds. `oo enact hook` speaks the host's protocol for both
+moments, so the host's configuration holds one command instead of a shell pipeline.
+
+Three things learned while building it, each the opposite of the obvious guess:
+
+- **More tags deliver less.** Hard tags intersect, so a precise-looking trigger empties the answer:
+  `[artifact=test, task=implement, concern=testing]` had no candidates at all in pygim's store;
+  `[artifact=test, task=design]` had seven. A trigger names the *space*, not the situation in full.
+- **The global store cannot be reached by tags.** Its knowledge answers every project, so its
+  vocabulary names nothing a path could match — and its rules are the ones most often missed. A
+  trigger may carry `term=<word>`, which is what the term filter was for: the subject tags cannot
+  name. With it, the test-isolation rule arrives; without it, two generic preferences do.
+- **Silence is most of the behaviour.** A delivery that fires on everything is read as noise and
+  then not read at all — the colour rule again. Most paths map to nothing, and that is correct.
+
+This is the first, hand-written stand-in for §4.13's context controller. A learned policy replaces
+the file, not the shape: something says which space a moment is in, and the index does the selecting.
+
 ### 4.13 Direction: the end state this is built toward
 
 The design is aimed at an end state, not at what the first stores need. Debith, 2026-09-21, on

@@ -149,6 +149,113 @@ class GimmicksCliApp:
         except ValueError:
             click.echo(body)
 
+    def enact_hook(self, *, where: Environment) -> None:
+        """Speak an agent host's hook protocol on stdin and stdout, so the host's configuration holds
+        one command rather than a shell pipeline nobody can test.
+
+        Two events, and they are the two moments a rule can arrive: the session's start, where
+        everything is delivered because nothing is known about what is coming, and immediately
+        before a file is written, where almost nothing is — only what the path says (global #16).
+
+        Prints nothing when there is nothing to say. A hook that fires on every write and speaks
+        every time is read as noise and then not read at all."""
+        import json as _json
+
+        try:
+            event = _json.loads(sys.stdin.read() or "{}")
+        except ValueError:
+            return
+        name = event.get("hook_event_name") or ""
+        if name == "SessionStart":
+            said = self._capture(lambda: self.enact_status(where=where, standing=True))
+        elif name == "PreToolUse":
+            path = (event.get("tool_input") or {}).get("file_path") or ""
+            if not path:
+                return
+            said = self._capture(lambda: self._standing_for(where.at(Path(event.get("cwd") or where.cwd)), path))
+        else:
+            return
+        if said.strip():
+            click.echo(_json.dumps({"hookSpecificOutput": {"hookEventName": name,
+                                                           "additionalContext": said}}))
+
+    @staticmethod
+    def _capture(run) -> str:
+        """What a command would have printed. The hook returns it as data rather than as output."""
+        import contextlib
+        import io
+
+        buffer = io.StringIO()
+        with contextlib.redirect_stdout(buffer):
+            try:
+                run()
+            except click.ClickException:
+                return ""
+        return buffer.getvalue()
+
+    def _standing_for(self, where: Environment, path: str, most: int = 3) -> None:
+        """What applies to the space *path* is in — for a hook, at the moment of a write.
+
+        Silent when the store has no trigger map, when the path is in no space it names, or when
+        that space holds nothing: a delivery that fires on everything is read as noise and then not
+        read at all, which is the same failure as colouring every line (global memory #16)."""
+        from _pygim._mcp import _stores, _triggers
+        from _pygim._mcp.enact import build
+
+        stores = self._stores(where)
+        found = stores.find()
+        if found is None or not found.exists:
+            return
+        tags, term = _triggers.split_term(
+            _triggers.tags_for(path, _triggers.load(found.root), _stores.project_root(Path(where.cwd))))
+        if not tags:
+            return
+        server = build(where)
+        placed = []
+        for scope in ("project", "global"):       # the rule most often missed is the global one
+            placed += self._rules_in(server, scope, tags, most, term)
+        if not placed:
+            return
+        subject = f" about {term}" if term else ""
+        click.echo(_style.title(f"enact — {path} is {', '.join(tags)}{subject}"))
+        for m in placed[:most]:
+            point = _triggers.one_line(m.get("text", "")) or (m.get("text", "").split("\n")[0][:110])
+            where_from = " (global)" if m.get("scope") == "global" else ""
+            click.echo(f"  {_style.strong(m['memory'] + where_from)}  {m['title']}")
+            if point:
+                click.echo(f"      {_style.muted(point)}")
+
+    @staticmethod
+    def _rules_in(server, scope: str, tags, most: int, term: str = ""):
+        """What one store has for this space. A store is asked only with tags its own vocabulary
+        knows — the global store answers every project and so names almost nothing specific, and a
+        tag it has never heard of is a refusal, not a narrower question."""
+        import json as _json
+
+        known = server.call("vocabulary", {"scope": scope})
+        if known.get("isError"):
+            return []
+        live = {v["tag"] for d in _json.loads(known["content"][0]["text"])["dimensions"] for v in d["values"]}
+        mine = [tag for tag in tags if tag in live]
+        if not mine:
+            return []
+        ask = {"scope": scope, "hard": mine, "max": most, "budget": 700,
+               "soft": ["kind=preference", "kind=principle"]}
+        if term:
+            ask["term"] = term
+        answer = server.call("read", ask)
+        if answer.get("isError"):
+            return []
+        body = _json.loads(answer["content"][0]["text"])
+        if body.get("refused"):
+            return []
+        out = list(body.get("memories") or [])
+        if body.get("procedure"):
+            out.insert(0, body["procedure"])
+        for m in out:
+            m["scope"] = scope
+        return out
+
     @staticmethod
     def _stores(where: Environment):
         """The machine's stores, built here: one object for the command's whole run, so a command
@@ -374,10 +481,15 @@ class GimmicksCliApp:
         click.echo(_style.good("accepted ") + f"{memory} — its instances fold from the next read "
                    f"{_style.muted('(report: ' + result['report'] + ')')}")
 
-    def enact_status(self, *, where: Environment, standing: bool = False) -> None:
-        """Print where the repository at *root* stands, or the standing knowledge of a session there."""
+    def enact_status(self, *, where: Environment, standing: bool = False,
+                     for_path: Optional[str] = None) -> None:
+        """Print where the store stands, the standing knowledge of a session, or — with *for_path* —
+        only what applies to the space that path is in."""
         from pygim.enact import Enact
 
+        if for_path:
+            self._standing_for(where, for_path)
+            return
         if standing:
             from _pygim._mcp.enact import build
 
