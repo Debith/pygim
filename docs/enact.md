@@ -236,6 +236,15 @@ It prints the tool's JSON result. A refusal is a result here as everywhere else 
 `refused` and exits **0**. Exit **1** means the call could not be made at all: no such tool, or the
 arguments were not JSON. `oo enact call nonesuch --json '{}'` lists the tools there are.
 
+Each call is a process, and a process is a session — right for the MCP server, which is one
+process per conversation, wrong for a script, where it would put every memory in a session of its
+own and leave `review` nothing to gather. Name one instead:
+
+```bash
+export PYGIM_ENACT_SESSION=$(oo enact call session --json '{}' | jq -r .session)
+# or per call: oo enact call remember --session 12 --json '{...}'
+```
+
 This is what the end-to-end tests use: a process per step, nothing imported, so they see the CLI,
 the MCP dispatch, the adapter, the C++ service and the files store the way a shell script does.
 One round trip is about 90 ms.

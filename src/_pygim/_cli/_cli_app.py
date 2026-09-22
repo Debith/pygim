@@ -6,6 +6,7 @@ Command-Line Interface Application for Python Gimmicks.
 from __future__ import annotations  # `str | None` in signatures on Python 3.9
 
 from subprocess import Popen, DEVNULL
+import os
 import sys
 import shutil
 import functools
@@ -106,7 +107,8 @@ class GimmicksCliApp:
         except (RuntimeError, VocabularyError) as exc:
             raise click.ClickException(str(exc)) from exc
 
-    def enact_call(self, *, name: str, arguments: Optional[str], root: Optional[str]) -> None:
+    def enact_call(self, *, name: str, arguments: Optional[str], session: Optional[int],
+                   root: Optional[str]) -> None:
         """One tool of the agent surface, from a shell. The same dispatch the MCP server uses, so a
         script — or a test — drives the whole stack through the commands, with no Python import of
         its own: `oo enact call read --json '{"hard": ["domain=dnd", "artifact=spell",
@@ -114,7 +116,12 @@ class GimmicksCliApp:
 
         A refusal is a result here, as everywhere else in this system: it prints as JSON with
         `refused` and exits 0. Exit 1 means the call could not be made at all — the tool does not
-        exist, or the arguments were not JSON."""
+        exist, or the arguments were not JSON.
+
+        Each call is a process, and a process is a session, so a script that does not say otherwise
+        writes every memory into a session of its own and `review` can gather none of them. Name one
+        with *session* — or export ``PYGIM_ENACT_SESSION``, which is the same mechanism a reloaded
+        server resumes by."""
         import json as _json
 
         from _pygim._mcp import enact as server
@@ -130,6 +137,8 @@ class GimmicksCliApp:
             known = ", ".join(sorted(tool["name"] for tool in server.TOOLS))
             raise click.ClickException(f"no tool called `{name}` — this server offers: {known}")
 
+        if session is not None:      # every process is its own session unless one is named
+            os.environ[server.SESSION_ENV] = str(session)
         made = server.EnactServer(root=root)
         reply = made.handle({"jsonrpc": "2.0", "id": 1, "method": "tools/call",
                              "params": {"name": name, "arguments": parsed}})

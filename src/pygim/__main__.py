@@ -115,18 +115,25 @@ def enact_setup(kind, name, path, source, no_register):
 @click.argument("name")
 @click.option("--json", "arguments", default=None,
               help="The tool's arguments as a JSON object. Without it, they are read from stdin.")
+@click.option("--session", type=int, default=None,
+              help="Write as this session, so several calls belong together and `review` can gather "
+                   "them. Default: each call is a session of its own.")
 @_ROOT
-def enact_call(name, arguments, root):
+def enact_call(name, arguments, session, root):
     """Call one tool of the agent surface from a shell, and print its JSON result.
 
     The same dispatch the MCP server uses, so a script drives the whole stack through commands:
 
         oo enact call read --json '{"hard": ["domain=pygim", "artifact=store", "task=implement"]}'
 
+    Each call is a process, and a process is a session. To make several calls one session:
+
+        export PYGIM_ENACT_SESSION=$(oo enact call session --json '{}' | jq -r .session)
+
     A refusal is a result: it prints with `refused` and exits 0. Exit 1 means the call could not be
     made at all — no such tool, or the arguments were not JSON.
     """
-    GimmicksCliApp().enact_call(name=name, arguments=arguments, root=root)
+    GimmicksCliApp().enact_call(name=name, arguments=arguments, session=session, root=root)
 
 
 @enact.command("mcp")

@@ -328,11 +328,36 @@ class TestReloading:
 
     def test_a_result_says_once_that_the_code_moved_on(self, server):
         assert not server.stale()
-        server._code = ("an older pygim", ())
+        server._code = ("an older pygim", {})
         assert server.stale()
         err, info = call(server, "session")
         assert "`oo enact reload`" in info["server_stale"]["next"]
         assert "server_stale" not in call(server, "session")[1]        # said once, not on every call
+
+    def test_a_module_arriving_later_is_not_the_code_moving_on(self, server):
+        """Imports here are lazy — `_packs` arrives with the first `cite`, the extension with the
+        first call that opens a store — so a stamp taken over `sys.modules` as it stands grew during
+        the process\'s life and then differed from itself. Every server said the code had moved on
+        as soon as it did anything new. It showed on `oo enact call`, where a process that had just
+        started reported it on every single call; in a long-lived server it looked like one spurious
+        \"run reload\" and was easy to believe."""
+        import types
+
+        assert not server.stale()
+        late = types.ModuleType("pygim._late_arrival")
+        late.__file__ = __file__                     # a real file, so it stats
+        sys.modules["pygim._late_arrival"] = late
+        try:
+            assert not server.stale()
+        finally:
+            del sys.modules["pygim._late_arrival"]
+
+    def test_a_file_it_started_with_changing_is(self, server):
+        assert not server.stale()
+        version, started = server._code
+        path = next(iter(started))
+        server._code = (version, {**started, path: (0, 0)})
+        assert server.stale()
 
     def test_a_signal_or_a_marker_asks_for_the_reload(self, server):
         assert not server._reload_asked()

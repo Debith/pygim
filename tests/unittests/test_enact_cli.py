@@ -219,6 +219,36 @@ class TestReferringToSomethingThatIsNotThere:
         assert fingerprint(store) == was
 
 
+class TestSeveralCallsAsOneSession:
+    """A process is a session. That is right for the MCP server, which is one process for one
+    conversation, and wrong for a script, where it means every memory lands in a session of its own
+    and `review` — what a consolidation starts from — can gather none of them."""
+
+    def test_without_a_session_each_call_is_its_own_and_review_sees_one_write(self, project, env, seeded):
+        call("read", project, env, hard=TAGS)
+        made = call("remember", project, env, title="Frost Ward", text="Typed resistance for a round.",
+                    tags=TAGS + ["kind=example"], reason="a case", seen=[seeded])
+        assert made["ok"], made
+        assert [m["title"] for m in call("review", project, env)["written"]] == []   # a fresh session wrote nothing
+
+    def test_naming_one_gathers_the_writes_of_several_processes(self, project, env, seeded):
+        opened = call("session", project, env)["session"]
+        where = ["call", "read", "--json", json.dumps({"hard": TAGS}), "--session", str(opened)]
+        assert oo(*where, cwd=project, env=env).returncode == 0
+        seen = [seeded]
+        for title, text in (("Frost Ward", "Typed resistance for a round."), ("Absorb", "It converts damage.")):
+            done = oo("call", "remember", "--session", str(opened), "--json",
+                      json.dumps({"title": title, "text": text, "tags": TAGS + ["kind=example"],
+                                  "reason": "a case", "seen": seen}), cwd=project, env=env)
+            made = json.loads(done.stdout)
+            assert made["ok"], done.stdout
+            seen.append(made["memory"])
+        reviewed = json.loads(oo("call", "review", "--session", str(opened), "--json", "{}",
+                                 cwd=project, env=env).stdout)
+        assert reviewed["session"] == opened
+        assert [m["title"] for m in reviewed["written"]] == ["Frost Ward", "Absorb"]
+
+
 class TestOpeningTheStoreAgain:
     """Every command here is a process, and every process opens the store from scratch — which is
     why this is where the next defect showed. It is invisible in-process and invisible to any test

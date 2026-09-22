@@ -826,10 +826,16 @@ class EnactServer:
     # ── reloading (03 §9.1.3) ───────────────────────────────────────────────
 
     def _code_stamp(self) -> Any:
-        """What the server is running: the version, and every source file it was loaded from. A
-        reinstall or an edited file changes it, and the process cannot pick that up by itself —
-        Python has already imported what it has, and the extension cannot be re-imported at all."""
-        files = []
+        """What the server is running: the version, and every source file it had loaded when it
+        started. A reinstall or an edited file changes it, and the process cannot pick that up by
+        itself — Python has already imported what it has, and the extension cannot be re-imported.
+
+        Only the files loaded *at start* are recorded, and only those are looked at again. Imports
+        here are lazy — `_packs` arrives with the first `cite`, the extension with the first call
+        that opens a store — so a stamp taken over `sys.modules` as it stands grows during the
+        process's life and then differs from itself. That is not the code moving on; nothing about a
+        module arriving says the code on disk changed."""
+        files = {}
         for module in list(sys.modules.values()):
             path = getattr(module, "__file__", None)
             if not path or ("_pygim" not in path and "pygim" not in path):
@@ -838,12 +844,23 @@ class EnactServer:
                 stat = os.stat(path)
             except OSError:
                 continue
-            files.append((path, stat.st_mtime_ns, stat.st_size))
-        return (_version(), tuple(sorted(files)))
+            files[path] = (stat.st_mtime_ns, stat.st_size)
+        return (_version(), files)
 
     def stale(self) -> bool:
-        """Whether the code on disk has moved on since this process started."""
-        return self._code_stamp() != self._code
+        """Whether the code on disk has moved on since this process started: a different version, or
+        one of the files it started with changed or went away."""
+        version, started_with = self._code
+        if _version() != version:
+            return True
+        for path, was in started_with.items():
+            try:
+                stat = os.stat(path)
+            except OSError:
+                return True
+            if (stat.st_mtime_ns, stat.st_size) != was:
+                return True
+        return False
 
     def _reload_asked(self) -> bool:
         """`oo enact reload` asks either by signal — SIGHUP, which sets the flag — or by touching
