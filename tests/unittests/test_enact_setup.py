@@ -581,6 +581,27 @@ class TestANewProjectsVocabulary:
         assert not checked["ok"] and str(draft) in checked["errors"] and "checkout" in checked["errors"]
         assert not (store / "taxonomy" / "pack-proj.yaml").exists()
 
+    def test_an_accept_says_which_documents_it_kept_at_their_old_path(self, project, isolated):
+        """After the 2026-09-22 rename a draft could give a document its new path and the store kept
+        the old one, silently — and the vocabulary went on citing a file that no longer existed.
+        Keeping the live entry is right; a pack must not move another pack's documents. Saying so
+        is what was missing."""
+        store = project / ".enact"
+        Enact.init(str(store))
+        draft = store / "taxonomy" / "studies" / "s" / "proposal" / "pack-proj.yaml"
+        draft.parent.mkdir(parents=True)
+        draft.write_text(PACK, encoding="utf-8")
+        (draft.parent / "inventory.yaml").write_text("readme:\n  kind: text\n  path: README.md\n  version: abc\n",
+                                                     encoding="utf-8")
+        first = _packs.accept(store, draft)
+        assert first["ok"] and first["inventory"] == ["readme"] and first["inventory_kept"] == []
+        (draft.parent / "inventory.yaml").write_text("readme:\n  kind: text\n  path: docs/README.md\n  version: abc\n",
+                                                     encoding="utf-8")
+        again = _packs.accept(store, draft, replace=True)
+        assert again["ok"] and again["inventory"] == []
+        assert again["inventory_kept"] == ["readme: kept README.md, the draft says docs/README.md"]
+        assert "path: README.md" in (store / "sources" / "inventory.yaml").read_text(encoding="utf-8")
+
     def test_an_accepted_pack_is_live_at_a_running_server_s_next_call(self, project, isolated):
         store = project / ".enact"
         Enact.init(str(store))

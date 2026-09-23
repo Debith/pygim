@@ -728,6 +728,8 @@ class GimmicksCliApp:
                        + (f"; {len(done['inventory'])} document(s) added to the inventory" if done["inventory"] else ""))
             if done.get("adds"):
                 click.echo("added: " + ", ".join(done["adds"]))
+            for kept in done.get("inventory_kept") or []:
+                click.echo(_style.bad("inventory: ") + kept + " — edit sources/inventory.yaml if the document moved")
             if done["removed"]:
                 click.echo("removed values, carried by no memory: " + ", ".join(r["tag"] for r in done["removed"]))
             for warning in done["warnings"]:

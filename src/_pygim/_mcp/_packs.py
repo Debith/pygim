@@ -17,7 +17,7 @@ import re
 import shutil
 import tempfile
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 _PACK_NAME = re.compile(r"^pack:\s*([A-Za-z0-9_\-]+)\s*$", re.MULTILINE)
 _INVENTORY_ID = re.compile(r"^([A-Za-z0-9_.\-]+):\s*$", re.MULTILINE)
@@ -116,7 +116,7 @@ def accept(store: Path, proposal: Path, replace: bool = False, *, project: Optio
         lines = [f"  {r['tag']}: {', '.join(r['carried_by'])}" for r in carried]
         return {"ok": False, "errors": "the pack removes values that memories still carry — unlink or retag them first:\n" + "\n".join(lines)}
     shutil.copyfile(proposal, store / "taxonomy" / f"pack-{result['pack']}.yaml")
-    result["inventory"] = _merge_inventory(store, proposal.parent / "inventory.yaml")
+    result["inventory"], result["inventory_kept"] = _merge_inventory(store, proposal.parent / "inventory.yaml")
     return result
 
 
@@ -204,25 +204,34 @@ def _locator_warnings(sources: List[Dict[str, Any]], store: Path, drafted: Path,
     return out
 
 
-def _merge_inventory(store: Path, drafted: Path) -> List[str]:
-    """Appends the drafted inventory's documents that the store's inventory lacks; returns their ids."""
+def _merge_inventory(store: Path, drafted: Path) -> Tuple[List[str], List[str]]:
+    """Appends the drafted inventory's documents that the store's inventory lacks, and returns their
+    ids — and, apart, each document the store already lists at another path, which it keeps.
+
+    The second list exists because the merge once said nothing about them: after the 2026-09-22
+    rename a draft could give `design-memory-00` its new path, the store kept the old one, and the
+    pack's locators went on pointing at a file that no longer existed. Keeping the live entry is
+    still right — a pack must not move another pack's documents — but it has to be said."""
     if not drafted.is_file():
-        return []
+        return [], []
     live = store / "sources" / "inventory.yaml"
     live.parent.mkdir(parents=True, exist_ok=True)
-    have = set(_INVENTORY_ID.findall(live.read_text(encoding="utf-8"))) if live.is_file() else set()
+    known = inventory(live) if live.is_file() else {}
+    wanted = inventory(drafted)
     blocks = re.split(r"(?m)^(?=[A-Za-z0-9_.\-]+:\s*$)", drafted.read_text(encoding="utf-8"))
     added, keep = [], []
     for block in blocks:
         m = _INVENTORY_ID.match(block)
-        if m and m.group(1) not in have:
+        if m and m.group(1) not in known:
             added.append(m.group(1))
             keep.append(block.rstrip() + "\n")
+    kept = [f"{doc}: kept {known[doc]}, the draft says {path}"
+            for doc, path in wanted.items() if doc in known and known[doc] != path]
     if added:
         header = "" if live.is_file() else "# The documents this vocabulary cites. Paths are relative to the project's root.\n"
         with live.open("a", encoding="utf-8") as fh:
             fh.write(header + "".join(keep))
-    return added
+    return added, kept
 
 
 def doc_id(relative: Path) -> str:
