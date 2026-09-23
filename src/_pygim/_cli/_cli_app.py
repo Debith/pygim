@@ -95,7 +95,7 @@ class GimmicksCliApp:
         except (FileNotFoundError, _docs_serve.ServeError) as exc:
             raise click.ClickException(str(exc)) from exc
 
-    def inventory(self, *, where: Environment, path: str | None) -> None:
+    def inventory(self, *, where: Environment, path: str | None, brief: bool = False) -> None:
         """What is already at hand in a project, against what its code actually reaches for.
 
         The point is the join, not either list: a component you already have is invisible at the
@@ -107,6 +107,9 @@ class GimmicksCliApp:
         root = Path(path) if path else Path(where.cwd)
         if not root.is_dir():
             raise click.ClickException(f"{root} is not a directory")
+        if brief:
+            click.echo(_inventory.project_map(root))
+            return
         found = _inventory.from_machine(root)
         click.echo(_style.title(f"{root.name} — {found.files} python file(s), "
                                 f"{len(found.ships)} module(s) shipped") + "\n")
@@ -201,9 +204,11 @@ class GimmicksCliApp:
         """Speak an agent host's hook protocol on stdin and stdout, so the host's configuration holds
         one command rather than a shell pipeline nobody can test.
 
-        Two events, and they are the two moments a rule can arrive: the session's start, where
-        everything is delivered because nothing is known about what is coming, and immediately
-        before a file is written, where almost nothing is — only what the path says (global #16).
+        Three events, and they are the moments a rule can arrive: the session's start, where the
+        project map and the standing knowledge are delivered because nothing is known about what is
+        coming; the moment a request is made, where a procedure whose task the request asks for
+        arrives in full; and immediately before a file is written, where almost nothing is known —
+        only what the path says (global #16).
 
         Prints nothing when there is nothing to say. A hook that fires on every write and speaks
         every time is read as noise and then not read at all."""
@@ -214,8 +219,11 @@ class GimmicksCliApp:
         except ValueError:
             return
         name = event.get("hook_event_name") or ""
+        here = where.at(Path(event.get("cwd") or where.cwd))
         if name == "SessionStart":
-            said = self._capture(lambda: self.enact_status(where=where, standing=True))
+            said = self._project_map(here) + self._capture(lambda: self.enact_status(where=here, standing=True))
+        elif name == "UserPromptSubmit":
+            said = self._capture(lambda: self._process_for(here, event.get("prompt") or ""))
         elif name == "PreToolUse":
             path = (event.get("tool_input") or {}).get("file_path") or ""
             if not path:
@@ -226,6 +234,46 @@ class GimmicksCliApp:
         if said.strip():
             click.echo(_json.dumps({"hookSpecificOutput": {"hookEventName": name,
                                                            "additionalContext": said}}))
+
+    @staticmethod
+    def _project_map(where: Environment) -> str:
+        """The project map, framed for a session's start — or nothing outside a git checkout, where
+        there is no project to describe and a walk could wander the whole home directory."""
+        from _pygim import _inventory
+        from _pygim._mcp import _stores
+
+        if _stores.git(["rev-parse", "--show-toplevel"], Path(where.cwd)) is None:
+            return ""
+        root = _stores.project_root(Path(where.cwd))
+        try:
+            body = _inventory.project_map(root)
+        except Exception:                                # never worth failing a session start for
+            return ""
+        return f'<project-map root="{root}">\n{body}\n</project-map>\n\n'
+
+    def _process_for(self, where: Environment, prompt: str) -> None:
+        """The procedure a request asks for, in full — or nothing, which is the common answer.
+
+        Each procedure names the words a request uses when its task is asked (`asked`); the one
+        whose words the request uses most is delivered, both on a tie. A process known only by its
+        title is not followed, so its steps must arrive at the moment the task is stated."""
+        from _pygim._mcp import _cards
+        from _pygim._mcp.enact import build
+
+        if not prompt.strip():
+            return
+        server = build(where)
+        scored = []
+        for scope, memory in (("global", server._global_if_any()), ("project", server._project_if_any())):
+            for p in server._heads(memory, "kind=procedure"):
+                hits = _cards.asked_for(_cards.parse(p.get("text", "")), prompt)
+                if hits:
+                    scored.append((hits, scope, p))
+        if not scored:
+            return
+        best = max(hits for hits, _, _ in scored)
+        for hits, scope, p in [s for s in scored if s[0] == best][:2]:
+            click.echo(_cards.process(p, scope))
 
     @staticmethod
     def _capture(run) -> str:

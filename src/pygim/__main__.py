@@ -261,8 +261,10 @@ def enact_status(where, standing, stale, everything, triggers, for_path, root):
 @cli_oo.command("inventory")
 @click.option("--path", default=None, type=click.Path(exists=True, file_okay=False),
               help="The project to survey (default: the current directory).")
+@flag_opt("--map", "brief", help="Print the project map every session starts with instead: what the project "
+                                 "is, its layout, what it ships and leaves idle, how it runs, what changed last.")
 @click.pass_obj
-def inventory(where, path):
+def inventory(where, path, brief):
     """What a project already has, against what its code reaches for.
 
     A component you already have is invisible where you would have used it: an import of the
@@ -270,7 +272,7 @@ def inventory(where, path):
     already ships an answer. This prints the join — what is shipped, declared and installed
     against what is actually imported — and nothing else can show it.
     """
-    GimmicksCliApp().inventory(where=where, path=path)
+    GimmicksCliApp().inventory(where=where, path=path, brief=brief)
 
 
 @cli_oo.group()

@@ -178,3 +178,32 @@ def render(memory: Mapping[str, Any], scope: str = "project") -> str:
     if card.steps:
         parts.append(f"{len(card.steps)} steps" + (f", asked as: {card.asked}" if card.asked else ""))
     return head + "\n    " + " · ".join(parts)
+
+
+def asked_for(card: Card, prompt: str) -> int:
+    """How many of a procedure's request words *prompt* uses — as whole words, with the usual
+    endings, so `review` finds reviews and reviewing but `fix` does not find fixture."""
+    text = " ".join((prompt or "").lower().split())
+    hits = 0
+    for word in card.words():
+        pattern = r"(?<![\w-])" + re.escape(" ".join(word.split())) + r"(?:s|es|ed|d|ing|e)?(?![\w-])"
+        if re.search(pattern, text):
+            hits += 1
+    return hits
+
+
+def process(memory: Mapping[str, Any], scope: str = "project") -> str:
+    """A procedure in full, as it is delivered at the moment its task is asked for."""
+    card = parse(str(memory.get("text") or ""))
+    ref = f"{memory['memory']}{' (global)' if scope == 'global' else ''}"
+    task = next((t.split("=", 1)[1] for t in memory.get("tags", []) if t.startswith("task=")), "")
+    lines = [f'<enact-process memory="{ref}" task="{task}">', str(memory["title"])]
+    lines.append(" · ".join(f"{name}: {card.get(name)}" for name in ("when", "not") if card.get(name)))
+    lines.append("Copy these steps into your reply as a checklist and tick them off as you go — "
+                 "it is how the owner sees the process was followed:")
+    lines.extend(f"{n}. {step}" for n, step in enumerate(card.steps, 1))
+    if card.why:
+        lines.append(f"why: {card.why}")
+    lines.append(f"`show {memory['memory']}`{' in global' if scope == 'global' else ''} for the example and the evidence.")
+    lines.append("</enact-process>")
+    return "\n".join(line for line in lines if line)

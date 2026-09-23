@@ -127,7 +127,7 @@ def survey(*, imports: Mapping[str, Use], ships: Sequence[str], available: Mappi
         elif head in stdlib:
             add(standard, head, use)
         elif head in available:
-            add(third_party, available[head], use)
+            add(third_party, head, use)                  # the name the code says, not the distribution's
         else:
             add(unresolved, head, use)
 
@@ -349,3 +349,97 @@ def text_files(root: Path) -> List[Tuple[str, str]]:
         if relative.endswith(TEXT) and not (NOT_OURS & set(relative.split("/"))):
             out.append((relative, text if isinstance(text, str) else text.decode("utf-8", "replace")))
     return out
+
+
+LANGUAGES = {".py": "Python", ".pyi": "Python", ".h": "C++", ".hpp": "C++", ".cpp": "C++", ".cc": "C++",
+             ".c": "C", ".rs": "Rust", ".go": "Go", ".js": "JavaScript", ".ts": "TypeScript",
+             ".java": "Java", ".md": "Markdown", ".rst": "reStructuredText", ".ipynb": "notebooks"}
+ROLES = {"src": "code", "lib": "code", "tests": "tests", "test": "tests", "docs": "docs", "doc": "docs",
+         "examples": "examples", "benchmarks": "benchmarks", "scripts": "scripts", "tools": "tools",
+         "data": "data", "py": "code"}
+MANIFESTS = ("pyproject.toml", "setup.py", "setup.cfg", "requirements.txt", "CMakeLists.txt", "Makefile",
+             "package.json", "Cargo.toml", "go.mod", "environment.yml", "tox.ini", "noxfile.py")
+
+
+def project_map(root: Path, *, recent: int = 3) -> str:
+    """What this project is, before any file in it is opened — the discovery every task starts with.
+
+    Two models reviewed one file of pygim in depth on 2026-09-23 and neither looked at the project
+    first; neither saw that the project ships the components the file should have used. A step that
+    has to be remembered is a step that gets skipped, so this is computed at every session's start
+    and delivered unasked: what the project says it is, how it is laid out, what it ships and leaves
+    idle in its own work, what it reaches for, how it is run, and what changed last. Under 1.5 KB.
+    """
+    from _pygim._mcp._stores import git
+
+    root = Path(root)
+    listed = git(["ls-files"], root)
+    names = [n for n in (listed or "").splitlines() if n]
+    lines: List[str] = []
+
+    title, about = root.name, ""
+    for readme in ("README.md", "README.rst", "README.txt", "README"):
+        if (root / readme).is_file():
+            text = (root / readme).read_text(encoding="utf-8", errors="replace")
+            heads = [ln.strip("#= ").strip() for ln in text.splitlines() if ln.startswith("#")]
+            heads = [h for h in heads if h and not h.startswith(("!", "<", "["))]
+            title = heads[0] if heads else title
+            prose = [ln.strip() for ln in text.splitlines()
+                     if ln.strip() and not ln.startswith(("#", "=", "-", "[", "!", "<", "|", "`", ">"))]
+            about = prose[0] if prose else ""
+            break
+    lines.append(f"{title}" + (f" — {about[:160]}" if about else ""))
+
+    tops: Dict[str, int] = {}
+    for name in names:
+        head = name.split("/")[0]
+        if "/" in name and not head.startswith(".") and head not in NOT_OURS:
+            tops[head] = tops.get(head, 0) + 1
+    if tops:
+        lines.append("layout: " + " · ".join(
+            f"{d}/ ({ROLES[d] + ', ' if d in ROLES else ''}{n} files)"
+            for d, n in sorted(tops.items(), key=lambda kv: -kv[1])[:8]))
+    manifests = [m for m in MANIFESTS if (root / m).is_file()]
+    if manifests:
+        lines.append("built by: " + ", ".join(manifests))
+
+    counts: Dict[str, int] = {}
+    for name in names:
+        language = LANGUAGES.get(Path(name).suffix)
+        if language:
+            counts[language] = counts.get(language, 0) + 1
+    if counts:
+        lines.append("languages: " + " · ".join(f"{k} {v}" for k, v in sorted(counts.items(), key=lambda kv: -kv[1])[:5]))
+
+    try:
+        found = from_machine(root)
+    except Exception:                                    # a map is never worth failing a session start for
+        found = None
+    if found is not None:
+        if found.ships:
+            idle = found.unused + found.shown_only
+            lines.append(f"ships: {', '.join(sorted({n.split('.')[0] for n in found.ships}))} "
+                         f"({len(found.ships)} modules)"
+                         + (f"; not used by its own work: {', '.join(n.split('.', 1)[-1] for n in idle)}"
+                            f" — `oo inventory` for the join" if idle else ""))
+        else:
+            lines.append("ships: nothing importable — an application")
+        elsewhere = list(found.third_party)[:8]
+        if elsewhere:
+            lines.append("reaches for: " + ", ".join(elsewhere))
+
+    manifest = root / "pyproject.toml"
+    if manifest.is_file():
+        import tomllib
+
+        try:
+            scripts = tomllib.loads(manifest.read_text(encoding="utf-8")).get("project", {}).get("scripts", {})
+        except ValueError:
+            scripts = {}
+        if scripts:
+            lines.append("run as: " + ", ".join(sorted(scripts)))
+
+    log = git(["log", f"-{recent}", "--format=%h %s"], root)
+    if log:
+        lines.append("recent: " + " | ".join(line[:80] for line in log.splitlines()))
+    return "\n".join(lines)

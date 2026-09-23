@@ -192,3 +192,63 @@ class TestCheckingTheMapItself:
     def test_no_map_at_all_is_said_plainly(self, project, env):
         (project / ".enact" / "triggers.yaml").unlink()
         assert "no trigger map" in self.run(project, env)
+
+
+class TestAProcessArrivesWhenItsTaskIsAsked:
+    """A procedure known only by its title is not followed — standing knowledge carries titles, and
+    three sessions asked to "Analyze this file" on 2026-09-23 followed no process at all. So the
+    steps arrive at the moment a request asks for their task, matched on the words the procedure
+    itself names in `asked`, and nothing arrives when no task is asked."""
+
+    @pytest.fixture
+    def with_a_process(self, project, env):
+        made = subprocess.run(
+            [str(OO), "enact", "call", "remember", "--json", json.dumps({
+                "title": "Review what exists against what the project already has",
+                "tags": ["domain=proj", "artifact=any", "task=design", "kind=procedure"],
+                "when": "asked to review existing work", "why": "a review of the file alone misses the shelf",
+                "asked": "review, analyze, analyse, critique",
+                "steps": ["Discover the project — check: can you name what it ships?",
+                          "Judge it against what the project owns — check: a finding or an explicit nothing?"],
+                "seen": ["#0"], "reason": "a process"})],
+            cwd=project, env=env, capture_output=True, text=True)
+        assert json.loads(made.stdout)["ok"], made.stdout
+        return project
+
+    def ask(self, prompt, project, env):
+        return hook({"hook_event_name": "UserPromptSubmit", "prompt": prompt, "cwd": str(project)}, project, env)
+
+    def test_a_request_that_asks_for_the_task_gets_the_steps_in_full(self, with_a_process, env):
+        said = self.ask("Analyze this file, please", with_a_process, env)
+        context = said["hookSpecificOutput"]["additionalContext"]
+        assert said["hookSpecificOutput"]["hookEventName"] == "UserPromptSubmit"
+        assert "1. Discover the project — check: can you name what it ships?" in context
+        assert "checklist" in context                                 # and it asks to be followed visibly
+
+    def test_a_request_that_asks_for_no_task_hears_nothing(self, with_a_process, env):
+        assert self.ask("go", with_a_process, env) is None
+        assert self.ask("yes, commit it", with_a_process, env) is None
+
+    def test_a_word_inside_another_word_is_not_a_request(self, with_a_process, env):
+        assert self.ask("the reviewer-bot left a note", with_a_process, env) is None
+
+
+class TestTheSessionStartsWithTheProject:
+    def test_the_project_map_comes_first_when_the_directory_is_a_checkout(self, project, env):
+        subprocess.run(["git", "init", "-q"], cwd=project, env=env, check=True)
+        (project / "README.md").write_text("# Proj\n\nA project that does one thing.\n", encoding="utf-8")
+        (project / "src" / "proj").mkdir(parents=True)
+        (project / "src" / "proj" / "__init__.py").write_text("", encoding="utf-8")
+        subprocess.run(["git", "add", "-A"], cwd=project, env=env, check=True)
+        made = subprocess.run(
+            [str(OO), "enact", "call", "remember", "--json", json.dumps({
+                "title": "Lay options out as a table", "reason": "how Debith wants answers",
+                "when": "Answering with choices.", "why": "A reader compares options faster in a table.",
+                "tags": ["domain=proj", "artifact=any", "task=design", "kind=preference"], "seen": ["#0"]})],
+            cwd=project, env=env, capture_output=True, text=True)
+        assert json.loads(made.stdout)["ok"], made.stdout
+        said = hook({"hook_event_name": "SessionStart", "source": "startup", "cwd": str(project)}, project, env)
+        context = said["hookSpecificOutput"]["additionalContext"]
+        assert context.startswith(f'<project-map root="{project}">')
+        assert "Proj — A project that does one thing." in context and "ships: proj" in context
+        assert context.index("</project-map>") < context.index("Lay options out as a table")
