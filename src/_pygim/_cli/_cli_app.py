@@ -29,6 +29,11 @@ def _echo(msg, quiet):
 
 flag_opt = functools.partial(click.option, is_flag=True, default=False)
 
+# What a host submits that nobody typed: a finished background task arrives as a prompt too. On
+# 2026-09-23 "Background command … analysis session completed" brought the review procedure twice,
+# to a session that was running reviews, not doing one.
+NOT_A_REQUEST = ("<task-notification>", "[SYSTEM NOTIFICATION")
+
 
 @dataclass
 class GimmicksCliApp:
@@ -108,7 +113,7 @@ class GimmicksCliApp:
         if not root.is_dir():
             raise click.ClickException(f"{root} is not a directory")
         if brief:
-            click.echo(_inventory.project_map(root))
+            click.echo(_inventory.project_map(root, home=Path(where.home)))
             return
         found = _inventory.from_machine(root)
         click.echo(_style.title(f"{root.name} — {found.files} python file(s), "
@@ -252,7 +257,7 @@ class GimmicksCliApp:
             return ""
         root = _stores.project_root(Path(where.cwd))
         try:
-            body = _inventory.project_map(root)
+            body = _inventory.project_map(root, home=Path(where.home))
         except Exception:                                # never worth failing a session start for
             return ""
         return f'<project-map root="{root}">\n{body}\n</project-map>\n\n'
@@ -266,7 +271,7 @@ class GimmicksCliApp:
         from _pygim._mcp import _cards
         from _pygim._mcp.enact import build
 
-        if not prompt.strip():
+        if not prompt.strip() or any(mark in prompt for mark in NOT_A_REQUEST):
             return
         server = build(where)
         scored = []

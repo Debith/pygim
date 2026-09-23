@@ -252,3 +252,11 @@ class TestTheSessionStartsWithTheProject:
         assert context.startswith(f'<project-map root="{project}">')
         assert "Proj — A project that does one thing." in context and "ships: proj" in context
         assert context.index("</project-map>") < context.index("Lay options out as a table")
+
+
+def test_a_finished_background_task_is_not_a_request(project, env):
+    """A host submits a finished background task as a prompt. "…analysis session completed" brought
+    the review procedure, twice, to a session that was running reviews rather than doing one."""
+    notice = ("<system-reminder>\n[SYSTEM NOTIFICATION - NOT USER INPUT]\n<task-notification><summary>"
+              "Background command \"Run a fresh analysis session\" completed</summary></task-notification>")
+    assert hook({"hook_event_name": "UserPromptSubmit", "prompt": notice, "cwd": str(project)}, project, env) is None

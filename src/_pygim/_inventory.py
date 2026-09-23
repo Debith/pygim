@@ -351,6 +351,95 @@ def text_files(root: Path) -> List[Tuple[str, str]]:
     return out
 
 
+CONDA_ROOTS = ("miniconda3", "anaconda3", "miniforge3", "mambaforge", ".conda")
+LOCAL_ENVS = (".venv", "venv", "env")
+
+
+@dataclass(frozen=True)
+class Host:
+    """An environment a project runs in, and how that is known."""
+
+    prefix: Path
+    kind: str                 # "conda env" or "venv"
+    name: str
+    python: str               # "3.12", or "" when it cannot be told
+    how: str                  # what showed it: an editable install, a venv inside the project, environment.yml
+    installs: Tuple[str, ...] = ()
+
+    def tool(self, name: str) -> Optional[Path]:
+        """A command installed in this environment, by path — a session's shell does not activate it."""
+        found = self.prefix / "bin" / name
+        return found if found.exists() else None
+
+
+def _dist(folder: str) -> str:
+    """`pygim-0.0.8.post1.dev69+dirty.dist-info` -> `pygim 0.0.8.post1.dev69+dirty`."""
+    stem = folder[: -len(".dist-info")]
+    name, _, version = stem.partition("-")
+    return f"{name} {version}".strip()
+
+
+def environments(root: Path, home: Path) -> List[Host]:
+    """Where this project runs: every environment on the machine that holds it as an editable install,
+    a virtual environment inside it, and a conda environment its environment.yml names.
+
+    Finding the execution environment is part of discovery. A session's shell activates nothing, so
+    `oo` and the project's own `python` are not on its PATH; on 2026-09-23 one of two sessions found
+    the conda environment by itself and the other gave up on the inventory. An editable install says
+    which checkout it came from (`direct_url.json`), which is what makes this work for any project
+    developed with `pip install -e`, not only this one. *home* is the one the program was given."""
+    import json
+    import os
+    from urllib.parse import unquote, urlparse
+    from pygim.pathlike import path
+
+    root = Path(root).resolve()
+    candidates: List[Tuple[Path, str, str]] = []
+    for base in CONDA_ROOTS:
+        conda = Path(home) / base
+        if (conda / "conda-meta").is_dir():
+            candidates.append((conda, "conda env", "base"))
+        if (conda / "envs").is_dir():
+            candidates += [(Path(str(env)), "conda env", env.name) for env in path(str(conda / "envs")).iterdir()]
+    candidates += [(root / name, "venv", name) for name in LOCAL_ENVS if (root / name / "pyvenv.cfg").is_file()]
+    named = ""
+    if (root / "environment.yml").is_file():
+        for line in (root / "environment.yml").read_text(encoding="utf-8", errors="replace").splitlines():
+            if line.startswith("name:"):
+                named = line.split(":", 1)[1].strip()
+
+    hosts: List[Host] = []
+    for prefix, kind, name in candidates:
+        seen, installs = set(), []
+        for record in path(str(prefix)).glob("lib/python*/site-packages/*.dist-info/direct_url.json"):
+            real = os.path.realpath(str(record))
+            if real in seen:                      # lib/python3.1 may be a link to lib/python3.12
+                continue
+            seen.add(real)
+            try:
+                data = json.loads(Path(real).read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                continue
+            url = urlparse(data.get("url", ""))
+            if url.scheme == "file" and (data.get("dir_info") or {}).get("editable") \
+                    and Path(unquote(url.path)).resolve() == root:
+                installs.append(_dist(Path(real).parent.name))
+        inside = kind == "venv"
+        if not (installs or inside or (named and name == named)):
+            continue
+        python = os.path.basename(os.path.realpath(str(prefix / "bin" / "python")))
+        how = ("installed editable as " + " and ".join(sorted(installs)) if installs else
+               "a virtual environment inside the project" if inside else "environment.yml names it")
+        hosts.append(Host(prefix, kind, name, python.removeprefix("python") if python.startswith("python3") else "",
+                          how, tuple(sorted(installs))))
+    return hosts
+
+
+def _where(host: Host, home: Path) -> str:
+    text = str(host.prefix)
+    return "~" + text[len(str(home)):] if text.startswith(str(home)) else text
+
+
 LANGUAGES = {".py": "Python", ".pyi": "Python", ".h": "C++", ".hpp": "C++", ".cpp": "C++", ".cc": "C++",
              ".c": "C", ".rs": "Rust", ".go": "Go", ".js": "JavaScript", ".ts": "TypeScript",
              ".java": "Java", ".md": "Markdown", ".rst": "reStructuredText", ".ipynb": "notebooks"}
@@ -361,7 +450,7 @@ MANIFESTS = ("pyproject.toml", "setup.py", "setup.cfg", "requirements.txt", "CMa
              "package.json", "Cargo.toml", "go.mod", "environment.yml", "tox.ini", "noxfile.py")
 
 
-def project_map(root: Path, *, recent: int = 3) -> str:
+def project_map(root: Path, *, home: Optional[Path] = None, recent: int = 3) -> str:
     """What this project is, before any file in it is opened — the discovery every task starts with.
 
     Two models reviewed one file of pygim in depth on 2026-09-23 and neither looked at the project
@@ -411,6 +500,21 @@ def project_map(root: Path, *, recent: int = 3) -> str:
     if counts:
         lines.append("languages: " + " · ".join(f"{k} {v}" for k, v in sorted(counts.items(), key=lambda kv: -kv[1])[:5]))
 
+    hosts = environments(root, home) if home is not None else []
+    inventory = "`oo inventory`"
+    for host in hosts:
+        how = host.how
+        if host.installs:
+            names = [i.split(" ", 1)[0] for i in host.installs]
+            how = "installed editable as " + " and ".join(names) + (
+                f" ({len(names)} installs of one checkout)" if len(names) > 1 else "")
+        lines.append(f"runs in: {host.kind} `{host.name}`" + (f", Python {host.python}" if host.python else "")
+                     + f", {how}; not active in a session's shell — use {_where(host, home)}/bin/python")
+        if host.tool("oo"):
+            inventory = f"`{_where(host, home)}/bin/oo inventory`"
+    if home is not None and not hosts:
+        lines.append("runs in: not found — no environment on this machine installs it editable, and it has no "
+                     "virtual environment or environment.yml of its own; find how it runs before running it")
     try:
         found = from_machine(root)
     except Exception:                                    # a map is never worth failing a session start for
@@ -421,7 +525,7 @@ def project_map(root: Path, *, recent: int = 3) -> str:
             lines.append(f"ships: {', '.join(sorted({n.split('.')[0] for n in found.ships}))} "
                          f"({len(found.ships)} modules)"
                          + (f"; not used by its own work: {', '.join(n.split('.', 1)[-1] for n in idle)}"
-                            f" — `oo inventory` for the join" if idle else ""))
+                            f" — {inventory} for the join" if idle else ""))
         else:
             lines.append("ships: nothing importable — an application")
         elsewhere = list(found.third_party)[:8]

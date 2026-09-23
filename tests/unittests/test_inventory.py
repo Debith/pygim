@@ -196,3 +196,66 @@ def test_the_check_over_this_project_finds_a_plausible_number_of_files():
     files = _inventory.python_files(root)
     assert len(files) > 40, f"only {len(files)} python files found under {root}"
     assert _inventory.ships_in(root) and "pygim" in _inventory.ships_in(root)
+
+
+class TestWhereItRuns:
+    """Finding the execution environment is part of discovery. On 2026-09-23 one of two sessions found
+    the conda environment by itself and ran the inventory; the other did not, and gave up on it. An
+    editable install records which checkout it came from, which makes this work for any project."""
+
+    def conda_env(self, home, name, *, points_at=None, editable=True, dist="proj-1.0"):
+        prefix = home / "miniconda3" / "envs" / name
+        site = prefix / "lib" / "python3.12" / "site-packages"
+        (site / f"{dist}.dist-info").mkdir(parents=True)
+        (prefix / "lib" / "python3.1").symlink_to(prefix / "lib" / "python3.12")    # as conda lays it out
+        (prefix / "bin").mkdir()
+        (prefix / "bin" / "python3.12").write_text("", encoding="utf-8")
+        (prefix / "bin" / "python").symlink_to(prefix / "bin" / "python3.12")
+        (prefix / "bin" / "oo").write_text("", encoding="utf-8")
+        if points_at is not None:
+            (site / f"{dist}.dist-info" / "direct_url.json").write_text(json.dumps(
+                {"url": f"file://{points_at}", "dir_info": {"editable": editable}}), encoding="utf-8")
+        return prefix
+
+    def test_the_environment_holding_an_editable_install_of_the_project_is_found_once(self, tmp_path):
+        home, project = tmp_path / "home", tmp_path / "proj"
+        project.mkdir()
+        self.conda_env(home, "work", points_at=project)
+        self.conda_env(home, "other", points_at=tmp_path / "elsewhere")
+        self.conda_env(home, "copied", points_at=project, editable=False)       # an install, not a checkout
+        hosts = _inventory.environments(project, home)
+        assert [(h.name, h.python, h.installs) for h in hosts] == [("work", "3.12", ("proj 1.0",))]
+        assert hosts[0].tool("oo") == home / "miniconda3" / "envs" / "work" / "bin" / "oo"
+
+    def test_a_virtual_environment_inside_the_project_is_where_it_runs(self, tmp_path):
+        project = tmp_path / "proj"
+        (project / ".venv").mkdir(parents=True)
+        (project / ".venv" / "pyvenv.cfg").write_text("home = /usr/bin\n", encoding="utf-8")
+        hosts = _inventory.environments(project, tmp_path / "home")
+        assert [(h.kind, h.name, h.how) for h in hosts] == [("venv", ".venv", "a virtual environment inside the project")]
+
+    def test_the_map_says_where_it_runs_and_names_the_command_that_works(self, tmp_path):
+        home, project = tmp_path / "home", tmp_path / "proj"
+        (project / "src" / "proj").mkdir(parents=True)
+        (project / "src" / "proj" / "__init__.py").write_text("", encoding="utf-8")
+        (project / "src" / "proj" / "idle.py").write_text("", encoding="utf-8")
+        self.conda_env(home, "work", points_at=project)
+        shown = _inventory.project_map(project, home=home)
+        assert "runs in: conda env `work`, Python 3.12, installed editable as proj; not active in a session's shell" \
+               " — use ~/miniconda3/envs/work/bin/python" in shown
+        assert "`~/miniconda3/envs/work/bin/oo inventory` for the join" in shown
+
+    def test_two_installs_of_one_checkout_are_named_as_such(self, tmp_path):
+        home, project = tmp_path / "home", tmp_path / "proj"
+        project.mkdir()
+        prefix = self.conda_env(home, "work", points_at=project, dist="proj-2.0")
+        old = prefix / "lib" / "python3.12" / "site-packages" / "old_name-1.0.dist-info"
+        old.mkdir()
+        (old / "direct_url.json").write_text(json.dumps({"url": f"file://{project}", "dir_info": {"editable": True}}),
+                                             encoding="utf-8")
+        assert "2 installs of one checkout" in _inventory.project_map(project, home=home)
+
+    def test_a_project_nothing_hosts_says_so_rather_than_saying_nothing(self, tmp_path):
+        project = tmp_path / "proj"
+        project.mkdir()
+        assert "runs in: not found" in _inventory.project_map(project, home=tmp_path / "home")
