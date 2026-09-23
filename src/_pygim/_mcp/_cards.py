@@ -198,17 +198,42 @@ def standing(preferences: Sequence[tuple], procedures: Sequence[tuple], budget: 
     leaves out. Each item is (memory, scope).
 
     Measured on 2026-09-23: 25 cards at full length rendered to 14,457 characters, and with the project
-    map the session-start text reached 16,127 — past the ~13 KB at which the host moves a hook's output
-    to a file and shows a 2 KB preview, which is the failure the cards were written to end. So the
-    cards are rendered to a budget, and a tier that drops a field says which."""
+    map the session-start text reached 16,127 — past the point where the host moves a hook's output
+    to a file behind a 2 KB preview (somewhere above the 8,906 characters seen arriving inline, and
+    at or below the 13,121 seen moved), which is the failure the cards were written to end.
+
+    A preference's `why` is the last thing given up, and it is given up one card at a time — the
+    longest first, only until the text fits — because dropping it from every card at once meant two
+    new procedure cards cost fifteen preferences their reasons."""
     full = TIERS[0]
-    for pref_fields, proc_fields in TIERS:
+
+    def fits(parts):
+        return sum(len(x) + 1 for part in parts for x in part) <= budget
+
+    def dropped(pref_fields, proc_fields):
+        return [f for f in full[0] if f not in pref_fields] + [f"procedure {f}" for f in full[1] if f not in proc_fields]
+
+    for pref_fields, proc_fields in TIERS[:2]:
         rendered = ([render(m, s, pref_fields) for m, s in preferences],
                     [render(m, s, proc_fields) for m, s in procedures])
-        if sum(len(x) + 1 for part in rendered for x in part) <= budget:
-            dropped = [f for f in full[0] if f not in pref_fields] + \
-                      [f"procedure {f}" for f in full[1] if f not in proc_fields]
-            return rendered[0], rendered[1], dropped
+        if fits(rendered):
+            return rendered[0], rendered[1], dropped(pref_fields, proc_fields)
+
+    with_why, without_why = TIERS[2][0], TIERS[3][0]
+    procs = [render(m, s, TIERS[2][1]) for m, s in procedures]
+    cards = [render(m, s, with_why) for m, s in preferences]
+    longest_first = sorted(range(len(preferences)), key=lambda i: -len(parse(str(preferences[i][0].get("text") or "")).why))
+    cut = 0
+    while not fits((cards, procs)) and cut < len(longest_first):
+        i = longest_first[cut]
+        cards[i] = render(preferences[i][0], preferences[i][1], without_why)
+        cut += 1
+    if fits((cards, procs)):
+        left = dropped(with_why, TIERS[2][1])
+        if cut:
+            left.append(f"why on {cut} of {len(preferences)} preferences")
+        return cards, procs, left
+    rendered = ([render(m, s, ()) for m, s in preferences], [render(m, s, ()) for m, s in procedures])
     return rendered[0], rendered[1], ["everything but the titles"]
 
 

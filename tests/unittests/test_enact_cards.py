@@ -159,3 +159,22 @@ class TestTheBudget:
         prefs = [(self.card(n), "project") for n in range(200)]
         pref_cards, _, left_out = _cards.standing(prefs, [], budget=1_000)
         assert left_out == ["everything but the titles"] and pref_cards[0].startswith("#0 A rule")
+
+
+class TestAReasonIsGivenUpOneCardAtATime:
+    """Dropping `why` from every card at once meant two new procedure cards cost fifteen preferences
+    their reasons (2026-09-23). So the last step drops it from the longest first, only until it fits."""
+
+    def card(self, n, why_length):
+        return {"memory": f"#{n}", "title": f"Rule {n}",
+                "text": _cards.compose({"when": "w" * 40, "not": "n" * 60, "do": "d" * 60, "why": "y" * why_length})}
+
+    def test_only_as_many_reasons_go_as_the_budget_needs_longest_first(self):
+        prefs = [(self.card(n, 60 + n * 10), "project") for n in range(10)]
+        when_and_why = [_cards.render(m, s, ("when", "why")) for m, s in prefs]
+        needed = sum(len(c) + 1 for c in when_and_why) - 150       # a little too short for every reason
+        cards, _, left_out = _cards.standing(prefs, [], budget=needed)
+        kept = [c for c in cards if "why: " in c]
+        assert 0 < len(kept) < 10                                  # some kept, some given up
+        assert "why: " not in cards[9] and "why: " in cards[0]     # the longest went first
+        assert left_out[-1] == f"why on {10 - len(kept)} of 10 preferences"

@@ -221,7 +221,13 @@ class GimmicksCliApp:
         name = event.get("hook_event_name") or ""
         here = where.at(Path(event.get("cwd") or where.cwd))
         if name == "SessionStart":
-            said = self._project_map(here) + self._capture(lambda: self.enact_status(where=here, standing=True))
+            from _pygim._mcp.enact import SESSION_START_LIMIT, STANDING_BUDGET
+
+            project_map, budget = self._project_map(here), STANDING_BUDGET
+            said = project_map + self._capture(lambda: self.enact_status(where=here, standing=True, budget=budget))
+            while len(said) > SESSION_START_LIMIT and budget > 1000:   # the cards give way, not the map
+                budget -= len(said) - SESSION_START_LIMIT
+                said = project_map + self._capture(lambda: self.enact_status(where=here, standing=True, budget=budget))
         elif name == "UserPromptSubmit":
             said = self._capture(lambda: self._process_for(here, event.get("prompt") or ""))
         elif name == "PreToolUse":
@@ -774,7 +780,7 @@ class GimmicksCliApp:
                    f"{_style.muted('(report: ' + result['report'] + ')')}")
 
     def enact_status(self, *, where: Environment, standing: bool = False,
-                     for_path: Optional[str] = None) -> None:
+                     for_path: Optional[str] = None, budget: Optional[int] = None) -> None:
         """Print where the store stands, the standing knowledge of a session, or — with *for_path* —
         only what applies to the space that path is in."""
         from pygim.enact import Enact
@@ -786,7 +792,7 @@ class GimmicksCliApp:
             from _pygim._mcp.enact import build
 
             server = build(where)
-            data = server.standing()
+            data = server.standing() if budget is None else server.standing(budget)
             waiting = data.get("waiting") or []
             if not data["preferences"] and not data["procedures"] and not waiting:
                 return

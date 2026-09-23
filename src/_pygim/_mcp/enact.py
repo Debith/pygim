@@ -39,6 +39,10 @@ INSTRUCTIONS_CAP = 2000  # characters. Claude Code keeps the first 2,048 of a se
 # file past roughly 13 KB (the smallest moved on this machine was 13,121 bytes) and shows a 2 KB
 # preview, so the whole session-start text — project map, mailbox and cards — is kept near 9 KB.
 STANDING_BUDGET = 7500
+# The whole session-start text — map, mailbox and cards — is held to the largest size seen arriving
+# inline (8,906 characters, 2026-09-23). The host's real limit lies somewhere up to 13,121, the
+# smallest seen moved to a file; a budget set inside what has been observed cannot fail silently.
+SESSION_START_LIMIT = 8900
 
 INSTRUCTIONS = """\
 A problem-space memory: knowledge is found by the kind of problem being solved,
