@@ -421,8 +421,10 @@ class GimmicksCliApp:
                 # rename 11 of pygim's did, and nothing looked — this is the same check `check_pack` runs
                 # on a draft, run on each live pack.
                 from _pygim._mcp import _packs
+                from pygim.pathlike import path
+
                 cites = []
-                for pack in sorted(Path(root, "taxonomy").glob("pack-*.yaml")):
+                for pack in sorted((Path(str(p)) for p in path(str(root)).joinpath("taxonomy").glob("pack-*.yaml")), key=str):
                     try:
                         cites += [f"{pack.name}: {w}" for w in _packs.check(Path(root), pack, project=project)["warnings"]]
                     except Exception as exc:                  # a pack that will not load says so elsewhere
