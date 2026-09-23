@@ -317,3 +317,35 @@ def from_machine(root: Path, distributions=None, stdlib: Optional[Collection[str
                   declared=declared_in(root),
                   stdlib=sys.stdlib_module_names if stdlib is None else stdlib,
                   root=root, files=len(files))
+
+
+TEXT = (".py", ".pyi", ".h", ".hpp", ".cpp", ".c", ".md", ".rst", ".toml", ".yaml", ".yml", ".json",
+        ".txt", ".cfg", ".ini", ".sh", ".cmake")
+
+
+def text_files(root: Path) -> List[Tuple[str, str]]:
+    """Every text file the project keeps, as a path relative to *root* with its text.
+
+    In a git checkout that is what `git ls-files` lists, so ignored build output, virtual
+    environments and caches are left out by the project's own rules rather than by a guess; outside
+    one, the walk falls back to everything not in `NOT_OURS`. Read by pygim's path table either way.
+    """
+    from pygim.pathlike import PathSet, path
+    from _pygim._mcp._stores import git
+
+    listed = git(["ls-files", "-z"], Path(root))
+    if listed is not None:
+        names = [n for n in listed.split("\0") if n and n.endswith(TEXT)]
+        found = PathSet([path(str(Path(root) / n)) for n in names])
+    else:
+        found = PathSet(path(str(root)).rglob("*"))
+    members, texts = found.to_list(), found.read_all_files()
+    if len(members) != len(texts):
+        return []
+    here, out = Path(root), []
+    for member, text in zip(members, texts):
+        file = Path(str(member))
+        relative = (file.relative_to(here) if file.is_relative_to(here) else file).as_posix()
+        if relative.endswith(TEXT) and not (NOT_OURS & set(relative.split("/"))):
+            out.append((relative, text if isinstance(text, str) else text.decode("utf-8", "replace")))
+    return out

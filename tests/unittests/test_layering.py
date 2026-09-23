@@ -190,10 +190,11 @@ OS_WALKS = {"walk", "listdir", "scandir"}       # and os's
 # PathSet to. Benchmarks compare the two by definition.
 ORACLE = ("test_pathlike.py", "test_path_store.py", "benchmarks/")
 
-# What is still walked by hand, counted on 2026-09-22. It may fall; it may not rise. A ratchet
+# What is still walked by hand, counted on 2026-09-22 (19) and again on 2026-09-23 (17). It may
+# fall; it may not rise. A ratchet
 # rather than a ban, because banning it today would mean converting nineteen call sites in one
 # commit, and a rule that has to be obeyed all at once is a rule that gets turned off.
-WALKS_BY_HAND = 19
+WALKS_BY_HAND = 17
 
 
 OURS = {"path", "PathSet", "PathStore"}         # pygim's own, which is the point of the rule
@@ -204,24 +205,44 @@ def _hand_walks(text):
     `path(x).rglob(...)` — that is the walker this rule exists to promote, and a check that counted
     obeying it as breaking it would be read once and then turned off.
 
-    Receivers are followed one assignment deep (`found = path(root)` then `found.iterdir()`), which
-    is as far as a syntax tree can honestly go. Anything less direct is still counted, so the number
-    can only be too high, never too low."""
+    Receivers are followed through the idioms that keep a path ours: an assignment from `path(…)`
+    or from `ours / "part"`, and a loop over what one of ours yields (`for child in here.iterdir()`).
+    That is as far as a syntax tree can honestly go. Anything less direct is still counted, so the
+    number can only be too high, never too low."""
     import ast
 
+    tree = ast.parse(text)
+
+    def is_ours(expr, ours):
+        if isinstance(expr, ast.Call):
+            if getattr(expr.func, "id", None) in OURS:
+                return True
+            if isinstance(expr.func, ast.Attribute):
+                return is_ours(expr.func.value, ours)
+        if isinstance(expr, ast.Name):
+            return expr.id in ours
+        if isinstance(expr, ast.BinOp):
+            return is_ours(expr.left, ours)
+        return False
+
     ours = set()
-    for node in ast.walk(ast.parse(text)):
-        if (isinstance(node, ast.Assign) and isinstance(node.value, ast.Call)
-                and getattr(node.value.func, "id", None) in OURS):
-            ours |= {t.id for t in node.targets if isinstance(t, ast.Name)}
+    for _ in range(3):                                  # a name made from one made from one
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Assign) and is_ours(node.value, ours):
+                ours |= {t.id for t in node.targets if isinstance(t, ast.Name)}
+            elif isinstance(node, (ast.For, ast.comprehension)):
+                source = node.iter
+                if isinstance(source, ast.Call) and getattr(source.func, "id", None) == "sorted" and source.args:
+                    source = source.args[0]
+                if is_ours(source, ours) and isinstance(node.target, ast.Name):
+                    ours.add(node.target.id)
 
     out = []
-    for node in ast.walk(ast.parse(text)):
+    for node in ast.walk(tree):
         if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)):
             continue
         receiver = getattr(node.func.value, "id", None)
-        on_ours = receiver in ours or (isinstance(node.func.value, ast.Call)
-                                       and getattr(node.func.value.func, "id", None) in OURS)
+        on_ours = is_ours(node.func.value, ours)
         if node.func.attr in BY_HAND and receiver != "ast" and not on_ours:
             out.append((node.lineno, node.func.attr))
         elif node.func.attr in OS_WALKS and receiver == "os":
@@ -236,6 +257,9 @@ def test_the_walk_checker_knows_our_walker_from_the_hand_written_one():
     assert _hand_walks("import os\nos.walk('.')\n") == [(2, "os.walk")]
     assert _hand_walks("from pygim.pathlike import path\npath('.').rglob('*.py')\n") == []
     assert _hand_walks("from pygim.pathlike import path\nhere = path('.')\nhere.iterdir()\n") == []
+    assert _hand_walks("here = path('.') / 'src'\nfor child in sorted(here.iterdir(), key=str):\n"
+                       "    child.iterdir()\n") == []
+    assert _hand_walks("from pathlib import Path\nhere = Path('.') / 'src'\nhere.iterdir()\n")
 
 
 @pytest.mark.skipif(not PY_ROOT.is_dir(), reason="source tree not present (testing the installed package)")
@@ -243,7 +267,7 @@ def test_the_project_walks_with_its_own_walker():
     """pygim ships PathSet, so pygim uses PathSet. The argument is not consistency and not speed —
     it is that using a component is the only cheap way to find out what is wrong with it. Converting
     one test on 2026-09-22 found a latent bug in the test and an API sharpness in `read_all_files`
-    within the hour; neither was going to be found by admiring it from outside (global memory #12).
+    within the hour; neither was going to be found by admiring it from outside (global memory #20).
 
     This counts what is left and refuses to let it grow. When the count falls, lower the number —
     the second assertion makes that non-optional, so the budget cannot quietly become a licence."""

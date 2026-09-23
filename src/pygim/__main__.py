@@ -232,6 +232,12 @@ def enact_accept(where, memory_ref, pack, reason, replace, walk, assume_yes, roo
 @flag_opt("--standing", "standing",
           help="Print the standing knowledge instead — every preference in full, as a session receives "
                "it — and nothing else, so a host's session-start hook can put it in front of an agent.")
+@flag_opt("--stale", "stale",
+          help="Check every store on this machine for what its memories name and no longer exists: commands "
+               "and their options, paths, names in the project's code, links between memories, and code "
+               "citing a superseded global memory. A dead reference in a card is stale; in a body it may be "
+               "history, and is listed with --all.")
+@flag_opt("--all", "everything", help="With --stale: list the body mentions too, not only the count.")
 @flag_opt("--triggers", "triggers",
           help="Check the store's trigger map: what each pattern would actually deliver, and which "
                "deliver nothing. A trigger that is silent fails silently.")
@@ -241,8 +247,11 @@ def enact_accept(where, memory_ref, pack, reason, replace, walk, assume_yes, roo
                    "so a hook may call it before every write.")
 @_ROOT
 @click.pass_obj
-def enact_status(where, standing, triggers, for_path, root):
+def enact_status(where, standing, stale, everything, triggers, for_path, root):
     """Where the store stands: its version, reviews and pending proposals."""
+    if stale:
+        GimmicksCliApp().enact_stale(where=where.with_root(root), everything=everything)
+        return
     if triggers:
         GimmicksCliApp().enact_triggers(where=where.with_root(root))
         return

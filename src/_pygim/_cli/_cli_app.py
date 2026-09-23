@@ -275,6 +275,109 @@ class GimmicksCliApp:
         if empty:
             click.echo("\n" + _style.bad(f"{empty} of {len(triggers)} deliver nothing"))
 
+    def enact_stale(self, *, where: Environment, everything: bool = False) -> None:
+        """Every store on this machine, asked whether what its memories name still exists.
+
+        A card is followed literally, so a dead command or a renamed name in one is stale; the same
+        thing in a body may be history on purpose and is only worth a look. Code that cites a global
+        memory by a number since superseded is listed too — the citation outlives the memory. Printed,
+        never failed: this finds the work, and the work is a rewrite."""
+        from pygim.enact import Enact
+        from pygim.__main__ import cli_oo
+        from _pygim import _inventory
+        from _pygim._mcp import _cards, _stale, _stores
+
+        stores = self._stores(where)
+        scopes = [(s.name, Path(s.root)) for s in stores.scopes()]
+        if not scopes:
+            raise click.ClickException(stores.guidance())
+
+        def everything_in(root: Path):
+            """All heads, and every superseded memory's slug with the head that replaced it."""
+            memory = Enact(str(root))
+            domains = [tag for d in memory.vocabulary(dimension="domain", brief=True)["dimensions"]
+                       for tag in d["values"]]
+            heads = memory.heads(domains)
+            highest = max((int(h["memory"].lstrip("#")) for h in heads), default=-1)
+            slugs, replaced = {}, {}
+            for n in range(highest + 1):
+                shown = memory.show(f"#{n}")
+                if not shown.get("ok"):
+                    continue
+                if shown.get("head"):
+                    slugs[shown["slug"]] = f"#{n}"
+                elif shown.get("superseded_by"):
+                    replaced[shown["slug"]] = shown["superseded_by"][0]
+            return memory, heads, slugs, replaced
+
+        loaded = {name: everything_in(root) for name, root in scopes}
+        head_slugs = {slug: ref for _, _, slugs, _ in loaded.values() for slug, ref in slugs.items()}
+        by_ref = {(name, ref): slug for name, (_, _, slugs, _) in loaded.items() for slug, ref in slugs.items()}
+        successor = {}
+        for name, (_, _, _, replaced) in loaded.items():
+            for old, new_ref in replaced.items():
+                successor[old] = by_ref.get((name, new_ref), new_ref)
+        link = _stale.link_resolver(head_slugs, successor)
+
+        global_name = next((name for name, root in scopes if stores.global_root() and
+                            Path(root).resolve() == Path(stores.global_root()).resolve()), None)
+        reference = None
+        if global_name:
+            memory, heads, _, _ = loaded[global_name]
+            live = {int(h["memory"].lstrip("#")): h["title"] for h in heads}
+            replaced_by = {}
+            highest = max(live, default=-1)
+            for n in range(highest + 1):
+                if n not in live:
+                    shown = memory.show(f"#{n}")
+                    if shown.get("ok") and shown.get("superseded_by"):
+                        replaced_by[n] = int(shown["superseded_by"][0].lstrip("#"))
+            reference = _stale.reference_resolver(live, replaced_by)
+        command = _stale.command_resolver(cli_oo)
+        from importlib import metadata as _metadata
+        elsewhere = set(sys.stdlib_module_names) | set(_inventory.installed(_metadata.distributions()))
+
+        stale_total = look_total = legacy_total = 0
+        for name, root in scopes:
+            memory, heads, _, _ = loaded[name]
+            project = _stores.project_of(root)
+            files = _inventory.text_files(project) if project else []
+            ours = set(_inventory.ships_in(project)) | _inventory.local_in(files) if project else set()
+            ours = {n.split(".")[0] for n in ours}
+            resolve = _stale.Resolvers(
+                command=command, link=link, reference=reference,
+                path=_stale.path_resolver(project, where.home, [r for r, _ in files]) if project else None,
+                name=_stale.name_resolver(_stale.words_in(text for _, text in files), ours, elsewhere)
+                if files else None)
+            findings = [f for h in heads for f in _stale.check(h, resolve)]
+            legacy = [h["memory"] for h in heads if _cards.parse(h.get("text", "")).legacy]
+            stale = [f for f in findings if f.stale]
+            look = [f for f in findings if not f.stale]
+            stale_total, look_total, legacy_total = stale_total + len(stale), look_total + len(look), legacy_total + len(legacy)
+            click.echo(_style.title(f"{name}") + _style.muted(f"  {root}") + "\n  "
+                       + f"{len(heads)} memories: "
+                       + (_style.bad(f"{len(stale)} stale") if stale else _style.good("0 stale"))
+                       + f", {len(look)} to look at, {len(legacy)} not yet a card"
+                       + ("" if project else _style.muted("  — no project, so paths and code names are not checked")))
+            shown = stale + (look if everything else [])
+            for ref in dict.fromkeys(f.memory for f in shown):
+                mine = [f for f in shown if f.memory == ref]
+                click.echo(f"\n  {_style.strong(ref)} {mine[0].title[:80]}")
+                for f in mine:
+                    label = (_style.bad("card") if f.stale else
+                             _style.muted("card?" if f.part == "card" else "body"))
+                    click.echo(f"    {label}  {f.named}\n          {f.problem}")
+            if project and global_name and reference is not None:
+                cited = _stale.cited_in_code(files, reference)
+                if cited:
+                    click.echo("\n  " + _style.strong("code citing a superseded global memory"))
+                    for at, problem in cited:
+                        click.echo(f"    {at}\n          {problem}")
+            click.echo("")
+        click.echo((_style.bad(f"{stale_total} stale in cards") if stale_total else _style.good("nothing stale in any card"))
+                   + f" · {look_total} to look at" + ("" if everything else " (`--all` lists them)")
+                   + f" · {legacy_total} memories not yet cards")
+
     def _standing_for(self, where: Environment, path: str, most: int = 3) -> None:
         """What applies to the space *path* is in — for a hook, at the moment of a write.
 
