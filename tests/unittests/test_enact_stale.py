@@ -136,6 +136,12 @@ class TestAMemoryAsAWhole:
             ("[[old-slug]]", "points at a superseded memory; link [[live-slug]] instead"),
             ("[[nothing]]", "no memory has this slug")]
 
+    def test_a_link_shown_in_code_font_is_syntax_not_a_link(self):
+        """#92's own card says to link with `[[slug]]`; the first run read the placeholder as a
+        broken link and counted the rule about links as stale."""
+        assert _stale.check(self.memory("When: linking\nWhy: numbers go stale\nDo: write `[[slug]]`"),
+                            self.resolve) == []
+
     def test_code_citing_a_superseded_global_memory_is_listed_with_its_line(self):
         resolve = _stale.reference_resolver({20: "Eat your own dogfood"}, {12: 20})
         old, new = 12, 20                        # built at runtime, so this file cites nothing itself

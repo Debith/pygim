@@ -117,7 +117,8 @@ def check(memory: Mapping[str, object], resolve: Resolvers) -> List[Finding]:
             if resolver is not None:
                 note(part, what, value, resolver(value.split() if what == "command" else value))
         if resolve.link is not None:
-            for slug in _LINK.findall(text):
+            # a link in code font shows the syntax — `[[slug]]` in a rule about linking — and links nothing
+            for slug in _LINK.findall(_CODE.sub("", text)):
                 note(part, "link", f"[[{slug}]]", resolve.link(slug))
         if resolve.reference is not None:
             for number in _GLOBAL_REF.findall(text):

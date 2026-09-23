@@ -415,6 +415,26 @@ class GimmicksCliApp:
                     label = (_style.bad("card") if f.stale else
                              _style.muted("card?" if f.part == "card" else "body"))
                     click.echo(f"    {label}  {f.named}\n          {f.problem}")
+            if project:
+                # The vocabulary cites documents too: a locator whose file moved, or whose lines no longer
+                # hold the passage, is as stale as a memory naming a dead command. After the 2026-09-22
+                # rename 11 of pygim's did, and nothing looked — this is the same check `check_pack` runs
+                # on a draft, run on each live pack.
+                from _pygim._mcp import _packs
+                cites = []
+                for pack in sorted(Path(root, "taxonomy").glob("pack-*.yaml")):
+                    try:
+                        cites += [f"{pack.name}: {w}" for w in _packs.check(Path(root), pack, project=project)["warnings"]]
+                    except Exception as exc:                  # a pack that will not load says so elsewhere
+                        cites.append(f"{pack.name}: not checked — {exc}")
+                if cites:
+                    look_total += len(cites)
+                    click.echo("\n  " + _style.strong("vocabulary citing what is no longer there")
+                               + _style.muted(f"  — {len(cites)}; `check_pack` a corrected draft, then accept it"))
+                    for line in cites[: None if everything else 5]:
+                        click.echo(f"    {line}")
+                    if len(cites) > 5 and not everything:
+                        click.echo(_style.muted(f"    … and {len(cites) - 5} more (--all)"))
             if project and global_name and reference is not None:
                 cited = _stale.cited_in_code(files, reference)
                 if cited:
