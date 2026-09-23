@@ -262,12 +262,12 @@ class Stores:
     def _look(self) -> Optional[Found]:
         cwd = Path(self.where.cwd).resolve()
         if self.where.store_root:
-            return Found(Path(self.where.store_root).expanduser().resolve(),
+            return Found(Path(self.where.store_root).resolve(),
                          self.where.store_root_from or "--root")
         for key in GIT_KEYS:
             configured = git(["config", "--get", key], cwd)
             if configured:
-                path = Path(configured).expanduser()
+                path = self.where.path(configured) if configured.startswith("~") else Path(configured)
                 if not path.is_absolute():
                     path = (main_worktree(cwd) or cwd) / path
                 return Found(path.resolve(), "git config " + key)
@@ -306,7 +306,7 @@ class Stores:
         for key in GLOBAL_KEYS:
             configured = git(["config", "--global", "--get", key], self.where.home)
             if configured:
-                return Path(configured).expanduser().resolve()
+                return self.where.path(configured).resolve()
         default = self.where.user_data / GLOBAL_NAME
         return default if is_store(default) else None
 
@@ -374,7 +374,7 @@ class Stores:
         """The machine's global store: created under the user data directory unless *path* says
         otherwise, marked personal so every write is committed, and recorded in the user's git
         config so every project on this machine finds it."""
-        root = (path or self.where.user_data / GLOBAL_NAME).expanduser().resolve()
+        root = self.where.path(str(path or self.where.user_data / GLOBAL_NAME)).resolve()
         if not is_store(root):
             create(root, source)
         if not (root / POLICY).is_file():
@@ -418,7 +418,7 @@ class Stores:
                        if git(["show-ref", "--verify", "--quiet", f"refs/heads/{b}"], cwd) is not None
                        or git(["show-ref", "--verify", "--quiet", f"refs/remotes/origin/{b}"], cwd) is not None),
                       BRANCH)
-        root = (path or main.parent / f"{main.name}-{branch}").expanduser().resolve()
+        root = self.where.path(str(path or main.parent / f"{main.name}-{branch}")).resolve()
         self.refresh()
         if is_store(root):
             point_git_at(root, cwd)

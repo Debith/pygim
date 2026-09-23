@@ -434,8 +434,10 @@ class TestHowTheOutputReads:
         where = ["enact", "accept", "--root", str(project / ".enact")]
         assert "\x1b[" not in CliRunner().invoke(cli_oo, where).output                       # not a terminal
         assert "\x1b[" not in CliRunner().invoke(cli_oo, ["--no-color"] + where, color=True).output
-        monkeypatch.setenv("NO_COLOR", "")                                                   # any value, even empty
+        monkeypatch.setenv("NO_COLOR", "1")                                                  # any value but empty
         assert "\x1b[" not in CliRunner().invoke(cli_oo, where, color=True).output
+        monkeypatch.setenv("NO_COLOR", "")          # no-color.org: "present and not an empty string"
+        assert "\x1b[" in CliRunner().invoke(cli_oo, where, color=True).output
         monkeypatch.delenv("NO_COLOR")
         monkeypatch.setenv("TERM", "dumb")
         assert "\x1b[" not in CliRunner().invoke(cli_oo, where, color=True).output

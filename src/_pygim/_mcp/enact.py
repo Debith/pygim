@@ -27,8 +27,9 @@ from . import _cards, _packs, _stores
 PROTOCOL_VERSION = "2025-06-18"
 SERVER_NAME = "pygim-enact"
 STANDING_TOKENS = 2000  # how much preference text the startup instructions may carry
-SESSION_ENV = "PYGIM_ENACT_SESSION"   # a reloaded server resumes the session number it had
-RELOADED_ENV = "PYGIM_ENACT_RELOADED"  # set on the process a reload exec'd into
+# a reloaded server resumes the session number it had, and knows it was reloaded; the names are the
+# ones the wiring reads (`_config`), spelled once
+from .._config import RELOADED as RELOADED_ENV, SESSION as SESSION_ENV  # noqa: E402
 
 INSTRUCTIONS_CAP = 2000  # characters. Claude Code keeps the first 2,048 of a server's instructions and
 #                          drops the rest without a word: the first session to rely on them was sent
@@ -709,7 +710,7 @@ class EnactServer:
         return taxonomy_stamp(self._memory)
 
     def _store_path(self, path: str) -> Path:
-        p = Path(path).expanduser()
+        p = self.where.path(path) if str(path).startswith("~") else Path(path)   # a relative one is the store's
         if p.is_absolute():
             return p
         in_store = Path(self.memory.root) / p
