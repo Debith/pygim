@@ -98,6 +98,57 @@ class GimmicksCliApp:
         except (FileNotFoundError, _docs_serve.ServeError) as exc:
             raise click.ClickException(str(exc)) from exc
 
+    def inventory(self, *, where: Environment, path: str | None) -> None:
+        """What is already at hand in a project, against what its code actually reaches for.
+
+        The point is the join, not either list: a component you already have is invisible at the
+        call site, so nobody notices reaching past it. Printed, never failed — a first run finds
+        things that are fine on purpose, and a check that cries wolf is read once and then never
+        again. What should fail is decided after the exemptions are written down."""
+        from _pygim import _inventory
+
+        root = Path(path) if path else Path(where.cwd)
+        if not root.is_dir():
+            raise click.ClickException(f"{root} is not a directory")
+        found = _inventory.from_machine(root)
+        click.echo(_style.title(f"{root.name} — {found.files} python file(s), "
+                                f"{len(found.ships)} module(s) shipped") + "\n")
+        if not found.ships:
+            click.echo(_style.muted("  ships nothing importable — an application, not a library\n"))
+
+        def band(heading, rows, note=""):
+            if not rows:
+                return
+            click.echo(_style.strong(heading) + (_style.muted(f"  — {note}") if note else ""))
+            for row in rows:
+                click.echo(f"  {row}")
+            click.echo("")
+
+        band("ships, and nothing imports it", found.unused,
+             "not even a test; either unfinished or unreachable")
+        band("ships, and only its own tests and examples import it", found.shown_only,
+             "demonstrated, never used — the feedback a component gives only comes from a real caller")
+        band("ships, and the project builds with it",
+             [f"{name:<28}{use.work:>4} in the work{('  +' + str(use.shown) + ' shown') if use.shown else ''}"
+              for name, use in found.used])
+        band("declared as a dependency, never imported", list(found.declared_unused),
+             "from pyproject.toml")
+        band("imported, and nothing here provides it",
+             [f"{name:<28}{use.total:>4}" for name, use in found.unresolved.items()],
+             "a sibling checkout or a missing install")
+        band("available here, and used",
+             [f"{name:<28}{use.total:>4}" for name, use in list(found.third_party.items())[:8]],
+             "what this project reaches for from elsewhere")
+
+        idle = found.unused + found.shown_only
+        if idle:
+            click.echo(_style.bad(f"{len(idle)} of {len(found.ships)} shipped module(s) are not "
+                                  f"used by this project's own code."))
+            click.echo(_style.muted("Each is a decision — worth recording either way. Nothing here "
+                                    "fails; the join is the finding."))
+        elif found.ships:
+            click.echo(_style.good("every shipped module is used by this project's own code."))
+
     def enact_mcp(self, *, where: Environment) -> None:
         """Serve the project's store over MCP on stdio; the server starts even without one."""
         from _pygim._mcp import enact as server

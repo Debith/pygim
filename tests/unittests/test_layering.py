@@ -196,21 +196,46 @@ ORACLE = ("test_pathlike.py", "test_path_store.py", "benchmarks/")
 WALKS_BY_HAND = 19
 
 
+OURS = {"path", "PathSet", "PathStore"}         # pygim's own, which is the point of the rule
+
+
 def _hand_walks(text):
-    """Where *text* walks a filesystem itself. `ast.walk` is not a filesystem walk, and saying so
-    in the checker rather than in a comment is the difference between a rule and a nuisance."""
+    """Where *text* walks a filesystem itself. `ast.walk` is not a filesystem walk, and neither is
+    `path(x).rglob(...)` — that is the walker this rule exists to promote, and a check that counted
+    obeying it as breaking it would be read once and then turned off.
+
+    Receivers are followed one assignment deep (`found = path(root)` then `found.iterdir()`), which
+    is as far as a syntax tree can honestly go. Anything less direct is still counted, so the number
+    can only be too high, never too low."""
     import ast
+
+    ours = set()
+    for node in ast.walk(ast.parse(text)):
+        if (isinstance(node, ast.Assign) and isinstance(node.value, ast.Call)
+                and getattr(node.value.func, "id", None) in OURS):
+            ours |= {t.id for t in node.targets if isinstance(t, ast.Name)}
 
     out = []
     for node in ast.walk(ast.parse(text)):
         if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)):
             continue
         receiver = getattr(node.func.value, "id", None)
-        if node.func.attr in BY_HAND and receiver != "ast":
+        on_ours = receiver in ours or (isinstance(node.func.value, ast.Call)
+                                       and getattr(node.func.value.func, "id", None) in OURS)
+        if node.func.attr in BY_HAND and receiver != "ast" and not on_ours:
             out.append((node.lineno, node.func.attr))
         elif node.func.attr in OS_WALKS and receiver == "os":
             out.append((node.lineno, "os." + node.func.attr))
     return out
+
+
+def test_the_walk_checker_knows_our_walker_from_the_hand_written_one():
+    """Run against its own hard case before it is trusted, as the environment check is: the whole
+    rule is "use ours", so mistaking ours for theirs would make obedience look like a violation."""
+    assert _hand_walks("from pathlib import Path\nPath('.').rglob('*.py')\n")
+    assert _hand_walks("import os\nos.walk('.')\n") == [(2, "os.walk")]
+    assert _hand_walks("from pygim.pathlike import path\npath('.').rglob('*.py')\n") == []
+    assert _hand_walks("from pygim.pathlike import path\nhere = path('.')\nhere.iterdir()\n") == []
 
 
 @pytest.mark.skipif(not PY_ROOT.is_dir(), reason="source tree not present (testing the installed package)")

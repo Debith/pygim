@@ -248,6 +248,21 @@ def enact_status(where, standing, triggers, for_path, root):
     GimmicksCliApp().enact_status(where=where.with_root(root), standing=standing, for_path=for_path)
 
 
+@cli_oo.command("inventory")
+@click.option("--path", default=None, type=click.Path(exists=True, file_okay=False),
+              help="The project to survey (default: the current directory).")
+@click.pass_obj
+def inventory(where, path):
+    """What a project already has, against what its code reaches for.
+
+    A component you already have is invisible where you would have used it: an import of the
+    standard library reads as correct whether or not the project, or something it depends on,
+    already ships an answer. This prints the join — what is shipped, declared and installed
+    against what is actually imported — and nothing else can show it.
+    """
+    GimmicksCliApp().inventory(where=where, path=path)
+
+
 @cli_oo.group()
 def docs():
     """Documentation tools."""
