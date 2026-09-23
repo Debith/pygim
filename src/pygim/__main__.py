@@ -48,21 +48,22 @@ def stubs(check):
 
 
 class _OoGroup(BannerGroup):
-    """`oo <verb> ...` runs a verb (``docs serve``); anything else is free text
-    for the assistant; nothing at all shows the help."""
+    """`oo <verb> ...` runs a verb; nothing at all shows the help; anything else is an error.
 
-    def parse_args(self, ctx, args):
-        if args and not args[0].startswith("-") and args[0] not in self.commands:
-            ctx.meta["free_text"] = " ".join(args)
-            ctx.args = []
-            return []
-        return super().parse_args(ctx, args)
+    An unknown word used to be taken as free text for an assistant that was never built, which
+    printed a sentence and exited 0 — so `oo memory reload`, a command renamed away on 2026-09-22
+    and still named in the knowledge every session receives, reported success and did nothing. A
+    command that does not exist has to say so, and say it with a status a script can see."""
 
-    def invoke(self, ctx):
-        text = ctx.meta.get("free_text")
-        if text is not None:
-            return GimmicksCliApp().ai(text)
-        return super().invoke(ctx)
+    def resolve_command(self, ctx, args):
+        name = click.utils.make_str(args[0]) if args else ""
+        if args and not name.startswith("-") and self.get_command(ctx, name) is None:
+            import difflib
+
+            near = difflib.get_close_matches(name, self.list_commands(ctx), n=1, cutoff=0.6)
+            ctx.fail(f"No such command {name!r}." + (f" Did you mean {near[0]!r}?" if near else "")
+                     + " Run `oo --help` for the list.")
+        return super().resolve_command(ctx, args)
 
 
 @click.group(cls=_OoGroup, invoke_without_command=True, tagline="AI powered Python Gimmicks")
@@ -77,7 +78,7 @@ def cli_oo(ctx, no_color):
 
     ctx.obj = _config.from_process(colour=False if no_color else None)
     _style.use(ctx.obj.colour)
-    if ctx.invoked_subcommand is None and ctx.meta.get("free_text") is None:
+    if ctx.invoked_subcommand is None:
         click.echo(ctx.get_help())
 
 
@@ -94,9 +95,9 @@ _ROOT = click.option("--root", default=None, type=click.Path(file_okay=False),
 @enact.command("setup")
 @click.option("--user", "kind", flag_value="user", help="Create the store in your user data directory.")
 @click.option("--branch", "kind", flag_value="branch",
-              help="Keep the store on an orphan `memory` branch, checked out as a worktree of its own.")
+              help="Keep the store on an orphan `enact` branch, checked out as a worktree of its own.")
 @click.option("--local", "kind", flag_value="local",
-              help="Keep the store in the project as .memory, committed with the code on this branch.")
+              help="Keep the store in the project as .enact, committed with the code on this branch.")
 @click.option("--global", "kind", flag_value="global",
               help="Create this machine's global store, for knowledge about no single project "
                    "(domain=any): every project's sessions read it, and each write is committed at once.")
@@ -105,11 +106,11 @@ _ROOT = click.option("--root", default=None, type=click.Path(file_okay=False),
               help="--branch: where to check the branch out (default: beside the main worktree). "
                    "--global: where the global store lives (default: your user data directory).")
 @click.option("--from", "source", default=None, type=click.Path(exists=True, file_okay=False),
-              help="Start the new store as a copy of an existing one, such as a project's .memory.")
+              help="Start the new store as a copy of an existing one, such as a project's .enact.")
 @click.option("--no-register", is_flag=True, help="Do not register the MCP server with Claude Code.")
 @click.pass_obj
 def enact_setup(where, kind, name, path, source, no_register):
-    """Set this project and machine up to use a memory store: find or create the store, point every
+    """Set this project and machine up to use an ENACT store: find or create the store, point every
     worktree of the clone at it, and register the MCP server with Claude Code at user scope.
     Run it again on another machine to join a project whose store already exists."""
     GimmicksCliApp().enact_setup(where=where, kind=kind, name=name, path=path, source=source, register=not no_register)
@@ -236,7 +237,7 @@ def enact_accept(where, memory_ref, pack, reason, replace, walk, assume_yes, roo
                "deliver nothing. A trigger that is silent fails silently.")
 @click.option("--for", "for_path", default=None, metavar="PATH",
               help="Print only what applies to the space PATH is in, as the store's "
-                   "taxonomy/triggers.yaml maps it. Silent when the path is in no space it names, "
+                   "triggers.yaml maps it. Silent when the path is in no space it names, "
                    "so a hook may call it before every write.")
 @_ROOT
 @click.pass_obj

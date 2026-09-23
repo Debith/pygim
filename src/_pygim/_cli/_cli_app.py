@@ -73,9 +73,6 @@ class GimmicksCliApp:
         ).wait()
         Popen("python -m coverage report -m".split(" ")).wait()
 
-    def ai(self, text):
-        print("AI is not implemented yet!")
-
     def docs_serve(self, *, port: int = 8000, directory: str | None = None,
                    host: str | None = None, index: str | None = None,
                    rebuild: str | None = None) -> None:
@@ -616,7 +613,7 @@ class GimmicksCliApp:
             waiting = data.get("waiting") or []
             if not data["preferences"] and not data["procedures"] and not waiting:
                 return
-            click.echo("Standing knowledge from pygim memory. " + data["note"])
+            click.echo("Standing knowledge from ENACT. " + data["note"])
             if waiting:
                 click.echo("\n" + _style.bad(f"Waiting in the mailbox ({len(waiting)})") +
                            " — read them with the mailbox tool:")

@@ -538,10 +538,16 @@ class TestCli:
         assert result.exit_code == 0
         assert "--rebuild" in result.output and "--index" in result.output
 
-    def test_free_text_goes_to_ai(self):
-        result = CliRunner().invoke(cli_oo, ["explain", "this"])
-        assert result.exit_code == 0
-        assert "AI is not implemented yet!" in result.output
+    def test_an_unknown_command_fails_and_says_so(self):
+        """`oo memory reload` — renamed away, still named in stored knowledge — printed a sentence
+        and exited 0. A command that does not exist must fail where a script can see it."""
+        result = CliRunner().invoke(cli_oo, ["memory", "reload"])
+        assert result.exit_code == 2
+        assert "No such command 'memory'" in result.output
+
+    def test_a_near_miss_is_offered_the_command_it_probably_meant(self):
+        result = CliRunner().invoke(cli_oo, ["enakt", "status"])
+        assert result.exit_code == 2 and "Did you mean 'enact'?" in result.output
 
     def test_no_args_shows_help(self):
         result = CliRunner().invoke(cli_oo, [])
