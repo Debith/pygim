@@ -69,26 +69,53 @@ public:
     /// Things noticed while reading the files that need a human's eye.
     [[nodiscard]] const std::vector<std::string>& problems() const noexcept { return m_problems; }
 
-    /// The ids of the documents in sources/inventory.yaml (02 §5.2), in file order: the top-level
-    /// keys, each on a line of its own. What a read's coverage compares its citations against.
+    /// The document ids of `sources/inventory.yaml`, as the store reads them for `coverage`. Parsed as
+    /// YAML, with the engine the vocabulary is read with: it was scanned line by line, and took a quoted
+    /// id differently from the Python side's reading of the same file (review sessions, 2026-09-23). An
+    /// inventory that will not parse lists nothing here; `check_pack` and `status --stale` say why.
     [[nodiscard]] std::vector<std::string> inventory_ids() const {
         std::vector<std::string> out;
         const fs::path p = m_root / "sources" / "inventory.yaml";
         std::error_code ec;
         if (!fs::is_regular_file(p, ec)) return out;
         const std::string text = read_file(p);
-        for (std::size_t pos = 0; pos < text.size();) {
-            auto nl = text.find('\n', pos);
-            if (nl == std::string::npos) nl = text.size();
-            std::string_view line(text.data() + pos, nl - pos);
-            pos = nl + 1;
-            while (!line.empty() && (line.back() == '\r' || line.back() == ' ' || line.back() == '\t')) line.remove_suffix(1);
-            if (line.empty() || line.front() == ' ' || line.front() == '\t' || line.front() == '#' || line.back() != ':') continue;
-            line.remove_suffix(1);
-            if (line.front() == '"' && line.size() >= 2 && line.back() == '"') line = line.substr(1, line.size() - 2);
-            out.emplace_back(line);
+        const std::string name = p.string();
+        yaml_detail::ensure_throwing_callbacks();
+        try {
+            ryml::Tree tree = ryml::parse_in_arena(ryml::to_csubstr(name), ryml::to_csubstr(text));
+            const ryml::ConstNodeRef root = tree.crootref();
+            if (!root.readable() || !root.is_map()) return out;
+            for (ryml::ConstNodeRef c : root.children())
+                if (c.has_key()) out.emplace_back(c.key().str, c.key().len);
+        } catch (const std::exception&) {
+            out.clear();
         }
         return out;
+    }
+
+    /// Replaces one of the store's own text files — a vocabulary pack (`taxonomy/pack-*.yaml`) or the
+    /// source inventory (`sources/inventory.yaml`) — atomically and under the commit lock, and only if
+    /// it still holds what the caller read: *expected* is the digest of that content, or empty when the
+    /// file must not exist yet. Returns false, writing nothing, when it has changed since.
+    ///
+    /// The store owns its bytes. Accepting a pack once copied it in, and appended to the inventory, from
+    /// outside the store: past the lock every other write takes, and past any strategy that changes how
+    /// bytes are stored — an encrypting store would have had two writes it never saw.
+    [[nodiscard]] bool write_file(const std::string& relative, std::string_view content, const std::string& expected) {
+        const fs::path rel = fs::path(relative).lexically_normal();
+        const std::string file = rel.filename().string();
+        const bool pack = rel.parent_path() == fs::path("taxonomy") && file.starts_with("pack-") && rel.extension() == ".yaml";
+        const bool inventory = rel == fs::path("sources") / "inventory.yaml";
+        if (rel.is_absolute() || !(pack || inventory))
+            throw std::invalid_argument(relative + ": the store writes only its vocabulary packs and its source inventory this way");
+        auto guard = lock();
+        const fs::path p = m_root / rel;
+        std::error_code ec;
+        const std::string now = fs::is_regular_file(p, ec) ? digest::of(read_file(p)).hex() : std::string();
+        if (now != expected) return false;
+        fs::create_directories(p.parent_path());
+        write_atomically(p, content);
+        return true;
     }
 
     // ── vocabulary ────────────────────────────────────────────────────────

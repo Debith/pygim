@@ -573,6 +573,13 @@ public:
 
     /// Every vocabulary value that cites a source, with its full locator — what checking a drafted
     /// pack's citations against the documents needs (02 §5.3).
+    /// Replace a vocabulary pack or the source inventory, atomically, under the commit lock, and only if
+    /// it still holds what the caller read — see files::store::write_file. False when it changed since.
+    bool write_file(const std::string& relative, const std::string& content, const std::string& expected) {
+        py::gil_scoped_release nogil;
+        return m_store->write_file(relative, content, expected);
+    }
+
     py::list sources() const {
         const auto s = m_service->current();
         const auto& tax = s->tax();

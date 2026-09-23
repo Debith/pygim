@@ -144,3 +144,34 @@ class TestADocumentKeepsItsOwnId:
         assert _packs.cite(project, "docs/a-b.md", 1, store=store)["source"]["doc"] == "docs-a-b"
         other = _packs.cite(project, "docs/a/b.md", 1, store=store)["source"]["doc"]
         assert other != "docs-a-b" and other.startswith("docs-a-b")
+
+
+class TestTheStoreOwnsItsBytes:
+    """Accepting a pack copied it into `taxonomy/` and appended to the inventory from outside the
+    store — past the commit lock every other write takes, and past any strategy that changes how
+    bytes are stored. The store writes them itself now, and only over what the caller read."""
+
+    def test_a_pack_is_written_when_nothing_changed_since_it_was_read(self, store):
+        memory = Enact(str(store))
+        assert memory.write_file("taxonomy/pack-x.yaml", "pack: x\n", "")
+        assert (store / "taxonomy" / "pack-x.yaml").read_text(encoding="utf-8") == "pack: x\n"
+
+    def test_a_file_changed_since_it_was_read_is_not_written_over(self, store):
+        memory = Enact(str(store))
+        live = store / "sources" / "inventory.yaml"
+        read = digest(live.read_bytes())
+        live.write_text(live.read_text(encoding="utf-8") + "late:\n  path: LATE.md\n", encoding="utf-8")
+        assert memory.write_file("sources/inventory.yaml", "readme:\n  path: README.md\n", read) is False
+        assert "late:" in live.read_text(encoding="utf-8")                      # the other writer's entry stands
+
+    @pytest.mark.parametrize("relative", ["memories/x.md", "taxonomy/base.yaml", "taxonomy/../x.yaml",
+                                          "/tmp/x.yaml", "sources/other.yaml"])
+    def test_nothing_else_is_written_this_way(self, store, relative):
+        with pytest.raises(Exception, match="only its vocabulary packs and its source inventory"):
+            Enact(str(store)).write_file(relative, "x", "")
+
+    def test_the_stores_own_reader_sees_every_id_yaml_does(self, store):
+        (store / "sources" / "inventory.yaml").write_text(
+            '"my doc":\n  path: A.md\nflow: {path: B.md}\nplain:\n  path: C.md\n', encoding="utf-8")
+        coverage = Enact(str(store)).read(["task=design"], [])["coverage"]
+        assert set(coverage["not_cited"]) == {"my doc", "flow", "plain"}

@@ -14,7 +14,7 @@ document from the same path.
 from __future__ import annotations
 
 import re
-import shutil
+import shutil  # the scratch stores `check` builds, never the live one
 import tempfile
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -138,9 +138,18 @@ def accept(store: Path, proposal: Path, replace: bool = False, *, project: Optio
     if carried:
         lines = [f"  {r['tag']}: {', '.join(r['carried_by'])}" for r in carried]
         return {"ok": False, "errors": "the pack removes values that memories still carry — unlink or retag them first:\n" + "\n".join(lines)}
-    shutil.copyfile(proposal, store / "taxonomy" / f"pack-{result['pack']}.yaml")
-    result["inventory"], result["inventory_kept"] = _merge_inventory(store, proposal.parent / "inventory.yaml")
+    target = f"taxonomy/pack-{result['pack']}.yaml"
+    if not memory.write_file(target, proposal.read_text(encoding="utf-8"), _digest_of(store / target)):
+        return {"ok": False, "errors": f"{target} changed while it was being accepted — run the accept again"}
+    result["inventory"], result["inventory_kept"] = _merge_inventory(store, proposal.parent / "inventory.yaml", memory)
     return result
+
+
+def _digest_of(file: Path) -> str:
+    """What `write_file` compares against: the digest of *file* as it is now, or empty when it is not."""
+    from pygim.enact import digest
+
+    return digest(file.read_bytes()) if file.is_file() else ""
 
 
 def entries(path: Path) -> Dict[str, Dict[str, Any]]:
@@ -254,7 +263,7 @@ def _locator_warnings(sources: List[Dict[str, Any]], store: Path, drafted: Path,
     return out
 
 
-def _merge_inventory(store: Path, drafted: Path) -> Tuple[List[str], List[str]]:
+def _merge_inventory(store: Path, drafted: Path, memory: Any = None) -> Tuple[List[str], List[str]]:
     """Appends the drafted inventory's documents that the store's inventory lacks, and returns their
     ids — and, apart, each document the store already lists at another path, which it keeps.
 
@@ -266,23 +275,33 @@ def _merge_inventory(store: Path, drafted: Path) -> Tuple[List[str], List[str]]:
     What is appended is written by the YAML engine, so a path that needs quoting is quoted; and it
     starts on a line of its own. A hand-edited inventory whose last line had no newline once took the
     first appended id onto that line — `path: README.mdguide:` — and read back as one document
-    pointing at the other's file, while the accept reported success."""
+    pointing at the other's file, while the accept reported success.
+
+    The store writes it (`write_file`: atomically, under the commit lock, only if the inventory still
+    holds what was read here), and a change in between is read again rather than written over."""
     if not drafted.is_file():
         return [], []
+    if memory is None:
+        from pygim.enact import Enact
+
+        memory = Enact(str(store))
     live = store / "sources" / "inventory.yaml"
-    live.parent.mkdir(parents=True, exist_ok=True)
-    known = inventory(live)
     wanted = entries(drafted)
-    new = {doc: entry for doc, entry in wanted.items() if doc not in known}
-    kept = [f"{doc}: kept {known[doc]}, the draft says {entry.get('path', '')}"
-            for doc, entry in wanted.items() if doc in known and known[doc] != str(entry.get("path") or "")]
-    if new:
-        before = live.read_text(encoding="utf-8") if live.is_file() else ""
-        lead = ("# The documents this vocabulary cites. Paths are relative to the project's root.\n" if not before
-                else "" if before.endswith("\n") else "\n")
-        with live.open("a", encoding="utf-8") as fh:
-            fh.write(lead + _yaml_text(new))
-    return list(new), kept
+    for _ in range(3):                                # another writer between the read and the write: read again
+        before = live.read_bytes() if live.is_file() else b""
+        known = inventory(live)
+        new = {doc: entry for doc, entry in wanted.items() if doc not in known}
+        kept = [f"{doc}: kept {known[doc]}, the draft says {entry.get('path', '')}"
+                for doc, entry in wanted.items() if doc in known and known[doc] != str(entry.get("path") or "")]
+        if not new:
+            return [], kept
+        text = before.decode("utf-8")
+        lead = ("# The documents this vocabulary cites. Paths are relative to the project's root.\n" if not text
+                else "" if text.endswith("\n") else "\n")
+        if memory.write_file("sources/inventory.yaml", text + lead + _yaml_text(new),
+                             _digest_of(live) if before else ""):
+            return list(new), kept
+    raise RuntimeError(f"{live} kept changing while the accept tried to add to it — run the accept again")
 
 
 def doc_id(relative: Path) -> str:

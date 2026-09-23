@@ -106,6 +106,10 @@ operation returns a plain dict, and a refused write is a result with
         .def("proposals", &Enact::proposals, "Concepts the vocabulary lacks, folded, waiting for a human.")
         .def("ingest", &Enact::ingest, py::arg("path"), "Ingests a hand-written corpus file, reconciled by slug and digest.")
         .def("sources", &Enact::sources, "Every vocabulary value that cites a source, with its full locator.")
+        .def("write_file", &Enact::write_file, py::arg("relative"), py::arg("content"), py::arg("expected"),
+             "Replace taxonomy/pack-*.yaml or sources/inventory.yaml atomically under the commit lock, only if "
+             "it still holds what was read (`expected`: its digest, or empty for a new file). False when it "
+             "changed since.")
         .def("receipts", &Enact::receipts)
         .def("rerun", &Enact::rerun, py::arg("receipt"),
              "Reruns a receipt against the snapshot and vocabulary it pinned; `same` says whether it matched.");
