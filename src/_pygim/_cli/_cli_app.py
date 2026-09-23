@@ -208,7 +208,7 @@ class GimmicksCliApp:
         project map and the standing knowledge are delivered because nothing is known about what is
         coming; the moment a request is made, where a procedure whose task the request asks for
         arrives in full; and immediately before a file is written, where almost nothing is known —
-        only what the path says (global #16).
+        only what the path says (global #27).
 
         Prints nothing when there is nothing to say. A hook that fires on every write and speaks
         every time is read as noise and then not read at all."""
@@ -431,7 +431,7 @@ class GimmicksCliApp:
 
         Silent when the store has no trigger map, when the path is in no space it names, or when
         that space holds nothing: a delivery that fires on everything is read as noise and then not
-        read at all, which is the same failure as colouring every line (global memory #16)."""
+        read at all, which is the same failure as colouring every line (global memory #27)."""
         from _pygim._mcp import _stores, _triggers
         from _pygim._mcp.enact import build
 

@@ -740,7 +740,7 @@ and what each store's own policy says about publishing it.
 Standing knowledge answers *was it delivered*. It does not answer *was it delivered near*, and the
 difference decides whether a rule has any effect. An agent does not consult what it knows; it is
 conditioned by what is in its context, and salience falls with distance — a rule delivered at a
-session's door is inert two hundred calls later, when the decision it governs is made (global #16).
+session's door is inert two hundred calls later, when the decision it governs is made (global #27).
 
 Measured on 2026-09-22, in one session: three rules were broken, all three by *recall*, none by
 choice. A store was created in the owner's real user data directory while the rule forbidding it sat

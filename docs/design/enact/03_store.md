@@ -309,7 +309,7 @@ is buildable — but a test that speaks only through commands runs a new process
 store held in one process's memory is gone before the next one starts. The two cannot both hold.
 What these tests need from a fake is isolation, not speed, and that is what a store under the
 test's own temporary directory gives: the real strategy, exercised in full, over data that is the
-test's own and nobody else's (global memory #2). Where speed does matter, pointing the temporary
+test's own and nobody else's (global memory #26). Where speed does matter, pointing the temporary
 directory at a RAM-backed filesystem costs no code at all.
 
 ### 3.6 The mailbox — settled 2026-09-21

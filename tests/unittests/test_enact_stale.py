@@ -138,8 +138,10 @@ class TestAMemoryAsAWhole:
 
     def test_code_citing_a_superseded_global_memory_is_listed_with_its_line(self):
         resolve = _stale.reference_resolver({20: "Eat your own dogfood"}, {12: 20})
-        files = [("tests/test_x.py", "x = 1\n# see global memory #12\n# and global #20\n")]
-        assert _stale.cited_in_code(files, resolve) == [("tests/test_x.py:2", "global #12 was superseded by global #20")]
+        old, new = 12, 20                        # built at runtime, so this file cites nothing itself
+        files = [("tests/test_x.py", f"x = 1\n# see global memory #{old}\n# and global #{new}\n")]
+        assert _stale.cited_in_code(files, resolve) == [
+            ("tests/test_x.py:2", f"global #{old} was superseded by global #{new}")]
 
 
 def test_the_command_finds_a_dead_command_in_a_real_store(tmp_path):

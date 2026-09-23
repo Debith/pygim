@@ -25,7 +25,7 @@ behaviour: it is a result, not an exception, it names the facts that would make 
 and it must leave the store exactly as it was. The last of those is the one nothing else checks, so
 every refusal here is followed by a look at the places it must not have touched.
 
-The world is the test\'s own (global memory #2): a store under tmp_path, a user data directory and
+The world is the test\'s own (global memory #26): a store under tmp_path, a user data directory and
 a git configuration that point nowhere near this machine\'s. Nothing is monkeypatched — a process
 cannot be — so the isolation is the one a person gets from the same environment variables.
 """

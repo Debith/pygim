@@ -2,7 +2,7 @@
 """Delivering a rule at the moment it governs, rather than at the session's door.
 
 A rule reaches an agent at session start and is inert two hundred calls later, when the decision it
-governs is actually made (global memory #16). The moment a file is about to be written is a moment
+governs is actually made (global memory #27). The moment a file is about to be written is a moment
 that can be classified — by its path — and `triggers.yaml` in the store is that classification,
 written by hand, versioned with everything else, and the first stand-in for the context controller
 the design is aimed at.

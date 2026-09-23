@@ -247,9 +247,10 @@ def words_in(texts: Iterable[str]) -> Set[str]:
 
 
 def cited_in_code(files: Iterable[Tuple[str, str]], resolve: Callable[[int], Optional[str]]) -> List[Tuple[str, str]]:
-    """Code that cites a global memory by number — "(global memory #12)" in a docstring — and now
-    points at one that was superseded. The citation outlives the memory, and a reader who follows
-    it gets the old version."""
+    """Code that cites a global memory by number in a docstring or a design document, and now points
+    at one that was superseded. A number names one version of a memory, so rewriting the memory
+    leaves every citation of it behind; a reader who follows one gets the old version. Found on the
+    first run: `test_layering.py` citing the dogfood rule by the number it had before its rewrite."""
     out = []
     for relative, text in files:
         for n, line in enumerate(text.splitlines(), 1):
