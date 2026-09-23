@@ -726,6 +726,8 @@ class GimmicksCliApp:
                 raise click.ClickException(done["errors"])
             click.echo(f"accepted pack `{done['pack']}`: {len(done['dimensions'])} dimension(s), {done['values']} value(s)"
                        + (f"; {len(done['inventory'])} document(s) added to the inventory" if done["inventory"] else ""))
+            if done.get("adds"):
+                click.echo("added: " + ", ".join(done["adds"]))
             if done["removed"]:
                 click.echo("removed values, carried by no memory: " + ", ".join(r["tag"] for r in done["removed"]))
             for warning in done["warnings"]:

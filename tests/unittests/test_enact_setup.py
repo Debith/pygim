@@ -591,7 +591,10 @@ class TestANewProjectsVocabulary:
         draft.write_text(PACK, encoding="utf-8")
         (draft.parent / "inventory.yaml").write_text("readme:\n  kind: text\n  path: README.md\n  version: abc\n", encoding="utf-8")
         checked = json.loads(server.call("check_pack", {"path": str(draft)})["content"][0]["text"])
-        assert checked["ok"] and checked["dimensions"] == ["area"] and checked["values"] == 2
+        assert checked["ok"] and checked["dimensions"] == ["area"]
+        # every tag gained, wherever it lands — the old count said 2, missing the extension and the domain
+        assert checked["adds"] == ["area=basket", "area=checkout", "artifact=page", "domain=proj"]
+        assert checked["values"] == 4
         out = CliRunner().invoke(cli_oo, ["enact", "accept", "--pack", str(draft), "--root", str(store)])
         assert out.exit_code == 0, out.output
         dims = [d["name"] for d in json.loads(server.call("vocabulary", {})["content"][0]["text"])["dimensions"]]

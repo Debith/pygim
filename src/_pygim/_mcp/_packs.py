@@ -51,7 +51,9 @@ def _tags(vocabulary: Dict[str, Any]) -> List[str]:
 def check(store: Path, proposal: Path, *, project: Optional[Path] = None, memory: Any = None) -> Dict[str, Any]:
     """Loads *proposal* as ``taxonomy/pack-<name>.yaml`` beside the store's vocabulary, in a scratch
     copy. ``ok`` with what the pack adds, or ``ok: False`` with the loader's messages, which name
-    the proposal's own path and line.
+    the proposal's own path and line. What it adds is every tag the vocabulary gains, wherever it
+    lands: a pack that only extends a dimension it does not own, or only brings its own domain,
+    once reported `values: 0` — which reads as a pack that adds nothing.
 
     Two things the loader cannot see come back beside a pack that loads. ``warnings``: each locator
     the pack adds, checked against its document in *project* — not inventoried, missing, a passage
@@ -87,8 +89,9 @@ def check(store: Path, proposal: Path, *, project: Optional[Path] = None, memory
             continue
         carriers = [f"{h['memory']} {h['title']}" for h in memory.heads([tag])] if memory is not None else []
         removed.append({"tag": tag, "carried_by": carriers})
+    gained = sorted(remaining - set(_tags(live)))
     return {"ok": True, "pack": name, "dimensions": [d["name"] for d in dims],
-            "values": sum(sum(1 for v in d["values"] if not v.get("any")) for d in dims),
+            "values": len(gained), "adds": gained,
             "replaces": (store / "taxonomy" / target).exists(),
             "removed": removed,
             "warnings": _locator_warnings(added, store, proposal.parent / "inventory.yaml", project)}
