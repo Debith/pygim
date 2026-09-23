@@ -365,6 +365,7 @@ class Host:
     python: str               # "3.12", or "" when it cannot be told
     how: str                  # what showed it: an editable install, a venv inside the project, environment.yml
     installs: Tuple[str, ...] = ()
+    shared: Tuple[str, ...] = ()   # files two installs of the checkout both own — removing either removes them
 
     def tool(self, name: str) -> Optional[Path]:
         """A command installed in this environment, by path — a session's shell does not activate it."""
@@ -410,7 +411,7 @@ def environments(root: Path, home: Path) -> List[Host]:
 
     hosts: List[Host] = []
     for prefix, kind, name in candidates:
-        seen, installs = set(), []
+        seen, installs, owned = set(), [], []
         for record in path(str(prefix)).glob("lib/python*/site-packages/*.dist-info/direct_url.json"):
             real = os.path.realpath(str(record))
             if real in seen:                      # lib/python3.1 may be a link to lib/python3.12
@@ -424,14 +425,21 @@ def environments(root: Path, home: Path) -> List[Host]:
             if url.scheme == "file" and (data.get("dir_info") or {}).get("editable") \
                     and Path(unquote(url.path)).resolve() == root:
                 installs.append(_dist(Path(real).parent.name))
+                record = Path(real).parent / "RECORD"
+                owned.append({line.split(",", 1)[0] for line in record.read_text(encoding="utf-8").splitlines()
+                              if line and "dist-info" not in line.split(",", 1)[0]} if record.is_file() else set())
         inside = kind == "venv"
         if not (installs or inside or (named and name == named)):
             continue
         python = os.path.basename(os.path.realpath(str(prefix / "bin" / "python")))
         how = ("installed editable as " + " and ".join(sorted(installs)) if installs else
                "a virtual environment inside the project" if inside else "environment.yml names it")
+        # Two installs of one checkout usually both own its console scripts. On 2026-09-23 the older one
+        # was uninstalled as stale, took `bin/oo` and `bin/pygim` with it, and every hook and server
+        # start failed until they were restored — the files both claim are what makes a duplicate matter.
+        shared = sorted(set.intersection(*owned)) if len(owned) > 1 else []
         hosts.append(Host(prefix, kind, name, python.removeprefix("python") if python.startswith("python3") else "",
-                          how, tuple(sorted(installs))))
+                          how, tuple(sorted(installs)), tuple(Path(s).name for s in shared)))
     return hosts
 
 
@@ -507,7 +515,9 @@ def project_map(root: Path, *, home: Optional[Path] = None, recent: int = 3) -> 
         if host.installs:
             names = [i.split(" ", 1)[0] for i in host.installs]
             how = "installed editable as " + " and ".join(names) + (
-                f" ({len(names)} installs of one checkout)" if len(names) > 1 else "")
+                f" ({len(names)} installs of one checkout" + (f", both owning {', '.join(host.shared)} — "
+                "uninstalling either removes them; reinstall the other after" if host.shared else "") + ")"
+                if len(names) > 1 else "")
         lines.append(f"runs in: {host.kind} `{host.name}`" + (f", Python {host.python}" if host.python else "")
                      + f", {how}; not active in a session's shell — use {_where(host, home)}/bin/python")
         if host.tool("oo"):

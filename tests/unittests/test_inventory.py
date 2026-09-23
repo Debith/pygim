@@ -255,6 +255,23 @@ class TestWhereItRuns:
                                              encoding="utf-8")
         assert "2 installs of one checkout" in _inventory.project_map(project, home=home)
 
+    def test_two_installs_that_own_the_same_script_say_what_uninstalling_one_would_take(self, tmp_path):
+        """On 2026-09-23 the older of two installs was uninstalled as stale and took `bin/oo` with it —
+        both had it in their RECORD — and every hook and server start failed until it was restored."""
+        home, project = tmp_path / "home", tmp_path / "proj"
+        project.mkdir()
+        prefix = self.conda_env(home, "work", points_at=project, dist="proj-2.0")
+        site = prefix / "lib" / "python3.12" / "site-packages"
+        (site / "proj-2.0.dist-info" / "RECORD").write_text("../../../bin/oo,sha256=a,1\nproj/__init__.py,,\n",
+                                                           encoding="utf-8")
+        old = site / "old_name-1.0.dist-info"
+        old.mkdir()
+        (old / "direct_url.json").write_text(json.dumps({"url": f"file://{project}", "dir_info": {"editable": True}}),
+                                             encoding="utf-8")
+        (old / "RECORD").write_text("../../../bin/oo,sha256=b,1\nold_name/__init__.py,,\n", encoding="utf-8")
+        shown = _inventory.project_map(project, home=home)
+        assert "both owning oo — uninstalling either removes them; reinstall the other after" in shown
+
     def test_a_project_nothing_hosts_says_so_rather_than_saying_nothing(self, tmp_path):
         project = tmp_path / "proj"
         project.mkdir()
