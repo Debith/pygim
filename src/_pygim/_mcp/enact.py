@@ -35,6 +35,11 @@ INSTRUCTIONS_CAP = 2000  # characters. Claude Code keeps the first 2,048 of a se
 #                          11,900 and received 2,048, to the character. So the instructions carry the
 #                          loop and an index, and `session` carries the knowledge itself.
 
+# Characters of standing cards a session receives at its start. The host moves a hook's output to a
+# file past roughly 13 KB (the smallest moved on this machine was 13,121 bytes) and shows a 2 KB
+# preview, so the whole session-start text — project map, mailbox and cards — is kept near 9 KB.
+STANDING_BUDGET = 7500
+
 INSTRUCTIONS = """\
 A problem-space memory: knowledge is found by the kind of problem being solved,
 not by similarity to the prompt.
@@ -572,7 +577,7 @@ class EnactServer:
         except Exception:  # a store that will not load: the tools will say so
             return []
 
-    def standing(self) -> Dict[str, Any]:
+    def standing(self, budget: int = STANDING_BUDGET) -> Dict[str, Any]:
         """The standing knowledge of a session here: every preference and every procedure as a card
         (`_cards`) — never the full text, which is one `show` away and was delivered twice when it
         was sent in full — from the machine's global store and then this project's — global first and the
@@ -581,11 +586,14 @@ class EnactServer:
         wide = self._global_if_any()
         near = self._memory if self._memory is not None else self._project_if_any()
         sources = [("global", wide), ("project", near)]
-        preferences = [dict(scope=origin, memory=p["memory"], title=p["title"], card=_cards.render(p, origin))
-                       for origin, m in sources for p in self._heads(m, "kind=preference")]
-        procedures = [dict(scope=origin, memory=p["memory"], title=p["title"], card=_cards.render(p, origin),
+        prefs = [(p, origin) for origin, m in sources for p in self._heads(m, "kind=preference")]
+        procs = [(p, origin) for origin, m in sources for p in self._heads(m, "kind=procedure")]
+        pref_cards, proc_cards, left_out = _cards.standing(prefs, procs, budget)
+        preferences = [dict(scope=origin, memory=p["memory"], title=p["title"], card=card)
+                       for (p, origin), card in zip(prefs, pref_cards)]
+        procedures = [dict(scope=origin, memory=p["memory"], title=p["title"], card=card,
                            where=" ".join(t for t in p["tags"] if t.startswith(("artifact=", "task="))))
-                      for origin, m in sources for p in self._heads(m, "kind=procedure")]
+                      for (p, origin), card in zip(procs, proc_cards)]
         if self._standing_seen is None:   # the baseline `standing_changed` compares against; only it moves it on
             self._standing_seen = {p["key"]: p["title"] for p in self._heads(wide, "kind=preference")}
         waiting = []
@@ -596,7 +604,8 @@ class EnactServer:
         return {"note": "These apply to every task here, advice included. Where a global and a project "
                         "preference disagree, the project's is the rule. Each is a card; `show` one for the "
                         "example and the evidence behind it.",
-                "preferences": preferences, "procedures": procedures, "waiting": waiting}
+                "preferences": preferences, "procedures": procedures, "waiting": waiting,
+                "left_out": left_out}
 
     def _standing(self) -> str:
         """The index of standing knowledge that the instructions carry: titles only, and only as many

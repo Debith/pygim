@@ -164,8 +164,9 @@ def summary(text: str, room: int = 180) -> str:
     return line if len(line) <= room else line[: room - 1].rstrip() + "…"
 
 
-def render(memory: Mapping[str, Any], scope: str = "project") -> str:
-    """One memory as a card: its number and rule, then a line of when · not · do · why.
+def render(memory: Mapping[str, Any], scope: str = "project",
+           fields: Sequence[str] = ("when", "not", "do", "why", "asked")) -> str:
+    """One memory as a card: its number and rule, then a line of the named *fields*.
 
     A procedure's card names its task words and step count instead of the steps; the steps arrive
     in full when a request asks for that task, or with `show`."""
@@ -174,10 +175,41 @@ def render(memory: Mapping[str, Any], scope: str = "project") -> str:
     head = f"{ref} {memory['title']}"
     if card.legacy:
         return f"{head}\n    {summary(card.body)} — not yet a card; `show` for the rest"
-    parts = [f"{name}: {card.get(name)}" for name in ("when", "not", "do", "why") if card.get(name)]
+    parts = [f"{name}: {card.get(name)}" for name in fields if name != "asked" and card.get(name)]
     if card.steps:
-        parts.append(f"{len(card.steps)} steps" + (f", asked as: {card.asked}" if card.asked else ""))
-    return head + "\n    " + " · ".join(parts)
+        parts.append(f"{len(card.steps)} steps" + (f", asked as: {card.asked}" if card.asked and "asked" in fields else ""))
+    return head + ("\n    " + " · ".join(parts) if parts else "")
+
+
+# What a session receives at its start, from fullest to barest. A preference applies to everything,
+# so its rule, when and why matter most; a procedure's steps arrive when its task is asked, so at the
+# start it needs only its trigger. Each step drops what a `show` gives back most cheaply.
+TIERS = (
+    (("when", "not", "do", "why"), ("when", "asked")),
+    (("when", "not", "why"), ("asked",)),
+    (("when", "why"), ("asked",)),
+    (("when",), ("asked",)),
+    ((), ()),
+)
+
+
+def standing(preferences: Sequence[tuple], procedures: Sequence[tuple], budget: int) -> tuple:
+    """Every standing card at the fullest tier that fits in *budget* characters, and what that tier
+    leaves out. Each item is (memory, scope).
+
+    Measured on 2026-09-23: 25 cards at full length rendered to 14,457 characters, and with the project
+    map the session-start text reached 16,127 — past the ~13 KB at which the host moves a hook's output
+    to a file and shows a 2 KB preview, which is the failure the cards were written to end. So the
+    cards are rendered to a budget, and a tier that drops a field says which."""
+    full = TIERS[0]
+    for pref_fields, proc_fields in TIERS:
+        rendered = ([render(m, s, pref_fields) for m, s in preferences],
+                    [render(m, s, proc_fields) for m, s in procedures])
+        if sum(len(x) + 1 for part in rendered for x in part) <= budget:
+            dropped = [f for f in full[0] if f not in pref_fields] + \
+                      [f"procedure {f}" for f in full[1] if f not in proc_fields]
+            return rendered[0], rendered[1], dropped
+    return rendered[0], rendered[1], ["everything but the titles"]
 
 
 def asked_for(card: Card, prompt: str) -> int:

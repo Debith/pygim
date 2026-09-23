@@ -128,3 +128,34 @@ class TestTheToolEnforcesIt:
         said = self.call(server, "merge", memories=[a["memory"], b["memory"]], title="Both", text="ab",
                          reason="one thing")
         assert said["refused"] == "template"
+
+
+class TestTheBudget:
+    """25 full cards rendered to 14,457 characters, and with the project map the session-start text
+    reached 16,127 — past the ~13 KB at which the host moves a hook's output to a file behind a 2 KB
+    preview. That is the failure the cards were written to end, so they are rendered to a budget."""
+
+    def card(self, n, kind="preference"):
+        fields = {"when": "w" * 90, "not": "n" * 90, "do": "d" * 150, "why": "y" * 120}
+        if kind == "procedure":
+            fields.update(asked="review, analyse", steps=["a step — check: a question?"] * 5)
+        return {"memory": f"#{n}", "title": "A rule stated in the imperative " + "x" * 50,
+                "text": _cards.compose(fields)}
+
+    def test_everything_fits_at_full_length_when_there_is_room(self):
+        prefs, procs, left_out = _cards.standing([(self.card(1), "global")], [], budget=10_000)
+        assert left_out == [] and "do: " + "d" * 150 in prefs[0]
+
+    def test_too_many_cards_drop_fields_in_order_and_say_which(self):
+        prefs = [(self.card(n), "project") for n in range(20)]
+        procs = [(self.card(100 + n, "procedure"), "global") for n in range(8)]
+        pref_cards, proc_cards, left_out = _cards.standing(prefs, procs, budget=7_500)
+        assert sum(len(c) + 1 for c in pref_cards + proc_cards) <= 7_500
+        assert left_out[:2] == ["not", "do"]                         # what a `show` restores most cheaply
+        assert all("when: " in c and "why: " in c for c in pref_cards)   # the rule, when and why survive
+        assert all("asked as: review, analyse" in c for c in proc_cards)  # a procedure keeps its trigger
+
+    def test_when_nothing_fits_the_titles_still_arrive_and_it_says_so(self):
+        prefs = [(self.card(n), "project") for n in range(200)]
+        pref_cards, _, left_out = _cards.standing(prefs, [], budget=1_000)
+        assert left_out == ["everything but the titles"] and pref_cards[0].startswith("#0 A rule")

@@ -771,6 +771,9 @@ class GimmicksCliApp:
                 for m in waiting:
                     who = f" to {m['to']}" if m.get("to") else ""
                     click.echo(f"- {m['id']} {m['kind']}{who} ({m['author']}): {m['text'].splitlines()[0][:100]}")
+            if data.get("left_out"):
+                click.echo(_style.muted(f"To fit, the cards below leave out: {', '.join(data['left_out'])} — "
+                                        "`show` any of them for the whole card and the evidence."))
             if data["preferences"]:
                 click.echo("\n" + _style.title("Preferences") + _style.muted(" — each a card; `show` one for the rest"))
                 for p in data["preferences"]:
