@@ -19,15 +19,38 @@ import tempfile
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-_PACK_NAME = re.compile(r"^pack:\s*([A-Za-z0-9_\-]+)\s*$", re.MULTILINE)
-_INVENTORY_ID = re.compile(r"^([A-Za-z0-9_.\-]+):\s*$", re.MULTILINE)
+def _yaml(file: Path) -> Any:
+    """A YAML file as pygim's own engine reads it (rapidyaml, through `pygim.pathlike`).
+
+    The inventory and a pack's name were read with regular expressions until 2026-09-23, when review
+    sessions showed the hand reader getting four of five valid forms wrong — a trailing comment kept
+    in the path, a flow mapping dropped, a nested `path:` taking over the document's own — while the
+    library this module ships reads YAML correctly. An empty file, or one holding only comments, is
+    None."""
+    from pygim.pathlike import path
+
+    try:
+        return path(str(file)).read()
+    except Exception as exc:                          # the engine names the line; say which file it was
+        raise ValueError(f"{file}: not valid YAML — {exc}") from None
 
 
-def pack_name(text: str) -> str:
-    m = _PACK_NAME.search(text)
-    if not m:
+def _yaml_text(data: Any) -> str:
+    """*data* as the engine writes it, quoted wherever YAML needs quoting."""
+    from pygim.pathlike import path
+
+    with tempfile.TemporaryDirectory(prefix="pygim-yaml-") as tmp:
+        out = Path(tmp) / "out.yaml"
+        path(str(out)).write(data)
+        return out.read_text(encoding="utf-8")
+
+
+def pack_name(proposal: Path) -> str:
+    data = _yaml(proposal)
+    name = data.get("pack") if isinstance(data, dict) else None
+    if not isinstance(name, str) or not name.strip():
         raise ValueError("a pack starts with `pack: <domain>` — the domain's name is the pack's name")
-    return m.group(1)
+    return name.strip()
 
 
 def _scratch(tmp: str, name: str, store: Path, skip: str, add: Optional[str] = None) -> Any:
@@ -64,7 +87,7 @@ def check(store: Path, proposal: Path, *, project: Optional[Path] = None, memory
 
     text = proposal.read_text(encoding="utf-8")
     try:
-        name = pack_name(text)
+        name = pack_name(proposal)
     except ValueError as exc:
         return {"ok": False, "errors": f"{proposal}:1: {exc}"}
     target = f"pack-{name}.yaml"
@@ -120,22 +143,21 @@ def accept(store: Path, proposal: Path, replace: bool = False, *, project: Optio
     return result
 
 
+def entries(path: Path) -> Dict[str, Dict[str, Any]]:
+    """The documents of an inventory file, each id with its whole entry (kind, path, version)."""
+    if not path.is_file():
+        return {}
+    data = _yaml(path)
+    if data is None:
+        return {}
+    if not isinstance(data, dict):
+        raise ValueError(f"{path}: an inventory is a mapping of document id to its entry")
+    return {str(doc): (entry if isinstance(entry, dict) else {}) for doc, entry in data.items()}
+
+
 def inventory(path: Path) -> Dict[str, str]:
     """The documents of an inventory file: id to path, as written."""
-    out: Dict[str, str] = {}
-    if not path.is_file():
-        return out
-    current = None
-    for line in path.read_text(encoding="utf-8").splitlines():
-        m = _INVENTORY_ID.match(line)
-        if m:
-            current = m.group(1)
-            out[current] = ""
-            continue
-        field = re.match(r"^\s+path:\s*(.*?)\s*$", line)
-        if field and current is not None:
-            out[current] = field.group(1).strip("\"'")
-    return out
+    return {doc: str(entry.get("path") or "") for doc, entry in entries(path).items()}
 
 
 def _bases(inventory_file: Path, project: Optional[Path], store: Optional[Path]) -> List[Path]:
@@ -162,31 +184,58 @@ def _resolve(inventory_file: Path, path: str, project: Optional[Path], store: Op
 
 
 def _lines(file: Path) -> List[str]:
-    return file.read_bytes().replace(b"\r\n", b"\n").decode("utf-8").split("\n")
+    """A document's lines. \\r\\n is a line ending, never part of a line (corpus.h), and the newline
+    that ends the last line does not begin another: split on "\\n", a file of three lines ending in a
+    newline gave four, and the fourth — empty — was accepted as a line. Every such line digests to the
+    digest of nothing, so a locator to it verified against any document on the machine."""
+    text = file.read_bytes().replace(b"\r\n", b"\n").decode("utf-8")
+    if not text:
+        return []
+    lines = text.split("\n")
+    return lines[:-1] if text.endswith("\n") else lines
+
+
+BLANK = ("is blank — a blank passage digests the same in every document, so it would verify against any "
+         "of them; cite the lines that say it")
 
 
 def _locator_warnings(sources: List[Dict[str, Any]], store: Path, drafted: Path, project: Optional[Path]) -> List[str]:
+    """Each locator the pack adds, checked as it will stand once the pack is accepted.
+
+    `accept` keeps the store's entry for a document it already lists and adds the draft's only for a
+    new one, so the check reads the documents the same way — the store's path wins, and a draft that
+    disagrees is named. It once checked the draft's path instead, and so warned about a file the
+    accept would never use, and passed a dead one it would keep."""
     from pygim.enact import digest
 
-    known = {doc: (store / "sources" / "inventory.yaml", path) for doc, path in inventory(store / "sources" / "inventory.yaml").items()}
-    known.update({doc: (drafted, path) for doc, path in inventory(drafted).items()})
+    listed = store / "sources" / "inventory.yaml"
+    try:
+        live, draft = inventory(listed), inventory(drafted)
+    except ValueError as exc:
+        return [str(exc)]
+    known = {**{doc: p for doc, p in draft.items() if doc not in live}, **live}
     texts: Dict[str, Optional[List[str]]] = {}
-    out = []
+    out, told = [], set()
     for s in sources:
         where = f"{s['tag']}: {s['doc']}:L{s['line']}"
-        if s["doc"] not in known:
-            out.append(f"{where}: {s['doc']} is not in the inventory — add it, or cite an inventoried document")
+        doc = s["doc"]
+        if doc not in known:
+            out.append(f"{where}: {doc} is not in the inventory — add it, or cite an inventoried document")
             continue
-        if s["doc"] not in texts:
-            file = _resolve(known[s["doc"]][0], known[s["doc"]][1], project, store)
-            texts[s["doc"]] = _lines(file) if file else None
-        text = texts[s["doc"]]
+        if doc in live and doc in draft and draft[doc] != live[doc] and doc not in told:
+            told.add(doc)
+            out.append(f"{doc}: the store keeps {live[doc]}; the draft's {draft[doc]} is ignored — "
+                       f"edit sources/inventory.yaml if the document moved")
+        if doc not in texts:
+            file = _resolve(listed, known[doc], project, store)
+            texts[doc] = _lines(file) if file else None
+        text = texts[doc]
         if text is None:
-            looked = ", ".join(str(b) for b in _bases(known[s["doc"]][0], project, store))
-            out.append(f"{where}: the document {known[s['doc']][1]} was not found under {looked}")
+            looked = ", ".join(str(b) for b in _bases(listed, project, store))
+            out.append(f"{where}: the document {known[doc]} was not found under {looked}")
             continue
         first, count = s["line"] - 1, s["lines"]
-        if first + count > len(text):
+        if first < 0 or count < 1 or first + count > len(text):
             out.append(f"{where}: the document has {len(text)} lines")
             continue
         passage = text[first:first + count]
@@ -195,6 +244,7 @@ def _locator_warnings(sources: List[Dict[str, Any]], store: Path, drafted: Path,
             continue
         wanted = [x.strip() for x in passage]
         if not any(wanted):
+            out.append(f"{where}: the passage {BLANK}")
             continue
         also = [i + 1 for i in range(len(text) - count + 1)
                 if i != first and [x.strip() for x in text[i:i + count]] == wanted]
@@ -211,27 +261,28 @@ def _merge_inventory(store: Path, drafted: Path) -> Tuple[List[str], List[str]]:
     The second list exists because the merge once said nothing about them: after the 2026-09-22
     rename a draft could give `design-memory-00` its new path, the store kept the old one, and the
     pack's locators went on pointing at a file that no longer existed. Keeping the live entry is
-    still right — a pack must not move another pack's documents — but it has to be said."""
+    still right — a pack must not move another pack's documents — but it has to be said.
+
+    What is appended is written by the YAML engine, so a path that needs quoting is quoted; and it
+    starts on a line of its own. A hand-edited inventory whose last line had no newline once took the
+    first appended id onto that line — `path: README.mdguide:` — and read back as one document
+    pointing at the other's file, while the accept reported success."""
     if not drafted.is_file():
         return [], []
     live = store / "sources" / "inventory.yaml"
     live.parent.mkdir(parents=True, exist_ok=True)
-    known = inventory(live) if live.is_file() else {}
-    wanted = inventory(drafted)
-    blocks = re.split(r"(?m)^(?=[A-Za-z0-9_.\-]+:\s*$)", drafted.read_text(encoding="utf-8"))
-    added, keep = [], []
-    for block in blocks:
-        m = _INVENTORY_ID.match(block)
-        if m and m.group(1) not in known:
-            added.append(m.group(1))
-            keep.append(block.rstrip() + "\n")
-    kept = [f"{doc}: kept {known[doc]}, the draft says {path}"
-            for doc, path in wanted.items() if doc in known and known[doc] != path]
-    if added:
-        header = "" if live.is_file() else "# The documents this vocabulary cites. Paths are relative to the project's root.\n"
+    known = inventory(live)
+    wanted = entries(drafted)
+    new = {doc: entry for doc, entry in wanted.items() if doc not in known}
+    kept = [f"{doc}: kept {known[doc]}, the draft says {entry.get('path', '')}"
+            for doc, entry in wanted.items() if doc in known and known[doc] != str(entry.get("path") or "")]
+    if new:
+        before = live.read_text(encoding="utf-8") if live.is_file() else ""
+        lead = ("# The documents this vocabulary cites. Paths are relative to the project's root.\n" if not before
+                else "" if before.endswith("\n") else "\n")
         with live.open("a", encoding="utf-8") as fh:
-            fh.write(header + "".join(keep))
-    return added, kept
+            fh.write(lead + _yaml_text(new))
+    return list(new), kept
 
 
 def doc_id(relative: Path) -> str:
@@ -253,6 +304,8 @@ def passage(project: Optional[Path], store: Optional[Path], locator: str) -> str
         raise ValueError(f"{locator!r} is not a locator — write document:L<line> or document:L<from>-<to>")
     doc, first = m.group("doc"), int(m.group("from"))
     last = int(m.group("to") or first)
+    if first < 1:
+        raise ValueError(f"{locator}: lines are counted from 1")
     if last < first:
         raise ValueError(f"{locator}: the range ends before it starts")
     listed = (store / "sources" / "inventory.yaml") if store is not None else None
@@ -263,7 +316,7 @@ def passage(project: Optional[Path], store: Optional[Path], locator: str) -> str
     file = _resolve(listed, known[doc], project, store)
     if file is None:
         raise ValueError(f"{doc} is inventoried as {known[doc]!r}, which is not a file under this store or its project")
-    text = file.read_bytes().replace(b"\r\n", b"\n").decode("utf-8").split("\n")
+    text = _lines(file)
     if last > len(text):
         raise ValueError(f"{doc} has {len(text)} lines; {locator} runs past its end")
     return "\n".join(text[first - 1:last])
@@ -283,17 +336,26 @@ def cite(project: Path, path: str, line: int, lines: int = 1, store: Optional[Pa
     # \r\n is a line ending, never part of a line, as for hand-written memories (corpus.h): a checkout
     # with Windows line endings must cite the same passage, and the same version, as one without.
     content = file.read_bytes().replace(b"\r\n", b"\n")
-    text = content.decode("utf-8").split("\n")
-    if line < 1 or line + lines - 1 > len(text):
+    text = _lines(file)
+    if line < 1 or lines < 1 or line + lines - 1 > len(text):
         raise ValueError(f"{relative} has {len(text)} lines; line {line} for {lines} is out of range")
     passage = "\n".join(text[line - 1:line - 1 + lines])
+    if not passage.strip():
+        raise ValueError(f"{relative}:{line}: the passage {BLANK}")
     doc = doc_id(relative)
     if store is not None:
         listed = store / "sources" / "inventory.yaml"
-        for known, known_path in inventory(listed).items():
+        known_ids = inventory(listed)
+        for known, known_path in known_ids.items():
             if _resolve(listed, known_path, project, store) == file:
                 doc = known
                 break
+        else:
+            # `docs/a-b.md` and `docs/a/b.md` both flatten to `docs-a-b`; a new document never takes an
+            # id another already has, or its locators would resolve to that document's file
+            base, n = doc, 2
+            while doc in known_ids:
+                doc, n = f"{base}-{n}", n + 1
     return {
         "source": {"doc": doc, "line": line, "lines": lines, "passage": digest(passage.encode("utf-8"))},
         "locator": f"{doc}:L{line}" + (f"-{line + lines - 1}" if lines > 1 else ""),
