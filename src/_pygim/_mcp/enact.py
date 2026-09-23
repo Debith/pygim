@@ -22,7 +22,7 @@ from pathlib import Path
 from .._config import Environment
 from typing import Any, Callable, Dict, IO, List, Optional
 
-from . import _packs, _stores
+from . import _cards, _packs, _stores
 
 PROTOCOL_VERSION = "2025-06-18"
 SERVER_NAME = "pygim-enact"
@@ -39,18 +39,18 @@ INSTRUCTIONS = """\
 A problem-space memory: knowledge is found by the kind of problem being solved,
 not by similarity to the prompt.
 
-1. Call `session` first. Its `standing` holds the owner's preferences in full.
-   They apply to everything you do here, advice included: read them before
-   anything else. Then call `vocabulary`.
+1. Call `session` first. Its `standing` holds the owner's preferences and the
+   procedures as cards (when, not, do, why); `show` one for the rest. They
+   apply to everything you do here, advice included. Then call `vocabulary`.
 2. `read` before you work, and before you recommend something, rule something
-   out or propose a design. Hard tags filter, soft tags order, `term` narrows to
-   a subject. Follow the procedure a read returns first; its `standing` names
-   preferences in that space it did not place.
+   out or propose a design. Hard tags filter, soft tags order, `term` narrows.
+   Follow the procedure a read returns first.
 3. When something outlives the task: nothing covers it -> `remember`; a memory
-   says less or says it wrong -> `remember` with `supersedes`; one already says
-   exactly this -> `learn`. Pass what you read as `seen`. No tag fits ->
-   `proposals`, never a forced tag. After a read, `learn` what it gave you:
-   `useful`, `not_needed` or `misleading` — all three are evidence.
+   says it wrong -> `remember` with `supersedes`; one says exactly this ->
+   `learn`. Pass what you read as `seen`. A memory is a card and a body: give
+   `when` and `why` (a procedure `asked` and `steps`); `text` is the body. No
+   tag fits -> `proposals`. After a read, `learn` useful, not_needed or
+   misleading — all three are evidence.
 4. A refusal names facts. Act on them and try again.
 5. Consolidate only when the user asks (the `consolidate` prompt). Only the user
    accepts a generalisation or a pack, with `oo enact accept`.
@@ -226,6 +226,21 @@ def _schema(properties: Dict[str, Any], required: Optional[List[str]] = None) ->
     return {"type": "object", "properties": properties, "required": required or [], "additionalProperties": False}
 
 
+
+_CARD = {
+    "when": {"type": "string", "description": "When it applies, in the words a request, a file or a task would use. "
+                                              "Delivered on the card, so it is how a session knows this is for it."},
+    "not": {"type": "string", "description": "Where it stops applying — the boundary that keeps a short rule from "
+                                             "being stretched over everything."},
+    "do": {"type": "string", "description": "The concrete action, command or check that carries it out."},
+    "why": {"type": "string", "description": "One sentence: what goes wrong without it. A reason lets a rule reach "
+                                             "cases it did not name."},
+    "asked": {"type": "string", "description": "A procedure: comma-separated words a request uses when its task is "
+                                               "asked (review, analyse, audit). A request that uses one gets the steps."},
+    "steps": {"type": "array", "items": {"type": "string"},
+              "description": "A procedure: ordered steps, each an action and the check that must hold before the next."},
+}
+
 TOOLS: List[Dict[str, Any]] = [
     {
         "name": "session",
@@ -237,8 +252,12 @@ TOOLS: List[Dict[str, Any]] = [
         "name": "vocabulary",
         "description": "The controlled vocabulary. Each dimension is one question with a closed list of answers; "
                        "role hard means it filters by default, soft means it only orders; each value's entry says "
-                       "when to use it and when not to. Tag requests and memories with these exact names.",
-        "inputSchema": _schema({"scope": _SCOPE}),
+                       "when to use it and when not to. Tag requests and memories with these exact names. By "
+                       "default an index — every tag with its one-line brief, which is enough to read; name a "
+                       "`dimension` for its full entries (when, when_not, example) before tagging a new memory.",
+        "inputSchema": _schema({"scope": _SCOPE,
+                                "dimension": {"type": "string", "description": "One dimension, with its full entries."},
+                                "full": {"type": "boolean", "description": "Every dimension with its full entries."}}),
     },
     {
         "name": "read",
@@ -266,15 +285,20 @@ TOOLS: List[Dict[str, Any]] = [
     },
     {
         "name": "remember",
-        "description": "Record knowledge that outlives the task. Tag it from the vocabulary; every hard dimension must "
-                       "be answered (dimension=any only if it holds for every value). Pass in `seen` every memory you "
-                       "read in its space — a new memory is refused while unread ones exist there. To replace what a "
-                       "memory says, pass it in `supersedes`. If a memory already says exactly this, call `learn` "
-                       "instead. Concepts with no tag go in `proposals`, each with brief, when, when_not and example.",
+        "description": "Record knowledge that outlives the task, as a card and a body. The card — the title, which "
+                       "is the rule itself in the imperative, with `when`, `not`, `do` and `why` — is what reaches a "
+                       "session unasked, so keep each field to a line. `text` is the body, read on demand: the "
+                       "example, the evidence with dates and pointers, the links. A procedure also gives `asked` and "
+                       "`steps`. Tag it from the vocabulary; every hard dimension must be answered (dimension=any only "
+                       "if it holds for every value). Pass in `seen` every memory you read in its space — a new "
+                       "memory is refused while unread ones exist there. To replace what a memory says, pass it in "
+                       "`supersedes`. If a memory already says exactly this, call `learn` instead. Concepts with no "
+                       "tag go in `proposals`, each with brief, when, when_not and example.",
         "inputSchema": _schema({
             "scope": _SCOPE,
-            "title": {"type": "string"},
-            "text": {"type": "string"},
+            "title": {"type": "string", "description": "The rule itself, in the imperative, under a hundred characters."},
+            **_CARD,
+            "text": {"type": "string", "description": "The body: the example, the evidence, the links."},
             "tags": _TAGS,
             "reason": {"type": "string", "description": "Why this outlives the task, or why it replaces what it supersedes."},
             "supersedes": _REFS,
@@ -293,7 +317,7 @@ TOOLS: List[Dict[str, Any]] = [
                 "brief": {"type": "string"}, "full": {"type": "string"}, "when": {"type": "string"},
                 "when_not": {"type": "string"}, "example": {"type": "string"},
             }, ["concept", "brief", "when", "when_not", "example"])},
-        }, ["title", "text", "tags"]),
+        }, ["title", "tags", "when", "why"]),
     },
     {
         "name": "learn",
@@ -313,9 +337,9 @@ TOOLS: List[Dict[str, Any]] = [
                        "and carries the union of their tags unless `tags` is given. The result names the kind of "
                        "recollection failure that made the duplicate.",
         "inputSchema": _schema({
-            "memories": _REFS, "title": {"type": "string"}, "text": {"type": "string"},
+            "memories": _REFS, "title": {"type": "string"}, **_CARD, "text": {"type": "string"},
             "reason": {"type": "string"}, "tags": _TAGS, "scope": _SCOPE,
-        }, ["memories", "title", "text", "reason"]),
+        }, ["memories", "title", "when", "why", "reason"]),
     },
     {
         "name": "link",
@@ -460,13 +484,11 @@ class EnactServer:
             "check_pack": lambda a: _packs.check(Path(self.memory.root), self._store_path(a["path"]),
                                                  project=_stores.project_root(self.where.cwd), memory=self.memory),
             "session": self._session,
-            "vocabulary": lambda a: self._mem(a).vocabulary(dimension=a.get("dimension", ""),
-                                                              brief=bool(a.get("brief", False))),
+            "vocabulary": self._vocabulary_tool,
             "read": self._read,
             "remember": self._remember,
             "learn": self._learn,
-            "merge": lambda a: self._mem(a).merge(a["memories"], title=a["title"], text=a["text"], reason=a["reason"],
-                                                 tags=a.get("tags", []), session=self._session_no()),
+            "merge": self._merge,
             "link": lambda a: self._attach(a, add=True),
             "unlink": lambda a: self._attach(a, add=False),
             "retire": lambda a: self._mem(a).retire(a["memory"], reason=a["reason"], author="agent"),
@@ -551,16 +573,17 @@ class EnactServer:
             return []
 
     def standing(self) -> Dict[str, Any]:
-        """The standing knowledge of a session here: every preference in full and every procedure by
-        title, from the machine's global store and then this project's — global first and the
+        """The standing knowledge of a session here: every preference and every procedure as a card
+        (`_cards`) — never the full text, which is one `show` away and was delivered twice when it
+        was sent in full — from the machine's global store and then this project's — global first and the
         project's last, because where the two disagree the nearer rule wins. Nothing is recorded as
         read. This is what `session` returns; the instructions carry only an index of it."""
         wide = self._global_if_any()
         near = self._memory if self._memory is not None else self._project_if_any()
         sources = [("global", wide), ("project", near)]
-        preferences = [dict(scope=origin, memory=p["memory"], title=p["title"], text=p["text"].strip(), tokens=p["tokens"])
+        preferences = [dict(scope=origin, memory=p["memory"], title=p["title"], card=_cards.render(p, origin))
                        for origin, m in sources for p in self._heads(m, "kind=preference")]
-        procedures = [dict(scope=origin, memory=p["memory"], title=p["title"],
+        procedures = [dict(scope=origin, memory=p["memory"], title=p["title"], card=_cards.render(p, origin),
                            where=" ".join(t for t in p["tags"] if t.startswith(("artifact=", "task="))))
                       for origin, m in sources for p in self._heads(m, "kind=procedure")]
         if self._standing_seen is None:   # the baseline `standing_changed` compares against; only it moves it on
@@ -571,7 +594,8 @@ class EnactServer:
         except Exception:   # a store that will not load: the tools will say so
             waiting = []
         return {"note": "These apply to every task here, advice included. Where a global and a project "
-                        "preference disagree, the project's is the rule.",
+                        "preference disagree, the project's is the rule. Each is a card; `show` one for the "
+                        "example and the evidence behind it.",
                 "preferences": preferences, "procedures": procedures, "waiting": waiting}
 
     def _standing(self) -> str:
@@ -725,9 +749,44 @@ class EnactServer:
                               "misleading. A read records nothing about what its memories were worth.")
         return result
 
+    def _vocabulary_tool(self, a: Dict[str, Any]) -> Any:
+        """The index unless a dimension or everything is asked for in full. The full vocabulary is
+        96% codebook entries; reading needs the names, and the entries matter only when a new memory
+        is being tagged — measured on 2026-09-23 at 24,705 characters, of which the tags were 1,077."""
+        memory = self._mem(a)
+        if a.get("dimension") or a.get("full") or a.get("brief") is False:
+            return memory.vocabulary(dimension=a.get("dimension", ""), brief=False)
+        whole = memory.vocabulary(dimension="", brief=False)
+        index = []
+        for d in whole.get("dimensions", []):
+            index.append({"name": d["name"], "role": d["role"],
+                          "question": (d.get("entry") or {}).get("brief", ""),
+                          "values": {v["tag"]: (v.get("entry") or {}).get("brief", "") for v in d.get("values", [])}})
+        return {"version": whole.get("version"), "dimensions": index, "rejected": whole.get("rejected", []),
+                "full": "name a `dimension` for its when, when_not and example before tagging a new memory"}
+
+    def _card(self, a: Dict[str, Any]) -> Any:
+        """The text a write stores, or the refusal naming what its card lacks."""
+        card = _cards.from_call(a)
+        gaps = card.missing(_cards.kind_of(a.get("tags", [])))
+        if gaps:
+            return None, _cards.refusal(gaps)
+        return _cards.compose({name: card.get(name) for name in _cards.FIELDS} | {"steps": card.steps},
+                              card.body), None
+
+    def _merge(self, a: Dict[str, Any]) -> Any:
+        text, refused = self._card(a)
+        if refused:
+            return refused
+        return self._mem(a).merge(a["memories"], title=a["title"], text=text, reason=a["reason"],
+                                  tags=a.get("tags", []), session=self._session_no())
+
     def _remember(self, a: Dict[str, Any]) -> Any:
+        text, refused = self._card(a)
+        if refused:
+            return refused
         return self._mem(a).remember(
-            title=a["title"], text=a["text"], tags=a["tags"], reason=a.get("reason", ""),
+            title=a["title"], text=text, tags=a["tags"], reason=a.get("reason", ""),
             supersedes=a.get("supersedes", []), generalises=a.get("generalises", []), seen=a.get("seen", []),
             cites=a.get("cites", []),
             proposals=a.get("proposals", []), session=self._session_no(), turn=self.turn, author="agent",

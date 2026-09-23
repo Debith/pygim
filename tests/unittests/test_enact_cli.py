@@ -88,8 +88,22 @@ def oo(*args, cwd, env, stdin=None):
                           capture_output=True, text=True, timeout=120)
 
 
+# A memory is a card and a body (`_cards`), and a write without `when` and `why` is refused. Most tests
+# here are about something else — scopes, supersession, the unread check — so the helper gives them
+# a valid card unless the test names its own; the template has tests of its own that pass none.
+CARD = {"when": "In the case this test sets up.", "why": "The test needs a memory the store will accept."}
+
+
+def carded(name, arguments):
+    if name in ("remember", "merge") and not any(k in arguments for k in ("when", "why", "not", "do", "steps")) \
+            and not str(arguments.get("text", "")).lstrip().lower().startswith(("when:", "not:", "do:", "why:")):
+        return {**CARD, **arguments}
+    return arguments
+
+
 def call(name, cwd, env, **arguments):
     """One tool of the agent surface. A refusal is a result, so a non-zero exit is a test failure."""
+    arguments = carded(name, arguments)
     done = oo("call", name, "--json", json.dumps(arguments), cwd=cwd, env=env)
     assert done.returncode == 0, f"`oo enact call {name}` failed:\n{done.stderr}"
     return json.loads(done.stdout)
@@ -305,7 +319,7 @@ class TestOverTheRealProtocol:
         serving.tool("read", hard=TAGS)
         seen = [seeded]
         for title in ("Frost Ward", "Absorb"):
-            made = serving.tool("remember", title=title, text=f"{title} is a case.",
+            made = serving.tool("remember", **CARD, title=title, text=f"{title} is a case.",
                                 tags=TAGS + ["kind=example"], reason="a case", seen=seen)
             assert made["ok"], made
             seen.append(made["memory"])
@@ -354,7 +368,7 @@ class TestSeveralCallsAsOneSession:
         seen = [seeded]
         for title, text in (("Frost Ward", "Typed resistance for a round."), ("Absorb", "It converts damage.")):
             done = oo("call", "remember", "--session", str(opened), "--json",
-                      json.dumps({"title": title, "text": text, "tags": TAGS + ["kind=example"],
+                      json.dumps({"when": "In the case this test sets up.", "why": "The test needs a memory the store will accept.", "title": title, "text": text, "tags": TAGS + ["kind=example"],
                                   "reason": "a case", "seen": seen}), cwd=project, env=env)
             made = json.loads(done.stdout)
             assert made["ok"], done.stdout

@@ -56,7 +56,21 @@ def server(tmp_path):
     return build(at(tmp_path, tmp_path), Enact(str(root)))   # cwd matters: stores are discovered around it
 
 
+# A memory is a card and a body (`_cards`), and a write without `when` and `why` is refused. Most tests
+# here are about something else — scopes, supersession, the unread check — so the helper gives them
+# a valid card unless the test names its own; the template has tests of its own that pass none.
+CARD = {"when": "In the case this test sets up.", "why": "The test needs a memory the store will accept."}
+
+
+def carded(name, arguments):
+    if name in ("remember", "merge") and not any(k in arguments for k in ("when", "why", "not", "do", "steps")) \
+            and not str(arguments.get("text", "")).lstrip().lower().startswith(("when:", "not:", "do:", "why:")):
+        return {**CARD, **arguments}
+    return arguments
+
+
 def call(server, name, **arguments):
+    arguments = carded(name, arguments)
     resp = server.handle({"jsonrpc": "2.0", "id": 7, "method": "tools/call", "params": {"name": name, "arguments": arguments}})
     result = resp["result"]
     return result["isError"], (result["content"][0]["text"] if result["isError"] else json.loads(result["content"][0]["text"]))
@@ -92,14 +106,17 @@ class TestAskingForLessOfTheVocabulary:
     little of it was wanted. Reported by the D-D-2024 study as item 12, and then paid on a hot path
     when a hook began asking, before every write, only which tags were live."""
 
-    def test_brief_gives_the_names_without_the_entries(self, server):
-        err, whole = call(server, "vocabulary")
-        err, brief = call(server, "vocabulary", brief=True)
-        assert len(json.dumps(brief)) * 4 < len(json.dumps(whole))     # a fraction of the size
-        names = {tag for d in brief["dimensions"] for tag in d["values"]}
+    def test_by_default_it_is_an_index_and_the_entries_come_when_asked_for(self, server):
+        """Reading needs the names; only tagging a new memory needs when, when_not and example. The
+        whole vocabulary was 96% entries — 24,705 characters to deliver 1,077 of tags."""
+        err, index = call(server, "vocabulary")
+        err, whole = call(server, "vocabulary", full=True)
+        assert len(json.dumps(index)) * 2 < len(json.dumps(whole))     # a fraction of the size
+        names = {tag for d in index["dimensions"] for tag in d["values"]}
         assert {v["tag"] for d in whole["dimensions"] for v in d["values"]} == names
-        assert all(isinstance(tag, str) for tag in names)
-        assert "entry" not in brief["dimensions"][0]
+        assert all(isinstance(brief, str) for d in index["dimensions"] for brief in d["values"].values())
+        assert "entry" not in index["dimensions"][0] and index["dimensions"][0]["question"]
+        assert "dimension" in index["full"]                              # it says how to get the rest
 
     def test_one_dimension_is_returned_alone(self, server):
         err, one = call(server, "vocabulary", dimension="kind")
@@ -192,7 +209,8 @@ class TestProtocol:
         assert f"- {pref['memory']} Prefer templates" in text and "even with one use" not in text   # an index: titles only
         err, info = call(server, "session")
         standing = info["standing"]
-        assert [(p["title"], p["text"]) for p in standing["preferences"]] == [("Prefer templates", "Template it,\neven with one use.")]
+        assert [p["title"] for p in standing["preferences"]] == ["Prefer templates"]
+        assert "Template it," in standing["preferences"][0]["card"]              # a card, not the text
         assert [(p["title"], p["where"]) for p in standing["procedures"]] == [("Releasing", "artifact=any task=design")]
         assert len(Enact(str(root)).receipts()) == receipts                       # nothing recorded as read
 
@@ -232,7 +250,7 @@ class TestProtocol:
         assert names == [t["name"] for t in TOOLS]
         assert {"session", "vocabulary", "read", "remember", "learn", "merge", "show", "proposals"} <= set(names)
         remember = next(t for t in tools if t["name"] == "remember")
-        assert remember["inputSchema"]["required"] == ["title", "text", "tags"]
+        assert remember["inputSchema"]["required"] == ["title", "tags", "when", "why"]   # the card, not the body
 
     def test_consolidate_is_offered_as_a_prompt(self, server):
         prompts = server.handle({"jsonrpc": "2.0", "id": 4, "method": "prompts/list"})["result"]["prompts"]
@@ -458,7 +476,8 @@ def test_the_real_command_over_pipes(tmp_path):
         {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": "2025-06-18", "capabilities": {}}},
         {"jsonrpc": "2.0", "method": "notifications/initialized"},
         {"jsonrpc": "2.0", "id": 2, "method": "tools/call",
-         "params": {"name": "remember", "arguments": {"title": "One", "text": "first", "tags": TAGS}}},
+         "params": {"name": "remember", "arguments": {"title": "One", "text": "first", "tags": TAGS,
+                                                          "when": "In the case this test sets up.", "why": "The test needs a memory the store will accept."}}},
         {"jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": {"name": "read", "arguments": {"hard": ["task=design"]}}},
     ]
     proc = subprocess.run(

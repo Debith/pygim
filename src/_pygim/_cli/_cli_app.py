@@ -620,13 +620,15 @@ class GimmicksCliApp:
                 for m in waiting:
                     who = f" to {m['to']}" if m.get("to") else ""
                     click.echo(f"- {m['id']} {m['kind']}{who} ({m['author']}): {m['text'].splitlines()[0][:100]}")
-            for p in data["preferences"]:
-                where = " (global)" if p["scope"] == "global" else ""
-                click.echo("\n" + _style.title(f"## {p['memory']}{where} {p['title']}") + f"\n{p['text']}")
+            if data["preferences"]:
+                click.echo("\n" + _style.title("Preferences") + _style.muted(" — each a card; `show` one for the rest"))
+                for p in data["preferences"]:
+                    click.echo(p["card"])
             if data["procedures"]:
-                click.echo("\nProcedures — a read naming their artifact and task places the steps first:")
+                click.echo("\n" + _style.title("Procedures") +
+                           _style.muted(" — the steps arrive when a request asks for the task, or with `show`"))
                 for p in data["procedures"]:
-                    click.echo(f"- {p['memory']} {p['title']} — {p['where']}")
+                    click.echo(p["card"])
             return
 
         store = self._store(where)

@@ -52,6 +52,11 @@ def git_at_least(major: int, minor: int) -> bool:
 
 
 def call(server, name, **arguments):
+    """One tool, over the protocol. A write gets a valid card unless the test names its own: these
+    tests are about stores and scopes, and the template has tests of its own."""
+    if name in ("remember", "merge") and "when" not in arguments:
+        arguments = {"when": "In the case this test sets up.", "why": "The test needs a memory the store will accept.",
+                     **arguments}
     """One tool call, as the MCP host makes it: (is_error, the decoded result or the error text)."""
     resp = server.handle({"jsonrpc": "2.0", "id": 7, "method": "tools/call",
                           "params": {"name": name, "arguments": arguments}})
@@ -302,8 +307,9 @@ class TestTheGlobalStore:
         text = server.handle({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}})["result"]["instructions"]
         assert "(global) Explain in layers" in text and "Prefer templates" in text and "(global) Prefer templates" not in text
         standing = call(server, "session")[1]["standing"]
-        assert [(p["scope"], p["title"], p["text"]) for p in standing["preferences"]] == [
-            ("global", "Explain in layers", "Assumed words first."), ("project", "Prefer templates", "Template it.")]
+        assert [(p["scope"], p["title"]) for p in standing["preferences"]] == [
+            ("global", "Explain in layers"), ("project", "Prefer templates")]
+        assert "Assumed words first." in standing["preferences"][0]["card"]        # each arrives as a card
         assert "the project's is the rule" in standing["note"]                     # global first, the nearer rule last
         monkeypatch.chdir(project)
         out = CliRunner().invoke(cli_oo, ["enact", "status", "--standing"])

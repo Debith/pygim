@@ -103,6 +103,7 @@ def project(tmp_path, env):
     made = subprocess.run(
         [str(OO), "enact", "call", "remember", "--json", json.dumps({
             "title": "A test names its own world", "reason": "it outlives the task",
+            "when": "Writing or changing a test.", "why": "A test that reads the machine is not reproducible.",
             "text": "One line: build the world in the test, never the machine's.",
             "tags": ["domain=proj", "artifact=test", "task=design", "kind=principle"]})],
         cwd=project, env=env, capture_output=True, text=True)
@@ -144,6 +145,7 @@ class TestTheHookAHostRuns:
         made = subprocess.run(
             [str(OO), "enact", "call", "remember", "--json", json.dumps({
                 "title": "Lay options out as a table", "reason": "how Debith wants answers",
+                "when": "Answering with choices.", "why": "A reader compares options faster in a table.",
                 "text": "One line: name the choices, recommend one.",
                 "tags": ["domain=proj", "artifact=any", "task=design", "kind=preference"],
                 "seen": ["#0"]})],
