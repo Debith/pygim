@@ -650,7 +650,7 @@ class EnactServer:
         own documents, so a store built entirely from its own sources could not be quoted at all
         and its citations went unchecked."""
         project, store = self._cite_roots(a)
-        return _packs.cite(project, a["path"], int(a["line"]), int(a.get("lines", 1)), store=store)
+        return _packs.Sources(store, project).cite(a["path"], int(a["line"]), int(a.get("lines", 1)))
 
     def _cite_roots(self, a: Dict[str, Any]) -> Any:
         name = (a.get("scope") or "project").strip().lower()
@@ -687,7 +687,7 @@ class EnactServer:
         text comes back beside the result for the writer to read."""
         try:
             project, store = self._cite_roots(a)
-            _packs.passage(project, store, locator)
+            _packs.Sources(store, project).passage(locator)
             return None
         except (ValueError, KeyError, OSError) as bad:
             return {"ok": False, "refused": "unknown locator", "message": str(bad), "facts": []}
@@ -695,7 +695,7 @@ class EnactServer:
     def _passage(self, a: Dict[str, Any], locator: str) -> Any:
         try:
             project, store = self._cite_roots(a)
-            return _packs.passage(project, store, locator)
+            return _packs.Sources(store, project).passage(locator)
         except Exception:
             return None
 

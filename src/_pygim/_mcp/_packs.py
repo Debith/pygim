@@ -169,29 +169,6 @@ def inventory(path: Path) -> Dict[str, str]:
     return {doc: str(entry.get("path") or "") for doc, entry in entries(path).items()}
 
 
-def _bases(inventory_file: Path, project: Optional[Path], store: Optional[Path]) -> List[Path]:
-    """Where an inventoried path may be relative to: the project's root (02 §5.2); the checkout the
-    store says it serves, for a store kept outside it; the store's own root, for a body of knowledge
-    with its own sources and no checkout; and the inventory file, for stores written before the
-    first rule."""
-    from . import _stores
-
-    served = _stores.project_of(store) if store is not None else None
-    seen: List[Path] = []
-    for base in (project, served, store, inventory_file.parent):
-        if base is not None and base not in seen:
-            seen.append(base)
-    return seen
-
-
-def _resolve(inventory_file: Path, path: str, project: Optional[Path], store: Optional[Path] = None) -> Optional[Path]:
-    for base in _bases(inventory_file, project, store):
-        candidate = (base / path).resolve()
-        if candidate.is_file():
-            return candidate
-    return None
-
-
 def _lines(file: Path) -> List[str]:
     """A document's lines. \\r\\n is a line ending, never part of a line (corpus.h), and the newline
     that ends the last line does not begin another: split on "\\n", a file of three lines ending in a
@@ -208,100 +185,249 @@ BLANK = ("is blank — a blank passage digests the same in every document, so it
          "of them; cite the lines that say it")
 
 
-def _locator_warnings(sources: List[Dict[str, Any]], store: Path, drafted: Path, project: Optional[Path]) -> List[str]:
-    """Each locator the pack adds, checked as it will stand once the pack is accepted.
+_UNREAD = object()
 
-    `accept` keeps the store's entry for a document it already lists and adds the draft's only for a
-    new one, so the check reads the documents the same way — the store's path wins, and a draft that
-    disagrees is named. It once checked the draft's path instead, and so warned about a file the
-    accept would never use, and passed a dead one it would keep."""
-    from pygim.enact import digest
 
-    listed = store / "sources" / "inventory.yaml"
-    try:
-        live, draft = inventory(listed), inventory(drafted)
-    except ValueError as exc:
-        return [str(exc)]
-    known = {**{doc: p for doc, p in draft.items() if doc not in live}, **live}
-    texts: Dict[str, Optional[List[str]]] = {}
-    out, told = [], set()
-    for s in sources:
-        where = f"{s['tag']}: {s['doc']}:L{s['line']}"
-        doc = s["doc"]
+class Sources:
+    """A store's sources: the documents its vocabulary and memories cite, where each one lives, and the
+    passages cited from them.
+
+    One store and the project it serves, held together. Seven functions took them apart and passed
+    them to each other — `(project, store, inventory file)` threaded through every one, four of them
+    reaching in to turn a document id into a file (global #14; found by a review session, 2026-09-23).
+    The served checkout is worked out once and kept: it was read from the store's policy file on every
+    lookup, which is configuration read in the middle of a library (global #9)."""
+
+    def __init__(self, store: Optional[Path], project: Optional[Path] = None) -> None:
+        self.store = store
+        self.project = project
+        self._served: Any = _UNREAD
+
+    @property
+    def listed(self) -> Optional[Path]:
+        """The store's inventory file, or None for no store."""
+        return self.store / "sources" / "inventory.yaml" if self.store is not None else None
+
+    def documents(self) -> Dict[str, str]:
+        """Each inventoried document id with its path, as the store keeps it."""
+        return inventory(self.listed) if self.listed is not None else {}
+
+    def served(self) -> Optional[Path]:
+        """The checkout the store says it serves, read from its policy once and kept."""
+        if self._served is _UNREAD:
+            from . import _stores
+
+            self._served = _stores.project_of(self.store) if self.store is not None else None
+        return self._served
+
+    def bases(self, inventory_file: Path) -> List[Path]:
+        """Where an inventoried path may be relative to: the project's root (02 §5.2); the checkout the
+        store says it serves, for a store kept outside it; the store's own root, for a body of knowledge
+        with its own sources and no checkout; and the inventory file, for stores written before the
+        first rule."""
+        seen: List[Path] = []
+        for base in (self.project, self.served(), self.store, inventory_file.parent):
+            if base is not None and base not in seen:
+                seen.append(base)
+        return seen
+
+    def resolve(self, inventory_file: Path, path: str) -> Optional[Path]:
+        for base in self.bases(inventory_file):
+            candidate = (base / path).resolve()
+            if candidate.is_file():
+                return candidate
+        return None
+
+    def warnings(self, sources: List[Dict[str, Any]], drafted: Path) -> List[str]:
+        """Each locator the pack adds, checked as it will stand once the pack is accepted.
+
+        `accept` keeps the store's entry for a document it already lists and adds the draft's only for a
+        new one, so the check reads the documents the same way — the store's path wins, and a draft that
+        disagrees is named. It once checked the draft's path instead, and so warned about a file the
+        accept would never use, and passed a dead one it would keep."""
+        from pygim.enact import digest
+
+        listed = self.listed
+        try:
+            live, draft = inventory(listed), inventory(drafted)
+        except ValueError as exc:
+            return [str(exc)]
+        known = {**{doc: p for doc, p in draft.items() if doc not in live}, **live}
+        texts: Dict[str, Optional[List[str]]] = {}
+        out, told = [], set()
+        for s in sources:
+            where = f"{s['tag']}: {s['doc']}:L{s['line']}"
+            doc = s["doc"]
+            if doc not in known:
+                out.append(f"{where}: {doc} is not in the inventory — add it, or cite an inventoried document")
+                continue
+            if doc in live and doc in draft and draft[doc] != live[doc] and doc not in told:
+                told.add(doc)
+                out.append(f"{doc}: the store keeps {live[doc]}; the draft's {draft[doc]} is ignored — "
+                           f"edit sources/inventory.yaml if the document moved")
+            if doc not in texts:
+                file = self.resolve(listed, known[doc])
+                texts[doc] = _lines(file) if file else None
+            text = texts[doc]
+            if text is None:
+                looked = ", ".join(str(b) for b in self.bases(listed))
+                out.append(f"{where}: the document {known[doc]} was not found under {looked}")
+                continue
+            first, count = s["line"] - 1, s["lines"]
+            if first < 0 or count < 1 or first + count > len(text):
+                out.append(f"{where}: the document has {len(text)} lines")
+                continue
+            passage = text[first:first + count]
+            if s["passage"] and digest("\n".join(passage).encode("utf-8")) != s["passage"]:
+                out.append(f"{where}: the lines there are not the cited passage — the document changed, or the line is wrong")
+                continue
+            wanted = [x.strip() for x in passage]
+            if not any(wanted):
+                out.append(f"{where}: the passage {BLANK}")
+                continue
+            also = [i + 1 for i in range(len(text) - count + 1)
+                    if i != first and [x.strip() for x in text[i:i + count]] == wanted]
+            if also:
+                shown = ", ".join(f"L{n}" for n in also[:5]) + (" …" if len(also) > 5 else "")
+                out.append(f"{where}: the cited text also occurs at {shown} — check this is the occurrence meant")
+        return out
+
+    def merge(self, drafted: Path, memory: Any = None) -> Tuple[List[str], List[str]]:
+        """Appends the drafted inventory's documents that the store's inventory lacks, and returns their
+        ids — and, apart, each document the store already lists at another path, which it keeps.
+
+        The second list exists because the merge once said nothing about them: after the 2026-09-22
+        rename a draft could give `design-memory-00` its new path, the store kept the old one, and the
+        pack's locators went on pointing at a file that no longer existed. Keeping the live entry is
+        still right — a pack must not move another pack's documents — but it has to be said.
+
+        What is appended is written by the YAML engine, so a path that needs quoting is quoted; and it
+        starts on a line of its own. A hand-edited inventory whose last line had no newline once took the
+        first appended id onto that line — `path: README.mdguide:` — and read back as one document
+        pointing at the other's file, while the accept reported success.
+
+        The store writes it (`write_file`: atomically, under the commit lock, only if the inventory still
+        holds what was read here), and a change in between is read again rather than written over."""
+        if not drafted.is_file():
+            return [], []
+        if memory is None:
+            from pygim.enact import Enact
+
+            memory = Enact(str(self.store))
+        live = self.listed
+        wanted = entries(drafted)
+        for _ in range(3):                                # another writer between the read and the write: read again
+            before = live.read_bytes() if live.is_file() else b""
+            known = inventory(live)
+            new = {doc: entry for doc, entry in wanted.items() if doc not in known}
+            kept = [f"{doc}: kept {known[doc]}, the draft says {entry.get('path', '')}"
+                    for doc, entry in wanted.items() if doc in known and known[doc] != str(entry.get("path") or "")]
+            if not new:
+                return [], kept
+            text = before.decode("utf-8")
+            lead = ("# The documents this vocabulary cites. Paths are relative to the project's root.\n" if not text
+                    else "" if text.endswith("\n") else "\n")
+            if memory.write_file("sources/inventory.yaml", text + lead + _yaml_text(new),
+                                 _digest_of(live) if before else ""):
+                return list(new), kept
+        raise RuntimeError(f"{live} kept changing while the accept tried to add to it — run the accept again")
+
+    def passage(self, locator: str) -> str:
+        """The text a locator names, for a writer to check before citing it — and, by raising, the only
+        check available at write time: that the document is inventoried here and the lines exist. It
+        cannot tell whether the passage says what it is cited *for*; two of this store's own eight
+        locators were in range and still quoted the wrong sentence."""
+        m = _LOCATOR.match(locator.strip())
+        if not m:
+            raise ValueError(f"{locator!r} is not a locator — write document:L<line> or document:L<from>-<to>")
+        doc, first = m.group("doc"), int(m.group("from"))
+        last = int(m.group("to") or first)
+        if first < 1:
+            raise ValueError(f"{locator}: lines are counted from 1")
+        if last < first:
+            raise ValueError(f"{locator}: the range ends before it starts")
+        listed = self.listed
+        known = self.documents()
         if doc not in known:
-            out.append(f"{where}: {doc} is not in the inventory — add it, or cite an inventoried document")
-            continue
-        if doc in live and doc in draft and draft[doc] != live[doc] and doc not in told:
-            told.add(doc)
-            out.append(f"{doc}: the store keeps {live[doc]}; the draft's {draft[doc]} is ignored — "
-                       f"edit sources/inventory.yaml if the document moved")
-        if doc not in texts:
-            file = _resolve(listed, known[doc], project, store)
-            texts[doc] = _lines(file) if file else None
-        text = texts[doc]
-        if text is None:
-            looked = ", ".join(str(b) for b in _bases(listed, project, store))
-            out.append(f"{where}: the document {known[doc]} was not found under {looked}")
-            continue
-        first, count = s["line"] - 1, s["lines"]
-        if first < 0 or count < 1 or first + count > len(text):
-            out.append(f"{where}: the document has {len(text)} lines")
-            continue
-        passage = text[first:first + count]
-        if s["passage"] and digest("\n".join(passage).encode("utf-8")) != s["passage"]:
-            out.append(f"{where}: the lines there are not the cited passage — the document changed, or the line is wrong")
-            continue
-        wanted = [x.strip() for x in passage]
-        if not any(wanted):
-            out.append(f"{where}: the passage {BLANK}")
-            continue
-        also = [i + 1 for i in range(len(text) - count + 1)
-                if i != first and [x.strip() for x in text[i:i + count]] == wanted]
-        if also:
-            shown = ", ".join(f"L{n}" for n in also[:5]) + (" …" if len(also) > 5 else "")
-            out.append(f"{where}: the cited text also occurs at {shown} — check this is the occurrence meant")
-    return out
+            have = ", ".join(sorted(known)) or "nothing"
+            raise KeyError(f"{doc} is not in this store's source inventory — it lists: {have}")
+        file = self.resolve(listed, known[doc])
+        if file is None:
+            raise ValueError(f"{doc} is inventoried as {known[doc]!r}, which is not a file under this store or its project")
+        text = _lines(file)
+        if last > len(text):
+            raise ValueError(f"{doc} has {len(text)} lines; {locator} runs past its end")
+        return "\n".join(text[first - 1:last])
+
+    def cite(self, path: str, line: int, lines: int = 1) -> Dict[str, Any]:
+        """A locator into a project document: the passage at *line* (1-based) for *lines* lines. A document
+        the *store*'s inventory already lists keeps that id; any other gets one made from its path.
+        ``locator`` is the form a memory's ``cites`` takes."""
+        from pygim.enact import digest
+
+        file = (self.project / path).resolve() if not Path(path).is_absolute() else Path(path).resolve()
+        try:
+            relative = file.relative_to(self.project.resolve())
+        except ValueError:
+            raise ValueError(f"{file} is outside the project {self.project} — cite the project's own documents") from None
+        # \r\n is a line ending, never part of a line, as for hand-written memories (corpus.h): a checkout
+        # with Windows line endings must cite the same passage, and the same version, as one without.
+        content = file.read_bytes().replace(b"\r\n", b"\n")
+        text = _lines(file)
+        if line < 1 or lines < 1 or line + lines - 1 > len(text):
+            raise ValueError(f"{relative} has {len(text)} lines; line {line} for {lines} is out of range")
+        passage = "\n".join(text[line - 1:line - 1 + lines])
+        if not passage.strip():
+            raise ValueError(f"{relative}:{line}: the passage {BLANK}")
+        doc = doc_id(relative)
+        if self.store is not None:
+            listed = self.listed
+            known_ids = inventory(listed)
+            for known, known_path in known_ids.items():
+                if self.resolve(listed, known_path) == file:
+                    doc = known
+                    break
+            else:
+                # `docs/a-b.md` and `docs/a/b.md` both flatten to `docs-a-b`; a new document never takes an
+                # id another already has, or its locators would resolve to that document's file
+                base, n = doc, 2
+                while doc in known_ids:
+                    doc, n = f"{base}-{n}", n + 1
+        return {
+            "source": {"doc": doc, "line": line, "lines": lines, "passage": digest(passage.encode("utf-8"))},
+            "locator": f"{doc}:L{line}" + (f"-{line + lines - 1}" if lines > 1 else ""),
+            "inventory": {"id": doc, "kind": "text", "path": relative.as_posix(), "version": digest(content)},
+            "text": passage,
+        }
+
+
+# The functions callers have always used, each now one line over a `Sources`.
+
+
+def _bases(inventory_file: Path, project: Optional[Path], store: Optional[Path]) -> List[Path]:
+    return Sources(store, project).bases(inventory_file)
+
+
+def _resolve(inventory_file: Path, path: str, project: Optional[Path], store: Optional[Path] = None) -> Optional[Path]:
+    return Sources(store, project).resolve(inventory_file, path)
+
+
+def _locator_warnings(sources: List[Dict[str, Any]], store: Path, drafted: Path, project: Optional[Path]) -> List[str]:
+    return Sources(store, project).warnings(sources, drafted)
 
 
 def _merge_inventory(store: Path, drafted: Path, memory: Any = None) -> Tuple[List[str], List[str]]:
-    """Appends the drafted inventory's documents that the store's inventory lacks, and returns their
-    ids — and, apart, each document the store already lists at another path, which it keeps.
+    return Sources(store).merge(drafted, memory)
 
-    The second list exists because the merge once said nothing about them: after the 2026-09-22
-    rename a draft could give `design-memory-00` its new path, the store kept the old one, and the
-    pack's locators went on pointing at a file that no longer existed. Keeping the live entry is
-    still right — a pack must not move another pack's documents — but it has to be said.
 
-    What is appended is written by the YAML engine, so a path that needs quoting is quoted; and it
-    starts on a line of its own. A hand-edited inventory whose last line had no newline once took the
-    first appended id onto that line — `path: README.mdguide:` — and read back as one document
-    pointing at the other's file, while the accept reported success.
+def passage(project: Optional[Path], store: Optional[Path], locator: str) -> str:
+    """The text a locator names — see `Sources.passage`."""
+    return Sources(store, project).passage(locator)
 
-    The store writes it (`write_file`: atomically, under the commit lock, only if the inventory still
-    holds what was read here), and a change in between is read again rather than written over."""
-    if not drafted.is_file():
-        return [], []
-    if memory is None:
-        from pygim.enact import Enact
 
-        memory = Enact(str(store))
-    live = store / "sources" / "inventory.yaml"
-    wanted = entries(drafted)
-    for _ in range(3):                                # another writer between the read and the write: read again
-        before = live.read_bytes() if live.is_file() else b""
-        known = inventory(live)
-        new = {doc: entry for doc, entry in wanted.items() if doc not in known}
-        kept = [f"{doc}: kept {known[doc]}, the draft says {entry.get('path', '')}"
-                for doc, entry in wanted.items() if doc in known and known[doc] != str(entry.get("path") or "")]
-        if not new:
-            return [], kept
-        text = before.decode("utf-8")
-        lead = ("# The documents this vocabulary cites. Paths are relative to the project's root.\n" if not text
-                else "" if text.endswith("\n") else "\n")
-        if memory.write_file("sources/inventory.yaml", text + lead + _yaml_text(new),
-                             _digest_of(live) if before else ""):
-            return list(new), kept
-    raise RuntimeError(f"{live} kept changing while the accept tried to add to it — run the accept again")
+def cite(project: Path, path: str, line: int, lines: int = 1, store: Optional[Path] = None) -> Dict[str, Any]:
+    """A locator into a project document — see `Sources.cite`."""
+    return Sources(store, project).cite(path, line, lines)
 
 
 def doc_id(relative: Path) -> str:
@@ -311,73 +437,3 @@ def doc_id(relative: Path) -> str:
 
 
 _LOCATOR = re.compile(r"^(?P<doc>[^:\s]+):L(?P<from>\d+)(?:-(?P<to>\d+))?$")
-
-
-def passage(project: Optional[Path], store: Optional[Path], locator: str) -> str:
-    """The text a locator names, for a writer to check before citing it — and, by raising, the only
-    check available at write time: that the document is inventoried here and the lines exist. It
-    cannot tell whether the passage says what it is cited *for*; two of this store's own eight
-    locators were in range and still quoted the wrong sentence."""
-    m = _LOCATOR.match(locator.strip())
-    if not m:
-        raise ValueError(f"{locator!r} is not a locator — write document:L<line> or document:L<from>-<to>")
-    doc, first = m.group("doc"), int(m.group("from"))
-    last = int(m.group("to") or first)
-    if first < 1:
-        raise ValueError(f"{locator}: lines are counted from 1")
-    if last < first:
-        raise ValueError(f"{locator}: the range ends before it starts")
-    listed = (store / "sources" / "inventory.yaml") if store is not None else None
-    known = inventory(listed) if listed is not None else {}
-    if doc not in known:
-        have = ", ".join(sorted(known)) or "nothing"
-        raise KeyError(f"{doc} is not in this store's source inventory — it lists: {have}")
-    file = _resolve(listed, known[doc], project, store)
-    if file is None:
-        raise ValueError(f"{doc} is inventoried as {known[doc]!r}, which is not a file under this store or its project")
-    text = _lines(file)
-    if last > len(text):
-        raise ValueError(f"{doc} has {len(text)} lines; {locator} runs past its end")
-    return "\n".join(text[first - 1:last])
-
-
-def cite(project: Path, path: str, line: int, lines: int = 1, store: Optional[Path] = None) -> Dict[str, Any]:
-    """A locator into a project document: the passage at *line* (1-based) for *lines* lines. A document
-    the *store*'s inventory already lists keeps that id; any other gets one made from its path.
-    ``locator`` is the form a memory's ``cites`` takes."""
-    from pygim.enact import digest
-
-    file = (project / path).resolve() if not Path(path).is_absolute() else Path(path).resolve()
-    try:
-        relative = file.relative_to(project.resolve())
-    except ValueError:
-        raise ValueError(f"{file} is outside the project {project} — cite the project's own documents") from None
-    # \r\n is a line ending, never part of a line, as for hand-written memories (corpus.h): a checkout
-    # with Windows line endings must cite the same passage, and the same version, as one without.
-    content = file.read_bytes().replace(b"\r\n", b"\n")
-    text = _lines(file)
-    if line < 1 or lines < 1 or line + lines - 1 > len(text):
-        raise ValueError(f"{relative} has {len(text)} lines; line {line} for {lines} is out of range")
-    passage = "\n".join(text[line - 1:line - 1 + lines])
-    if not passage.strip():
-        raise ValueError(f"{relative}:{line}: the passage {BLANK}")
-    doc = doc_id(relative)
-    if store is not None:
-        listed = store / "sources" / "inventory.yaml"
-        known_ids = inventory(listed)
-        for known, known_path in known_ids.items():
-            if _resolve(listed, known_path, project, store) == file:
-                doc = known
-                break
-        else:
-            # `docs/a-b.md` and `docs/a/b.md` both flatten to `docs-a-b`; a new document never takes an
-            # id another already has, or its locators would resolve to that document's file
-            base, n = doc, 2
-            while doc in known_ids:
-                doc, n = f"{base}-{n}", n + 1
-    return {
-        "source": {"doc": doc, "line": line, "lines": lines, "passage": digest(passage.encode("utf-8"))},
-        "locator": f"{doc}:L{line}" + (f"-{line + lines - 1}" if lines > 1 else ""),
-        "inventory": {"id": doc, "kind": "text", "path": relative.as_posix(), "version": digest(content)},
-        "text": passage,
-    }
