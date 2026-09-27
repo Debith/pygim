@@ -43,10 +43,17 @@ threads : int, keyword-only
 simd : bool, keyword-only
     Allow the AVX2 path. Results are bit-identical either way.
 )doc")
-        .def("random", &pygim::Rng::random, py::arg("n"),
-             "Return a new 1-D float64 array of n uniforms in [0, 1).")
-        .def("uint64", &pygim::Rng::uint64, py::arg("n"),
-             "Return a new 1-D uint64 array of n raw 64-bit draws.")
+        .def("random", &pygim::Rng::random, py::arg("n"), py::kw_only(),
+             py::arg("format") = py::none(),
+             "Return n float64 uniforms in [0, 1) as `format` (see formats()).\n\n"
+             "None picks a numpy array when numpy imports, else a list.")
+        .def("uint64", &pygim::Rng::uint64, py::arg("n"), py::kw_only(),
+             py::arg("format") = py::none(),
+             "Return n raw 64-bit draws as `format` (see formats()).\n\n"
+             "None picks a numpy array when numpy imports, else a list.")
+        .def_static("formats", &pygim::output::available,
+             "The format names available in this interpreter: 'numpy', 'list', 'tuple',\n"
+             "'polars.Series', 'polars.DataFrame' (numpy and polars only when installed).")
         .def("fill", &pygim::Rng::fill, py::arg("out"),
              "Fill a C-contiguous float64 array (any shape) in place with uniforms in [0, 1).")
         .def("fill_uint64", &pygim::Rng::fill_uint64, py::arg("out"),

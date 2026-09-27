@@ -326,6 +326,54 @@ def test_properties_and_repr():
     assert Rng(0).simd in ("avx2", "scalar")
 
 
+def test_formats_lists_what_imports():
+    """formats() always offers list and tuple, numpy here since it imports."""
+    fmts = Rng.formats()
+    assert fmts[:3] == ("numpy", "list", "tuple")
+    try:
+        import polars  # noqa: F401
+    except ImportError:
+        assert "polars.Series" not in fmts
+    else:
+        assert fmts[3:] == ("polars.Series", "polars.DataFrame")
+
+
+@pytest.mark.parametrize("method", ["random", "uint64"])
+def test_format_default_numpy_and_sequences_carry_same_values(method):
+    """Every format carries the same values; None means numpy when it imports."""
+    ref = getattr(Rng(7), method)(100)
+    assert isinstance(ref, np.ndarray)
+    assert isinstance(getattr(Rng(7), method)(100, format="numpy"), np.ndarray)
+    as_list = getattr(Rng(7), method)(100, format="list")
+    as_tuple = getattr(Rng(7), method)(100, format="tuple")
+    assert type(as_list) is list and type(as_tuple) is tuple
+    assert as_list == ref.tolist() and as_tuple == tuple(ref.tolist())
+    assert getattr(Rng(7), method)(0, format="tuple") == ()
+
+
+@pytest.mark.parametrize("method, dtype", [("random", "Float64"), ("uint64", "UInt64")])
+def test_format_polars_series_and_dataframe(method, dtype):
+    """polars output keeps the dtype (uint64 past 2**63 must not overflow)."""
+    pl = pytest.importorskip("polars")
+    ref = getattr(Rng(7), method)(1000)
+    s = getattr(Rng(7), method)(1000, format="polars.Series")
+    assert isinstance(s, pl.Series) and s.dtype == getattr(pl, dtype) and s.name == "value"
+    assert s.to_list() == ref.tolist()
+    assert getattr(Rng(7), method)(10, format="polars").equals(s.head(10))
+    df = getattr(Rng(7), method)(1000, format="polars.DataFrame")
+    assert isinstance(df, pl.DataFrame) and df.columns == ["value"]
+    assert df["value"].to_list() == ref.tolist()
+
+
+def test_format_rejects_unknown_names():
+    with pytest.raises(ValueError, match="format must be"):
+        Rng(1).random(3, format="pandas")
+    with pytest.raises(TypeError):
+        Rng(1).random(3, format=list)
+    with pytest.raises(ValueError):
+        Rng(1).random(-1, format="list")
+
+
 def test_seed_none_gives_fresh_entropy():
     """seed=None draws real entropy: two generators must not collide."""
     assert not np.array_equal(Rng().random(64), Rng().random(64))
