@@ -109,6 +109,7 @@ class GimmicksCliApp:
         things that are fine on purpose, and a check that cries wolf is read once and then never
         again. What should fail is decided after the exemptions are written down."""
         from _pygim import _inventory
+        from _pygim._inventory import canonical
 
         root = Path(path) if path else Path(where.cwd)
         if not root.is_dir():
@@ -137,14 +138,26 @@ class GimmicksCliApp:
         band("ships, and the project builds with it",
              [f"{name:<28}{use.work:>4} in the work{('  +' + str(use.shown) + ' shown') if use.shown else ''}"
               for name, use in found.used])
-        band("declared as a dependency, never imported", list(found.declared_unused),
+        def library(name):
+            dist = found.provider(name)
+            return name if canonical(dist) == canonical(name) else f"{name} ({dist})"
+
+        band("declared as a dependency, installed, never imported", list(found.declared_unused),
              "from pyproject.toml")
+        band("declared, and run rather than imported", list(found.declared_run),
+             "a program or a pytest plugin — never imported, by design")
+        band("declared, and not installed here", list(found.declared_absent),
+             "cannot be judged from this environment")
         band("imported, and nothing here provides it",
              [f"{name:<28}{use.total:>4}" for name, use in found.unresolved.items()],
              "a sibling checkout or a missing install")
-        band("available here, and used",
-             [f"{name:<28}{use.total:>4}" for name, use in list(found.third_party.items())[:8]],
-             "what this project reaches for from elsewhere")
+        band("available here, and the work uses it",
+             [f"{library(name):<28}{use.work:>4} in the work{('  +' + str(use.shown) + ' shown') if use.shown else ''}"
+              for name, use in found.third_party_in_work],
+             "what this project is built with from elsewhere")
+        band("available here, used only by tests, examples and benchmarks",
+             [f"{library(name):<28}{use.shown:>4} shown" for name, use in found.third_party_shown_only],
+             "test runners and answer keys — they check what is built, and are not part of it")
 
         idle = found.unused + found.shown_only
         if idle:

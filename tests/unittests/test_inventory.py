@@ -76,6 +76,48 @@ class TestTheJudgement:
         assert found.declared_unused == []
 
 
+class TestDependenciesAreToldApartByHowTheyAreUsed:
+    """Debith, 2026-09-24: "Test import should be separate." PyYAML is the answer key pathlike's YAML
+    engine is checked against — imported by tests and a benchmark only — and the report said
+    "declared as a dependency, never imported": `pyyaml` in pyproject.toml and `PyYAML` in its
+    metadata were compared as two different names."""
+
+    def test_a_declared_name_matches_its_distribution_whatever_the_case(self):
+        found = survey(imports={"yaml": Use(shown=2)}, ships=[], available={"yaml": "PyYAML"},
+                       declared=["pyyaml", "Ruamel.YAML"], stdlib=STDLIB)
+        assert found.declared_unused == ["Ruamel.YAML"]
+
+    def test_a_library_only_tests_import_is_kept_apart_from_what_the_work_uses(self):
+        found = survey(imports={"click": Use(work=2, shown=1), "yaml": Use(shown=2), "pytest": Use(shown=30)},
+                       ships=[], available={"click": "click", "yaml": "PyYAML", "pytest": "pytest"},
+                       stdlib=STDLIB)
+        assert [name for name, _ in found.third_party_in_work] == ["click"]
+        assert [name for name, _ in found.third_party_shown_only] == ["pytest", "yaml"]
+        assert found.provider("yaml") == "PyYAML" and found.provider("click") == "click"
+
+    def test_a_declared_dependency_is_unused_or_run_as_a_command_or_not_installed_here(self):
+        """Three different facts were one line: mypy and pytest-xdist are not installed in the
+        environment that ran the report, and ruff is a program, never imported by design."""
+        found = survey(imports={}, ships=[], available={"numpy": "numpy"}, stdlib=STDLIB,
+                       declared=["numpy", "ruff", "mypy"], installed={"numpy", "ruff"}, commands={"ruff"})
+        assert found.declared_unused == ["numpy"]
+        assert found.declared_run == ["ruff"]
+        assert found.declared_absent == ["mypy"]
+
+    def test_a_distribution_that_puts_a_program_on_the_path_or_plugs_into_pytest_is_a_command(self):
+        class Dist:
+            """What `importlib.metadata` is asked of a distribution here, as plain values."""
+            def __init__(self, name, files=(), groups=()):
+                self.metadata = {"Name": name}
+                self.files = list(files)
+                self.entry_points = [type("EntryPoint", (), {"group": g})() for g in groups]
+
+        dists = [Dist("ruff", files=["../../../bin/ruff"]), Dist("pytest_xdist", groups=["pytest11"]),
+                 Dist("numpy", files=["numpy/__init__.py"])]
+        assert _inventory.commands_of(dists) == {"ruff", "pytest-xdist"}
+        assert _inventory.installed_names(dists) == {"ruff", "pytest-xdist", "numpy"}
+
+
 class TestWhatCountsAsUse:
     @pytest.mark.parametrize("path", ["tests/unittests/test_x.py", "docs/examples/ioc/basic.py",
                                       "benchmarks/run.py", "conftest.py", "src/lib/thing_test.py"])
@@ -175,6 +217,17 @@ class TestTheCommandAHumanRuns:
                               capture_output=True, text=True, env=env, timeout=120)
         assert done.returncode == 0, done.stderr
         assert "ships nothing importable" in done.stdout
+
+    def test_a_library_only_the_tests_import_is_printed_apart(self, tmp_path):
+        (tmp_path / "run.py").write_text("import click\n", encoding="utf-8")
+        (tmp_path / "tests").mkdir()
+        (tmp_path / "tests" / "test_run.py").write_text("import pytest\n", encoding="utf-8")
+        env = {**os.environ, "NO_COLOR": "1", "HOME": str(tmp_path / "home")}
+        done = subprocess.run([str(OO), "inventory", "--path", str(tmp_path)],
+                              capture_output=True, text=True, env=env, timeout=120)
+        assert done.returncode == 0, done.stderr
+        work, _, shown = done.stdout.partition("used only by tests, examples and benchmarks")
+        assert "click" in work and "pytest" not in work and "pytest" in shown
 
     def test_it_never_fails_on_what_it_finds(self, tmp_path):
         """A check that cries wolf is read once and then never again. This one reports; what should

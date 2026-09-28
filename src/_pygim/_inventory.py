@@ -21,7 +21,8 @@ the component is used for something else.
 from __future__ import annotations
 
 import ast
-from dataclasses import dataclass
+import re
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Collection, Dict, Iterable, List, Mapping, NamedTuple, Optional, Sequence, Set, Tuple
 
@@ -70,7 +71,25 @@ class Inventory:
     standard: Mapping[str, Use]
     local: Mapping[str, Use]
     unresolved: Mapping[str, Use]
-    declared_unused: Sequence[str]
+    declared_unused: Sequence[str]                 # installed here, and nothing imports it
+    declared_run: Sequence[str] = ()               # installed as a program or a pytest plugin: run, not imported
+    declared_absent: Sequence[str] = ()            # not installed where the report ran, so not judged
+    providers: Mapping[str, str] = field(default_factory=dict)   # an imported name -> its distribution
+
+    @property
+    def third_party_in_work(self) -> List[Tuple[str, Use]]:
+        """Libraries the project's own code uses — what it is built with."""
+        return [(name, use) for name, use in self.third_party.items() if use.work]
+
+    @property
+    def third_party_shown_only(self) -> List[Tuple[str, Use]]:
+        """Libraries only tests, examples and benchmarks import: test runners and answer keys, such
+        as PyYAML for pathlike's YAML engine — used to check what is built, not to build it."""
+        return [(name, use) for name, use in self.third_party.items() if use.only_shown]
+
+    def provider(self, name: str) -> str:
+        """The distribution that installs the module *name* — ``yaml`` comes from ``PyYAML``."""
+        return self.providers.get(name, name)
 
     def _idle(self, pick) -> List[str]:
         """Shipped names matching *pick*, minus any package a used submodule already vouches for.
@@ -95,14 +114,23 @@ class Inventory:
         return [(name, use) for name, use in self.ships.items() if use.work]
 
 
+def canonical(name: str) -> str:
+    """A distribution name as packaging compares them: case ignored, and runs of ``-``, ``_`` and
+    ``.`` alike (PEP 503) — ``pyyaml`` in a manifest is ``PyYAML`` in its metadata."""
+    return re.sub(r"[-_.]+", "-", name).lower()
+
+
 def survey(*, imports: Mapping[str, Use], ships: Sequence[str], available: Mapping[str, str],
            local: Collection[str] = (), declared: Sequence[str] = (), stdlib: Collection[str] = (),
+           installed: Optional[Collection[str]] = None, commands: Collection[str] = (),
            root: Path = Path("."), files: int = 0) -> Inventory:
     """Sort every imported name by where it came from, and every shipped name by who uses it.
 
     *imports* counts dotted module names; *ships* names this project offers an importer; *local*
     names modules the project contains but does not ship; *available* maps a top-level module to the
-    distribution that installed it; *declared* names distributions a manifest asked for.
+    distribution that installed it; *declared* names distributions a manifest asked for; *installed*
+    names the distributions present where this runs (None: not known), and *commands* those among
+    them that install a program or a pytest plugin — both in `canonical` form.
 
     A name nothing accounts for lands in `unresolved` rather than quietly among the third parties:
     an answer that stays silent about what it could not place cannot be told from a complete one.
@@ -132,7 +160,10 @@ def survey(*, imports: Mapping[str, Use], ships: Sequence[str], available: Mappi
             add(unresolved, head, use)
 
     imported = {name.split(".")[0] for name in imports}
-    reached = {available[head] for head in imported if head in available} | imported
+    reached = {canonical(available[head]) for head in imported if head in available} | {canonical(i) for i in imported}
+    idle = [d for d in declared if canonical(d) not in reached]
+    absent = [d for d in idle if installed is not None and canonical(d) not in installed]
+    run = [d for d in idle if d not in absent and canonical(d) in commands]
     by_use = lambda item: (-item[1].total, item[0])
     return Inventory(root=Path(root), files=files,
                      ships=dict(sorted(shipped.items())),
@@ -140,8 +171,9 @@ def survey(*, imports: Mapping[str, Use], ships: Sequence[str], available: Mappi
                      standard=dict(sorted(standard.items(), key=by_use)),
                      local=dict(sorted(ours.items(), key=by_use)),
                      unresolved=dict(sorted(unresolved.items(), key=by_use)),
-                     declared_unused=sorted(d for d in declared
-                                            if d not in reached and d.replace("-", "_") not in reached))
+                     declared_unused=sorted(d for d in idle if d not in absent and d not in run),
+                     declared_run=sorted(run), declared_absent=sorted(absent),
+                     providers={head: available[head] for head in third_party})
 
 
 # ── gathering the facts, which is the half that has to touch a machine ────────
@@ -282,6 +314,27 @@ def installed(distributions) -> Dict[str, str]:
     return found
 
 
+def installed_names(distributions) -> Set[str]:
+    """Every distribution present, in `canonical` form."""
+    return {canonical(dist.metadata["Name"]) for dist in distributions if dist.metadata and dist.metadata["Name"]}
+
+
+def commands_of(distributions) -> Set[str]:
+    """The distributions that install a program — a console script, or any file put in a ``bin``
+    or ``Scripts`` folder, as ruff's binary is — or plug into pytest, in `canonical` form. Such a
+    dependency is run rather than imported, so its absence from the imports is by design."""
+    found: Set[str] = set()
+    for dist in distributions:
+        name = dist.metadata["Name"] if dist.metadata else None
+        if not name:
+            continue
+        groups = {entry.group for entry in (dist.entry_points or [])}
+        placed = any(Path(str(f)).parent.name in ("bin", "Scripts") for f in (dist.files or []))
+        if placed or groups & {"console_scripts", "gui_scripts", "pytest11"}:
+            found.add(canonical(name))
+    return found
+
+
 def declared_in(root: Path) -> List[str]:
     """The distributions a manifest asks for, or nothing when the project has no manifest.
 
@@ -291,7 +344,6 @@ def declared_in(root: Path) -> List[str]:
     manifest = root / "pyproject.toml"
     if not manifest.is_file():
         return []
-    import re
     import tomllib
 
     try:
@@ -312,9 +364,10 @@ def from_machine(root: Path, distributions=None, stdlib: Optional[Collection[str
 
     files = python_files(root)
     ships = ships_in(root)
+    dists = list(metadata.distributions() if distributions is None else distributions)
     return survey(imports=imports_in(files, ships), ships=ships, local=local_in(files),
-                  available=installed(metadata.distributions() if distributions is None else distributions),
-                  declared=declared_in(root),
+                  available=installed(dists), declared=declared_in(root),
+                  installed=installed_names(dists), commands=commands_of(dists),
                   stdlib=sys.stdlib_module_names if stdlib is None else stdlib,
                   root=root, files=len(files))
 
