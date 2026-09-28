@@ -408,7 +408,7 @@ class GimmicksCliApp:
             reference = _stale.reference_resolver(live, replaced_by)
         command = _stale.command_resolver(cli_oo)
         from importlib import metadata as _metadata
-        elsewhere = set(sys.stdlib_module_names) | set(_inventory.installed(_metadata.distributions()))
+        elsewhere = set(_inventory.standard_library()) | set(_inventory.installed(_metadata.distributions()))
 
         stale_total = look_total = legacy_total = 0
         for name, root in scopes:

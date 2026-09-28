@@ -172,3 +172,31 @@ def test_the_command_finds_a_dead_command_in_a_real_store(tmp_path):
     said = run("status", "--stale").stdout
     assert "1 stale" in said and "no such command: `oo memory`" in said
     assert "1 to look at" in said                                          # the same words in the body
+
+
+def test_the_command_runs_on_a_python_that_does_not_list_its_standard_library(tmp_path, monkeypatch):
+    """`sys.stdlib_module_names` arrived in Python 3.10, and `status --stale` asked for it directly, so
+    on 3.9 the command crashed before printing a word (every 3.9 job of core/memory's second CI run,
+    2026-09-28). The same command in this process, with the attribute taken away."""
+    from click.testing import CliRunner
+    from pygim.__main__ import cli_oo
+
+    project = tmp_path / "proj"
+    project.mkdir()
+    (tmp_path / "home").mkdir()
+    for name, value in {"HOME": str(tmp_path / "home"), "NO_COLOR": "1", "XDG_DATA_HOME": str(tmp_path / "data"),
+                        "PYGIM_ENACT_GLOBAL": str(tmp_path / "no-global"), "GIT_CONFIG_GLOBAL": str(tmp_path / "gitconfig"),
+                        "GIT_CONFIG_NOSYSTEM": "1"}.items():
+        monkeypatch.setenv(name, value)
+    monkeypatch.chdir(project)
+    oo = lambda *args: CliRunner().invoke(cli_oo, ["enact", *args])
+    assert oo("setup", "--local", "--no-register").exit_code == 0
+    made = oo("call", "remember", "--json", json.dumps({
+        "title": "Reload the server after changing its code", "tags": ["domain=any", "artifact=any", "task=design"],
+        "when": "the server's code changed", "why": "a stale server answers with old behaviour",
+        "do": "run `oo memory reload`", "text": "It used to be `oo memory reload`."}))
+    assert json.loads(made.stdout)["ok"], made.output
+    monkeypatch.delattr(sys, "stdlib_module_names", raising=False)
+    said = oo("status", "--stale")
+    assert said.exit_code == 0, said.output
+    assert "1 stale" in said.stdout and "no such command: `oo memory`" in said.stdout
