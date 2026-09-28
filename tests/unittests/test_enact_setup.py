@@ -7,8 +7,10 @@ system git config, so nothing on the machine running the tests is read or writte
 from __future__ import annotations
 
 import json
+import os
 import re
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -275,7 +277,9 @@ class TestTheGlobalStore:
     def test_setup_makes_it_personal_published_and_found_from_any_project(self, project, isolated):
         out = CliRunner().invoke(cli_oo, ["enact", "setup", "--global"])
         assert out.exit_code == 0, out.output
-        root = isolated / "pygim" / "enact" / "global"
+        # where production puts it on this platform: XDG_DATA_HOME here, ~/Library/Application Support
+        # on macOS, LOCALAPPDATA on Windows — asked of the rule itself, not written out again
+        root = _config.user_data(os.environ, Path.home(), sys.platform == "win32", sys.platform == "darwin") / "global"
         assert _stores.is_store(root) and "sharing: personal" in out.output
         assert _stores.policy(root) == _stores.Policy(sharing="personal", push="auto")
         assert sh("git", "log", "--oneline", "-1", cwd=root)                       # committed as it was made

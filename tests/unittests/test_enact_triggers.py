@@ -15,13 +15,15 @@ import json
 import os
 import subprocess
 import sys
+import sysconfig
 from pathlib import Path
 
 import pytest
 
 from _pygim._mcp import _triggers
 
-OO = Path(sys.executable).parent / "oo"
+# The installed command, where pip put it for this interpreter: bin/oo, or Scripts\oo.exe on Windows.
+OO = Path(sysconfig.get_path("scripts")) / ("oo.exe" if os.name == "nt" else "oo")
 
 TRIGGERS = """\
 # a comment, and a blank line, both ignored

@@ -1,3 +1,4 @@
+import os
 import pytest
 import tempfile
 import pathlib
@@ -14,6 +15,12 @@ def temp_dir():
 
     assert __tdir.exists(), "DO NOT DELETE TEMP DIR!"
 
+    # Windows cannot delete the working directory, and a test's monkeypatch.chdir into this folder is
+    # undone only after this teardown: the autouse fixture below asks for monkeypatch first, so it
+    # outlives this one (every TestCleanUp teardown, first CI run on Windows, 2026-09-28).
+    here, gone = pathlib.Path.cwd().resolve(), __tdir.resolve()
+    if here == gone or gone in here.parents:
+        os.chdir(gone.parent)
     tdir.cleanup()
 
 

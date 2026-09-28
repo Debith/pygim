@@ -13,6 +13,7 @@ import json
 import os
 import subprocess
 import sys
+import sysconfig
 from pathlib import Path
 
 import click
@@ -21,7 +22,8 @@ import pytest
 from _pygim._mcp import _cards, _stale
 from _pygim._mcp._stale import Doubt, Resolvers
 
-OO = Path(sys.executable).parent / "oo"
+# The installed command, where pip put it for this interpreter: bin/oo, or Scripts\oo.exe on Windows.
+OO = Path(sysconfig.get_path("scripts")) / ("oo.exe" if os.name == "nt" else "oo")
 
 
 @click.group()
