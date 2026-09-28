@@ -241,6 +241,18 @@ class TestTheCommandAHumanRuns:
         assert done.returncode == 0
 
 
+def test_the_standard_library_is_known_on_a_python_that_does_not_list_it(tmp_path, monkeypatch):
+    """`sys.stdlib_module_names` arrived in Python 3.10. On 3.9 the inventory crashed on it before it
+    looked at anything, so `oo inventory`, the project map and `status --stale` all lost what it says
+    (every 3.9 job of the first CI run of core/memory, 2026-09-28)."""
+    (tmp_path / "run.py").write_text("import json\nimport os.path\nimport collections.abc\n", encoding="utf-8")
+    monkeypatch.delattr(sys, "stdlib_module_names", raising=False)
+    found = _inventory.from_machine(tmp_path)
+    assert {"json", "os", "collections"} <= set(found.standard) and not found.unresolved
+
+
+@pytest.mark.skipif(not (Path(__file__).resolve().parents[2] / "src").is_dir(),
+                    reason="source tree not present (testing the installed package)")
 def test_the_check_over_this_project_finds_a_plausible_number_of_files():
     """A rule checked over nothing passes for the wrong reason, and this walk goes through the
     library it is testing: a PathSet that returned nothing would leave every band empty and the
@@ -267,8 +279,35 @@ class TestWhereItRuns:
         (prefix / "bin" / "oo").write_text("", encoding="utf-8")
         if points_at is not None:
             (site / f"{dist}.dist-info" / "direct_url.json").write_text(json.dumps(
-                {"url": f"file://{points_at}", "dir_info": {"editable": editable}}), encoding="utf-8")
+                {"url": points_at.as_uri(), "dir_info": {"editable": editable}}), encoding="utf-8")
         return prefix
+
+    def windows_env(self, home, name, *, points_at, dist="proj-1.0"):
+        """A conda environment as Windows lays it out: Lib\\site-packages, python.exe at the root,
+        commands in Scripts\\ and the Python version only in conda-meta."""
+        prefix = home / "miniconda3" / "envs" / name
+        site = prefix / "Lib" / "site-packages"
+        (site / f"{dist}.dist-info").mkdir(parents=True)
+        (prefix / "python.exe").write_text("", encoding="utf-8")
+        (prefix / "Scripts").mkdir()
+        (prefix / "Scripts" / "oo.exe").write_text("", encoding="utf-8")
+        (prefix / "conda-meta").mkdir()
+        (prefix / "conda-meta" / "python-3.12.4-h2628c8c_0_cpython.json").write_text("{}", encoding="utf-8")
+        (site / f"{dist}.dist-info" / "direct_url.json").write_text(json.dumps(
+            {"url": points_at.as_uri(), "dir_info": {"editable": True}}), encoding="utf-8")
+        return prefix
+
+    def test_an_environment_laid_out_the_windows_way_is_found(self, tmp_path):
+        """The first CI run on Windows found no environment at all: the search knew only
+        lib/python*/site-packages, bin/python and bin/<command> (2026-09-28)."""
+        home, project = tmp_path / "home", tmp_path / "proj"
+        project.mkdir()
+        prefix = self.windows_env(home, "work", points_at=project)
+        hosts = _inventory.environments(project, home)
+        assert [(h.name, h.python, h.installs) for h in hosts] == [("work", "3.12", ("proj 1.0",))]
+        assert hosts[0].tool("oo") == prefix / "Scripts" / "oo.exe"
+        assert hosts[0].tool("python") == prefix / "python.exe"
+        assert "use ~/miniconda3/envs/work/python.exe" in _inventory.project_map(project, home=home)
 
     def test_the_environment_holding_an_editable_install_of_the_project_is_found_once(self, tmp_path):
         home, project = tmp_path / "home", tmp_path / "proj"
@@ -304,7 +343,7 @@ class TestWhereItRuns:
         prefix = self.conda_env(home, "work", points_at=project, dist="proj-2.0")
         old = prefix / "lib" / "python3.12" / "site-packages" / "old_name-1.0.dist-info"
         old.mkdir()
-        (old / "direct_url.json").write_text(json.dumps({"url": f"file://{project}", "dir_info": {"editable": True}}),
+        (old / "direct_url.json").write_text(json.dumps({"url": project.as_uri(), "dir_info": {"editable": True}}),
                                              encoding="utf-8")
         assert "2 installs of one checkout" in _inventory.project_map(project, home=home)
 
@@ -319,7 +358,7 @@ class TestWhereItRuns:
                                                            encoding="utf-8")
         old = site / "old_name-1.0.dist-info"
         old.mkdir()
-        (old / "direct_url.json").write_text(json.dumps({"url": f"file://{project}", "dir_info": {"editable": True}}),
+        (old / "direct_url.json").write_text(json.dumps({"url": project.as_uri(), "dir_info": {"editable": True}}),
                                              encoding="utf-8")
         (old / "RECORD").write_text("../../../bin/oo,sha256=b,1\nold_name/__init__.py,,\n", encoding="utf-8")
         shown = _inventory.project_map(project, home=home)

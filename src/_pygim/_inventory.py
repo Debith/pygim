@@ -359,7 +359,6 @@ def declared_in(root: Path) -> List[str]:
 
 def from_machine(root: Path, distributions=None, stdlib: Optional[Collection[str]] = None) -> Inventory:
     """`survey` against a real directory and a real environment. Called where a command is wired."""
-    import sys
     from importlib import metadata
 
     files = python_files(root)
@@ -368,8 +367,35 @@ def from_machine(root: Path, distributions=None, stdlib: Optional[Collection[str
     return survey(imports=imports_in(files, ships), ships=ships, local=local_in(files),
                   available=installed(dists), declared=declared_in(root),
                   installed=installed_names(dists), commands=commands_of(dists),
-                  stdlib=sys.stdlib_module_names if stdlib is None else stdlib,
+                  stdlib=standard_library() if stdlib is None else stdlib,
                   root=root, files=len(files))
+
+
+def standard_library() -> Collection[str]:
+    """The top-level names the running Python's standard library provides. From Python 3.10 it lists
+    them (`sys.stdlib_module_names`); before that they are read off the library's own folders — its
+    modules and packages, its compiled extensions (lib-dynload, or DLLs on Windows), and the modules
+    built into the interpreter. Part of what `from_machine` looks at, so called only from there."""
+    import os
+    import sys
+    import sysconfig
+    from pygim.pathlike import path
+
+    listed = getattr(sys, "stdlib_module_names", None)
+    if listed is not None:
+        return frozenset(listed)
+    names = set(sys.builtin_module_names)
+    lib = {sysconfig.get_paths()["stdlib"], sysconfig.get_paths()["platstdlib"]}
+    for folder in lib | {os.path.join(f, "lib-dynload") for f in lib} | {os.path.join(sys.base_prefix, "DLLs")}:
+        if not os.path.isdir(folder):
+            continue
+        for entry in path(folder).iterdir():
+            name = os.path.basename(str(entry))
+            head = name.split(".", 1)[0]
+            module = name.endswith((".py", ".so", ".pyd")) or os.path.isfile(os.path.join(folder, name, "__init__.py"))
+            if module and head.isidentifier() and name != "site-packages":
+                names.add(head)
+    return frozenset(names)
 
 
 TEXT = (".py", ".pyi", ".h", ".hpp", ".cpp", ".c", ".md", ".rst", ".toml", ".yaml", ".yml", ".json",
@@ -406,6 +432,9 @@ def text_files(root: Path) -> List[Tuple[str, str]]:
 
 CONDA_ROOTS = ("miniconda3", "anaconda3", "miniforge3", "mambaforge", ".conda")
 LOCAL_ENVS = (".venv", "venv", "env")
+# Where an environment keeps what is installed in it: lib/python3.12/site-packages on POSIX,
+# Lib\site-packages on Windows.
+SITE_PACKAGES = ("lib/python*/site-packages", "Lib/site-packages")
 
 
 @dataclass(frozen=True)
@@ -421,9 +450,14 @@ class Host:
     shared: Tuple[str, ...] = ()   # files two installs of the checkout both own — removing either removes them
 
     def tool(self, name: str) -> Optional[Path]:
-        """A command installed in this environment, by path — a session's shell does not activate it."""
-        found = self.prefix / "bin" / name
-        return found if found.exists() else None
+        """A command installed in this environment, by path — a session's shell does not activate it.
+        POSIX environments keep commands in bin/; Windows ones in Scripts\\, as .exe, with a conda
+        environment's python.exe at its root."""
+        for found in (self.prefix / "bin" / name, self.prefix / "Scripts" / f"{name}.exe",
+                      self.prefix / "Scripts" / name, self.prefix / f"{name}.exe"):
+            if found.exists():
+                return found
+        return None
 
 
 def _dist(folder: str) -> str:
@@ -444,7 +478,8 @@ def environments(root: Path, home: Path) -> List[Host]:
     developed with `pip install -e`, not only this one. *home* is the one the program was given."""
     import json
     import os
-    from urllib.parse import unquote, urlparse
+    from urllib.parse import urlparse
+    from urllib.request import url2pathname
     from pygim.pathlike import path
 
     root = Path(root).resolve()
@@ -465,7 +500,9 @@ def environments(root: Path, home: Path) -> List[Host]:
     hosts: List[Host] = []
     for prefix, kind, name in candidates:
         seen, installs, owned = set(), [], []
-        for record in path(str(prefix)).glob("lib/python*/site-packages/*.dist-info/direct_url.json"):
+        records = [record for layout in SITE_PACKAGES
+                   for record in path(str(prefix)).glob(layout + "/*.dist-info/direct_url.json")]
+        for record in records:
             real = os.path.realpath(str(record))
             if real in seen:                      # lib/python3.1 may be a link to lib/python3.12
                 continue
@@ -474,9 +511,9 @@ def environments(root: Path, home: Path) -> List[Host]:
                 data = json.loads(Path(real).read_text(encoding="utf-8"))
             except (OSError, ValueError):
                 continue
-            url = urlparse(data.get("url", ""))
+            url = urlparse(data.get("url", ""))          # pip writes file:///C:/… on Windows
             if url.scheme == "file" and (data.get("dir_info") or {}).get("editable") \
-                    and Path(unquote(url.path)).resolve() == root:
+                    and Path(url2pathname(url.path)).resolve() == root:
                 installs.append(_dist(Path(real).parent.name))
                 record = Path(real).parent / "RECORD"
                 owned.append({line.split(",", 1)[0] for line in record.read_text(encoding="utf-8").splitlines()
@@ -484,21 +521,46 @@ def environments(root: Path, home: Path) -> List[Host]:
         inside = kind == "venv"
         if not (installs or inside or (named and name == named)):
             continue
-        python = os.path.basename(os.path.realpath(str(prefix / "bin" / "python")))
         how = ("installed editable as " + " and ".join(sorted(installs)) if installs else
                "a virtual environment inside the project" if inside else "environment.yml names it")
         # Two installs of one checkout usually both own its console scripts. On 2026-09-23 the older one
         # was uninstalled as stale, took `bin/oo` and `bin/pygim` with it, and every hook and server
         # start failed until they were restored — the files both claim are what makes a duplicate matter.
         shared = sorted(set.intersection(*owned)) if len(owned) > 1 else []
-        hosts.append(Host(prefix, kind, name, python.removeprefix("python") if python.startswith("python3") else "",
+        hosts.append(Host(prefix, kind, name, _python_version(prefix),
                           how, tuple(sorted(installs)), tuple(Path(s).name for s in shared)))
     return hosts
 
 
-def _where(host: Host, home: Path) -> str:
-    text = str(host.prefix)
-    return "~" + text[len(str(home)):] if text.startswith(str(home)) else text
+def _python_version(prefix: Path) -> str:
+    """"3.12", read off what the environment keeps — its python link on POSIX, else its pyvenv.cfg,
+    else conda-meta's record of the python package, which is all a Windows conda environment has;
+    "" when none of them says."""
+    import os
+    from pygim.pathlike import path
+
+    linked = os.path.basename(os.path.realpath(str(prefix / "bin" / "python")))
+    if linked.startswith("python3"):
+        return linked[len("python"):]
+    config = prefix / "pyvenv.cfg"
+    if config.is_file():
+        for line in config.read_text(encoding="utf-8", errors="replace").splitlines():
+            key, _, value = line.partition("=")
+            if key.strip() in ("version", "version_info"):
+                return ".".join(value.strip().split(".")[:2])
+    if (prefix / "conda-meta").is_dir():
+        for record in path(str(prefix / "conda-meta")).glob("python-3*.json"):
+            return ".".join(os.path.basename(str(record))[len("python-"):].split(".")[:2])
+    return ""
+
+
+def _shown(target: Path, home: Path) -> str:
+    """*target* as a person types it: under *home* as ~/…, and with forward slashes, which every shell
+    a session runs commands in accepts, Windows' included."""
+    try:
+        return "~/" + Path(target).relative_to(home).as_posix()
+    except ValueError:
+        return Path(target).as_posix()
 
 
 LANGUAGES = {".py": "Python", ".pyi": "Python", ".h": "C++", ".hpp": "C++", ".cpp": "C++", ".cc": "C++",
@@ -572,9 +634,10 @@ def project_map(root: Path, *, home: Optional[Path] = None, recent: int = 3) -> 
                 "uninstalling either removes them; reinstall the other after" if host.shared else "") + ")"
                 if len(names) > 1 else "")
         lines.append(f"runs in: {host.kind} `{host.name}`" + (f", Python {host.python}" if host.python else "")
-                     + f", {how}; not active in a session's shell — use {_where(host, home)}/bin/python")
+                     + f", {how}; not active in a session's shell — use "
+                     + _shown(host.tool("python") or host.prefix / "bin" / "python", home))
         if host.tool("oo"):
-            inventory = f"`{_where(host, home)}/bin/oo inventory`"
+            inventory = f"`{_shown(host.tool('oo'), home)} inventory`"
     if home is not None and not hosts:
         lines.append("runs in: not found — no environment on this machine installs it editable, and it has no "
                      "virtual environment or environment.yml of its own; find how it runs before running it")
