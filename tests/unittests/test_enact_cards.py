@@ -151,7 +151,8 @@ class TestTheBudget:
         procs = [(self.card(100 + n, "procedure"), "global") for n in range(8)]
         pref_cards, proc_cards, left_out = _cards.standing(prefs, procs, budget=7_500)
         assert sum(len(c) + 1 for c in pref_cards + proc_cards) <= 7_500
-        assert left_out[:2] == ["not", "do"]                         # what a `show` restores most cheaply
+        assert left_out[:2] == ["do", "procedure when"]              # what a `show` restores most cheaply,
+        assert left_out[2].startswith("not on ")                     # then the next, only from as many as needed
         assert all("when: " in c and "why: " in c for c in pref_cards)   # the rule, when and why survive
         assert all("asked as: review, analyse" in c for c in proc_cards)  # a procedure keeps its trigger
 
@@ -178,3 +179,46 @@ class TestAReasonIsGivenUpOneCardAtATime:
         assert 0 < len(kept) < 10                                  # some kept, some given up
         assert "why: " not in cards[9] and "why: " in cards[0]     # the longest went first
         assert left_out[-1] == f"why on {10 - len(kept)} of 10 preferences"
+
+
+class TestTheCardsFillTheRoomTheyAreGiven:
+    """Only `why` was given up one card at a time; every other field went from every card at once,
+    so a budget a few characters short of a level fell the whole level. On 2026-09-26 pygim's
+    session start came out 44 characters over its cards' `when` level and arrived as bare titles,
+    3,551 of its 8,900 characters unused. Swept over every budget, what is left unused must never
+    be more than one card."""
+
+    @staticmethod
+    def cards():
+        """Eighteen preferences and thirteen procedures, sized like pygim's own on that day."""
+        def preference(n):
+            return {"memory": f"#{n}", "title": f"Rule {n}, stated as the rule itself " + "r" * (30 + n * 7 % 40),
+                    "text": _cards.compose({"when": "w" * (120 + n * 37 % 80), "not": "n" * (100 + n * 23 % 80),
+                                            "do": "d" * (150 + n * 41 % 100), "why": "y" * (110 + n * 29 % 80)})}
+
+        def procedure(n):
+            return {"memory": f"#{50 + n}", "title": f"Procedure {n}, named by its task " + "p" * (30 + n * 11 % 40),
+                    "text": _cards.compose({"when": "w" * (100 + n * 13 % 40), "asked": "fix, bug, failing, broken",
+                                            "why": "y" * 90, "steps": ["a step — check: a question?"] * (4 + n % 4)})}
+
+        return ([(preference(n), "global" if n < 9 else "project") for n in range(18)],
+                [(procedure(n), "global" if n < 8 else "project") for n in range(13)])
+
+    def test_no_budget_leaves_more_than_one_card_unused(self):
+        prefs, procs = self.cards()
+
+        def size(cards):
+            return sum(len(c) + 1 for c in cards)
+
+        full = size([_cards.render(m, s, _cards.TIERS[0][0]) for m, s in prefs] +
+                    [_cards.render(m, s, _cards.TIERS[0][1]) for m, s in procs])
+        titles = size([_cards.render(m, s, ()) for m, s in prefs + procs])
+        largest = max(len(_cards.render(m, s)) + 1 for m, s in prefs + procs)
+        wasted = []
+        for budget in range(titles, full, 25):
+            pref_cards, proc_cards, left_out = _cards.standing(prefs, procs, budget)
+            used = size(pref_cards + proc_cards)
+            if used > budget or budget - used > largest:
+                wasted.append(f"budget {budget}: cards {used}, unused {budget - used} ({left_out[-1]})")
+        assert not wasted, f"{len(wasted)} budgets leave more than one card ({largest}) unused, e.g. " + \
+            "; ".join(wasted[:: max(1, len(wasted) // 4)])

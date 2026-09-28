@@ -194,48 +194,55 @@ TIERS = (
 
 
 def standing(preferences: Sequence[tuple], procedures: Sequence[tuple], budget: int) -> tuple:
-    """Every standing card at the fullest tier that fits in *budget* characters, and what that tier
-    leaves out. Each item is (memory, scope).
+    """Every standing card as full as *budget* characters allow, and what that leaves out. Each item
+    is (memory, scope).
 
     Measured on 2026-09-23: 25 cards at full length rendered to 14,457 characters, and with the project
     map the session-start text reached 16,127 — past the point where the host moves a hook's output
     to a file behind a 2 KB preview (somewhere above the 8,906 characters seen arriving inline, and
     at or below the 13,121 seen moved), which is the failure the cards were written to end.
 
-    A preference's `why` is the last thing given up, and it is given up one card at a time — the
-    longest first, only until the text fits — because dropping it from every card at once meant two
-    new procedure cards cost fifteen preferences their reasons."""
-    full = TIERS[0]
+    Fields are given up in the order of `TIERS`, and each one card at a time — the longest first, and
+    only until the text fits. Given up from every card at once, a text a few characters over a level
+    fell the whole level: two new procedure cards cost fifteen preferences their reasons (2026-09-23),
+    and 44 characters over the `when` level left every preference a bare title, with 3,551 of the
+    session start's 8,900 characters unused (2026-09-26)."""
+    cards = [(m, s, 0, list(TIERS[0][0])) for m, s in preferences] + \
+            [(m, s, 1, list(TIERS[0][1])) for m, s in procedures]
+    rendered = [render(m, s, kept) for m, s, _, kept in cards]
+    total = sum(len(c) + 1 for c in rendered)
+    for level in range(1, len(TIERS)):
+        if total <= budget:
+            break
+        losing = sorted(((-len(parse(str(m.get("text") or "")).get(name)), i, name)
+                         for i, (m, _, group, _) in enumerate(cards)
+                         for name in TIERS[level - 1][group] if name not in TIERS[level][group]))
+        for _, i, name in losing:
+            m, s, _, kept = cards[i]
+            kept.remove(name)
+            card = render(m, s, kept)
+            total += len(card) - len(rendered[i])
+            rendered[i] = card
+            if total <= budget:
+                break
+    return rendered[:len(preferences)], rendered[len(preferences):], _left_out(cards)
 
-    def fits(parts):
-        return sum(len(x) + 1 for part in parts for x in part) <= budget
 
-    def dropped(pref_fields, proc_fields):
-        return [f for f in full[0] if f not in pref_fields] + [f"procedure {f}" for f in full[1] if f not in proc_fields]
-
-    for pref_fields, proc_fields in TIERS[:2]:
-        rendered = ([render(m, s, pref_fields) for m, s in preferences],
-                    [render(m, s, proc_fields) for m, s in procedures])
-        if fits(rendered):
-            return rendered[0], rendered[1], dropped(pref_fields, proc_fields)
-
-    with_why, without_why = TIERS[2][0], TIERS[3][0]
-    procs = [render(m, s, TIERS[2][1]) for m, s in procedures]
-    cards = [render(m, s, with_why) for m, s in preferences]
-    longest_first = sorted(range(len(preferences)), key=lambda i: -len(parse(str(preferences[i][0].get("text") or "")).why))
-    cut = 0
-    while not fits((cards, procs)) and cut < len(longest_first):
-        i = longest_first[cut]
-        cards[i] = render(preferences[i][0], preferences[i][1], without_why)
-        cut += 1
-    if fits((cards, procs)):
-        left = dropped(with_why, TIERS[2][1])
-        if cut:
-            left.append(f"why on {cut} of {len(preferences)} preferences")
-        return cards, procs, left
-    rendered = ([render(m, s, ()) for m, s in preferences], [render(m, s, ()) for m, s in procedures])
-    return rendered[0], rendered[1], ["everything but the titles"]
-
+def _left_out(cards: Sequence[tuple]) -> List[str]:
+    """What the cards gave up: a field every card of its kind lost, by name, in the card's order;
+    then one only some lost, with how many."""
+    if all(not kept for *_, kept in cards):
+        return ["everything but the titles"] if cards else []
+    whole, some = [], []
+    for group, prefix, plural in ((0, "", "preferences"), (1, "procedure ", "procedures")):
+        of_kind = [kept for _, _, g, kept in cards if g == group]
+        for name in TIERS[0][group]:
+            lost = sum(1 for kept in of_kind if name not in kept)
+            if lost and lost == len(of_kind):
+                whole.append(prefix + name)
+            elif lost:
+                some.append(f"{prefix}{name} on {lost} of {len(of_kind)} {plural}")
+    return whole + some
 
 def asked_for(card: Card, prompt: str) -> int:
     """How many of a procedure's request words *prompt* uses — as whole words, with the usual

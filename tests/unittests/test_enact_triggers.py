@@ -254,6 +254,79 @@ class TestTheSessionStartsWithTheProject:
         assert context.index("</project-map>") < context.index("Lay options out as a table")
 
 
+class TestTheSessionStartFillsItsRoom:
+    """2026-09-26: pygim's session start arrived with every preference as a bare title. Its cards at
+    the `when` level, with the project map and four mailbox messages, came to 8,944 characters — 44
+    over the limit — and the level below that was titles only, so 3,551 of the 8,900 characters went
+    unused. The map and the messages are never cut; the cards take whatever room they leave."""
+
+    TAGS = ["domain=proj", "artifact=any", "task=design"]
+
+    @pytest.fixture
+    def checkout(self, project, env):
+        subprocess.run(["git", "init", "-q"], cwd=project, env=env, check=True)
+        (project / "README.md").write_text("# Proj\n\nA project that does one thing.\n", encoding="utf-8")
+        subprocess.run(["git", "add", "-A"], cwd=project, env=env, check=True)
+        return project
+
+    def fill(self, project, preferences, procedures=0, title=""):
+        """Cards sized like pygim's own on that day: never all fit in full, and at the `when` level
+        about 6,900 characters, so enough waiting messages push them past it."""
+        from _pygim._mcp import _cards
+        from pygim.enact import Enact
+
+        store, seen, largest = Enact(str(project / ".enact")), ["#0"], 0
+        for n in range(preferences + procedures):
+            fields = {"when": "w" * (180 + n * 37 % 80), "why": "y" * (110 + n * 29 % 80)}
+            if n < preferences:
+                fields.update({"not": "n" * (100 + n * 23 % 80), "do": "d" * (150 + n * 41 % 100)})
+            else:
+                fields.update({"asked": "fix, bug, failing", "steps": ["a step — check: a question?"] * (4 + n % 4)})
+            made = store.remember(title=title or f"Rule {n}, stated as the rule itself " + "r" * (30 + n * 7 % 40),
+                                  text=_cards.compose(fields), seen=seen,
+                                  tags=self.TAGS + [f"kind={'preference' if n < preferences else 'procedure'}"])
+            seen.append(made["memory"])
+            largest = max(largest, len(_cards.render({"memory": made["memory"], "title": title or "t" * 70,
+                                                      "text": _cards.compose(fields)})) + 1)
+        return store, largest
+
+    def start(self, project, env):
+        said = hook({"hook_event_name": "SessionStart", "source": "startup", "cwd": str(project)}, project, env)
+        return said["hookSpecificOutput"]["additionalContext"]
+
+    def test_the_cards_take_the_room_the_map_and_the_messages_leave(self, checkout, env):
+        from _pygim._mcp.enact import SESSION_START_LIMIT
+
+        store, largest = self.fill(checkout, preferences=18, procedures=13)
+        wasted, texts = [], []
+        for waiting in range(11):
+            if waiting:
+                store.post(f"Message {waiting}: " + "m" * 140, kind="comment", author="agent")
+            text = self.start(checkout, env)
+            texts.append(text)
+            if not SESSION_START_LIMIT - largest <= len(text) <= SESSION_START_LIMIT:
+                cut = next((line for line in text.splitlines() if line.startswith("To fit")), "nothing cut")
+                wasted.append(f"{waiting} messages: {len(text)} characters — {cut[:80]}")
+        assert not wasted, (f"the text should land within one card ({largest}) of {SESSION_START_LIMIT}: "
+                            + "; ".join(wasted))
+        assert texts[0].count("when: ") == 18 > texts[-1].count("when: ")   # the messages pushed past `when`
+
+    @pytest.mark.xfail(strict=True, reason="titles alone over the limit all still arrive, so the text breaks it; "
+                                           "which titles to leave out is the owner's decision (2026-09-26)")
+    def test_the_limit_holds_however_much_there_is_to_say(self, checkout, env):
+        """Ninety titles of a hundred characters are more than the limit on their own."""
+        from _pygim._mcp.enact import SESSION_START_LIMIT
+
+        store, _ = self.fill(checkout, preferences=90, title="A preference whose title is long " + "t" * 66)
+        for n in range(10):
+            store.post(f"Message {n}: " + "m" * 140, kind="comment", author="agent")
+        text = self.start(checkout, env)
+        assert len(text) <= SESSION_START_LIMIT
+        assert text.startswith(f'<project-map root="{checkout}">') and "</project-map>" in text   # the map whole
+        assert text.count("Message ") == 10                                                    # every message
+        assert "To fit, the cards below leave out" in text                                     # and it says so
+
+
 def test_a_finished_background_task_is_not_a_request(project, env):
     """A host submits a finished background task as a prompt. "…analysis session completed" brought
     the review procedure, twice, to a session that was running reviews rather than doing one."""
