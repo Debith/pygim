@@ -291,11 +291,14 @@ def docs():
                    "site/, docs/, build/html/, docs/_build/html/ that has one).")
 @click.option("--rebuild", default=None,
               help="A shell command run in the served directory before serving; a non-zero exit aborts.")
-def docs_serve(port, directory, host, index, rebuild):
+@click.option("--reload/--no-reload", default=True, show_default=True,
+              help="Restart when the server's own code changes; open pages reload with it.")
+def docs_serve(port, directory, host, index, rebuild, reload):
     """Serve a docs directory with the review layer: every HTML page gets the
     commenter (comments land in __notes__/site-comments.jsonl under the served
     root) and images dropped on a page are written under images/."""
-    GimmicksCliApp().docs_serve(port=port, directory=directory, host=host, index=index, rebuild=rebuild)
+    GimmicksCliApp().docs_serve(port=port, directory=directory, host=host, index=index, rebuild=rebuild,
+                                reload=reload)
 
 
 if __name__ == "__main__":

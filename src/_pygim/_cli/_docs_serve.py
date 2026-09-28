@@ -20,6 +20,15 @@ Serves a directory of HTML/CSS/JS and adds two things a plain
   carries a marker; a hand-written ``x.html`` is a page in its own right and is
   never overwritten. ``README.md`` / ``index.md`` stand in for a missing
   ``index.html``.
+* **What changed since you read it.** Every page shows when it last changed — the file's
+  time, and what git says: not committed, or the last commit. A page made from Markdown can
+  be marked read (``POST /read``): its Markdown is kept, as it was, in
+  ``<root>/__notes__/read/<its path>.json``, and ``GET /read-state?page=<path>`` then lists
+  the blocks added and changed since — a changed one with what it said before — and the
+  blocks removed. A generated page tags each top-level block with ``data-block="<n>-<digest>"``
+  so the page can highlight them. A folder's listing marks each file that changed since it was
+  marked read, or that git has not committed, and gives each folder the count of such files
+  anywhere below it.
 * **Image drops.** Dropping an image on a page POSTs it to
   ``/upload?path=images/<sub>/<file>`` and it is written straight into
   ``<root>/images/<sub>/<file>`` — no Downloads round-trip. Uploads land only
@@ -42,8 +51,12 @@ served root. Don't expose it to an untrusted network.
 from __future__ import annotations
 
 import datetime
+import difflib
 import errno
+import functools
+import hashlib
 import http.server
+import io
 import json
 import html
 import os
@@ -57,7 +70,8 @@ import pygim
 from pygim.pathlike import PathStore
 from _pygim._cli import _commenter
 
-__all__ = ["ServeError", "make_server", "materialize_markdown", "rebuild", "render_markdown", "serve", "site_pages"]
+__all__ = ["ServeError", "Watch", "blocks_of", "history_of", "make_server", "materialize_markdown", "read_state",
+           "rebuild", "render_markdown", "serve", "site_pages"]
 
 SEG_RE = re.compile(r"^[a-z0-9][a-z0-9 ._-]*$", re.IGNORECASE)  # one path segment, no traversal (spaces ok)
 EXT_OK = (".jpg", ".jpeg", ".png", ".webp", ".gif")
@@ -66,6 +80,11 @@ MAX_COMMENT = 64 * 1024  # 64 KB per comment payload
 
 # Site annotations land here (relative to the served root): one JSON object per line.
 COMMENTS_REL = "__notes__/site-comments.jsonl"
+# A page's Markdown as it was when its reader marked it read: ``<READ_REL>/<page's path>.json``.
+READ_REL = "__notes__/read"
+# How alike an old and a new block must be (difflib's ratio) to be one block changed rather than
+# one removed and another added.
+SAME_BLOCK = 0.5
 
 # Where ``/`` goes when the served root has no ``index.html`` of its own: the
 # first of these that exists (common generated-docs layouts).
@@ -96,8 +115,15 @@ blockquote{border-left:3px solid #b06e14;margin:1rem 0;padding:.2rem 1rem;color:
 code.term,abbr.term{border-bottom:1px dotted #8a9299;cursor:help}
 th.term{border-bottom:1px dotted #8a9299;cursor:help}
 a.xref{color:inherit;text-decoration:none;border-bottom:1px dotted #8a9299;cursor:help}
+.rd-meta{min-height:1.45em;margin:-.3rem 0 1.2rem;color:#5f6a72;font-size:.85rem;line-height:1.45;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 </style>"""
-GENERATED_MARK = "<!-- generated from {src} by oo docs serve; edit the Markdown, not this file -->"
+# Raised whenever the renderer's output changes, so a page an older renderer made is made again
+# rather than kept until its Markdown next changes.
+RENDERER = "renderer 3"
+# Under a generated page's title: when the page changed, and the way to mark it read (``_commenter.READER``).
+META_LINE = '<p id="rd-meta" class="rd-meta"></p>'
+GENERATED_MARK = "<!-- generated from {src} by oo docs serve (" + RENDERER + "); edit the Markdown, not this file -->"
 # A generated page is named for what it is, so it reads as derived in any listing and one
 # glob ignores the lot. A hand-written ``x.html`` keeps its plain name and is never touched.
 GENERATED_SUFFIX = ".generated.html"
@@ -106,6 +132,8 @@ MERMAID_SCRIPT = ("<script type=\"module\">import mermaid from "
                   "mermaid.initialize({startOnLoad:true});</script>")
 
 HOST_ENV = "PYGIM_HOST"
+# This run of the server; a page that sees another one at /alive reloads, to get the new code.
+BOOT = os.urandom(8).hex()
 
 # A table whose first heading cell is one of these defines terms: column one is the
 # term, column two its meaning. Writing such a table is all a page does to get hover
@@ -304,29 +332,120 @@ def _annotate(body: str, site, page: str | None) -> str:
     return "".join(out)
 
 
+_FENCE_OPEN_RE = re.compile(r"^(`{3,}|~{3,})")
+_LIST_ITEM_RE = re.compile(r"^(?:[-*+]|\d+[.)])\s")
+_BLOCK_MARK_RE = re.compile(r"<!--b:(\d+-[0-9a-f]{12})-->\s*<([a-zA-Z][a-zA-Z0-9]*)")
+
+
+def _block_spans(text: str) -> list:
+    """*text* (Markdown) as its top-level blocks: ``(first line, block text)`` for each paragraph,
+    heading, list, table or code block a reader sees as one. A fence is one block whatever it
+    holds, and a list stays one block across the blank lines between its items."""
+    lines = text.split("\n")
+    spans, start, current, fence, blank = [], 0, [], None, False
+
+    def close():
+        if current:
+            spans.append((start, "\n".join(line.rstrip() for line in current).strip("\n")))
+        current.clear()
+
+    for number, line in enumerate(lines):
+        if fence:
+            current.append(line)
+            closing = line.strip()
+            if closing.startswith(fence) and not closing.strip(fence[0]):
+                fence = None
+                close()
+            continue
+        if not line.strip():
+            blank = True
+            continue
+        opening = _FENCE_OPEN_RE.match(line)
+        indented = line[:1] in (" ", "\t")
+        listed = bool(current) and _LIST_ITEM_RE.match(current[0]) and _LIST_ITEM_RE.match(line)
+        if current and not opening and (not blank or indented or listed):
+            if blank:
+                current.append("")
+        else:
+            close()
+            start = number
+        current.append(line)
+        blank = False
+        if opening:
+            fence = opening.group(1)
+    close()
+    return spans
+
+
+def blocks_of(text: str) -> list:
+    """*text* (Markdown) as the text of its top-level blocks, in order (see ``_block_spans``)."""
+    return [block for _, block in _block_spans(text)]
+
+
+def _digest(block: str) -> str:
+    return hashlib.sha1(block.encode("utf-8")).hexdigest()[:12]
+
+
+def _tokens(blocks: list) -> list:
+    """What names each block in a page: its place and the digest of its text, ``"<n>-<digest>"``,
+    so a page made from other text never matches a token by accident."""
+    return [f"{n}-{_digest(block)}" for n, block in enumerate(blocks)]
+
+
+def _with_block_marks(text: str) -> str:
+    """*text* with an HTML comment naming each top-level block in front of it, on lines of its
+    own, for the renderer to turn into a ``data-block`` attribute on the block's element."""
+    spans = _block_spans(text)
+    lines = text.split("\n")
+    for (first, _), token in reversed(list(zip(spans, _tokens([block for _, block in spans])))):
+        lines[first:first] = ["", f"<!--b:{token}-->", ""]
+    return "\n".join(lines)
+
+
+@functools.lru_cache(maxsize=4096)
+def _render_fragment(text: str) -> str:
+    """A few blocks of Markdown as HTML, for showing what a page said before; a block rendered once
+    is not rendered again on the next click."""
+    try:
+        import markdown
+    except ImportError:
+        return f"<pre>{html.escape(text)}</pre>"
+    return markdown.markdown(text, extensions=["fenced_code", "tables"])
+
+
 def render_markdown(text: str, title: str, *, site=None, page: str | None = None) -> str | None:
     """*text* (Markdown) as a complete HTML page, or None when the ``markdown``
     package is not installed (the file is then served as it is). Fenced
     ``mermaid`` blocks become ``<pre class="mermaid">`` with the Mermaid
     script, so diagrams render in the browser. Given a *site* index, a code span or
-    table header naming one of its terms and a section reference all gain hover text."""
+    table header naming one of its terms and a section reference all gain hover text.
+    Each top-level block's element carries ``data-block="<n>-<digest>"``."""
     try:
         import markdown
     except ImportError:
         return None
 
-    body = markdown.markdown(text, extensions=["fenced_code", "tables", "toc"])
+    body = markdown.markdown(_with_block_marks(text), extensions=["fenced_code", "tables", "toc"])
     body = _annotate(body, site, page)
     # relative links to Markdown point at the pages generated for them
     body = re.sub(r'(href=")(?![a-z][a-z0-9+.-]*:|/|#)([^"#]+)\.md(#[^"]*)?"',
                   lambda m: f'{m.group(1)}{m.group(2)}{GENERATED_SUFFIX}{m.group(3) or ""}"', body)
     mermaid = ""
     if 'class="language-mermaid"' in body:
+        # The block stays escaped: Mermaid decodes the entities of `innerHTML` itself, and an
+        # unescaped `<<strategy>>` would be parsed by the browser as an element first.
         body = re.sub(
             r'<pre><code class="language-mermaid">(.*?)</code></pre>',
-            lambda m: '<pre class="mermaid">' + html.unescape(m.group(1)) + "</pre>",
+            lambda m: '<pre class="mermaid">' + m.group(1) + "</pre>",
             body, flags=re.S)
         mermaid = MERMAID_SCRIPT
+    body = _BLOCK_MARK_RE.sub(lambda m: f'<{m.group(2)} data-block="{m.group(1)}"', body)
+    body = re.sub(r"<!--b:[^>]*-->\s*", "", body)     # a block that rendered to nothing, such as a link definition
+    # the line the review layer writes when the page changed into: under the title, there from the start
+    if "</h1>" in body:
+        body = body.replace("</h1>", "</h1>\n" + META_LINE, 1)
+    else:
+        body = META_LINE + "\n" + body
     return (f"<!doctype html><html><head><meta charset=\"utf-8\"><title>{html.escape(title)}</title>"
             f"{MARKDOWN_STYLE}</head><body>{body}{mermaid}</body></html>")
 
@@ -368,8 +487,8 @@ def materialize_markdown(md, *, site=None):
             head = ""
         if "generated from" not in head or "oo docs serve" not in head:
             return out                                   # not ours: never overwritten
-        if os.path.getmtime(os.fspath(out)) >= os.path.getmtime(os.fspath(md)):
-            return out                                   # fresh
+        if RENDERER in head and os.path.getmtime(os.fspath(out)) >= os.path.getmtime(os.fspath(md)):
+            return out                                   # fresh, and made by this renderer
     page = site.pages.get(os.fspath(md)) if site is not None else None
     rendered = render_markdown(md.read_bytes().decode("utf-8"), md.stem, site=site, page=page)
     if rendered is None:
@@ -391,6 +510,321 @@ def _page_key(root, page: str | None):
     if page is None:
         return None
     return root / page.lstrip("/")
+
+
+def history_of(path) -> dict:
+    """When *path* last changed on disk, and what git says of it: its last commit (short id and
+    time) and whether the file differs from it — an untracked or ignored file counts as not
+    committed. The git fields are None outside a checkout, or where git cannot be run."""
+    import subprocess
+
+    changed = datetime.datetime.fromtimestamp(os.path.getmtime(os.fspath(path))).astimezone()
+    out = {"changed": changed.isoformat(timespec="seconds"), "commit": None, "committed": None,
+           "uncommitted": None}
+
+    def git(*args):
+        return subprocess.run(["git", "-C", os.fspath(path.parent), *args, "--", path.name],
+                              capture_output=True, text=True, timeout=5, check=False)
+
+    try:
+        status = git("status", "--porcelain", "--ignored")
+        if status.returncode != 0:
+            return out                                   # not a checkout
+        log = git("log", "-1", "--format=%h%x09%cI")
+    except (OSError, subprocess.TimeoutExpired):
+        return out
+    out["uncommitted"] = bool(status.stdout.strip())
+    if log.returncode == 0 and log.stdout.strip():
+        out["commit"], out["committed"] = log.stdout.strip().split("\t", 1)
+    return out
+
+
+def _source_of(root, page: str | None):
+    """What the served *page* is made from — the Markdown behind a generated page, or the page
+    itself — or None when *page* names nothing under *root* that is a page."""
+    if not page:
+        return None
+    target = (root / page.lstrip("/")).resolve()
+    if root not in target.parents or not target.is_file():
+        return None
+    if target.name.endswith(GENERATED_SUFFIX):
+        md = target.parent / (target.name[: -len(GENERATED_SUFFIX)] + ".md")
+        return md if md.is_file() else None
+    return target if target.suffix.lower() in PAGE_SUFFIXES else None
+
+
+def _read_mark(root, source):
+    """Where *source*'s Markdown is kept as it was when its reader marked it read."""
+    return root / READ_REL / (_relative(root, source).lstrip("/") + ".json")
+
+
+# Each exact likeness computed, by the digests of its two blocks. A page's load, each click that marks
+# one change read and the state that click answers with all compare the same pairs of blocks again,
+# and one pair of long blocks costs a tenth of a second or more (Debith, 2026-09-27: "Marking
+# something read takes several seconds").
+_LIKENESS: dict = {}
+LIKENESS_KEPT = 100_000
+
+
+def _likeness(pair, old: str, new: str, score: float):
+    """How alike *old* and *new* are — difflib's ratio — when it could reach ``SAME_BLOCK`` and beat
+    *score*, else None. *pair* is a SequenceMatcher already holding *new* as its second sequence.
+    The cheap upper bounds decide first, so an exact ratio is computed only where it could win, and
+    once per pair of blocks."""
+    key = (_digest(old), _digest(new))
+    ratio = _LIKENESS.get(key)
+    if ratio is not None:
+        return ratio if ratio >= SAME_BLOCK else None
+    pair.set_seq1(old)
+    for bound in (pair.real_quick_ratio, pair.quick_ratio):
+        upper = bound()
+        if upper < SAME_BLOCK or upper <= score:
+            return None
+    ratio = pair.ratio()
+    if len(_LIKENESS) >= LIKENESS_KEPT:
+        _LIKENESS.pop(next(iter(_LIKENESS)))
+    _LIKENESS[key] = ratio
+    return ratio if ratio >= SAME_BLOCK else None
+
+
+def _alignment(before: list, now: list) -> list:
+    """*before* and *now* (lists of blocks) paired in document order: ``(kind, i, j)`` with kind
+    ``same``, ``changed`` (old block i became new block j), ``added`` (i None) or ``removed``
+    (j None). A replaced range can hold a reworded block beside a deleted one, so each new block
+    in it is paired with the old block most like it, in order; what pairs with nothing is added or
+    removed."""
+    out = []
+    matcher = difflib.SequenceMatcher(None, [_digest(b) for b in before], [_digest(b) for b in now], autojunk=False)
+    for op, i1, i2, j1, j2 in matcher.get_opcodes():
+        if op == "equal":
+            out += [("same", i1 + k, j1 + k) for k in range(i2 - i1)]
+        elif op == "insert":
+            out += [("added", None, j) for j in range(j1, j2)]
+        elif op == "delete":
+            out += [("removed", i, None) for i in range(i1, i2)]
+        else:
+            last = i1 - 1
+            for j in range(j1, j2):
+                best, score = None, 0.0
+                pair = difflib.SequenceMatcher(None, autojunk=False)
+                pair.set_seq2(now[j])
+                for i in range(last + 1, i2):
+                    ratio = _likeness(pair, before[i], now[j], score)
+                    if ratio is not None and ratio > score:
+                        best, score = i, ratio
+                if best is None:
+                    out.append(("added", None, j))
+                    continue
+                out += [("removed", i, None) for i in range(last + 1, best)]
+                out.append(("changed", best, j))
+                last = best
+            out += [("removed", i, None) for i in range(last + 1, i2)]
+    return out
+
+
+def _changes(before_text: str, now_text: str) -> dict:
+    """What *now_text* adds, changes and removes against *before_text*, block by block: added and
+    changed blocks by their token in the page, a changed one with what it said before, and each
+    removed block as it read — both rendered."""
+    before, now = blocks_of(before_text), blocks_of(now_text)
+    tokens = _tokens(now)
+    added, changed, removed, last = [], [], [], None
+    for kind, i, j in _alignment(before, now):
+        if kind == "added":
+            added.append(tokens[j])
+        elif kind == "changed":
+            changed.append({"block": tokens[j], "before": _render_fragment(before[i])})
+        elif kind == "removed":
+            # shown where it stood: after the page's block it followed (None: at the top)
+            removed.append({"block": _removed_token(i, before[i]), "before": _render_fragment(before[i]),
+                            "after": last})
+        if j is not None:
+            last = tokens[j]
+    return {"added": added, "changed": changed, "removed": removed}
+
+
+def _removed_token(i: int, block: str) -> str:
+    """What names a removed block: ``r<its place in the old text>-<digest>``, never a page token."""
+    return f"r{i}-{_digest(block)}"
+
+
+def _read_one(before_text: str, now_text: str, token: str) -> str:
+    """*before_text* with only the change *token* names taken in: the baseline once that one change
+    is read, every other change still new against it. ValueError when *token* names no change."""
+    before, now = blocks_of(before_text), blocks_of(now_text)
+    tokens = _tokens(now)
+    kept, found = [], False
+    for kind, i, j in _alignment(before, now):
+        if kind in ("added", "changed") and tokens[j] == token:
+            kept.append(now[j])
+            found = True
+        elif kind == "removed" and _removed_token(i, before[i]) == token:
+            found = True                                 # read: it is gone from what was read, too
+        elif kind != "added":
+            kept.append(before[i])
+    if not found:
+        raise ValueError(f"{token}: not a change on this page")
+    return "\n\n".join(kept) + "\n"
+
+
+def _committed_text(path):
+    """*path*'s text in the last commit: ``""`` when the last commit does not have it — a page never
+    committed is new all through — and None outside a checkout, or where git cannot be run."""
+    import subprocess
+
+    folder = os.fspath(path.parent)
+    try:
+        inside = subprocess.run(["git", "-C", folder, "rev-parse", "--is-inside-work-tree"],
+                                capture_output=True, timeout=5, check=False)
+        if inside.returncode != 0:
+            return None
+        shown = subprocess.run(["git", "-C", folder, "show", f"HEAD:./{path.name}"],
+                               capture_output=True, timeout=5, check=False)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    return shown.stdout.decode("utf-8", "replace") if shown.returncode == 0 else ""
+
+
+def read_state(root, page: str | None):
+    """What the reader of *page* needs to know: when it last changed, and — for a page made from
+    Markdown — what is new to them. That is what changed since they marked it read
+    (``baseline: "read"``) or, until they first do, what differs from the page's last commit
+    (``baseline: "commit"``, ``marked`` None). ``read`` is None for a page never marked outside a
+    checkout, and False for a page with no Markdown behind it. None when *page* is not a page
+    under *root*."""
+    source = _source_of(root, page)
+    if source is None:
+        return None
+    state = {"page": page, "source": _relative(root, source), "modified": history_of(source)}
+    if source.suffix.lower() != ".md":
+        state["read"] = False
+        return state
+    marked, baseline, text = _baseline(root, source)
+    state["read"] = None if text is None else {"marked": marked, "baseline": baseline,
+                                               **_changes(text, source.read_bytes().decode("utf-8"))}
+    return state
+
+
+def _baseline(root, source):
+    """What *source* is compared with: ``(marked, "read", text)`` from its read mark, else
+    ``(None, "commit", text)`` from its last commit, else ``(None, None, None)``."""
+    mark = _read_mark(root, source)
+    if mark.is_file():
+        kept = mark.read()
+        return kept.get("marked"), "read", kept.get("text", "")
+    committed = _committed_text(source)
+    return (None, "commit", committed) if committed is not None else (None, None, None)
+
+
+def mark_read(root, page: str | None, block: str | None = None):
+    """Keep *page*'s Markdown as it is now, as what its reader has read — or, given *block*, take in
+    only that one change and leave the others new; returns the new state. None when *page* is not a
+    page under *root*; ValueError for a page with no Markdown behind it, or a *block* that is not a
+    change on it."""
+    source = _source_of(root, page)
+    if source is None:
+        return None
+    if source.suffix.lower() != ".md":
+        raise ValueError(f"{page}: only a page made from Markdown can be marked read")
+    now = source.read_bytes().decode("utf-8")
+    if block:
+        _, _, text = _baseline(root, source)
+        if text is None:
+            raise ValueError(f"{page}: nothing to compare with, so no single change to mark")
+        now = _read_one(text, now, block)
+    mark = _read_mark(root, source)
+    mark.parent.mkdir(parents=True, exist_ok=True)
+    mark.write({"page": page, "marked": _now(), "text": now})
+    return read_state(root, page)
+
+
+LISTING_STYLE = """<style>
+.ls{list-style:none;padding:0;margin:1rem 0}
+.ls li{display:flex;gap:.6rem;align-items:baseline;padding:.25rem 0;border-bottom:1px solid #eceae4}
+.ls a{color:#1d242b;text-decoration:none}.ls a:hover,.ls a:focus-visible{text-decoration:underline}
+.ls li.dir a{font-weight:600}
+.tag{font-size:.72rem;line-height:1.5;padding:0 .5rem;border-radius:9px;white-space:nowrap}
+.tag.read{background:rgba(176,110,20,.13);color:#80500c}
+.tag.git{background:#eceae4;color:#4f5961}
+.legend{color:#5f6a72;font-size:.85rem}
+</style>"""
+
+
+def _changed_since_read(root) -> set:
+    """Every page under *root* whose Markdown differs from the text kept when it was marked read,
+    as absolute path strings."""
+    notes = root / READ_REL
+    if not notes.is_dir():
+        return set()
+    base, changed = os.fspath(notes), set()
+    for mark in notes.pathset("**/*.json"):
+        source = root / os.fspath(mark)[len(base) + 1: -len(".json")]
+        try:
+            if source.is_file() and source.read_bytes().decode("utf-8") != mark.read().get("text"):
+                changed.add(os.fspath(source))
+        except (OSError, RuntimeError, UnicodeDecodeError, AttributeError):
+            continue                                     # an unreadable mark marks nothing
+    return changed
+
+
+def _uncommitted(root) -> set:
+    """Every file under *root* git has not committed — modified, added or untracked — as absolute
+    path strings. Ignored files are left out, as they are meant to be; empty outside a checkout."""
+    import subprocess
+
+    def git(*args):
+        return subprocess.run(["git", "-C", os.fspath(root), *args], capture_output=True, text=True,
+                              timeout=10, check=False)
+
+    try:
+        top = git("rev-parse", "--show-toplevel")
+        if top.returncode != 0:
+            return set()
+        status = git("status", "--porcelain=v1", "-z", "--untracked-files=all")
+    except (OSError, subprocess.TimeoutExpired):
+        return set()
+    base, out, fields, i = top.stdout.strip(), set(), status.stdout.split("\0"), 0
+    while i < len(fields):
+        entry, i = fields[i], i + 1
+        if len(entry) < 4:
+            continue
+        if entry[0] in "RC":
+            i += 1                                       # the path it was renamed or copied from
+        out.add(os.path.normpath(os.path.join(base, entry[3:])))
+    return out
+
+
+def _listing(root, folder, url_path: str) -> str:
+    """*folder* as a page of its entries, folders first: a file is marked when it changed since it
+    was marked read, or git has not committed it; a folder gives how many such files it holds at
+    any depth. A generated page is never marked — its Markdown carries the mark."""
+    read_changed, uncommitted = _changed_since_read(root), _uncommitted(root)
+    uncommitted = {p for p in uncommitted if not p.endswith(GENERATED_SUFFIX)}
+
+    def tags(read, git):
+        """A file's marks (``True``) or a folder's counts (numbers)."""
+        def tag(kind, value, text):
+            if not value:
+                return ""
+            count = "" if value is True else f"{value} "
+            return f'<span class="tag {kind}">{count}{text}</span>'
+        return tag("read", read, "changed since read") + tag("git", git, "not committed")
+
+    rows = [] if folder == root else ['<li class="dir"><a href="../">../</a></li>']
+    for entry in sorted(folder.pathset("*"), key=lambda p: (not p.is_dir(), p.name.lower())):
+        path, name = os.fspath(entry), entry.name
+        if entry.is_dir():
+            inside = path + os.sep
+            marks = tags(sum(p.startswith(inside) for p in read_changed), sum(p.startswith(inside) for p in uncommitted))
+            rows.append(f'<li class="dir"><a href="{urllib.parse.quote(name)}/">{html.escape(name)}/</a>{marks}</li>')
+        else:
+            marks = "" if name.endswith(GENERATED_SUFFIX) else tags(path in read_changed, path in uncommitted)
+            rows.append(f'<li><a href="{urllib.parse.quote(name)}">{html.escape(name)}</a>{marks}</li>')
+    title = html.escape(url_path)
+    legend = (f'<p class="legend">{tags(True, False)} the page changed after it was marked read &nbsp; '
+              f'{tags(False, True)} git has not committed it — a folder counts both below it</p>')
+    return (f'<!doctype html><html><head><meta charset="utf-8"><title>{title}</title>{MARKDOWN_STYLE}{LISTING_STYLE}'
+            f'</head><body><h1>{title}</h1>{legend}<ul class="ls">{"".join(rows)}</ul></body></html>')
 
 
 def _pick_index(root, index: str | None) -> str | None:
@@ -430,8 +864,20 @@ def _make_handler(root, index: str | None, site=None):
                     if c.get("status", "open") == "open"
                     and (wanted is None or _page_key(root, c.get("page")) == wanted)]))
                 return
+            if route == "/alive":
+                self._send_json({"boot": BOOT})         # a new value is a new run: open pages reload
+                return
             if route == "/pages":
                 self._send_json(sorted(_relative(root, p) for p in listed_pages(root)))
+                return
+            if route == "/read-state":
+                def answer():
+                    state = read_state(root, urllib.parse.parse_qs(parsed.query).get("page", [None])[0])
+                    if state is None:
+                        self.send_error(404, "not a page here")
+                    else:
+                        self._send_json(state)
+                self._guarded(answer)
                 return
             if self.path in ("/", "/index.html") and index and not (root / "index.html").is_file() \
                     and not (root / "README.md").is_file() and not (root / "index.md").is_file():
@@ -451,7 +897,12 @@ def _make_handler(root, index: str | None, site=None):
                     self.send_header("Location", urllib.parse.quote(_relative(root, generated)))
                     self.end_headers()
                     return
-            # every served HTML page gets the ✎ commenter
+            # a generated page is brought up to date with its Markdown before it is served
+            if page.name.endswith(GENERATED_SUFFIX):
+                md = page.parent / (page.name[: -len(GENERATED_SUFFIX)] + ".md")
+                if md.is_file():
+                    materialize_markdown(md, site=site)
+            # every served HTML page gets the review layer: the ✎ commenter and what changed
             if page.suffix.lower() == ".html" and page.is_file():
                 try:
                     text = page.read_bytes().decode("utf-8")
@@ -466,6 +917,21 @@ def _make_handler(root, index: str | None, site=None):
                 self.wfile.write(body)
                 return
             super().do_GET()
+
+        def list_directory(self, path):
+            """A folder with no index page, listed with what changed in it (see ``_listing``)."""
+            folder = pygim.path(path, store=store).resolve()
+            try:
+                page = _listing(root, folder, urllib.parse.unquote(urllib.parse.urlparse(self.path).path))
+            except OSError:
+                self.send_error(404, "No permission to list directory")
+                return None
+            body = _commenter.inject(page).encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            return io.BytesIO(body)
 
         # ---- helpers ---------------------------------------------------
         def _guarded(self, action):
@@ -541,8 +1007,23 @@ def _make_handler(root, index: str | None, site=None):
                 self._guarded(lambda: self._post_comment_change(editing=route == "/comment-edit"))
             elif route == "/upload":
                 self._post_upload(parsed)
+            elif route == "/read":
+                self._guarded(self._post_read)
             else:
                 self.send_error(404, "not found")
+
+        def _post_read(self):
+            obj = self._read_json_body()
+            try:
+                state = mark_read(root, obj.get("page") if obj else None, obj.get("block") if obj else None)
+            except ValueError as exc:
+                self.send_error(400, str(exc))
+                return
+            if state is None:
+                self.send_error(404, "not a page here")
+                return
+            print(f"  marked read: {state['source']}")
+            self._send_json(state)
 
         def _post_comment(self):
             if self._body_length(MAX_COMMENT) is None:
@@ -670,10 +1151,63 @@ def make_server(doc_root, *, port: int = 8000, host: str | None = None,
         raise ServeError("\n".join(lines)) from e
 
 
-def serve(doc_root, *, port: int = 8000, host: str | None = None,
-          index: str | None = None, store=None) -> None:
-    """Serve *doc_root* on *port* until Ctrl-C. See :func:`make_server` for errors."""
+class Watch:
+    """Files, and whether any has changed since this last looked."""
+
+    def __init__(self, files):
+        self.files = list(files)
+        self.seen = self._stamps()
+
+    def _stamps(self) -> dict:
+        stamps = {}
+        for f in self.files:
+            try:
+                stamps[os.fspath(f)] = os.path.getmtime(os.fspath(f))
+            except OSError:
+                stamps[os.fspath(f)] = None               # gone, or not yet there: that is a state too
+        return stamps
+
+    def changed(self) -> bool:
+        now = self._stamps()
+        moved, self.seen = now != self.seen, now
+        return moved
+
+
+def own_sources() -> list:
+    """The code a running server has loaded that changes while it runs: this package, the review
+    layer's fragment beside it, and the command line that starts it."""
+    here = pygim.path(os.path.dirname(os.path.abspath(__file__)))
+    return sorted(here.pathset("*.py"), key=os.fspath) + [here.parent.parent / "pygim" / "__main__.py"]
+
+
+def _reexec() -> None:
+    """Start this same command again in this same process: new code, same terminal, same port."""
+    import sys
+    os.execv(sys.executable, [sys.executable, *sys.argv])
+
+
+def serve(doc_root, *, port: int = 8000, host: str | None = None, index: str | None = None, store=None,
+          reload: bool = True, watch=None, restart=None, interval: float = 1.0) -> None:
+    """Serve *doc_root* on *port* until Ctrl-C. See :func:`make_server` for errors.
+
+    With *reload* the server watches its own code (*watch*, default `own_sources`) and, when a file
+    changes, stops and starts again through *restart* (default: the same command, in place). Open
+    pages see the new run's `BOOT` at ``/alive`` and reload themselves."""
+    import threading
+
     httpd = make_server(doc_root, port=port, host=host, index=index, store=store)
+    stopped, changed = threading.Event(), threading.Event()
+    if reload:
+        watched = Watch(own_sources() if watch is None else watch)
+
+        def look():
+            while not stopped.wait(interval):
+                if watched.changed():
+                    changed.set()
+                    httpd.shutdown()
+                    return
+
+        threading.Thread(target=look, daemon=True).start()
     port = httpd.server_address[1]
     ip = _lan_ip()
     print("Docs are UP. Open EITHER url in your browser:")
@@ -682,11 +1216,18 @@ def serve(doc_root, *, port: int = 8000, host: str | None = None,
         print(f"    http://{ip}:{port}/      (use this one if localhost won't connect)")
     root = pygim.path(doc_root, store=store or PathStore()).resolve()
     print(f"\nServing {root}  ({len(site_pages(root))} pages; GET /pages lists them)")
-    print(f"Comments (✎) land in {COMMENTS_REL}; image drops write under images/. Ctrl-C to stop.")
+    print(f"Comments (✎) land in {COMMENTS_REL}; pages marked read keep their text in {READ_REL}/;")
+    print("image drops write under images/. Ctrl-C to stop.")
     print("(Bound on all interfaces for WSL reachability — it's LAN-visible while running.)\n")
+    if reload:
+        print("Restarts itself when its code changes; open pages reload with it (--no-reload: off).\n")
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:
         print("\nstopped.")
     finally:
+        stopped.set()
         httpd.server_close()
+    if changed.is_set():
+        print("\ncode changed — restarting.\n", flush=True)
+        (restart or _reexec)()

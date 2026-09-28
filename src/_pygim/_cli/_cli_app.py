@@ -80,8 +80,9 @@ class GimmicksCliApp:
 
     def docs_serve(self, *, port: int = 8000, directory: str | None = None,
                    host: str | None = None, index: str | None = None,
-                   rebuild: str | None = None) -> None:
-        """Serve a docs directory locally with the ✎ commenter and image-drop endpoint.
+                   rebuild: str | None = None, reload: bool = True) -> None:
+        """Serve a docs directory locally with the ✎ commenter and image-drop endpoint; with
+        *reload*, it restarts itself when its own code changes.
 
         *rebuild* is a shell command run (in *directory*) before serving; a
         non-zero exit aborts."""
@@ -96,7 +97,7 @@ class GimmicksCliApp:
                 added, removed = _docs_serve.rebuild(doc_root, rebuild, store=store)
                 click.echo(f"rebuilt: {len(added)} page(s) added, {len(removed)} removed"
                            + "".join(f"\n  + {p}" for p in added) + "".join(f"\n  - {p}" for p in removed))
-            _docs_serve.serve(doc_root, port=port, host=host, index=index, store=store)
+            _docs_serve.serve(doc_root, port=port, host=host, index=index, store=store, reload=reload)
         except (FileNotFoundError, _docs_serve.ServeError) as exc:
             raise click.ClickException(str(exc)) from exc
 

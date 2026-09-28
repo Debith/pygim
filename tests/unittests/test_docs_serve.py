@@ -3,8 +3,14 @@
 
 import io
 import json
+import os
+import re
+import shutil
+import subprocess
 import threading
+import time
 import urllib.error
+import urllib.parse
 import urllib.request
 
 import click
@@ -28,6 +34,37 @@ def site(temp_dir):
     (temp_dir / "site").mkdir()
     (temp_dir / "site" / "index.html").write_text("<body>landing</body>", encoding="utf-8")
     return temp_dir
+
+
+def _mermaid_blocks_as_a_browser_reads_them(page):
+    """Each `<pre class="mermaid">` as a browser parses it: its text with entities decoded — what
+    Mermaid's `entityDecode(innerHTML)` yields — and how many elements the parser made inside it,
+    which must be none."""
+    from html.parser import HTMLParser
+
+    class Reader(HTMLParser):
+        def __init__(self):
+            super().__init__(convert_charrefs=True)
+            self.blocks, self.inside = [], False
+
+        def handle_starttag(self, tag, attrs):
+            if tag == "pre" and ("class", "mermaid") in attrs:
+                self.inside = True
+                self.blocks.append(["", 0])
+            elif self.inside:
+                self.blocks[-1][1] += 1
+
+        def handle_endtag(self, tag):
+            if tag == "pre":
+                self.inside = False
+
+        def handle_data(self, data):
+            if self.inside:
+                self.blocks[-1][0] += data
+
+    reader = Reader()
+    reader.feed(page)
+    return [(text, elements) for text, elements in reader.blocks]
 
 
 @pytest.fixture
@@ -93,7 +130,7 @@ class TestCommenterInjection:
     def test_inject_is_idempotent(self):
         once = _commenter.inject("<body>x</body>")
         assert _commenter.inject(once) == once
-        assert _commenter.inject("no body tag").endswith(_commenter.COMMENTER)
+        assert _commenter.inject("no body tag").endswith(_commenter.COMMENTER + _commenter.READER + _commenter.DIAGRAMS)
 
 
 class TestPages:
@@ -129,7 +166,7 @@ class TestMarkdown:
         assert status == 302 and headers["Location"] == "/design.generated.html"
         generated = (site / "design.generated.html").read_text(encoding="utf-8")
         assert "generated from design.md by oo docs serve" in generated
-        assert "<h1" in generated and "<em>text</em>" in generated and "<table>" in generated
+        assert "<h1" in generated and "<em>text</em>" in generated and "<table" in generated
         assert 'id="cmt-tab"' not in generated                         # the commenter is injected when served, not written
         status, headers, body = _get(server + "/design.md")            # following the redirect: the HTML page, with the commenter
         assert status == 200 and 'id="cmt-tab"' in body.decode("utf-8") and "<title>design</title>" in body.decode("utf-8")
@@ -178,10 +215,16 @@ class TestMarkdown:
         assert 'href="b.generated.html#part"' in html and 'href="https://x.y/z.md"' in html and 'href="/abs.md"' in html
 
     def test_mermaid_fence_becomes_a_live_diagram(self, site):
-        (site / "diagram.md").write_text("```mermaid\nclassDiagram\n  A --> B\n```\n", encoding="utf-8")
+        """Mermaid reads the block as the browser parsed it: `innerHTML`, entities decoded. The
+        test asserted the raw HTML string instead, so the generator unescaped the block, and the
+        browser then read a stereotype such as `<<strategy>>` as an HTML element — every class
+        diagram with one showed "Syntax error in text" (ENACT 03 §7, 2026-09-23)."""
+        source = "classDiagram\n  class A {\n    <<strategy>>\n    keeps rows\n  }\n  A <|.. B\n  A --> C : uses\n"
+        (site / "diagram.md").write_text(f"```mermaid\n{source}```\n", encoding="utf-8")
         root = _docs_serve.pygim.path(site, store=PathStore())
         html = (site / _docs_serve.materialize_markdown(root / "diagram.md").name).read_text(encoding="utf-8")
-        assert '<pre class="mermaid">' in html and "A --> B" in html and "mermaid.esm.min.mjs" in html
+        assert "mermaid.esm.min.mjs" in html
+        assert _mermaid_blocks_as_a_browser_reads_them(html) == [(source, 0)]
 
     def test_markdown_index_stands_in_for_a_missing_index_html(self, temp_dir):
         (temp_dir / "README.md").write_text("# Home\n", encoding="utf-8")
@@ -325,6 +368,410 @@ class TestComments:
         assert _post(server + "/nope", {})[0] == 404
 
 
+class TestWhatChangedSinceRead:
+    """A reader coming back to a page sees what changed since they marked it read, and when the page
+    last changed (pygim memory #96: Debith's comment on ENACT 03, 2026-09-23)."""
+
+    DOC = ("# Title\n\nFirst paragraph.\n\n- one\n\n- two\n\n| a | b |\n|---|---|\n| 1 | 2 |\n\n"
+           "```text\nfenced\n\nstill fenced\n```\n\nLast paragraph.\n")
+
+    def test_the_markdown_splits_into_the_blocks_a_reader_sees(self):
+        """A loose list is one block, and so is a fence with a blank line inside it."""
+        assert _docs_serve.blocks_of(self.DOC) == [
+            "# Title", "First paragraph.", "- one\n\n- two", "| a | b |\n|---|---|\n| 1 | 2 |",
+            "```text\nfenced\n\nstill fenced\n```", "Last paragraph."]
+
+    def test_each_block_of_a_generated_page_carries_its_place_and_digest(self):
+        page = _docs_serve.render_markdown(self.DOC, "t")
+        tags = re.findall(r'<(\w+) data-block="(\d+)-[0-9a-f]{12}"', page)
+        assert [(tag, int(n)) for tag, n in tags] == [("h1", 0), ("p", 1), ("ul", 2), ("table", 3), ("pre", 4), ("p", 5)]
+        assert "<!--b:" not in page and page.count("<li>") == 2               # the list stayed one list
+
+    def test_a_page_an_older_renderer_made_is_made_again(self, site):
+        """A fix to the renderer reached no page until its Markdown changed: after the Mermaid fix
+        of 2026-09-23 thirteen pages had to be rebuilt by hand."""
+        (site / "note.md").write_text("# one\n", encoding="utf-8")
+        (site / "note.generated.html").write_text(
+            "<!doctype html>\n<!-- generated from note.md by oo docs serve; edit the Markdown, not this file -->old",
+            encoding="utf-8")
+        root = _docs_serve.pygim.path(site, store=PathStore())
+        _docs_serve.materialize_markdown(root / "note.md")
+        assert "data-block" in (site / "note.generated.html").read_text(encoding="utf-8")
+
+    def test_a_generated_page_is_brought_up_to_date_when_it_is_opened(self, server, site):
+        md = site / "note.md"
+        md.write_text("# one\n", encoding="utf-8")
+        _get(server + "/note.md")
+        time.sleep(0.05)
+        md.write_text("# two\n", encoding="utf-8")
+        os.utime(md, None)
+        _, _, body = _get(server + "/note.generated.html")
+        assert b"two" in body
+
+    def test_a_page_never_marked_read_says_so_and_when_it_changed(self, server, site):
+        (site / "doc.md").write_text(self.DOC, encoding="utf-8")
+        _get(server + "/doc.md")
+        status, _, body = _get(server + "/read-state?page=%2Fdoc.generated.html")
+        state = json.loads(body)
+        assert status == 200 and state["read"] is None and state["source"] == "/doc.md"
+        assert re.match(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d[+-]\d\d:\d\d$", state["modified"]["changed"])
+        assert state["modified"]["commit"] is None and state["modified"]["uncommitted"] is None   # not a git checkout
+
+    def test_changes_are_reported_against_the_page_as_it_was_when_marked_read(self, server, site):
+        (site / "doc.md").write_text(self.DOC, encoding="utf-8")
+        _get(server + "/doc.md")
+        status, body = _post(server + "/read", {"page": "/doc.generated.html"})
+        read = json.loads(body)["read"]
+        assert status == 200 and read["marked"] and (read["added"], read["changed"], read["removed"]) == ([], [], [])
+        kept = json.loads((site / "__notes__" / "read" / "doc.md.json").read_text(encoding="utf-8"))
+        assert kept["text"] == self.DOC
+
+        edited = (self.DOC.replace("First paragraph.", "First paragraph, reworded.")
+                  .replace("| a | b |\n|---|---|\n| 1 | 2 |\n\n", "") + "\nAdded paragraph.\n")
+        time.sleep(0.05)
+        (site / "doc.md").write_text(edited, encoding="utf-8")
+        os.utime(site / "doc.md", None)
+        _, _, page = _get(server + "/doc.generated.html")
+        _, _, body = _get(server + "/read-state?page=%2Fdoc.generated.html")
+        read = json.loads(body)["read"]
+        assert [token.split("-")[0] for token in read["added"]] == ["5"]
+        assert [c["block"].split("-")[0] for c in read["changed"]] == ["1"]
+        assert "First paragraph." in read["changed"][0]["before"]
+        assert len(read["removed"]) == 1 and "<table>" in read["removed"][0]["before"]
+        for token in read["added"] + [c["block"] for c in read["changed"]]:
+            assert f'data-block="{token}"'.encode() in page                   # the page names the same blocks
+
+    def test_a_reworded_block_is_paired_with_what_it_was_not_with_its_neighbour(self):
+        """A paragraph reworded next to a table deleted is one replaced range to a diff; the table
+        was reported as part of the paragraph's "before", and nothing as removed (found running the
+        page in a browser, 2026-09-23)."""
+        before = "# T\n\nFirst paragraph.\n\n| a | b |\n|---|---|\n| 1 | 2 |\n\nLast.\n"
+        now = "# T\n\nFirst paragraph, reworded.\n\nLast.\n"
+        changes = _docs_serve._changes(before, now)
+        assert [c["block"].split("-")[0] for c in changes["changed"]] == ["1"] and changes["added"] == []
+        assert "First paragraph." in changes["changed"][0]["before"] and "<table>" not in changes["changed"][0]["before"]
+        assert len(changes["removed"]) == 1 and "<table>" in changes["removed"][0]["before"]
+
+    def test_a_block_in_a_replaced_range_that_resembles_nothing_is_added(self):
+        before = "# T\n\nOld words here.\n\nLast.\n"
+        now = "# T\n\nCompletely different sentence about tables.\n\nLast.\n"
+        changes = _docs_serve._changes(before, now)
+        assert [a.split("-")[0] for a in changes["added"]] == ["1"] and changes["changed"] == []
+        assert len(changes["removed"]) == 1 and "Old words here." in changes["removed"][0]["before"]
+
+    def test_one_change_can_be_marked_read_and_the_others_stay_new(self, server, site):
+        """Debith, 2026-09-25: "now marking it read marked all read, not the single entry"."""
+        (site / "doc.md").write_text(self.DOC, encoding="utf-8")
+        _get(server + "/doc.md")
+        _post(server + "/read", {"page": "/doc.generated.html"})
+        time.sleep(0.05)
+        edited = (self.DOC.replace("First paragraph.", "First paragraph, reworded.")
+                  .replace("Last paragraph.", "Last paragraph, reworded.") + "\nAdded paragraph.\n")
+        (site / "doc.md").write_text(edited, encoding="utf-8")
+        os.utime(site / "doc.md", None)
+        _, _, body = _get(server + "/read-state?page=%2Fdoc.generated.html")
+        read = json.loads(body)["read"]
+        first = read["changed"][0]["block"]
+        status, body = _post(server + "/read", {"page": "/doc.generated.html", "block": first})
+        read = json.loads(body)["read"]
+        assert status == 200 and first not in [c["block"] for c in read["changed"]]
+        assert len(read["changed"]) == 1 and len(read["added"]) == 1          # the other two are still new
+        added = read["added"][0]
+        _, body = _post(server + "/read", {"page": "/doc.generated.html", "block": added})
+        read = json.loads(body)["read"]
+        assert read["added"] == [] and len(read["changed"]) == 1
+        status, _ = _post(server + "/read", {"page": "/doc.generated.html", "block": "9-000000000000"})
+        assert status == 400                                                    # not a change on this page
+
+    @staticmethod
+    def _long_page(reworded: bool, tables: int = 8, rows: int = 12) -> str:
+        """A page of long tables; reworded, one value in every row changes, as owner-review's did."""
+        parts = ["# A long review\n"]
+        for t in range(tables):
+            lines = [f"## Task {t}\n", "| Dimension | observed | proposed | run 1 | run 2 |", "|---|---|---|---|---|"]
+            for r in range(rows):
+                values = [f"value_{(t * 7 + r * 3 + c + (5 if reworded and c == r % 4 else 0)) % 41} — "
+                          "what it means, in a sentence of its own" for c in range(4)]
+                lines.append(f"| dimension {r} | " + " | ".join(values) + " |")
+            parts.append("\n".join(lines) + "\n")
+        return "\n".join(parts)
+
+    def test_marking_one_change_read_on_a_long_rewritten_page_answers_at_once(self, server, site):
+        """Debith, 2026-09-27: "Marking something read takes several seconds" — on owner-review, whose
+        every table had been rewritten, each click compared every long block with every other twice
+        (3.6 s a time), though the page's load had just compared the same pairs."""
+        (site / "doc.md").write_text(self._long_page(reworded=False), encoding="utf-8")
+        _get(server + "/doc.md")
+        _post(server + "/read", {"page": "/doc.generated.html"})
+        time.sleep(0.05)
+        (site / "doc.md").write_text(self._long_page(reworded=True), encoding="utf-8")
+        os.utime(site / "doc.md", None)
+        _, _, body = _get(server + "/read-state?page=%2Fdoc.generated.html")       # the page's load
+        changed = [c["block"] for c in json.loads(body)["read"]["changed"]]
+        assert len(changed) == 8
+        for block in changed[:2]:
+            started = time.perf_counter()
+            status, body = _post(server + "/read", {"page": "/doc.generated.html", "block": block})
+            took = time.perf_counter() - started
+            assert status == 200 and block not in [c["block"] for c in json.loads(body)["read"]["changed"]]
+            assert took < 1.0, f"marking one change read took {took:.2f}s"
+
+    def test_a_removed_block_says_where_it_stood_and_can_be_marked_read_alone(self):
+        """Debith, 2026-09-25: "Removed can be red tint, or maybe grayed out, or strike-through. The
+        button is not needed." A removed block is shown where it stood, after the block it followed."""
+        before = "# T\n\nKeep one.\n\n| a | b |\n|---|---|\n| 1 | 2 |\n\nKeep two.\n\nAnother paragraph going.\n"
+        now = "# T\n\nKeep one.\n\nKeep two.\n\nA brand new paragraph.\n"
+        changes = _docs_serve._changes(before, now)
+        tokens = _docs_serve._tokens(_docs_serve.blocks_of(now))
+        table = next(r for r in changes["removed"] if "<table>" in r["before"])
+        assert table["after"] == tokens[1] and table["block"].startswith("r")        # it stood after "Keep one."
+        kept = _docs_serve._read_one(before, now, table["block"])
+        again = _docs_serve._changes(kept, now)
+        assert not any("<table>" in r["before"] for r in again["removed"])
+        assert len(again["removed"]) + len(again["added"]) + len(again["changed"]) == \
+            len(changes["removed"]) + len(changes["added"]) + len(changes["changed"]) - 1
+
+    def test_a_hand_written_page_has_a_date_but_no_read_marks(self, server):
+        status, _, body = _get(server + "/read-state?page=%2Fpage.html")
+        assert status == 200 and json.loads(body)["read"] is False
+        status, _ = _post(server + "/read", {"page": "/page.html"})
+        assert status == 400
+
+    @pytest.mark.parametrize("page", ["/../outside.md", "/missing.generated.html", "", "/style.css"])
+    def test_a_page_that_is_not_a_page_here_is_refused(self, server, page):
+        status, _, _ = _get(server + "/read-state?page=" + urllib.parse.quote(page))
+        assert status == 404
+        status, _ = _post(server + "/read", {"page": page})
+        assert status == 404
+
+    @pytest.mark.skipif(shutil.which("git") is None, reason="needs git")
+    def test_git_says_whether_the_page_is_committed(self, temp_dir):
+        def git(*args):
+            subprocess.run(["git", "-C", str(temp_dir), "-c", "user.name=t", "-c", "user.email=t@example.com", *args],
+                           check=True, capture_output=True)
+        git("init", "-q")
+        (temp_dir / "doc.md").write_text("# one\n", encoding="utf-8")
+        git("add", "doc.md")
+        git("commit", "-q", "-m", "one")
+        root = _docs_serve.pygim.path(temp_dir, store=PathStore())
+        committed = _docs_serve.history_of(root / "doc.md")
+        assert committed["commit"] and committed["committed"] and committed["uncommitted"] is False
+        (temp_dir / "doc.md").write_text("# two\n", encoding="utf-8")
+        assert _docs_serve.history_of(root / "doc.md")["uncommitted"] is True
+
+    def test_a_generated_page_keeps_a_line_under_its_title_for_its_date(self):
+        """Debith, 2026-09-24, on the floating box: "I don't see much use for this box right now" and
+        "I prefer that the document itself has some sort of color coding". When the page changed, and
+        the way to mark it read, now sit in the document under its title; the line is there from the
+        start, so filling it in moves nothing on the page."""
+        page = _docs_serve.render_markdown("# Title\n\nText.\n", "t")
+        assert re.search(r'<h1 [^>]*>Title</h1>\s*<p id="rd-meta" class="rd-meta"></p>', page)
+        untitled = _docs_serve.render_markdown("Text only.\n", "t")
+        assert re.search(r'<body>\s*<p id="rd-meta" class="rd-meta"></p>', untitled)
+
+    def test_a_highlight_tints_a_block_over_its_own_background(self):
+        """The first tint was a `background-color` at 7%: too faint to notice (Debith, 2026-09-24:
+        "I hope that in the document, there are some changes to background color for things that
+        are new"), and it replaced a code block's own grey, so a new code block looked paler than an
+        unchanged one. A tint is now a layer over whatever background the block has."""
+        for kind in ("rd-added", "rd-changed"):
+            rule = re.search(r"\[data-block\]\." + kind + r"\{([^}]*)\}", _commenter.READER).group(1)
+            assert "background-color" not in rule and "background-image:linear-gradient" in rule
+            alpha = float(re.search(r"rgba\(\d+,\d+,\d+,(\.\d+)\)", rule).group(1))
+            assert alpha >= 0.15, f"{kind}: a tint of {alpha} is too faint to see on the page"
+
+    def test_dragging_a_zoomed_diagram_never_starts_a_text_selection(self):
+        """Debith, 2026-09-26: "after zooming in the dragging stops working as it seems to be
+        autoselecting content at the same time". Zoomed in, the drawing fills the screen, so every
+        drag begins on its text, and the browser began a selection that took the pointer. Three
+        guards, each enough alone in most browsers: nothing in the view can be selected, the drawing
+        does not take pointer events (the view does), and a press cancels the browser's default."""
+        css = re.search(r"#dg-view\{([^}]*)\}", _commenter.DIAGRAMS).group(1)
+        assert "user-select:none" in css
+        assert "pointer-events:none" in re.search(r"#dg-view \.stage\{([^}]*)\}", _commenter.DIAGRAMS).group(1)
+        press = re.search(r'view\.addEventListener\("pointerdown",function\(e\)\{(.*?)\}\);', _commenter.DIAGRAMS, re.S).group(1)
+        assert "e.preventDefault()" in press
+
+    def test_every_served_page_asks_what_changed(self, server):
+        _, _, body = _get(server + "/page.html")
+        assert b"/read-state?page=" in body
+
+
+class _Served:
+    """A server over *root* for the length of a ``with``; yields its base URL."""
+
+    def __init__(self, root):
+        self.httpd = _docs_serve.make_server(root, port=0, host="127.0.0.1")
+        self.thread = threading.Thread(target=self.httpd.serve_forever, daemon=True)
+
+    def __enter__(self):
+        self.thread.start()
+        return f"http://127.0.0.1:{self.httpd.server_address[1]}"
+
+    def __exit__(self, *exc):
+        self.httpd.shutdown()
+        self.httpd.server_close()
+        self.thread.join(timeout=5)
+
+
+def _git_repo(root):
+    """*root* as a git checkout; returns a function that runs git in it."""
+    def git(*args):
+        subprocess.run(["git", "-C", str(root), "-c", "user.name=t", "-c", "user.email=t@example.com", *args],
+                       check=True, capture_output=True)
+    git("init", "-q")
+    return git
+
+
+class TestAPageNeverMarkedReadShowsWhatDiffersFromTheLastCommit:
+    """Until a page is first marked read, what is new is what differs from its last commit. Before,
+    a page never marked showed nothing, and the first mark took in changes the reader never saw
+    (Debith's "Is this now new?", 2026-09-24; chose this over leaving it)."""
+
+    DOC = TestWhatChangedSinceRead.DOC
+
+    @pytest.mark.skipif(shutil.which("git") is None, reason="needs git")
+    def test_the_last_commit_is_the_baseline_until_the_first_mark(self, temp_dir):
+        git = _git_repo(temp_dir)
+        (temp_dir / "doc.md").write_text(self.DOC, encoding="utf-8")
+        git("add", "doc.md")
+        git("commit", "-q", "-m", "one")
+        (temp_dir / "doc.md").write_text(self.DOC.replace("First paragraph.", "First paragraph, reworded.")
+                                         + "\nAdded paragraph.\n", encoding="utf-8")
+        with _Served(temp_dir) as base:
+            _get(base + "/doc.md")
+            _, _, body = _get(base + "/read-state?page=%2Fdoc.generated.html")
+            read = json.loads(body)["read"]
+            assert read["marked"] is None and read["baseline"] == "commit"
+            assert [c["block"].split("-")[0] for c in read["changed"]] == ["1"]
+            assert [a.split("-")[0] for a in read["added"]] == ["6"]
+            _, body = _post(base + "/read", {"page": "/doc.generated.html"})
+            read = json.loads(body)["read"]
+            assert read["baseline"] == "read" and (read["added"], read["changed"]) == ([], [])
+
+    @pytest.mark.skipif(shutil.which("git") is None, reason="needs git")
+    def test_a_page_never_committed_is_new_all_through(self, temp_dir):
+        git = _git_repo(temp_dir)
+        (temp_dir / "other.md").write_text("# other\n", encoding="utf-8")
+        git("add", "other.md")
+        git("commit", "-q", "-m", "one")
+        (temp_dir / "doc.md").write_text(self.DOC, encoding="utf-8")
+        with _Served(temp_dir) as base:
+            _get(base + "/doc.md")
+            _, _, body = _get(base + "/read-state?page=%2Fdoc.generated.html")
+            read = json.loads(body)["read"]
+        assert read["baseline"] == "commit" and len(read["added"]) == len(_docs_serve.blocks_of(self.DOC))
+
+
+def _row(listing: bytes, name: str) -> str:
+    """The listing's row for the entry called *name*."""
+    rows = re.findall(r"<li\b.*?</li>", listing.decode("utf-8"), re.S)
+    return next(row for row in rows if f">{name}</a>" in row)
+
+
+class TestTheServerRestartsItselfWhenItsCodeChanges:
+    """Debith, 2026-09-25: "I want some sort of restart mechanism to server. Restarting manually is
+    boring." Every change to the review layer needed a manual restart, and then a page reload."""
+
+    def test_a_change_to_a_watched_file_is_noticed_once(self, temp_dir):
+        code = temp_dir / "code.py"
+        code.write_text("x = 1\n", encoding="utf-8")
+        watch = _docs_serve.Watch([_docs_serve.pygim.path(code, store=PathStore())])
+        assert watch.changed() is False
+        time.sleep(0.05)
+        code.write_text("x = 2\n", encoding="utf-8")
+        os.utime(code, None)
+        assert watch.changed() is True and watch.changed() is False
+
+    def test_serve_stops_and_restarts_when_its_code_changes(self, site, temp_dir):
+        code = temp_dir / "code.py"
+        code.write_text("x = 1\n", encoding="utf-8")
+        restarted = threading.Event()
+        thread = threading.Thread(target=_docs_serve.serve, args=(site,), daemon=True, kwargs=dict(
+            port=0, host="127.0.0.1", watch=[code], restart=restarted.set, interval=0.05))
+        thread.start()
+        time.sleep(0.4)
+        assert not restarted.is_set()
+        code.write_text("x = 2\n", encoding="utf-8")
+        os.utime(code, None)
+        assert restarted.wait(5), "a change to the server's code did not restart it"
+        thread.join(5)
+        assert not thread.is_alive()
+
+    def test_an_open_page_can_tell_that_the_server_restarted(self, server):
+        _, _, first = _get(server + "/alive")
+        _, _, again = _get(server + "/alive")
+        assert json.loads(first)["boot"] == json.loads(again)["boot"]           # the same run
+        _, _, page = _get(server + "/page.html")
+        assert b'fetch("/alive")' in page                                       # the page watches for a new one
+
+
+class TestFolderListingMarksWhatChanged:
+    """Debith, 2026-09-24: "when the server shows the file structure, is it possible to mark there on
+    files what files have changed and what folders contains files that have changed?" """
+
+    def _read_then_edit(self, server, site, rel):
+        _get(server + "/" + rel)
+        _post(server + "/read", {"page": "/" + rel.replace(".md", ".generated.html")})
+        time.sleep(0.05)
+        (site / rel).write_text((site / rel).read_text(encoding="utf-8") + "\nMore.\n", encoding="utf-8")
+        os.utime(site / rel, None)
+
+    def test_a_file_changed_since_it_was_marked_read_says_so(self, server, site):
+        (site / "notes").mkdir()
+        for name in ("a.md", "b.md", "x&y.md"):
+            (site / "notes" / name).write_text("# one\n", encoding="utf-8")
+        self._read_then_edit(server, site, "notes/a.md")
+        _get(server + "/notes/b.md")
+        _post(server + "/read", {"page": "/notes/b.generated.html"})              # read, and unchanged since
+        status, headers, listing = _get(server + "/notes/")
+        assert status == 200 and headers["Content-Type"].startswith("text/html")
+        assert "changed since read" in _row(listing, "a.md")
+        assert "changed since read" not in _row(listing, "b.md")
+        assert "x&amp;y.md" in listing.decode("utf-8")                           # names are escaped
+        assert "changed since read" not in _row(listing, "a.generated.html")     # the Markdown carries the mark
+        assert b'id="cmt-tab"' in listing                                        # the review layer, as on any page
+
+    def test_a_folder_counts_the_changed_files_anywhere_below_it(self, server, site):
+        (site / "notes" / "deep" / "deeper").mkdir(parents=True)
+        (site / "notes" / "deep" / "deeper" / "a.md").write_text("# one\n", encoding="utf-8")
+        self._read_then_edit(server, site, "notes/deep/deeper/a.md")
+        _, _, listing = _get(server + "/notes/")
+        assert "1 changed since read" in _row(listing, "deep/")
+
+    @pytest.mark.skipif(shutil.which("git") is None, reason="needs git")
+    def test_files_git_has_not_committed_are_marked_and_counted(self, temp_dir):
+        def git(*args):
+            subprocess.run(["git", "-C", str(temp_dir), "-c", "user.name=t", "-c", "user.email=t@example.com", *args],
+                           check=True, capture_output=True)
+        git("init", "-q")
+        (temp_dir / "kept.txt").write_text("same\n", encoding="utf-8")
+        (temp_dir / "edited.txt").write_text("one\n", encoding="utf-8")
+        git("add", ".")
+        git("commit", "-q", "-m", "one")
+        (temp_dir / "edited.txt").write_text("two\n", encoding="utf-8")
+        (temp_dir / "sub").mkdir()
+        (temp_dir / "sub" / "new.txt").write_text("new\n", encoding="utf-8")
+        httpd = _docs_serve.make_server(temp_dir, port=0, host="127.0.0.1")
+        thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+        thread.start()
+        try:
+            _, _, listing = _get(f"http://127.0.0.1:{httpd.server_address[1]}/")
+        finally:
+            httpd.shutdown()
+            httpd.server_close()
+            thread.join(timeout=5)
+        assert "not committed" in _row(listing, "edited.txt")
+        assert "not committed" not in _row(listing, "kept.txt")
+        assert "1 not committed" in _row(listing, "sub/")
+
+    def test_outside_a_checkout_nothing_is_marked_not_committed(self, server, site):
+        (site / "notes").mkdir()
+        (site / "notes" / "a.txt").write_text("x\n", encoding="utf-8")
+        _, _, listing = _get(server + "/notes/")
+        assert "not committed" not in _row(listing, "a.txt")
+
+
 class TestCrossReferencesAndTerms:
     """A site's Markdown pages define numbered sections and Term/Type tables; the
     generator turns a reference to either into hover text."""
@@ -371,7 +818,7 @@ class TestCrossReferencesAndTerms:
 
     def test_reference_inside_a_code_block_is_left_alone(self, temp_dir):
         html = self._render(temp_dir, "01_model.md")
-        fenced = html.split("<pre>")[1]
+        fenced = html.split("<pre")[1]
         assert "xref" not in fenced
 
     def test_code_span_naming_a_term_gets_hover_text(self, temp_dir):
