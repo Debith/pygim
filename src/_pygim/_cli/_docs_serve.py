@@ -193,7 +193,7 @@ class _SiteIndex:
             if page.suffix != ".md":
                 continue
             try:
-                text = page.read_bytes().decode("utf-8")
+                text = _page_text(page)
             except (OSError, RuntimeError, UnicodeDecodeError):
                 continue
             href = _relative(root, page.with_suffix(GENERATED_SUFFIX))
@@ -490,7 +490,7 @@ def materialize_markdown(md, *, site=None):
         if RENDERER in head and os.path.getmtime(os.fspath(out)) >= os.path.getmtime(os.fspath(md)):
             return out                                   # fresh, and made by this renderer
     page = site.pages.get(os.fspath(md)) if site is not None else None
-    rendered = render_markdown(md.read_bytes().decode("utf-8"), md.stem, site=site, page=page)
+    rendered = render_markdown(_page_text(md), md.stem, site=site, page=page)
     if rendered is None:
         return None
     mark = GENERATED_MARK.format(src=src_name)
@@ -667,6 +667,12 @@ def _read_one(before_text: str, now_text: str, token: str) -> str:
     return "\n\n".join(kept) + "\n"
 
 
+def _page_text(page) -> str:
+    """A Markdown page's text, its line endings read as \\n. A checkout made with git's autocrlf holds
+    \\r\\n on disk and \\n in the commit, and a line ending alone is not a change to its reader."""
+    return page.read_bytes().decode("utf-8").replace("\r\n", "\n")
+
+
 def _committed_text(path):
     """*path*'s text in the last commit: ``""`` when the last commit does not have it — a page never
     committed is new all through — and None outside a checkout, or where git cannot be run."""
@@ -682,7 +688,7 @@ def _committed_text(path):
                                capture_output=True, timeout=5, check=False)
     except (OSError, subprocess.TimeoutExpired):
         return None
-    return shown.stdout.decode("utf-8", "replace") if shown.returncode == 0 else ""
+    return shown.stdout.decode("utf-8", "replace").replace("\r\n", "\n") if shown.returncode == 0 else ""
 
 
 def read_state(root, page: str | None):
@@ -701,7 +707,7 @@ def read_state(root, page: str | None):
         return state
     marked, baseline, text = _baseline(root, source)
     state["read"] = None if text is None else {"marked": marked, "baseline": baseline,
-                                               **_changes(text, source.read_bytes().decode("utf-8"))}
+                                               **_changes(text, _page_text(source))}
     return state
 
 
@@ -726,7 +732,7 @@ def mark_read(root, page: str | None, block: str | None = None):
         return None
     if source.suffix.lower() != ".md":
         raise ValueError(f"{page}: only a page made from Markdown can be marked read")
-    now = source.read_bytes().decode("utf-8")
+    now = _page_text(source)
     if block:
         _, _, text = _baseline(root, source)
         if text is None:
@@ -760,7 +766,7 @@ def _changed_since_read(root) -> set:
     for mark in notes.pathset("**/*.json"):
         source = root / os.fspath(mark)[len(base) + 1: -len(".json")]
         try:
-            if source.is_file() and source.read_bytes().decode("utf-8") != mark.read().get("text"):
+            if source.is_file() and _page_text(source) != mark.read().get("text"):
                 changed.add(os.fspath(source))
         except (OSError, RuntimeError, UnicodeDecodeError, AttributeError):
             continue                                     # an unreadable mark marks nothing

@@ -441,6 +441,23 @@ class TestWhatChangedSinceRead:
         for token in read["added"] + [c["block"] for c in read["changed"]]:
             assert f'data-block="{token}"'.encode() in page                   # the page names the same blocks
 
+    def test_a_line_ending_alone_is_not_a_change(self, server, site):
+        """A checkout made with git's autocrlf holds \\r\\n on disk and \\n in the commit, so a page
+        read as bytes differed from its last commit, and from its read mark, on every line (first CI
+        run on Windows, 2026-09-28)."""
+        (site / "doc.md").write_bytes(self.DOC.replace("\n", "\r\n").encode("utf-8"))
+        _get(server + "/doc.md")
+        _post(server + "/read", {"page": "/doc.generated.html"})
+        kept = json.loads((site / "__notes__" / "read" / "doc.md.json").read_text(encoding="utf-8"))
+        assert kept["text"] == self.DOC
+        time.sleep(0.05)
+        (site / "doc.md").write_bytes(self.DOC.encode("utf-8"))
+        os.utime(site / "doc.md", None)
+        _get(server + "/doc.generated.html")
+        _, _, body = _get(server + "/read-state?page=%2Fdoc.generated.html")
+        read = json.loads(body)["read"]
+        assert (read["added"], read["changed"], read["removed"]) == ([], [], [])
+
     def test_a_reworded_block_is_paired_with_what_it_was_not_with_its_neighbour(self):
         """A paragraph reworded next to a table deleted is one replaced range to a diff; the table
         was reported as part of the paragraph's "before", and nothing as removed (found running the
