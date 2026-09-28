@@ -3,11 +3,13 @@
 
 name: Python package
 
+# The matrix runs when a pull request into main is opened or updated, and on main itself. A push to
+# any other branch runs nothing: work in progress reaches CI when its pull request does.
 on:
   push:
-    branches: [ "main", "dev", "core/**", "copilot/**" ]
+    branches: [ "main" ]
   pull_request:
-    branches: [ "main", "dev" ]
+    branches: [ "main" ]
 
 jobs:
   build:
