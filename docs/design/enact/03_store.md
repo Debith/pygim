@@ -1,7 +1,7 @@
 # ENACT — Technical Specification
 
 **Section 03: Store**
-Status: draft · Owner: Debith · Last updated: 2026-09-15
+Status: draft · Owner: Debith · Last updated: 2026-09-23
 
 What is written down, in what form, and how it survives the three things that happen to a
 memory repository in real use: a process dying mid-commit, two sessions writing at once, and
@@ -50,8 +50,9 @@ flowchart LR
 link, an unlink, a promotion, a merge, a retirement, a proposal's state, an inventory change,
 a hand edit noticed at startup — is one audit row, and the index at any moment is the rows up
 to that moment, replayed. Nothing else about the index is canonical. The overview's G10 asked
-that the index as it stood after any audit row can be rebuilt; making the log the only record
-makes that a definition rather than a feature.
+that the index as it stood after any audit row can be rebuilt. With the log as the only canonical
+record, the index after any row *is* the replay of the rows up to it — so what G10 asked for stops
+being a feature to implement and becomes the definition of the index.
 
 What is *not* in the log is content: a memory's text is written once into a content object
 and the row carries its digest. Rows stay small, and the log stays readable in a diff.
@@ -68,9 +69,11 @@ id  = digest(parents, clone, seq, time, op, payload)
 ```
 
 Each row names the row or rows its writer had seen as the head — normally one. Rows therefore
-form a chain, and a chain of hashes is tamper-evident and, more usefully here, **mergeable**:
-two copies of a repository that each grew their own rows can be joined, and the join has an
-identity of its own (§5).
+form a chain. A chain of hashes is tamper-evident: a row's id is the digest of its content, its
+parents' ids included, so editing any row changes its id, and the rows that name the old id no
+longer match anything. More usefully here, the chain is **mergeable**: because each row names its
+parents, two copies of a repository that each grew their own rows still form one graph when
+joined, and the join has an identity of its own (§5).
 
 | Name | Is | Seen as |
 |---|---|---|
@@ -130,10 +133,151 @@ Another person appends to theirs. Two people therefore never append to the same 
 `git merge` never has a conflicting line to resolve; `*.jsonl merge=union` in
 `.gitattributes` is there for the rare hand-copied file, not for normal work.
 
-**Content objects** are the memory text, named by the digest of the text and written by
-temp-file-and-rename, so writing one twice is a no-op and a torn write is never visible.
+**Content objects** are the memory text. An object is named by the digest of its text, so the
+same text always lands at the same name, and writing it twice is a no-op. It is written by
+temp-file-and-rename: the bytes go to a temporary file first, and the rename is what makes the
+object appear, so a torn write is never visible.
 Every distinct taxonomy version is frozen the same way when it is first seen, so a receipt
 pinned to an old vocabulary can still be rerun after the files have moved on.
+
+### 3.1.1 The layout is data; each folder kind is a class — settled 2026-09-23, not built yet
+
+**Scenario.** A new kind of record needs a folder, say a trace per session. Today that means a
+fourth pair of methods in `strategy/files/store.h` beside the three identical pairs for usage,
+receipts and mailbox, and the folder's name spelled in `init()`, in the methods and in the file's
+header comment. Those copies already disagree: `init()` does not create `sources/`, and the header
+comment lists neither `sources/`, `reviews/` nor `corpus/`. A sweep of the file found 86 string
+literals, 36 of them folder names. Settled: the new folder is one row of the layout,
+`{"traces", kind::daily_log, committed}`, served by the `DailyLog<Record>` that already exists,
+with the record's own codec. No method is written.
+
+Each class below says what it is responsible for, not what members it has; the arrows follow
+[the relationship pattern](../plantuml_relationship_pattern.md).
+
+```mermaid
+classDiagram
+    direction TB
+    class Views {
+        <<strategy>>
+        shows each memory to people
+    }
+    class FilesStore {
+        puts each kind of bytes in the folder the layout names
+    }
+    class Layout {
+        <<constexpr data>>
+        which folder holds what, and of which kind
+        committed or local
+    }
+    class ContentFolder {
+        keeps bytes under their digest
+        a second write is no write
+        objects/
+    }
+    class CloneLog {
+        appends the rows of this copy for good
+        hands back the new rows of every copy
+        audit/
+    }
+    class DailyLog~Record~ {
+        one line a record, one file per copy per day
+        usage/ receipts/ mailbox/
+    }
+    class DocumentFolder {
+        lists its documents in one fixed order
+        replaces one only if it is unchanged since read
+        taxonomy/ sources/ corpus/
+    }
+    class ViewFolder {
+        writes finished text under a name
+        skips it when unchanged
+        memories/ reviews/
+    }
+    class LocalState {
+        what never leaves this machine
+        the copy id, the session number, the commit lock
+        local/
+    }
+    class Problems {
+        a person must look at this file, at this line
+        replaced one source at a time
+    }
+    Views <|.. ViewFolder
+    FilesStore ..> Layout : reads
+    FilesStore *-- ContentFolder
+    FilesStore *-- CloneLog
+    FilesStore "1" *-- "3" DailyLog
+    FilesStore "1" *-- "3" DocumentFolder
+    FilesStore "1" *-- "2" ViewFolder
+    FilesStore *-- LocalState
+    FilesStore *-- Problems
+    note for Problems "every folder kind reports here"
+```
+
+What each folder kind takes from pathlike — the primitives of
+[pathlike: writes that survive](../pathlike_writes.md) and the engines of
+[the engine registry](../pathlike_engine_registry.md) (its section on core and adapter):
+
+```mermaid
+classDiagram
+    direction LR
+    class ContentFolder
+    class DocumentFolder
+    class ViewFolder
+    class LocalState
+    class CloneLog
+    class DailyLog~Record~
+    class AtomicWrite {
+        <<pathlike>>
+        readers see the old file or the new one
+    }
+    class DurableAppend {
+        <<pathlike>>
+        returns once the bytes are on the disk
+    }
+    class LineTail {
+        <<pathlike>>
+        complete lines added since the last read
+    }
+    class Engine {
+        <<strategy>>
+        parses bytes into its own tree
+    }
+    ContentFolder ..> AtomicWrite
+    DocumentFolder ..> AtomicWrite
+    ViewFolder ..> AtomicWrite
+    LocalState ..> AtomicWrite
+    CloneLog ..> DurableAppend
+    CloneLog ..> LineTail
+    DailyLog ..> DurableAppend
+    DailyLog ..> LineTail
+    DocumentFolder ..> Engine : yaml
+```
+
+**The layout, as a table.** Each folder has one kind — the class that handles it — and either
+git commits it or it never leaves this machine:
+
+| Folder | Kind, and the class that handles it | Committed |
+|---|---|---|
+| `objects/` | content: `ContentFolder` | yes |
+| `audit/` | one log per copy: `CloneLog` | yes |
+| `usage/`, `receipts/`, `mailbox/` | one log per copy per day: `DailyLog` | yes |
+| `taxonomy/`, `sources/`, `corpus/` | documents: `DocumentFolder` | yes |
+| `memories/`, `reviews/` | pages for people: `ViewFolder` | yes |
+| `local/` | this machine's own state: `LocalState` | never |
+
+Today `init()` also writes two small files as fixed text: `.gitignore`, which says `local/`, and
+`.gitattributes`, which says `*.jsonl merge=union` — git's instruction to merge a log file by
+keeping the lines of both sides. Both repeat what the table already knows: which folder is never
+committed, and which folders hold logs. So they are produced from the table rather than typed
+out, and a folder added to the table reaches both files by itself; today a new folder has to be
+spelled in three places. In the code the table is a `constexpr` array, so the compiler can check
+it: no folder listed twice, every kind handled.
+
+A folder kind is where behaviour lives; the table only says which folder has which kind. A
+table with no class behind it would be a list of constants with the logic still spread over the
+store (global #14 has why that is the half that usually gets dropped). What each of today's
+methods becomes is in §7.2.
 
 ### 3.2 A row, concretely
 
@@ -156,11 +300,12 @@ copy of the repository happened to load things in.
 header with its key, title, tags and citations, then the text. It is **generated**: rewritten
 whenever what it shows changes — a new head, but also a link, an unlink, a promotion, an accepted
 proposal, or rows caught up from another process — and removed when its chain has no head. The
-service compares each published snapshot with the one before it, so every change reaches the views
-through one place; opening a store checks every view, and a view already right is not rewritten,
-so git sees no churn. The reason it is committed is the diff. A correction appears in
-review as an edit to a file that already existed, which is how a person expects to see it
-(overview §4.5, step 5).
+service compares each published snapshot with the one before it; whatever operation changed what a
+view shows, the change reaches the views through that one comparison. Opening a store checks every
+view, and a view already right is not rewritten, so git sees no churn. The reason it is committed is the diff: a committed file's changes show
+up where people already review, so a change to a memory is reviewed as a change to its page.
+A correction appears in review as an edit to a file that already existed, which is how a person
+expects to see it (overview §4.5, step 5).
 
 Because it is generated, a view is never read back as truth. A view whose text is no
 version of its chain was edited by hand — and that is the human's, not the service's, to
@@ -207,8 +352,10 @@ reaching into that argument ten times. That is Feature Envy — a method list wr
 object — and it has a cost beyond reading: a free function cannot remember, so every scoped tool
 call re-walked the filesystem and shelled out to git.
 
-`Stores` is that object. It is built from an `Environment` where the program is wired, and it lives
-as long as the session does, which is exactly as long as its answer stays true.
+`Stores` is that object. It is built from an `Environment` where the program is wired, and it
+lives as long as the session does. The lifetime is chosen to match the answer: which stores this
+machine holds stays true for the length of a session, so a value found once may be held, and
+trusted, for exactly that long.
 
 | | Before | After |
 |---|---|---|
@@ -234,8 +381,9 @@ memory to move two locators — three lines after the report was answered.
 
 A citation is evidence *about* a memory, not part of what it says. So it moves the way a tag does:
 two more ops, `cite` and `uncite`, each naming the memory and one locator, with the same refusals —
-not a head, already cited, not cited. Replay copies the record before changing it, because earlier
-snapshots share it and a reader holding one must keep seeing the citations it was given.
+not a head, already cited, not cited. Replay copies the record before changing it: earlier
+snapshots share the same record, so changing it in place would change what a reader holding an old
+snapshot sees — and that reader must keep seeing the citations it was given.
 
 | What changes | Before | After |
 |---|---|---|
@@ -253,13 +401,20 @@ they are cited for. Both of this design's own wrong locators were in range.
 
 Rows carry a second-resolution time, a clone and a per-clone `seq`. Anything that needs *the latest*
 row of some kind has to say what latest means, and twice now the answer was "the greatest time,
-ties broken by row id" — which inside one second is a coin toss between unrelated digests.
+ties broken by row id". Rows written inside the same second carry the same time, so the tie falls
+to their row ids — digests, whose order says nothing about which row was written first. Inside one
+second, "latest" is a coin toss.
 
 The mailbox hit it first and was given `seq` (§3.6). The vocabulary hit it next. Opening a store
 appends a `taxonomy` row when the loaded vocabulary differs from the one the last such row records,
 and that row was found by scanning for the greatest time. A store created, given a pack and written
-to inside the same second could have its *first* taxonomy row win the tie for good — and then every
-open, for ever, appended another row claiming a change that had not happened.
+to inside the same second holds its base-vocabulary row and its pack row at one time, so which of
+them reads as "the last" falls to the digest toss. When the earlier, base row wins, the comparison
+always says changed — last recorded is the base, loaded is the base plus the pack — so the open
+appends a taxonomy row claiming a change that had not happened. And the toss has no memory: while
+the winning row keeps winning, every open repeats the append and the hash chain grows without
+bound. The black-box test that found it watched three reads in a row each add a row; its name now
+pins the fix (`test_reading_three_times_over_does_not_grow_the_hash_chain`).
 
 | | Before | After |
 |---|---|---|
@@ -292,8 +447,9 @@ does; one test asserts the same refusal reads identically through both.
 
 Nothing in the shipped code knows it is under test: no branch on an environment variable, no import
 from `tests/`, no seam that exists for a fixture. The isolation is the one a person gets from
-`$PYGIM_ENACT_GLOBAL`, `$XDG_DATA_HOME` and `$GIT_CONFIG_GLOBAL` — a process cannot be
-monkeypatched, which is part of what makes this suite worth its cost.
+`$PYGIM_ENACT_GLOBAL`, `$XDG_DATA_HOME` and `$GIT_CONFIG_GLOBAL`, and it is the only kind on
+offer: a separate process cannot be monkeypatched. That impossibility is part of what makes this
+suite worth its cost.
 
 It is deliberately about refusals, because a refusal is this design's most distinctive behaviour:
 it is a result rather than an exception, it names the facts that would make the call succeed, and
@@ -336,8 +492,8 @@ what it says.
 
 **State by appending**, as everywhere else here: a message that carries `resolves` closes the one
 it names, and it needs text of its own, so a thread is never closed silently. `mailbox` returns
-what is open, oldest first by time then id — one order whoever merged the clones — and `all`
-returns everything, since nothing is deleted.
+what is open, oldest first by time then id — a key each message carries itself, so the order is
+the same whoever merged the clones — and `all` returns everything, since nothing is deleted.
 
 **Delivery.** `session` lists what is open, so the first call of every session shows it; the
 session-start hook prints the same list (§9.1.2), so it arrives without anyone asking; and
@@ -350,11 +506,45 @@ any other scope — a community store's mailbox is where its contributors talk.
 
 ### 4.1 The row is the point of no return
 
-A commit writes everything a row refers to first — the content object, a new taxonomy file
-— and appends the row last. A process that dies before the append leaves an orphan object,
-which is harmless: nothing names it, and a later collection may remove it. A process that dies
-after the append has committed, completely. There is no state in between that any reader can
-see.
+A **row** is one line in this copy's audit log, `audit/<clone>.jsonl` (§3.2): the record that an
+operation happened — a memory remembered, a tag linked, a memory retired — with who, when and
+why. Replaying the rows in order rebuilds everything the store knows (00 §4, *audit row*). A
+memory's text is not in its row: it is a separate content object, which the row names by its
+digest.
+
+So an operation writes its content first and its row last, and the row is what makes it
+happen:
+
+| The process stops… | What is on disk | What a reader sees |
+|---|---|---|
+| before it writes anything | nothing | the operation did not happen |
+| after the content object, before the row | an object nothing names: an orphan | the operation did not happen; the orphan is harmless, and a later collection may remove it (§9.3) |
+| after the row | the object and the row | the operation happened, completely |
+
+There is no fourth moment — the work done but not committed — because an operation is complete
+when its row is appended, and not before. Until then its work is only an orphan: the caller has
+not been told it succeeded, and asking again writes the same object (it is addressed by its
+digest, so writing it twice is writing it once) and then the row.
+
+**Found 2026-09-23: seen whole, not yet kept whole.** The order holds for a reader, not for a power
+cut. `append_durably` forces the row to the disk (`fsync`); `write_atomically`, which writes the
+content object the row names, forces neither the file nor its folder
+(`strategy/files/lock.h`). After a power cut the row can be on the disk while the object it names
+is empty, which is exactly the in-between state this section rules out. This is reasoned from
+the code, not reproduced. The same helper names its temporary file `<file>.tmp` — one fixed
+name per file, so two writers of one file would be writing the same temporary file. That is safe
+only while every writer of that file holds the commit lock, and the store's constructor writes
+`local/clone` without taking it. Both are closed by pathlike's `AtomicWrite`
+([pathlike: writes that survive](../pathlike_writes.md)), which the folder kinds of §3.1.1 write
+through.
+
+**How it will be tested.** A unit test cannot cut the power, but it can check the order that
+survives a cut. `AtomicWrite` and `DurableAppend` take the way they force bytes to the disk as a
+policy (a template parameter): the real one calls `fsync`, and a recording one in tests writes
+down every write, force and rename. The test runs one `remember` and asserts the object's
+temporary file was forced, renamed and its folder forced, all before the row's append was
+forced. Today's helpers fail it at the first step, since nothing forces the object — which is
+the test to write first ([pathlike: writes that survive](../pathlike_writes.md), under tests).
 
 ### 4.2 Two sessions, one repository
 
@@ -400,8 +590,9 @@ a `stat` per file — and replays only what it has not seen.
 
 A promotion (Scenario 3.1) is the one place the two meet: three usage records reach the
 threshold, and the association they justify is committed as an audit row carrying the
-evidence it was promoted on. Replay applies the row; it never recounts usage, so a lost usage
-record can delay a promotion but never undo one.
+evidence it was promoted on. Replay applies the row; it never recounts usage. So a usage record
+lost before the threshold is reached can delay the promotion; one lost after the row is committed
+changes nothing, because the row, not the count, is what replay applies.
 
 ---
 
@@ -419,15 +610,17 @@ flowchart LR
 ```
 
 The next load finds two heads and writes a **merge row** whose parents are both of them. Its id
-is the digest of the sorted parents, so whoever merges first — and in whichever direction —
-produces the same row: merging A into B and B into A gives the same snapshot.
+is the digest of the sorted parents: the parents are put in one fixed order before hashing, so
+the direction of the merge never enters the digest. Whoever merges first — and in whichever
+direction — therefore produces the same row, and merging A into B and B into A gives the same
+snapshot.
 
 Replay walks the rows in topological order, breaking ties by row id. Two things need a rule
 because two people can disagree about them concurrently:
 
 | Concurrent pair | Rule | In the example above |
 |---|---|---|
-| a link and an unlink of the same association | **add wins**: an unlink removes only the links it had seen; a link it had not seen survives | the colleague's unlink had not seen Debith's link, so \#6 keeps `task=balance` |
+| a link and an unlink of the same association | **add wins**: an unlink row removes only the links that exist in the history behind its own parents — the rows its writer had replayed; a link made concurrently in the other clone is not in that history, so it survives | the colleague's unlink had not seen Debith's link, so \#6 keeps `task=balance` |
 | two supersedes of the same head | **both survive, and the chain is marked forked** | two corrections of \#6 are two heads; both are findable and a review item says the chain forked |
 
 A forked chain is a recollection failure between people rather than between sessions, and it
@@ -437,8 +630,9 @@ rule neither of them saw. Section 01's head-uniqueness law is therefore amended:
 any single line of history, and a fork created by a merge is reported, never silently resolved.
 
 What a merge cannot do is run the no-unread-write check across people who had not seen each
-other's rows. That is inherent — nobody can read what does not exist yet — and it is exactly the
-duplicate Feature 5 finds and names.
+other's rows. That is inherent — nobody can read what does not exist yet — so two people can write
+the same thing with neither having seen the other's note. That duplicate is exactly the one
+Feature 5 finds and names.
 
 ---
 
@@ -462,8 +656,9 @@ flowchart TB
 ```
 
 **The checkpoint** is the index as it stood at one row — associations, heads, the dense id map
-— kept in `local/`. It is trusted only when its row is an ancestor of the current head, and then
-only the rows after it are replayed. Deleting it costs one full replay and changes nothing else.
+— kept in `local/`. It is trusted only when its row is an ancestor of the current head — everything it
+was built from is then part of the head's own history — and then only the rows after it are
+replayed. Deleting it costs one full replay and changes nothing else.
 
 **Content is loaded lazily.** The snapshot keeps each memory's digest, title and token estimate;
 the text is read from its object when a context is actually built. A corpus of a hundred
@@ -473,54 +668,202 @@ thousand one-kilobyte memories is a hundred megabytes nobody needs in memory to 
 unknown slug is an ingestion row, a known slug with a new digest is a supersede, and an unchanged
 block is nothing at all. A block that fails the vocabulary is named by file and line, and the
 others land. A block's `cites:` header carries its locators, comma-separated, as a written
-memory's `cites` does. The same no-look rule is open to `remember` with origin `seed`, for an agent
-seeding a store from documents it has not yet written anything from.
+memory's `cites` does. Ingestion is a door with no look step (section 00a, Feature 4): a
+hand-written block is landed without the no-unread-write check, because its writer chose its tags
+outside any session. The same exemption is open to `remember` with origin `seed`, for an agent
+seeding a store from documents it has not yet written anything from — and to nothing else: a
+write during work always looks first.
 
 ---
 
-## 7. The contract, and its strategies
+## 7. The service, and its strategies — redrawn 2026-09-23
+
+**Scenario: two wirings, one service.** The stores on this machine are wired as
+`MemoryService<FilesStore, SystemClock, ViewFolder>` over a directory. A test that has to control
+time swaps in `FixedClock`, and nothing else changes. A store that must never publish plaintext
+is wired as `MemoryService<SealedStore<FilesStore>, SystemClock, LocalViews>`. In all three the
+service, the snapshot and the vocabulary loader are the same code, because they only ever speak
+to three strategies: where the bytes go, what time it is, and how a memory is shown to people.
+
+The diagrams in this section, and in §3.1.1, describe behaviour: each class says in a few words
+what it is responsible for, and the arrows carry how the classes relate. The arrows follow
+[the project's relationship pattern](../plantuml_relationship_pattern.md).
 
 ```mermaid
 classDiagram
-    direction LR
-    class memory_store {
-        load(since) rows and files
-        commit(transaction) row id
-        content(digest) text
-        append_usage(records)
-        append_receipt(receipt)
-        head() row ids
+    direction TB
+    class PythonShell {
+        speaks MCP, the CLI and the hooks
+        sets a store up
     }
-    class in_memory_store {
-        rows in vectors
-        for tests
+    class EnactAdapter {
+        <<pybind>>
+        translates a call into the terms of the service
+        and a result into Python values
+        decides nothing
     }
-    class files_store {
-        the layout of section 3
+    class Enact {
+        <<C++ wiring>>
+        builds the service from the chosen strategies
+        owns them while the store is open
+    }
+    class MemoryService~Store,Clock,Views~ {
+        decides what is true
+        renders what people read
+    }
+    class Codecs {
+        <<constexpr>>
+        turn a value into bytes and back
+        proven at compile time
+    }
+    class Store {
+        <<strategy>>
+        keeps rows, content and observations
+        never says where
+    }
+    class Clock {
+        <<strategy>>
+        says what time it is
+    }
+    class Views {
+        <<strategy>>
+        shows each memory to people
+        never the record
+    }
+    PythonShell ..> EnactAdapter : calls
+    EnactAdapter o-- Enact : holds, translates for
+    Enact *-- MemoryService
+    Enact *-- Store
+    Enact *-- Clock
+    Enact *-- Views
+    MemoryService o-- Store : holds
+    MemoryService o-- Clock : holds
+    MemoryService o-- Views : holds
+    MemoryService ..> Codecs : uses
+```
+
+`EnactAdapter` owns nothing: it holds the one `Enact` object and translates calls into it.
+`Enact` is the C++ side's wiring — it picks the strategies, builds the service from them, and
+owns all of it for as long as the store is open — so a C++ caller or test gets the same object
+the Python side does.
+
+Each strategy and what implements it, one diagram per family. Clock and Views have no arrows to
+anything outside their own family, so each is drawn alone, and the diagram above only names
+them. The ones marked *end state* are directions this design keeps a seam for, not work planned
+now (the owner's standing rule: a direction is not dropped because today's scale does not need
+it).
+
+**Store** — where the record goes:
+
+```mermaid
+classDiagram
+    direction TB
+    class Store {
+        <<strategy>>
+        keeps rows, content and observations
+    }
+    class FilesStore {
+        puts each kind of bytes where the layout says
         canonical, shared through git
     }
-    class sqlite_store {
+    class SealedStore~Inner~ {
+        seals the bytes, then hands them to the store it wraps
+    }
+    class CompositeStore {
+        <<end state>>
+        commits to the canonical store, then to a derived one
+    }
+    class SqliteStore {
+        <<end state>>
         a cache of rows, objects and checkpoints
         derived, never canonical
     }
-    class composite_store {
-        canonical
-        derived
+    class DatabaseStore {
+        <<end state>>
+        the same rows in a database a team already runs
+        derived, built on the persistence module
     }
-    memory_store <|.. in_memory_store
-    memory_store <|.. files_store
-    memory_store <|.. sqlite_store
-    memory_store <|.. composite_store
-    composite_store --> files_store : commits here first
-    composite_store --> sqlite_store : then here, best effort
+    class InMemoryStore {
+        <<end state>>
+        rows in vectors
+    }
+    Store <|.. FilesStore
+    Store <|.. SealedStore
+    Store <|.. CompositeStore
+    Store <|.. SqliteStore
+    Store <|.. DatabaseStore
+    Store <|.. InMemoryStore
+    SealedStore *-- Store : wraps
+    CompositeStore *-- FilesStore : commits here first
+    CompositeStore *-- SqliteStore : then here, best effort
 ```
 
-`memory_store` is a C++ concept, as `BackendPolicy` is for the persistence module, and the
-service is `MemoryService<Store>`: the strategy is chosen at compile time and a new one is a new
-type under `strategy/`, not a flag. The composite commits to the canonical store — the commit
+**Clock** — what time it is:
+
+```mermaid
+classDiagram
+    direction TB
+    class Clock {
+        <<strategy>>
+        says what time it is
+    }
+    class SystemClock {
+        the clock of the machine
+    }
+    class FixedClock {
+        a moment a test chooses
+    }
+    Clock <|.. SystemClock
+    Clock <|.. FixedClock
+```
+
+**Views** — where a memory's page for people goes:
+
+```mermaid
+classDiagram
+    direction TB
+    class Views {
+        <<strategy>>
+        shows each memory to people
+    }
+    class ViewFolder {
+        a page per memory under memories/
+    }
+    class LocalViews {
+        plaintext beside a sealed store
+        never committed
+    }
+    Views <|.. ViewFolder
+    Views <|.. LocalViews
+```
+
+Each strategy interface is a C++ concept, as `BackendPolicy` is for the persistence module, and
+the service is `MemoryService<Store, Clock, Views>`: a strategy is chosen at compile time, and a new
+one is a new type under `strategy/`, not a flag. `SealedStore` is a template on the store it wraps,
+so sealing composes with any backend. The composite commits to the canonical store — the commit
 point — and then to the derived one; a derived store that falls behind is noticed at load by its
-head and rebuilt. An MSSQL strategy, for a team that wants its history in a database it already
-runs, would be another derived store over the same rows, built on the persistence module.
+head and rebuilt. The in-memory store stays buildable, though the black-box tests of §3.5.3 do
+not want it.
+
+**Views are a strategy of their own, not part of the Store** (settled 2026-09-23). A *view* is
+the page a person reads for one memory — in the files store, `memories/<slug>.md`. It is not the
+record: the rows and content objects are, and a view is regenerated from them whenever they
+change. Where such a page can go depends on the backend:
+
+| Backend | Where a memory's page goes |
+|---|---|
+| files store | `memories/`, committed with the store |
+| sealed store | a local folder, never committed — a committed page would leak the text the store seals (the leak table below) |
+| database store | nowhere: it has no folder to put a page in |
+
+If views were part of the Store, every backend would have to handle them, including the one with
+nowhere to put them. So the wiring chooses a `Views` beside the store; the service renders the
+page (the `MemoryView` codec) and hands the finished text to it, and no store ever renders or
+writes a page.
+
+**Time is a strategy** (settled 2026-09-23). The service asked the store for the time
+(`now()`), which made time a storage concern and left a test no way to fix it. The clock is
+configuration in the sense of global #9, so it is a template parameter the wiring chooses.
 
 **A strategy is also where encryption belongs** (Debith, 2026-09-17: the backend should be
 configurable — "local to be encrypted and file system", a shared one a database — and the code
@@ -536,7 +879,78 @@ Three things a content decorator cannot hide, which the design has to answer ins
 |---|---|---|
 | file names | `memories/<slug>.md` spells a memory's title; `taxonomy/pack-<domain>.yaml` names the domain | views are derived, so an encrypted store keeps them out of what is committed, as local plaintext a person still reads |
 | commit messages | the global store's automatic commit names the memory it wrote | a store that is encrypted commits under an opaque message |
-| a content digest | content is addressed by the digest of its plaintext, and replay must stay deterministic, so ids cannot depend on a key | fine for prose; a short, guessable secret can still be confirmed by hashing a guess, so the rule is that secrets do not belong in memories at all |
+| a content digest | content is addressed by the digest of its plaintext, and replay must stay deterministic, so ids cannot depend on a key | fine for prose; a short, guessable secret can still be confirmed by hashing the guess and looking for that digest among the object names, so the rule is that secrets do not belong in memories at all |
+
+### 7.1 What a Store answers for
+
+**The point:** the service has to work with any store — files today, sealed or a database later —
+so the store's contract (the `memory_store` concept) must list exactly what every backend has to
+do, and nothing that only one backend can. On 2026-09-23 it did neither. It listed 22 operations,
+some of them not storage at all (the time, rendering pages); the service called `write_report`,
+which the contract does not list; and the adapter called five more that are not in it (`root`,
+`problems`, `inventory_ids`, `write_file`, `receipts`). Those five meant the adapter was written
+against the files store in particular: a second backend could not be swapped in without changing
+the adapter.
+
+The table takes today's operations, grouped by what they are for, and says what becomes of each.
+*Stays* means every store must provide it; *leaves* means it moves to `Clock` or `Views`, which
+the wiring supplies beside the store (§7).
+
+| What it is for | Operations on 2026-09-23 | In the redrawn contract |
+|---|---|---|
+| the record | `rows`, `new_rows`, `append`, `next_seq`, `clone`, `lock` | stays: the rows, whose they are, one writer at a time |
+| memory text | `put_object`, `object` | stays: content, found by its digest |
+| old vocabularies, kept for rerunning receipts | `freeze_taxonomy`, `load_frozen_taxonomy` | stays, as content: the `FrozenVocabulary` codec turns a vocabulary into one content object and back |
+| what happened around the record | `append_usage`, `usage`, `append_receipt`, `append_mailbox`, `mailbox`; `receipts` from the adapter | stays; `receipts` joins the contract |
+| the vocabulary and the source inventory | `load_taxonomy`; `write_file`, `inventory_ids` from the adapter | stays, as documents: list, read, and replace only if unchanged since read |
+| things a person must look at | `problems`, from the adapter | stays, as a type: file, line, what |
+| numbering sessions | `next_session` | stays: sessions are numbered per store |
+| the time | `now` | leaves, to `Clock` |
+| pages for people | `write_view`, `view_text`, `remove_view`, `write_report` | leave, to `Views` |
+| where the files are | `root`, from the adapter | leaves the contract: only `FilesStore` has a folder |
+
+### 7.2 From today's code
+
+Where each part of `strategy/files/store.h` goes (§3.1.1 has the classes). Listed so the change
+can be made one row at a time, each landing working.
+
+| Today in `store.h` | Goes to |
+|---|---|
+| `init` | creates the folders the layout names; `.gitignore`, `.gitattributes` and `base.yaml` come from the layout's data, not from literals |
+| constructor | sets values only (global #9); "is this a store" becomes an `open()` check; the copy id is made by `LocalState` on first use, under the lock, from randomness it is handed |
+| error text naming `oo enact setup` | the store states the fact, "no store at X"; the command line adds the command |
+| `root` | `FilesStore` only |
+| `clone` | a `CloneId` codec (`c-` and eight hex digits) held by `LocalState`; named `clone_id`, since `clone()` means a copy of the object in C++ and in `PathSet` |
+| `problems` | `Problems` |
+| `inventory_ids` | `DocumentFolder` over `sources/` and the yaml engine; an inventory that does not parse, has two documents or repeats an id is a problem, not an empty list |
+| `write_file` | `DocumentFolder`: replace only if unchanged; which files may be written comes from the layout |
+| `taxonomy_files`, `load_taxonomy` | `DocumentFolder` over `taxonomy/`, listed in a fixed order: the directory's own order differs between machines, and a frozen vocabulary written in it differs byte for byte |
+| `freeze_taxonomy`, `load_frozen_taxonomy` | the `FrozenVocabulary` codec, which owns the tag `pygim-taxonomy-files-1` (spelled three times today) and checks every length it reads; today a truncated object makes `remove_prefix` run past the end, which is undefined behaviour |
+| `rows`, `new_rows`, `append`, `next_seq` | `CloneLog`, over `LineTail`, `DurableAppend` and the row codec |
+| `lock` | `LocalState` |
+| `put_object`, `object`, `object_path` | `ContentFolder`; the `ab/cdef…` split is its addressing rule |
+| `append_usage`/`usage`, `append_receipt`/`receipts`, `append_mailbox`/`mailbox`, `day_file`, `lines_under` | one `DailyLog<Record>`, instantiated three times; the day comes from the record's own `time`, which all three records carry; an unreadable line is a problem, where today it is dropped without a word |
+| `write_view`, `view_text`, `remove_view` | the `MemoryView` codec (front matter, CR-LF read as LF) in the service, and `ViewFolder` over `memories/` |
+| `write_report` | `ViewFolder` over `reviews/`; it already receives finished text |
+| `next_session` | `LocalState`, reading the number with `std::from_chars`; today `1a2` reads as 12 |
+| `now` | `Clock`, and a `Timestamp` codec |
+| `lock.h`: `write_atomically`, `append_durably`, `read_file` | pathlike's `AtomicWrite`, `DurableAppend` and `file` |
+
+**The adapter.** `adapter/enact_adapter.h` is the pybind layer between Python and the C++
+service. Its only job is translation: a Python call into a C++ call, and the result back into
+Python values ([00 §8](00_overview.md#8-layering-rules)). On 2026-09-23 it also made decisions of
+its own. A decision made there reaches only callers that come through Python: a C++ caller or a
+test driving the service directly gets different answers, and nobody can see why. Each moves into
+the C++ side, so every caller gets one answer:
+
+| Adapter function | The decision it makes today | Moves to |
+|---|---|---|
+| `vocabulary` | leaves retired values out; builds the refusal for an unknown dimension | the service's vocabulary answer |
+| `heads` | keeps only current memories, removes duplicates, sorts | a query on the snapshot |
+| `waiting_acceptance` | what "waiting" means: generalises something, is current, is not yet accepted | a query on the snapshot |
+| `coverage_dict` | works out which inventoried documents nothing cites, and cuts the list at 8 | the read's own coverage, with the cut stated in the answer |
+| `ingest` | reads a file from disk and parses the corpus | the Python shell reads the file; the service parses the text |
+| `hex().substr(0, 12)`, seven times | the short form of a key | one `short()` on the key type |
 
 ---
 
@@ -570,8 +984,9 @@ directory.
 | **A user-level directory** | `~/.local/share/pygim/memory/pygim/` (the platform's user data directory) | nothing in the project's git at all | stays on one machine unless copied |
 | Inside the project | `pygim/.enact/`, committed | memories branch with the code they are about | only the branch that carries it has a memory — a project with several worktrees on several branches has several, or none |
 
-`git config` is what makes a store global to a project: git keeps it in the clone's shared
-configuration, so one `oo enact setup` points every worktree at the same store. The server is
+`git config` is what makes a store global to a project: the setting lives in the clone's
+configuration, which every worktree of that clone shares, so the path one `oo enact setup`
+writes is the path every worktree reads — one store for all of them. The server is
 registered once, at user scope and without a root, and finds each project's store from the
 directory the host starts it in. A consequence for sources (02 §5.2): a store outside the checkout
 cannot hold paths relative to itself, so an inventory path is relative to the project's root.

@@ -72,7 +72,7 @@ and the answer together.
 | `task` | what activity is it for? | design · critique · balance · troubleshoot · explain |
 | `purpose` | what is the thing *for*? | offensive · defensive · control · utility · exploration · social |
 | `action_economy` | what does it cost to use? | action · bonus_action · reaction · ritual |
-| `kind` | what sort of knowledge is this? | reference · principle · procedure · example · decision · preference |
+| `kind` | what sort of knowledge is this? | reference · principle · procedure · example · decision · preference · question |
 
 A memory answers as many of these questions as apply, and may give **several answers to one**:
 a spell note that is both offensive and defensive carries `purpose=offensive` and
@@ -88,8 +88,9 @@ Three consequences shape everything below.
   one that does not match costs nothing. Nothing is admitted or excluded by a soft tag.
 - **Questions are independent.** `purpose` and `action_economy` are separate axes, not a
   hierarchy: knowing one tells you nothing about the other. That independence is what the
-  vocabulary study measures (overview §4.8) and what keeps the answer set a flat product
-  rather than a tree.
+  vocabulary study measures (overview §4.8). It is also what keeps the answer set flat:
+  because no answer narrows any other, every combination of answers can occur, so the set
+  is a product of the dimensions rather than a tree in which one answer restricts the next.
 
 ### 2.1 Strong ids
 
@@ -103,7 +104,7 @@ template <class Tag, std::unsigned_integral T = std::uint32_t> class basic_id;
 | Alias | Width | Why that width |
 |---|---|---|
 | `memory_id` | 32 bits | a corpus outgrows a human's attention long before it outgrows this |
-| `tag_id` | 16 bits | the seed vocabulary has 53 values; a whole tag set stays inside one or two words |
+| `tag_id` | 16 bits | the seed vocabulary has 54 values; a whole tag set stays inside one or two words |
 | `dimension_id` | 8 bits | ten dimensions, and facet analysis does not reward many more |
 | `source_id` | 32 bits | one per inventoried document |
 | `session_id` | 64 bits | lineage names the session that wrote a memory |
@@ -113,22 +114,31 @@ Each is default-constructed to an invalid sentinel, is trivially copyable, and o
 
 ### 2.2 The content digest, and a memory's key
 
-The hash of a memory's content does two jobs: it is what "identical content is already a head"
-compares (overview §4.5), and it proves a stored text is the text that was written.
+The hash of a memory's content does two jobs. First, it is what the "identical content is
+already a head" check compares (overview §4.5): the service digests the incoming content and
+looks for a head whose recorded digest equals it — equal digests mean the content is already
+stored. Second, it proves a stored text is the text that was written: re-digest the stored
+text and compare with the recorded digest; a mismatch means the text is not the one the
+write carried.
 `basic_digest<Bits>` is `Bits / 64` lanes of `mix64`; `digest` is the 128-bit default. The same
 type names audit rows: a `row_id` is the digest of a row (section 03 §2.1).
 
 A memory's *identity* is not its content digest but its **key** — the `row_id` of the row that
-created it. Content can repeat: a correction reverted to the old text has the old digest and is
-still a different memory, with different lineage and a different place in its chain (section
-03 §2.2). Every file names a memory by its key; the dense `memory_id` exists only inside a
-snapshot.
+created it. The digest cannot be the identity, because content can repeat: a correction that
+reverts to the old text carries the old content, so it has the old digest — and it is still a
+different memory, created by a different row, with different lineage and a different place in
+its chain (section 03 §2.2). Every file names a memory by its key; the dense `memory_id`
+exists only inside a snapshot.
 
 **Decision 2.2 — 128 bits, not 64 and not SHA-256.** Sixty-four bits gives a birthday
-collision near 1e-10 for a corpus of 100 000 — small, but the failure mode is a *silently
-dropped write*, so the second lane is cheap insurance. SHA-256 would add a dependency for a
-boundary this is not: a repository's trust model is git's, and an adversary who can rewrite
-the associations file does not need a hash collision. If §11 gives a repository a trust
+collision near 1e-10 for a corpus of 100 000. That chance is small, but follow what a
+collision would do: two different contents share one digest, the identical-content check
+takes the new write for content already stored, and the new text is never written — a
+*silently dropped write*. Against that failure mode, the second lane is cheap insurance.
+SHA-256 would add a dependency, and what the dependency buys — protection against a
+collision constructed on purpose — matters only at a trust boundary, which this digest is
+not: a repository's trust model is git's, and an adversary who can rewrite the associations
+file does not need a hash collision. If §11 gives a repository a trust
 boundary of its own, the digest becomes a policy — hence the template parameter.
 
 ### 2.3 A tag is one id
@@ -189,8 +199,9 @@ sequenceDiagram
 
 Union within a dimension and intersection across them is the candidate rule of the overview's
 §4 stated as algebra: *for every hard dimension, at least one of the query's values*. Written
-with `id_set`, it is a handful of word-at-a-time operations, and the counting variants answer
-*how many* candidates there would be without building the set at all.
+with `id_set`, it is a handful of word-at-a-time operations. The counting variants combine
+the same words and count the set bits of each combined word as they go — a popcount — so they
+answer *how many* candidates there would be without ever allocating the candidate set.
 
 ---
 
@@ -217,8 +228,9 @@ flowchart LR
     w --> sum["soft_score = 5500<br/>exact, whatever the order"]
 ```
 
-The ranking key is a total order over distinct memories — negated score, then negated count
-of soft hits, then the id, which always terminates the comparison.
+The ranking key is negated score, then negated count of soft hits, then the id. Distinct
+memories never share an id, so when score and hit count both tie, the id still decides:
+the comparison always terminates, and the order over distinct memories is total.
 
 ### 3.1 Reproducing a retrieval later
 
@@ -255,7 +267,9 @@ build or iteration order.
 
 **This constrains a decision the overview leans toward.** Open decision §10 there suggests
 breaking rank ties with usage counters once they exist, instead of the memory id. Counters
-rise on *reads*, which are asynchronous observations that no snapshot version pins. Adopting
+rise on *reads*: each observation lands asynchronously as a usage record, and a usage record
+is not an audit row — of LEARN, only a promotion writes one (§3.1) — so counters move without
+moving the version. No snapshot version therefore names the counters' state at any moment. Adopting
 that tie-break would make a retrieval depend on state that reruns cannot reproduce — unless
 counters are folded into the snapshot version, which would mean publishing a snapshot on
 every read. The reproducible options are: keep the id tie-break, or version the counters at
@@ -339,8 +353,11 @@ marker and its counters are not fields of `memory`: they are `memory_state`, whi
 snapshot materialises from the associations and lineage edges the index holds. Two things
 follow. A store persists `memory` and never rewrites a stored one — the files store can treat
 a memory file as append-only, and a derived store can rebuild every byte of it from the
-canonical file by content hash. And *only the head is findable* stays a single comparison at
-read time rather than a walk, without that convenience costing content its immutability.
+canonical file by content hash. And *only the head is findable* stays cheap at read time:
+`memory_state` carries `superseded_by`, so headness is one comparison — is it empty — rather
+than a walk of the chain. Because that marker lives in the state and not in the content
+record, marking an old head superseded touches the index and never the written memory: the
+convenience does not cost content its immutability.
 
 A chain is the `supersedes` edges read forwards:
 
@@ -410,12 +427,15 @@ that has no id yet, which is why it carries a string where everything else carri
 
 A write meets one missing value at a time; a vocabulary study (overview §4.8) proposes whole
 *questions* — `purpose`, with its role, its weight and its codebook entry. That is a
-`dimension_proposal`, reviewed by the same human in the same way, and a `tag_proposal` may name
-a dimension that is itself still pending, so a pack is accepted as one reviewed set rather than
-dimension by dimension in the right order.
+`dimension_proposal`, reviewed by the same human in the same way. A `tag_proposal` may name a
+dimension that is itself still pending. Without that, a value could be accepted only after its
+dimension, and a pack would have to be taken dimension by dimension in the right order; with
+it, a pack is accepted as one reviewed set.
 
-The taxonomy is append-only, like the interner beneath it: accepting a proposal adds a tag and
-nothing ever removes one, so an id in a memory written last year still resolves. A value
+The taxonomy is append-only, like the interner beneath it: accepting a proposal appends a tag
+at the end, and nothing ever removes or reorders one. An id is a position in that insertion
+order, so no later append can change what an existing id points at — which is why an id in a
+memory written last year still resolves. A value
 withdrawn from use is marked, not deleted — the same reason a memory is superseded rather
 than edited.
 
@@ -433,8 +453,10 @@ flowchart LR
     resolve --> stale["mismatch → source changed since cited<br/>a review item, never a silent update"]
 ```
 
-A `locator` is trivially copyable and holds no path of its own — the inventory owns the path
-once, so moving a document is one edit rather than thousands. A `source` holds a
+A `locator` is trivially copyable and holds no path of its own: it names its source by id,
+and the inventory owns the path, once. Every locator into a document therefore points at the
+same path record, so when the document moves, the one inventory record is edited and every
+locator still resolves — one edit rather than thousands. A `source` holds a
 `path_table::row`, its kind, and the digest of the whole document when it was inventoried.
 
 The write is a value type too, because the service's four checks (overview §4.5) are written
@@ -468,7 +490,8 @@ not whether it is *recorded*. `context::procedure` is the first slot of overview
 outside the ranked list, at most one. `match::evidence` names the candidates a generalisation
 folds (overview §4.11): they are admitted and counted in `folded`, but not placed (section 04 §3.9).
 
-Every retrieval also leaves a `retrieval_receipt` — query id, when, `snapshot_version`,
+Every retrieval also leaves a `retrieval_receipt` — query id, when, `snapshot_id` (what pins
+the snapshot, per section 03 §2.1) with `snapshot_version` beside it as the readable "v55",
 `taxonomy_version`, the classification, and the ids returned. It is what §3.1's rerun
 consumes, and it is the only part of retrieval that is written rather than read.
 

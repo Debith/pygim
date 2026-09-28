@@ -5,8 +5,8 @@ Status: draft · Owner: Debith · Last updated: 2026-09-11
 
 The snapshot every read answers from, how a new one is published without stopping readers,
 and a read from the first tag to the receipt it leaves. Section 01 fixed the types and the
-arithmetic; section 03 fixed what the snapshot is built from. This section is the part the
-prototype's demo and evaluation test, and it must reproduce them.
+arithmetic; section 03 fixed what the snapshot is built from. This section is the part of the design that the
+prototype's demo and its evaluation put to the test, and it must reproduce them.
 
 | Scenario | What it needs from this section |
 |---|---|
@@ -77,8 +77,9 @@ classDiagram
 | `forward` | which tags a memory carries | the same rows, the other way round |
 | `procedures` | the head procedure for an artifact and task | memories in `heads` tagged `kind=procedure` |
 
-Counters are not in the snapshot. They rise on every read, which no snapshot version pins, and
-a ranking that depended on them could not be rerun (01 §3.1). They live with the statistics
+Counters are not in the snapshot. They rise on every read, and a read publishes no snapshot, so
+no snapshot version pins what a counter held at any moment; a ranking that depended on them could
+not be rerun (01 §3.1). They live with the statistics
 observer and are shown, never ranked on.
 
 ### 1.1 Postings over every memory, masked by heads
@@ -88,8 +89,9 @@ observer and are shown, never ranked on.
 | **All memories, masked** (chosen) | `inverted[purpose=defensive] = {2, 3, 6}` still holds retired \#3; candidates are intersected with `heads` at the end | a supersede changes one word in `heads`, not every posting list the old memory was in | one more intersection per read |
 | Heads only | superseding \#3 removes it from every list that holds it | nothing to mask | a supersede touches as many lists as the memory has tags, and a rerun at an older snapshot needs the lists as they were |
 
-The masked form is also what makes a rerun cheap: the snapshot at an older head differs from
-today's mostly in `heads`.
+The masked form is also what makes a rerun cheap: a supersede or a retirement changes the
+`heads` set and leaves every posting list as it was, so the snapshot at an older head differs
+from today's mostly in `heads`.
 
 ---
 
@@ -190,9 +192,12 @@ initialised from the base vocabulary has only `domain=any` and `artifact=any` un
 and the machine's global store stays that way for good, because nothing in it is about one project
 or one kind of thing. Refusing `any` there leaves the dimension unqueryable — a new store cannot be
 read on two of its three hard dimensions, and the global store cannot be read on `domain` at all.
-So `any` is nameable exactly when it is the only live value its dimension has, and the procedure
-slot reads it the same way: `artifact=any` anchors a slot there and nowhere else. The two rules
-have to agree, or a query that is accepted would return no procedure.
+So `any` is nameable exactly when it is the only live value its dimension has. The procedure slot
+reads it the same way: where `any` is the only live value, `artifact=any` counts as the single
+artifact value a slot needs; anywhere else it anchors no slot. The two rules have to agree. Suppose a
+query could name `any` in a dimension where the slot did not count it: the query would be
+accepted, the slot would find no single artifact value, and a query that is accepted would
+return no procedure.
 
 And `any` never
 scores — in a query that softens its dimension it simply does not match — or generic memories
@@ -225,14 +230,15 @@ a note saying to ask again with room for it — and the ranked matches get the w
 same answer — but only if the rules that turn candidates into an order have not changed underneath
 it, and until now nothing recorded them. `receipt.rules` does: the change above is version 2. A
 rerun compares it, so a read answered last month can be explained under the rules it was answered
-by rather than under today's. This is the seam §4.13 needs for anything learned: what a policy
+by rather than under today's. This is the seam the overview's §4.13 needs for anything learned: what a policy
 learns is state, and state that orders answers has to be versioned like the vocabulary it sits
 beside.
 
 ### 3.3 Scores — step 6
 
-For each candidate, the soft score is the sum of the weights of the dimensions its matched soft
-tags answer, in milli-units (01 §3). With a ranker configured (06), its score arrives in
+For each candidate, first take the query's soft tags that the candidate also carries — its
+matched soft tags. Each of those tags answers one dimension, and each dimension has a weight
+(01 §3). The candidate's soft score is the sum of those dimensions' weights, in milli-units. With a ranker configured (06), its score arrives in
 micro-units and the final score is
 
 ```text
@@ -281,8 +287,9 @@ done — so it is a recollection failure to be merged, not a choice for the retr
 The procedure goes in first, and its tokens count. Then the ranked matches in order: one that
 does not fit the remaining budget is skipped and the walk continues, so a short memory further
 down may still fit; the walk stops at `max_memories`. If the procedure alone exceeds the budget it
-is still the context, alone, with `over_budget` set — a procedure is never cut, and the caller
-learns that its budget is smaller than the domain's way of working. A memory's token estimate is
+is not placed (rules v2, 2026-09-22, §3.2.1): `over_budget` and `procedure_oversized` are set, the
+note names the procedure with its cost — its title only, ask again with room for it — and the
+budget goes to the ranked matches. A procedure is never cut. A memory's token estimate is
 the prototype's: its content length in bytes over four, at least one.
 
 ### 3.8 Explanation, receipt, usage — steps 10 and 11
@@ -298,7 +305,7 @@ the field report's reads returned up to 135 skipped entries that the agent only 
 | `facets` | for each tag among the candidates, how many carry it — leaving out tags every candidate carries, but always naming the query's soft tags, even at 0 | sees before reading again whether a soft tag can match at all (`pillar=combat: 0`), and which values would split the list |
 | `coverage` | the documents the candidates cite and how many cite each; how many cite nothing; the inventoried documents none of them cites | when nothing placed answers the question, goes to the uncited documents instead of trying another tag combination |
 | `next` | a reminder to report each memory with `learn` — `useful`, `not_needed` or `misleading` — since a read records what it *gave*, never what that was worth |
-| `standing` | the `kind=preference` candidates that were ranked but not placed — key and title, not text, and no budget | reads them with `show` before advising. With no soft tags a rank is age (§3.5), so the newest preference is last and `max` cuts it: the one a reader is least likely to know already |
+| `standing` | the `kind=preference` candidates that were ranked but not placed — key and title, not text, and no budget | reads them with `show` before advising. With no soft tags a rank is age, oldest first (§3.5); the newest preference is therefore ranked last, and `max` cuts the end of the list — so the preference cut is the newest, the one a reader is least likely to know already |
 
 A write that changes a memory — `remember`, `link`, `unlink`, `retire`, a promoting `learn` —
 answers with the memory's tags and whether it is a head, as the change left them, so confirming it
@@ -310,8 +317,9 @@ been returned. A slow disk delays the log, never the agent.
 ### 3.9 Folding a generalisation's instances — between steps 5 and 6
 
 A generalisation (overview §4.11) states the point its instances share, so placing both would
-spend the budget saying one thing several times. After step 5, every candidate one of whose
-`generalised_by` is also a candidate *and accepted by a person* (overview §4.11) is taken out of the list that will be scored and named
+spend the budget saying one thing several times. After step 5, each candidate's
+`generalised_by` is checked: when a generalisation in it is itself a candidate *and accepted by a
+person* (overview §4.11), the instance is taken out of the list that will be scored and is named
 under that generalisation as `evidence` — its key and title, not its text. An instance of two
 candidate generalisations is named under each. The procedure slot is never folded.
 
@@ -394,7 +402,8 @@ flowchart LR
 
 Nothing a read depends on is missing from that picture: the rows are canonical, content is
 immutable — so a term matches the same memories on every rerun — the vocabulary version is
-frozen, and every number is an integer. This is also how the
+frozen, and every number is an integer, so the same arithmetic gives the same score on every
+machine. This is also how the
 prototype's evaluation becomes a test — each of its queries, run once, leaves a receipt, and the
 C++ implementation is correct when it reruns every receipt to the prototype's answer.
 
@@ -409,7 +418,7 @@ C++ implementation is correct when it reruns every receipt to the prototype's an
 | `any` is exact | a memory carrying `d=any` meets every hard value of `d`, and `any` never adds to a score | generic knowledge either vanishes from new values or outranks specific knowledge everywhere |
 | Exact score | the final score is the integer formula of §3.3, evaluated without division | two processes rank the same candidates differently |
 | One slot | the procedure slot holds at most one memory, it is the head procedure for the query's single artifact and task, and it is not repeated below | a context opens with the wrong way of working, or with two |
-| Budget kept | the selected memories' tokens fit the budget, or the context is the procedure alone with `over_budget` set | a caller's budget is quietly exceeded, or its procedure quietly cut |
+| Budget kept | the selected memories' tokens fit the budget; a procedure that alone exceeds it is named with `over_budget` set, never placed and never cut (§3.2.1) | a caller's budget is quietly exceeded, or its procedure quietly cut |
 | A term only narrows | a read with a term places a subset of what the same read without it would admit, and its procedure slot is the same | a word in the prompt admits a memory the hard tags exclude, and retrieval by similarity is back |
 | Fold before rank | a non-slot candidate is placed iff no accepted candidate generalises it, decided before scoring | a context spends its budget repeating a pattern case by case — or the fold depends on the budget, and two budgets disagree about which memories count |
 | Immutable once published | a published snapshot never changes | a read sees half a commit |

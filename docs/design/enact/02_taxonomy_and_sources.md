@@ -39,7 +39,8 @@ The base is **copied** into a repository when it is created, not read from the i
 tool. A newer pygim that ships a revised base therefore changes nobody's vocabulary behind
 their back: upgrading is a set of proposals like any other, reviewed and accepted in that
 repository (overview §4.6). One file per pack keeps two people growing two domains out of
-each other's diffs.
+each other's diffs: each domain grows in its own file, so neither person's changes turn up
+in the diffs the other reviews.
 
 ### 1.2 YAML, because the file is mostly prose
 
@@ -95,10 +96,11 @@ A value read off a document carries where it was read, as a locator (§5):
 loaded, live in one snapshot, and are never written down.
 
 That one rule removes three problems at once. A file stays readable in a diff. Two
-repositories that grew their packs in a different order can exchange memories. And accepting
-a proposal can never renumber anything on disk, because nothing on disk has a number. Inside
-a process, ids are still stable in the way 01's *tag stability* law requires: loading is
-deterministic (§2.1), and interning a new value only ever appends.
+repositories that grew their packs in a different order assign different ids to the same tag —
+and can still exchange memories, because the files exchanged carry names, not ids. And
+accepting a proposal can never renumber anything on disk, because nothing on disk has a
+number. Inside a process, ids are still stable in the way 01's *tag stability* law requires:
+loading is deterministic (§2.1), and interning a new value only ever appends.
 
 ### 1.4 Weights are parsed, never converted
 
@@ -157,16 +159,18 @@ service can only check form, so the rule is about form:
 | brief only | — | cheap | the study's agreement numbers would be measuring guesswork |
 
 A drafted pack is checked before a person accepts it (`check_pack`, and again by `oo enact accept
---pack`), and what the loader cannot see comes back beside what it can. Every locator the pack adds
-is resolved against its document, and a warning names each that does not hold: the document is not
-in the store's inventory or the draft's; it is not found; the lines there are not the cited
-passage; or the cited text also occurs on other lines. A path is tried against the project's root,
-the store's own root — a store whose subject is a body of knowledge keeps its sources inside itself
-and belongs to no checkout — and the inventory file's directory; a "not found" says which of those
-it looked in, since a check that cannot say where it looked is one people learn to ignore. The last is the field report's case — a
-locator found by matching the text "Attack" took the Action entry's list item (`L61`), not the
-Attack Roll entry (`L131`), and nothing flagged it. They are warnings, not refusals: a repeated
-line can be the right one.
+--pack`), and the check's result holds what the loader cannot see beside what it can: every
+locator the pack adds is resolved against its document, and a warning names each that does not
+hold. Four things can fail to hold: the document is in neither the store's inventory nor the
+draft's; the document is not found; the lines there are not the cited passage; or the cited text
+also occurs on other lines. A document is looked for by its path, tried against three places: the
+project's root; the store's own root, because a store whose subject is a body of knowledge keeps
+its sources inside itself and belongs to no checkout; and the inventory file's directory. A "not
+found" says which of those it looked in, since a check that cannot say where it looked is one
+people learn to ignore. The fourth warning — the cited text also occurring on other lines — is the
+field report's case: a locator found by matching the text "Attack" took the Action entry's list
+item (`L61`), not the Attack Roll entry (`L131`), and nothing flagged it. They are warnings, not
+refusals: a repeated line can be the right one.
 
 A part that is empty, equal to the entry's own name, or equal to another part of the same
 entry is refused. Nothing else about a description is judged here; its adequacy is what the
@@ -178,7 +182,8 @@ study measures (§4) and what the human reviews.
 dimension, value, role, weight, entry and locator, in load order, with comments and
 formatting dropped. Two repositories with the same vocabulary have the same version, a
 reformatted file keeps its version, and a merge of two branches that grew different packs
-gets a version of its own without either side having to count. The "v3" a person sees is
+gets a version of its own — the merged content simply digests to a new value — without
+either side having to count. The "v3" a person sees is
 the number of accepted changes in the audit log; the digest is what a retrieval receipt pins.
 
 A human may edit a taxonomy file by hand — rewording a boundary after a classification
@@ -222,7 +227,9 @@ A value proposal may name a dimension that is itself only proposed; the set is a
 edited as a whole, so nothing has to be accepted in the right order. **Replacing a live pack**
 (`--replace`) lists the values the new file drops, and is refused while any head still carries
 one, naming each memory: after the replacement it would carry a tag the vocabulary no longer has,
-and on a hard dimension no read could find it. Retag those memories first; §3.3 says why the
+and no query could name the dropped value any more. On a hard dimension that is fatal: a memory
+is admitted only when the query names one of its values there, so a read that filters on that
+dimension could never find the memory again. Retag those memories first; §3.3 says why the
 service does not do it for you.
 
 ### 3.2 Rejecting, and what the agent is told
@@ -244,9 +251,10 @@ retirement named one. Removing a value would mean rewriting every association th
 which is an edit to history rather than a change to the vocabulary.
 
 A value can still disappear — a pack replaced, a file edited by hand. Replay then meets rows
-naming a tag it cannot resolve. Those rows are history: a review is raised only for a head that
-still carries the tag at the end of replay, one per memory and tag, so a value that was unlinked
-before it went raises nothing.
+naming a tag it cannot resolve. Those rows are history: replay keeps them and does not fail on
+them. A review is raised only for a head that still carries the tag once replay has finished —
+one per memory and tag — so a value that was unlinked before it went, leaving no head that
+carries it, raises nothing.
 
 ---
 
@@ -286,7 +294,7 @@ decimals; these are reporting numbers, not ranking ones, so they may be floating
 | Measure | For dimension *d*, over *n* sampled entries |
 |---|---|
 | Coverage | entries with at least one value in *d* in pass A, divided by *n* |
-| Discrimination | the largest share any single value of *d* takes among the entries that have one |
+| Discrimination | for each value of *d*, the share of pass-A entries carrying it, out of the entries that carry any value of *d*; discrimination is the largest of those shares |
 | Agreement | for each value *v*, Cohen's κ of the yes/no judgement "carries *v*" between pass A and pass B; the dimension's κ is the mean over values that either pass used at least once. The per-value κ and the entries behind each disagreement are reported, because they point at one boundary sentence |
 | Independence | for dimensions *d* and *e*, Cramér's V over a contingency table in which each entry contributes a total weight of 1, split evenly across its (value of *d*, value of *e*) pairs |
 
@@ -367,15 +375,17 @@ shardwake-corruption-magic:
 ```
 
 A path is relative to the project's root, and resolved through a `path_table` row (01, §6),
-so a hundred locators into one document share one path. `cite` gives a document the id its
-inventory entry already has, found by path, and makes one from the path only for a document the
-inventory lacks — so a vocabulary value and a memory never name one document two ways. The locator
+so a hundred locators into one document share one path. `cite` looks a document up in
+the inventory by its path: a document already inventoried gets the id its entry already has, and
+only a document the inventory lacks gets a new id made from the path — so one document has one
+id, and a vocabulary value and a memory never name it two ways. The locator
 a memory carries is `<id>:L<line>`, or `<id>:L<first>-<last>` for a passage of several lines.
 A path relative to the project also survives the store moving, which is not true of one relative to
 the inventory file: the D-D-2024 store moved out of the project it sat in (03 §9.1) and every
-`../../reference/...` had to be rewritten first. Not relative to the inventory file: a store
-may live outside the checkout — on its own branch, or in a user directory (03 §9.1) — and every
-worktree of the project must resolve the same document from the same path.
+`../../reference/...` had to be rewritten first. There is a second reason not to anchor a path
+to the inventory file: a store may live outside the checkout — on its own branch, or in a user
+directory (03 §9.1) — and every worktree of the project must resolve the same document from the
+same path.
 
 ### 5.3 Resolving a locator
 
@@ -414,7 +424,8 @@ document is accepted together with an inventory record for it (§3.1).
 
 What the agent finds when it reads a document — its chapters, a glossary and its terms,
 entries that repeat a shape — is stored as `sources/<id>.structure.json`, every item carrying
-a line, and bound to the rendition's digest. When the digest changes the structure is marked
+a line, and the file records the digest of the rendition it was read from. When the
+rendition's current digest no longer equals the recorded one, the structure is marked
 stale rather than trusted: it was read off text that no longer exists. The service stores it
 and checks the binding; building it is the agent's work (overview §4.9).
 

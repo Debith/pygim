@@ -9,8 +9,8 @@ very commits that fixed their earlier instances.
 |---|---|
 | **Field report** | `__notes__/2026-09-15-memory-field-report-dnd-seeding.md` — an agent session's account of seeding the D&D 2024 glossary into a store and then asking it three rules questions, with the tool calls counted. Its §7 is an A/B rerun after the first round of fixes. |
 | **Head view** | `memories/<slug>.md` — a generated file showing the current version of one memory, so a person can read and diff the store in git. |
-| **Candidate** | A memory the hard tags admit for a read, before ranking, the budget, and any term. |
-| **The fold** | Listing an accepted generalisation's instances under it as evidence rather than placing each in the context. |
+| **Candidate** | A memory that a read's hard tags admit — counted before ranking orders the candidates, before the budget cuts them, and before any term narrows them. |
+| **The fold** | What a read does with an accepted generalisation: rather than placing each of its instances in the context separately, the read lists the instances under the generalisation as evidence. |
 | **Locator** | `<document>:L<line>` — where a vocabulary value or a memory says its text comes from. |
 
 Sources: the field report §0–§7; this session's own defect (head views) and its fix; commits
@@ -44,7 +44,9 @@ Sources: the field report §0–§7; this session's own defect (head views) and 
 
 Defects #2 and #18 were *introduced by the fixes* in this series — #2 by the fix for #1, #18 by the
 fix for #4 — and each is a fresh instance of the same root cause as the defect it came from. That
-is the strongest evidence in this report that these are causes and not coincidences.
+is the strongest evidence in this report that these are causes and not coincidences: a coincidence
+has no reason to reappear inside its own fix, while a cause that is still operating does, because
+it shapes the fix as it shaped the defect.
 
 ```mermaid
 flowchart LR
@@ -77,13 +79,16 @@ it. There was no single place where "the index changed" arrives.
 file a person can read. That is the natural place to write it, and it is wrong, because the file
 does not depend on the *operation* but on the *state after* it. Each subsequent operation was
 written against the same model, and the design document (03 §3.3) described the view as "rewritten
-when the head changes" — true, but narrower than the file's actual dependency.
+when the head changes" — true, but narrower than the file's actual dependency: the file shows the
+memory's tags as well as its head, and `link` changes the tags without changing the head, so a
+view can go stale through changes that sentence never names.
 
 **Why the second instance happened.** The fix moved the write to the one place every change passes
 through, which is right, and then defined staleness as "the file differs from what it should be".
 For a *generated* file that is correct; for a file a person is invited to read and diff in git, it
-is a silent overwrite of their edit — a loss the design had already argued about (03 §3.4) and
-which the fix's author had to re-derive from the document rather than from the code.
+is a silent overwrite of their edit — a loss the design had already argued about (03 §3.4). The
+code carried no trace of that argument, so the fix's author had to re-derive it from the document
+rather than read it off the code.
 
 **Fixed.** Views now follow every published snapshot in one function, and a view whose text is no
 version of its chain is kept and reported instead of rewritten. Worked through with data in
@@ -115,7 +120,8 @@ what it lacked or withheld.
 00a, the whole test suite — walks the path where memories *are* found. G2 requires that every
 included memory explain itself, and the implementation satisfied it. Nothing required the response
 to explain the memories it did *not* include, or the question it could not answer. With stores of
-three to five memories in tests, an unanswerable read is indistinguishable from a small one.
+three to five memories in tests, every response is small, whether the store could answer or not —
+so an unanswerable read was indistinguishable from an ordinary read of a small store.
 
 **Fixed.** `coverage` (cited documents, uncited candidates, inventoried documents nothing cites),
 `facets` (what the candidates carry, including a soft tag at 0), `term`, `budget_dropped`, and
@@ -134,7 +140,8 @@ system needs from it (`learn`).
 
 **Why it happened.** Tool results were shaped after the audit row — the model's centre of gravity is
 the log, and a row is exactly "what happened". For an agent, though, a result is not a receipt; it is
-the next input. The gap showed up as cost: of the ~21 tool calls in the seeding session, four were
+the next input — whatever the result leaves unsaid, the agent's next call has to go and fetch. The
+gap showed up as cost: of the ~21 tool calls in the seeding session, four were
 `show` calls confirming a mutation, about five were `session` polls waiting for a human to accept a
 pack, and one was a refusal whose advice was wrong for what the agent wanted.
 
@@ -162,9 +169,10 @@ be open, or duplicated on both sides.
   exemption the ingest path already had (#12): the same capability existed on one side of a
   boundary and not the other.
 
-**Why it happened.** Each component was built with a clear, narrow input, which is good design and
-exactly why the cross-file obligations fell between components. Nobody owned "the store is
-consistent with the project's documents".
+**Why it happened.** Each component was built with a clear, narrow input. That is good design, and
+it is exactly why the cross-file obligations fell between components: a check that needs a second
+file belongs to no component whose input is one file, so none of them performed it. Nobody owned
+"the store is consistent with the project's documents".
 
 **Fixed.** `check_pack` and `accept --pack` resolve every locator a pack adds against its document
 (not inventoried, missing, wrong passage, text repeated elsewhere); accepting a replacement is
@@ -195,15 +203,17 @@ if substring matching is wanted, should the term grow wildcards?
 
 **What it is.** Nine MCP server processes were running against this project, eight of them started
 before the build they were meant to serve; the ninth held a tool schema cached from before `term`
-existed. Passing the new argument happened to work because the host forwarded it, which is luck.
+existed. Passing the new argument happened to work, but only because the host forwarded an
+argument its cached schema did not list — behaviour nothing guarantees, which is why it is luck.
 
 **Why it happened.** The server is started by the editor per session and never asked to exit, while
 the extension it imports is rebuilt underneath it. Nothing in the protocol handshake pins a version,
 and the store's own version negotiation (vocabulary digests, receipts) covers data, not code.
 
 **Fixed since (2026-09-17).** A result says `server_stale` once when the files on disk have moved
-on, and `oo memory reload` asks each server to re-exec itself between messages — exec keeps the
-host's pipes, so the session survives, and the session number travels with it. The reloaded process
+on, and `oo memory reload` asks each server to re-exec itself between messages — an exec replaces
+the code the process runs while keeping its open pipes to the host, so the session survives, and
+the session number travels with it. The reloaded process
 sends `tools/list_changed`, for hosts that re-fetch schemas on it. What remains is the host's half:
 a client that ignores that notification still holds the schemas it cached at connect time.
 

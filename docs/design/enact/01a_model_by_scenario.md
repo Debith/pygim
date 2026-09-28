@@ -10,8 +10,9 @@ and a **sequence diagram** of who calls whom, in order. Ids, versions and texts 
 00a uses, so a panel there and a diagram here describe the same moment.
 
 The actors are always the same four: the **Agent** thinks, the **Service** checks and keeps the
-books, the **Index** is the snapshot the service reads, the **Store** is where commits land, and
-the **Human** governs the vocabulary and reviews in git.
+books, the **Store** is where commits land, and the **Human** governs the vocabulary and reviews
+in git. Beside them stands the **Index** — not an actor but the snapshot the service reads, drawn
+as a participant only where a scenario needs to show what it holds.
 
 ---
 
@@ -195,8 +196,10 @@ sequenceDiagram
 
 ### Scenario 1.3 — A word the vocabulary lacks turns up during work
 
-The write lands at once under the tags that exist; the proposal rides along, pending, and
-points into a document the inventory does not hold yet.
+The write lands at once, under only the tags that already exist. The proposal travels in the
+same `write_request`, in its `proposals` field; the service stores it as pending rather than
+holding the write back for it. The proposal's justifying locator points into a document the
+inventory does not hold yet.
 
 ```mermaid
 classDiagram
@@ -250,7 +253,9 @@ sequenceDiagram
 
 ### Scenario 1.4 — A proposal is turned down
 
-A rejection is data too: it is published with the vocabulary so it is not proposed again.
+A rejection is data too: it is kept and handed to the agent with the vocabulary at the next
+session, so the agent sees that the concept was already rejected, and the reason, and does
+not propose it again.
 
 ```mermaid
 classDiagram
@@ -287,7 +292,9 @@ sequenceDiagram
 ### Scenario 2.1 — No memory yet
 
 Three writes in one session, each a `write_request` that becomes a `memory`. The first is the
-procedure, found through the locator the study left on `task=balance`.
+procedure. The vocabulary study left a locator on the value `task=balance`; the agent has the
+service resolve that locator, reaches the passage it names, and writes the procedure citing
+that passage.
 
 ```mermaid
 classDiagram
@@ -450,7 +457,10 @@ sequenceDiagram
 
 ### Scenario 3.1 — The right note is in a neighbouring space
 
-Nothing is written. Three usage records in three sessions become one learned `association`.
+Nothing is written. In each of three sessions the agent reports the same observation with a
+`learn` call, and each call lands as one usage record. The records are folded into the
+memory's counters; when the count reaches the threshold, the service promotes the
+observation into one learned `association`.
 
 ```mermaid
 classDiagram
@@ -499,7 +509,9 @@ sequenceDiagram
 
 ### Scenario 3.2 — The human links a tag directly
 
-The same `association` as a promotion, reached in one step, with a reason in the human's words.
+The `association` that results has the same shape a promotion produces; the difference is
+the path to it. The human's `link` call creates it in one step, with source `curated` and a
+reason in the human's own words, instead of three usage records reaching a threshold.
 
 ```mermaid
 classDiagram
@@ -577,7 +589,10 @@ sequenceDiagram
 ### Scenario 5.1 — An ingested note duplicates a chain
 
 A merge makes one `memory` whose `lineage` supersedes both. The verdict is read from the
-lineage of the two sources, not judged.
+lineage of the two memories merged, not judged. Lineage records how each entered the store:
+a memory whose lineage is `seed` was ingested from a corpus file, so no session read
+candidates before writing it, and no look step was ever expected of it; one whose lineage is
+`written` came from a session that had read first.
 
 ```mermaid
 classDiagram
@@ -613,8 +628,11 @@ sequenceDiagram
 
 ### Scenario 5.2 — A critique session writes the same point under another task
 
-The verdict comes from two records: what the later write saw, and what the earlier head
-carried at that moment.
+The verdict comes from two records. The later write's request records what its writer saw;
+the earlier head's `memory_state` records the tags it carried at that moment. Comparing them
+shows whether those tags could have admitted the earlier head into the later write's
+candidate set at all; here they could not — #5 carried `task=design` only, and the write's
+read filtered on `task=critique` — so the duplicate is a classification mismatch.
 
 ```mermaid
 classDiagram
@@ -699,7 +717,8 @@ sequenceDiagram
 
 A generalisation is a write whose request names the memories it is drawn from. The service
 checks that there are at least two, that they are heads, and that the generalisation covers them; nothing on the instances
-changes except the edge that points back.
+changes except that each instance's `memory_state` gains a `generalised_by` edge pointing
+back at the generalisation.
 
 ### Scenario 7.1 — Three new reactions make one point
 

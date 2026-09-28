@@ -10,8 +10,9 @@ an MCP server so that any agent host (Claude Code first) can use it directly.
 
 The behavioural reference for *retrieval* was a Python prototype: its demo and evaluation
 defined candidate selection, soft scoring and context building, and the C++ implementation
-reproduces them — held to it by parity tests for as long as both existed. The prototype has
-since been removed, its behaviour having passed into this specification and the tests. The
+reproduces them. While the prototype and the implementation both existed, parity tests held
+the implementation to the prototype's behaviour. The prototype has since been removed, its
+behaviour having passed into this specification and the tests. The
 rest of this specification goes beyond it: the prototype had no WRITE operation, no
 vocabulary study, no sources and no procedures. Where the two differ in naming, §4.1 records
 the mapping.
@@ -26,8 +27,8 @@ environment, so knowledge is *enacted* rather than stored and looked up. And *to
 into force, which is what a person does at the accept gate (§4.11.1). It is not an acronym.
 
 Until 2026-09-22 the whole of it was called "the memory". That name merged three parts this
-design keeps apart, and spent a word the end state needs (§4.13): episodic memory is one part of
-ENACT, not the name of it. The parts group by when they run — what is kept, what happens in the
+design keeps apart. It also spent a word the end state needs (§4.13): the end state needs
+"memory" for episodic memory, which is one part of ENACT, not the name of the whole. The parts group by when they run — what is kept, what happens in the
 loop, and what happens between tasks.
 
 | Group | Part | What it holds or does | Specified in | State |
@@ -66,16 +67,17 @@ flowchart LR
 
 Three notes on the shape, because each was a choice. **Adaptive cognition is the approach, not a
 part** — given a box of its own it reads as a subsystem containing everything, which tells a
-reader nothing. **Retrieval Policy belongs to Adaptive Context**, not beside it: it is the state
-the selector applies, and modelling a component's parameters as its sibling hides that the two
-change together. And **Vocabulary earns its own part** — it is neither memory nor knowledge nor
+reader nothing. **Retrieval Policy belongs to Adaptive Context**, not beside it: the policy is
+the state the selector applies. Modelled as the selector's sibling it reads as an independent
+component, which hides that the two change together. And **Vocabulary earns its own part** — it is neither memory nor knowledge nor
 consolidation, it is what makes retrieval by situation possible at all, and it is the part of this
 design with the fewest equivalents elsewhere.
 
 Two rules follow from the grouping, and both are already principles here: offline work is a
 lifecycle stage, never a step inside a read (§4.11); and episodic evidence stays separate from
-generalised knowledge and reusable procedures (§4.4), which is what lets a receipt be rerun long
-after the knowledge above it has changed.
+generalised knowledge and reusable procedures (§4.4) — kept apart, the evidence is untouched
+when the knowledge changes, which is what lets a receipt be rerun long after the knowledge
+above it has changed.
 
 ### The series
 
@@ -179,7 +181,7 @@ only orders what was found there.
 | **Context** | The final ordered subset of candidates handed to the agent, bounded by count and tokens. Opens with the procedure for the query's artifact and task, if one exists (§4.10). |
 | **Snapshot** | An immutable, versioned in-memory view of memories and associations used by readers. |
 | **Store** | A persistence backend satisfying the store contract. May be composed. |
-| **Kind** | A base dimension describing the epistemic type of a memory: reference, principle, procedure, example, decision, preference. Replaces the prototype's `quality` (§4.1). `procedure` is special in retrieval (§4.10). |
+| **Kind** | A base dimension describing the epistemic type of a memory: reference, principle, procedure, example, decision, preference, question. Replaces the prototype's `quality` (§4.1). `procedure` is special in retrieval (§4.10). |
 | **Procedure** | A memory of kind `procedure`: the ordered steps by which something is achieved for one artifact and one task, each step able to cite a source or another memory. At most one head procedure per (artifact, task) is placed first in a context (§4.10). |
 | **Unmapped concept** | Something the classifier noticed, in a request or in a memory being written, that has no tag in the taxonomy. Reported in a request; recorded as a *tag proposal* in a write. Never invented. |
 | **Chain** | A memory and all of its versions, linked by *supersedes*. Only the **head** is findable; the rest is readable history. Every write starts a chain or extends one; a merge joins chains. |
@@ -215,7 +217,7 @@ are the packs' names.
 | `domain` | hard | 1.0 | — one per pack |
 | `artifact` | hard | 1.0 | — the pack says what this domain makes or examines |
 | `task` | hard | 1.0 | design, critique, evaluate, troubleshoot, explain |
-| `kind` | soft | 0.5 | reference, principle, procedure, example, decision, preference |
+| `kind` | soft | 0.5 | reference, principle, procedure, example, decision, preference, question |
 | `tier` | soft | 1.0 | — the pack says how this domain bands level or maturity |
 
 **The dnd pack.** Five new dimensions, and values for four base ones.
@@ -232,8 +234,8 @@ are the packs' names.
 | `task` | | | += balance |
 | `tier` | | | += cantrip, low, mid, high, epic |
 
-Ten dimensions and fifty-three values in total — few enough that a memory's whole tag set is
-one 64-bit word (01, §2.3). The three hard dimensions answer *what field, what thing, what
+Ten dimensions and fifty-four values in total — few enough that, at one bit per tag, a
+memory's whole tag set fits in one 64-bit word (01, §2.3). The three hard dimensions answer *what field, what thing, what
 activity*; together they name a problem space coarsely enough that a memory tagged for it is
 plausibly relevant. The soft ones describe *how* the knowledge applies and order the
 candidates. Weights say how much a soft match is worth relative to the others: intent
@@ -246,7 +248,8 @@ half. The corpus's three decoys belong to packs this table does not spell out �
 - `level_band` is the base `tier`. A programming memory has a maturity, not a level band.
 - `quality` (principle, good_example, bad_example) is the base `kind`. This one is a
   correction as well as a rename: `quality` divided by *two* characteristics at once —
-  epistemic type and valence — which the one-characteristic-of-division rule forbids
+  epistemic type (principle versus example) and valence (good versus bad) — and the
+  one-characteristic-of-division rule forbids that: one facet asks one question
   (§4.8). Splitting it leaves `kind=principle` and `kind=example`, and leaves the good
   versus cautionary distinction without a home; whether valence deserves a facet of its own
   is open (§10).
@@ -309,8 +312,9 @@ Consolidation is a CURATE operation: `merge(ids, new_content, reason)` creates o
 whose lineage lists the sources, carries the union of their associations unless told
 otherwise, and retires the sources; `retire(id, reason)` alone removes a memory from
 retrieval. A merge of two heads that were written separately is also a *recollection
-failure* on record (§4.7): the merge row points at the later write's evidence, so the miss
-can be named. A consolidator beside the service (out of scope for v1) may propose merges and
+failure* on record (§4.7): two heads saying one thing means the later write did not
+recognise what the earlier one already said. The merge row points at the later write's
+evidence — what it searched and what it saw — so the kind of miss can be named. A consolidator beside the service (out of scope for v1) may propose merges and
 retirements from the counters — low usage, high overlap — but it proposes; a human or an
 explicit call commits.
 
@@ -346,8 +350,10 @@ The loop, from the agent's side:
    apart: nothing covers it → *start a chain*; a candidate covers it but says less or says it
    wrong → *extend that chain*, the new text superseding the head (§4.4); a candidate already
    says exactly this → *write nothing* and record usefulness instead (LEARN). Updating and
-   creating are the same operation seen from two sides, which is why the corpus sharpens
-   instead of accumulating near-duplicates.
+   creating are the same operation seen from two sides: every write passes through this one
+   decision, so what improves an existing chain lands as its next version, what is already
+   said lands as a LEARN, and only the genuinely new starts a chain. That is why the corpus
+   sharpens instead of accumulating near-duplicates.
 4. **Write.** One call, carrying the text, the tags, the reason, the decision, what was seen,
    and any proposals — spelled out below the list.
 5. **Review afterwards.** Files are canonical (§5), so the memory appears as text in the
@@ -365,7 +371,9 @@ remember(text, reason,
          proposals = ["template"])
 ```
 
-And from the service's side, four checks — the first of them two-sided — and a commit — every check a lookup or a set
+And from the service's side, four checks and a commit. The first check is two-sided — the tag
+values must be in the closed list, and the tags must leave the memory findable — so it fills
+the first two rows below. Every check is a lookup or a set
 operation, and every refusal an answer in facts rather than an opinion:
 
 | Check | Fails when | The service answers with |
@@ -382,8 +390,10 @@ audit row keeping the decision and `seen`, each proposal recorded and attached t
 the snapshot swapped, an event emitted.
 
 The **no unread write** check is what makes G14 a guarantee rather than a hope. It cannot
-make the agent judge well — that is the agent's job — but it makes *never looked* impossible,
-and it leaves behind exactly the evidence needed to name any miss that slips through (§4.7).
+make the agent judge well — that is the agent's job — but it makes *never looked* impossible:
+a `new` write is refused while any candidate in its space is missing from `seen`, so by the
+time a write lands, every candidate has been named as read. And the `seen` list kept in the
+audit row is exactly the evidence needed to name any miss that slips through (§4.7).
 
 Determinism (G1) is untouched by the agent being the classifier: classification is an input
 to retrieval, and the same tags always yield the same context. The rule-based classifier
@@ -392,8 +402,10 @@ remains for tests and for hosts without a model.
 The deliberate path stays open: a human can still write a corpus file by hand with the tags
 spelled out, which is how a repository is seeded and how someone writes down a body of
 knowledge on purpose. Ingestion of such a file is explicit — a command, or the file store
-loading — and reconciles by content hash, so an edited entry becomes a new version rather
-than a duplicate and a `git pull` is picked up on the next load. There is no watcher.
+loading — and reconciles by content hash: an entry whose hash the store already holds has
+already landed and lands nothing new, while an edited entry hashes differently and becomes a
+new version of its chain rather than a duplicate. A `git pull` is therefore picked up on the
+next load. There is no watcher.
 
 ### 4.6 Building and growing the vocabulary
 
@@ -448,10 +460,11 @@ open (§10).
 next month will have, so it is the contract between sessions. Its shape is the codebook
 entry (§4.8): what the value means, briefly and in full; when to use it; when not to use it —
 the boundary with the nearest neighbour; one example. The service verifies that every part is
-present and not merely the name repeated; adequacy is what the study measures (agreement
-between two passes) and what the human reviews, and what a recollection failure tests
-afterwards: a classification mismatch (§4.7) traced to two sessions reading one description
-two ways is the study's κ, met in the field, and the signal to rewrite.
+present and not merely the name repeated. Whether the description is *adequate* is judged three
+times: the study measures it, as agreement between two passes; the human reviews it; and a
+recollection failure tests it afterwards. When a classification mismatch (§4.7) is traced to
+two sessions reading one description two ways, that is the same disagreement the study's κ
+measures, met now in the field — and it is the signal to rewrite the description.
 
 This is the one place a human stands in front of a change — deliberately. A tag reshapes the
 problem space for every memory and every future query in the repository, which is a decision
@@ -495,8 +508,10 @@ problem space is. Ranganathan's five fundamental categories are the classic chec
 (the process or activity), *space*, *time*; later work expands it to thing, kind, part,
 property, material, process, operation, agent, product, and so on. Two rules matter here.
 Each facet is one characteristic of division — a single question with a closed set of
-answers — and facets are independent of each other. The first the human reviews; the second
-the service can measure. The base vocabulary is the categories that survive in every domain;
+answers — and facets are independent of each other. The first rule — one characteristic per
+facet — asks what a facet *means*, so only the human can review it; the second —
+independence — is a number, the association between two dimensions over the coded sample
+(Cramér's V, below), so the service can measure it. The base vocabulary is the categories that survive in every domain;
 preparing a domain walks the full list once and records an answer for each — a candidate
 axis, a base dimension already covering it, or *no* with a reason.
 
@@ -541,7 +556,9 @@ substantial, above 0.80 almost perfect; Fleiss: above 0.75 excellent — are ack
 be conventions with no evidence behind them, which is precisely why the study predeclares
 its own threshold (0.70 in the seed protocol) instead of borrowing one after the fact. The
 number that matters in review is not κ itself but the *confused pairs* beneath it: which two
-values the passes swapped, on which entries. That points at one boundary sentence.
+values the passes swapped, on which entries. Each pair points at one boundary sentence — the
+*when not to use it* line that draws the border between the two swapped values — and that
+sentence is where the fix goes.
 
 The four measures, once more, with what each is for:
 
@@ -561,8 +578,9 @@ web page — is a **source**. It is inventoried — id, path, kind, version hash
 is never ingested as memories, because memory is for what was learned and a source is
 available verbatim. Nothing is assumed about a source's inside: the chapters, the glossary,
 the shape its entries repeat are **derived structure**, found by the agent reading it and
-stored as an artefact bound to the document's hash, so that a changed document invalidates
-the structure derived from it and not the other way round.
+stored as an artefact bound to the document's hash. The binding runs one way: when the
+document changes, its hash changes and the structure derived from it is invalidated; nothing
+derived from a document ever invalidates the document itself.
 
 A **locator** is the citation: `source id · line or section · hash of the passage`. It holds
 no path of its own — the inventory owns the path once, so moving a document is one edit
@@ -631,8 +649,10 @@ writer knows it — but a store of cases alone makes the next agent rediscover t
 them every time. So a session ends the way it worked: the agent consolidates what it wrote.
 
 **The rhythm.** During work, write the case. When the user asks for a consolidation — at any
-point, as often as they like — the agent asks the service for what the session has written so far — every audit row carries its session (§4.4) — read them together with the
-spaces they landed in, and look for a point several of them make. Where there is one, write it
+point, as often as they like — the agent asks the service for what the session has written so
+far, which the service can list because every audit row carries its session (§4.4). The agent
+reads those memories together with the spaces they landed in, and looks for a point several of
+them make. Where there is one, write it
 once, at the level the cases support, as a *generalisation* of them. Where there is none,
 write nothing: a session that only added cases has still done its job.
 
@@ -645,8 +665,9 @@ repeating the same steps — and it is written with the same `remember` call and
 checks as any memory. Section 00a, Feature 7, draws it.
 
 **What the service checks.** What it can check without reading prose. There are at least two
-instances — one case is not a pattern — and each exists and is a head. Naming an instance
-counts as having read it, so the look-before-writing check does not ask for it twice. And the generalisation *covers* its instances: on every hard
+instances — one case is not a pattern — and each exists and is a head. Naming an instance in
+`generalises` counts as having read it, so the look-before-writing check does not ask for it
+to be named again in `seen`. And the generalisation *covers* its instances: on every hard
 dimension its values include each instance's values, or it answers `any` — so it is findable
 wherever one of its cases is. Whether the pattern is real is the agent's judgement and the
 human's review in the diff, like every other meaning in this system (§4.7).
@@ -662,9 +683,11 @@ case in the wider space, and a later consolidation widens the generalisation by 
 person has accepted it (below), its instances *fold* under it. A candidate one of whose generalisations is also a candidate gives
 up its own place and is named under that generalisation as its evidence — key and title, no
 text — so a context does not spend its budget saying one point five times, and a case is one
-`show` away when its detail matters. The fold happens before ranking and the budget, so it
-depends on neither: the evidence travels with its generalisation, and a retired generalisation
-is no candidate, so its instances unfold. Folded instances still count as admitted (section 04
+`show` away when its detail matters. The fold happens before ranking and the budget, so
+whether a case folds depends on neither its rank nor the room left in the budget: the evidence
+travels with its generalisation wherever it is placed. And a case folds only under a
+generalisation that is itself a candidate, so a retired generalisation — no longer a
+candidate — releases its instances to be placed on their own again. Folded instances still count as admitted (section 04
 §3.9).
 
 **What starts it.** The user, whenever they choose — mid-session as readily as at its end. A
@@ -715,12 +738,14 @@ is the reading surface) and of a message in the mailbox.
 A store belongs to a project: its vocabulary is that domain's, and its memories are about that
 work. Some knowledge is about no project at all — how this person wants an explanation written,
 how they want options laid out — and filed in one project's store it reaches only that project's
-sessions, never the ones that do not exist yet.
+sessions, never the sessions of projects that do not yet exist.
 
 So a machine may keep one **global store** beside each project's. An agent names which it means
 (`scope`), reads and writes stay within one store, and the standing knowledge a session starts
-with merges both: the global first, the project's last, because where they disagree the nearer
-rule wins. `domain=any` is the test of what belongs there.
+with merges both — the global first, the project's last, so that where they disagree the rule
+merged last stands, and that is the project's: the nearer rule wins. `domain=any` is the test
+of what belongs there: knowledge that holds for every value of `domain` is about no one
+project, and that is what the global store holds.
 
 How that knowledge is *delivered* turned out to matter as much as what it says. It first went in
 the server's startup instructions, the one channel that needs nothing from the agent — and the host
@@ -728,9 +753,10 @@ keeps only the first 2,048 characters of those, silently: 11,900 were sent, and 
 sitting at character 8,677 never arrived, in the session whose recommendation it would have
 changed. So the instructions now carry the loop and an index of titles, newest first, with the
 count of what the index leaves out; `session` returns every preference in full; a read names under
-`standing` the preferences in its space it did not place; and `oo enact status --standing` prints
-the lot for a host's session-start hook, which is the only delivery that depends on nobody's
-compliance. A test holds the instructions under the cap, because a truncated instruction looks
+`standing` the preferences that fall in its space but were not placed in the context;
+and `oo enact status --standing` prints the lot for a host's session-start hook, which is the only delivery that depends on nobody's
+compliance: the host runs the hook itself at every session start, where the instructions rely
+on the host keeping them whole and `session` relies on the agent choosing to call it. A test holds the instructions under the cap, because a truncated instruction looks
 exactly like a short one. Sections 03 §9.1.1 and §9.1.2 carry the
 mechanics, including how a write travels to this machine's other projects and to other machines,
 and what each store's own policy says about publishing it.
@@ -766,8 +792,9 @@ Three things learned while building it, each the opposite of the obvious guess:
   `[artifact=test, task=design]` had seven. A trigger names the *space*, not the situation in full.
 - **The global store cannot be reached by tags.** Its knowledge answers every project, so its
   vocabulary names nothing a path could match — and its rules are the ones most often missed. A
-  trigger may carry `term=<word>`, which is what the term filter was for: the subject tags cannot
-  name. With it, the test-isolation rule arrives; without it, two generic preferences do.
+  trigger may carry `term=<word>`; the term filter exists for exactly this, narrowing by a word
+  where the subject tags cannot name the space. With the term, the trigger delivers the
+  test-isolation rule; without it, two generic preferences arrive instead.
 - **Silence is most of the behaviour.** A delivery that fires on everything is read as noise and
   then not read at all — the colour rule again. Most paths map to nothing, and that is correct.
 
@@ -925,8 +952,22 @@ dependencies; `strategy/<name>/` holds concrete backends satisfying a `core/` co
 `bindings.cpp` registers the module. Dependencies flow inward only: strategies depend on
 core, adapters depend on both, core depends on neither.
 
+**The Python shell — settled 2026-09-23.** The same line runs one layer further out. ENACT's
+behaviour lives in C++; the pybind adapter translates and decides nothing; the Python above it
+speaks to the outside world. On 2026-09-23 neither held: the adapter made decisions
+([03 §7.2](03_store.md#72-from-todays-code) lists them), and rules about ENACT's own data were
+written in Python.
+
+| Layer | Holds | Today's code that moves |
+|---|---|---|
+| C++ service | rules about ENACT's own data: what a card is, what a citation proves, what coverage says, which memories are waiting | card parsing and rendering (`_pygim/_mcp/_cards.py`), passages and citations (`_packs.Sources`), the adapter's decisions |
+| pybind adapter | translation both ways, and all GIL handling | nothing moves in |
+| Python shell | the MCP protocol, the command line, the hooks, setting a store up, and checks that ask Python itself which modules import what and which commands exist | stays: the dispatch in `enact.py`, `_stores.py`, the resolvers in `_stale.py`, `_inventory.py` |
+
+The diagram of these layers is in [03 §7](03_store.md#7-the-service-and-its-strategies-redrawn-2026-09-23).
+
 ```text
-src/_pygim_fast/memory/                    core/ strategy/ adapter/ bindings.cpp ext.enact.toml
+src/_pygim_fast/enact/                     core/ strategy/ adapter/ bindings.cpp ext.enact.toml
 src/_pygim_fast/services/                  mailbox.h service_base.h
 src/_pygim_fast/services/eventbus/         core/ (bus, transformer and transport concepts)
 src/_pygim_fast/services/eventbus/strategy/null/    in-process only

@@ -28,8 +28,10 @@ line says so in its description and why.
 ## What proves it
 
 - **Every invariant is a compile-time proof.** A law stated in a comment is a
-  `static_assert` in `tests/static/*_proofs.cpp`, wired into an extension's
-  sources so a build that breaks it does not link. Laws are proven over more
+  `static_assert` in `tests/static/*_proofs.cpp`. The proof files are wired
+  into an extension's sources, so they compile whenever the extension does —
+  a change that breaks a law fails that compile, and the extension does not
+  link. Laws are proven over more
   than one instantiation (both engines, several widths).
 - **The Python surface has unit tests** in `tests/unittests/`, including the
   edge corpus, cross-platform cases (a Windows path needs a drive to be
@@ -37,20 +39,26 @@ line says so in its description and why.
   the previous module's behaviour) where one exists.
 - **A test names its own world.** Nothing a test reads may come from the machine it runs on —
   not the user's configuration, a shared directory, a running service, the clock or the working
-  directory — or a green run says only that this machine happens to be in the right state. Where a
-  real dependency *is* the thing under test (a real server over real pipes, a real database), it
-  runs against test data it created: a temporary directory, a throwaway database, a local
-  container. A test pointed at live data does not merely fail; it writes into someone's work.
+  directory. If a test does read the machine, its passing depends on the machine's state, and a
+  green run says only that this machine happens to be in the right state — not that the code is
+  right. Where a real dependency *is* the thing under test (a real server over real pipes, a
+  real database), it runs against test data it created: a temporary directory, a throwaway
+  database, a local container. A test pointed at live data does not merely fail; it writes into
+  someone's work.
 - **A performance claim is a measurement.** Every number in a changelog,
   docstring or design note comes from a benchmark under `benchmarks/`,
   recorded through `_results.py` against the commit. An optimisation is
-  justified by a same-process A/B (old and new compiled side by side), never
-  by comparing runs on a machine whose load drifts.
+  justified by an A/B in one process: the old and the new code are compiled
+  side by side and measured in the same run, so whatever the machine is doing
+  weighs on both alike. It is never justified by comparing separate runs,
+  because the machine's load drifts between them, and the difference measured
+  may be the drift, not the code.
 - **A test that reads the repository skips without it.** CI removes `src/` and
   tests the installed package; a source-tree check (layering, stubs) must
   `skip` when the tree is absent rather than fail. A memory or timing
-  measurement runs on a fresh heap (a subprocess), never against a heap that
-  remembers what an earlier test freed.
+  measurement runs on a fresh heap, which means in a subprocess: the test
+  process's own heap still holds what earlier tests allocated and freed, and
+  a measurement taken on it measures that history too.
 - **CI is green on the full matrix** (3 OS x every supported Python) before
   the work is called done; after a push, the run is watched, not assumed.
   Compiler flags are per-extension `flags_if_supported`; there is no
@@ -92,20 +100,23 @@ Three rules follow, and two of them are tests rather than conventions (`test_lay
   a builder — `enact.build` reads the clock, the files this process loaded and the vocabulary on
   disk, then hands the server plain values.
 - **Tests wire with the same function production uses.** `build(where)` in a test, `build(where)`
-  in `run`. What differs is the `Environment` passed in, which is configuration, which is exactly
-  what is meant to differ.
+  in `run`. What differs is the `Environment` passed in. The `Environment` is configuration, and
+  configuration is exactly what is meant to differ between a test and production.
 
-Environment variables are legitimate at a process boundary — a reloading server cannot pass an
-argument to its own successor — and the boundary is the wiring, never one layer in.
+Environment variables are legitimate at a process boundary: a reloading server cannot pass an
+argument to its own successor, so what the next process must know travels in the environment.
+And the boundary is the wiring, never one layer in.
 
 ## What it leaves behind
 
 An operation is not done when it returns the right answer; it is done when what it wrote is right
-and what it did not write is absent. For anything that refuses, a test says so explicitly: the
-audit log, the head views, the content objects and the vocabulary are byte-identical afterwards.
-Prefer to check this from outside the process — `oo enact call` makes every operation reachable
-from a shell, and the defects that survive in-process tests live in what a process does on its way
-in and out (design 03 §3.5.2, §3.5.3).
+and what it did not write is absent. For anything that refuses, a test says so explicitly: after the
+refused call, the audit log, the head views, the content objects and the vocabulary are
+byte-identical to what they were before it.
+Prefer to check this from outside the process. `oo enact call` makes every operation reachable
+from a shell, and that reach matters because of where defects hide: a test that runs in-process
+never exercises what a process does on its way in and on its way out, and that is exactly where
+the defects that survive such tests live (design 03 §3.5.2, §3.5.3).
 
 ## What it looks like
 
@@ -133,7 +144,9 @@ in and out (design 03 §3.5.2, §3.5.3).
 
 - **A store, a set, a table reports its exact bytes** under the same `bytes`
   key in `stats()`; process-wide memory (`pygim.utils.rss_bytes`) is a
-  benchmark probe, never a per-object size.
+  benchmark probe, never a per-object size: it measures the whole process, so
+  its number includes everything else the process holds and cannot be read as
+  the size of one object.
 - **Lifetime and threading are stated** in the header: what is append-only,
   who is the single writer, what holds the GIL, what a handle keeps alive.
 - **Commits explain why**, carry the co-author trailer, and never bundle

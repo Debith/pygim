@@ -48,9 +48,11 @@ flowchart LR
 *In the model's types: [Scenario 0 in section 01a](01a_model_by_scenario.md#scenario-0-starting-up).*
 
 Nothing in the features below can happen until the service holds a snapshot and the agent
-holds the vocabulary. Startup builds both from files — and the same files always build the
-same snapshot, down to its version number, so a retrieval from before the restart can still
-be rerun after it.
+holds the vocabulary. Startup builds both from files, and the same files always build the
+same snapshot, down to its version number. A retrieval's receipt names the snapshot version
+it was answered from; because a restart rebuilds that same version from the same files, the
+name on the receipt still points at the same snapshot, so a retrieval from before the
+restart can still be rerun after it.
 
 ```gherkin
 Given the repository as Feature 6 left it — 54 memories, snapshot v55, taxonomy v3,
@@ -76,9 +78,10 @@ flowchart LR
     ext -- "builds from config" --> svc["MemoryService over a composite store<br/>files canonical · sqlite derived"]
 ```
 
-**Panel 2.** What is read. Files are canonical, so every fact comes from the repository; the
-SQLite cache is only trusted where its content digests agree with the files, and rebuilt
-where they do not.
+**Panel 2.** What is read. Files are canonical: every fact comes from the repository's files,
+and the SQLite cache only repeats them for speed. The cache is trusted where its content
+digests agree with the files' — agreement shows the cache still repeats what the file says —
+and rebuilt from the files where they do not.
 
 ```mermaid
 flowchart LR
@@ -90,8 +93,9 @@ flowchart LR
 ```
 
 **Panel 3.** Every memory is checked as it loads — the laws of section 01, applied to what is
-on disk. A file whose content no longer matches its digest was edited in place, which content
-never is; it is left out of the snapshot and named, and the other memories load.
+on disk. A file whose content no longer matches its recorded digest was edited in place — and
+content is never edited in place, so the mismatch marks an edit that should never have
+happened. The file is left out of the snapshot and named, and the other memories load.
 
 ```mermaid
 flowchart TB
@@ -120,7 +124,9 @@ flowchart LR
     cnt --> snap
 ```
 
-**Panel 5.** Sources are cited, not loaded, so all startup does is rehash each document whole.
+**Panel 5.** Sources are cited, not loaded: the store keeps a locator into each document and
+the document's digest, never the document's text. So the only check startup can make is the
+digest: it rehashes each document whole and compares the result with the digest on record.
 One differs; the single citation into it — the passage that justified `mechanic=corruption` —
 becomes a review item. The passage itself is checked when someone resolves it.
 
@@ -310,7 +316,8 @@ flowchart TB
 **Panel 7.** Lock the sample and classify it twice. The sample is entries from the
 documents — there is nothing else yet. Pass A is this session; pass B is a fresh session
 with the candidate descriptions and nothing else. The evidence sheet has one row per entry,
-per dimension, per pass, and a coding dictionary that *is* the proposal.
+per dimension, per pass, and a coding dictionary — the candidate dimensions and values with
+their descriptions. That dictionary is what the study proposes: accepted, it becomes the pack.
 
 ```mermaid
 sequenceDiagram
@@ -389,8 +396,9 @@ when the work steps outside it — here, a homebrew mechanic the rulebooks never
 is not a defect of the study; it is the work extending the domain.
 
 **Panel 1.** The request is classified. Two concepts have no home: one is genuinely new to
-the vocabulary, one is already covered by another tag — the agent cannot always tell which,
-and does not have to.
+the vocabulary, one is already covered by another tag. The agent cannot always tell which is
+which, and does not have to: both go in as proposals, and the human's review tells them
+apart — one accepted, one rejected with the tag that covers it.
 
 ```mermaid
 flowchart LR
@@ -578,8 +586,8 @@ says so.
 
 ```mermaid
 flowchart LR
-    call["remember('Frost Ward (2nd, reaction when you take damage): resistance to that type until the start of your next turn — if cold, also temp HP equal to your level. Weaker than Shield against weapons, stronger against breath and spells: a niche, not an upgrade.',<br/>tags: domain=dnd artifact=spell task=design purpose=defensive action_economy=reaction mechanic=damage_mitigation mechanic=temporary_hp kind=example tier=mid,<br/>decision: new, seen: #1 #2)"] --> check["service: candidates under the hard tags — #1 #2<br/>minus seen — none"] --> ok["#3 written · snapshot v3"]
-    note["seen: #1 #2 — the procedure and the yardstick,<br/>neither is this decision"] -.-> call
+    request["remember('Frost Ward (2nd, reaction when you take damage): resistance to that type until the start of your next turn — if cold, also temp HP equal to your level. Weaker than Shield against weapons, stronger against breath and spells: a niche, not an upgrade.',<br/>tags: domain=dnd artifact=spell task=design purpose=defensive action_economy=reaction mechanic=damage_mitigation mechanic=temporary_hp kind=example tier=mid,<br/>decision: new, seen: #1 #2)"] --> check["service: candidates under the hard tags — #1 #2<br/>minus seen — none"] --> ok["#3 written · snapshot v3"]
+    note["seen: #1 #2 — the procedure and the yardstick,<br/>neither is this decision"] -.-> request
 ```
 
 **Panel 8.** Files are canonical, so the three memories are now three content objects,
@@ -682,7 +690,9 @@ And records the one genuinely new insight as a new chain
 ```
 
 **Panel 1.** The read. Everything under the hard tags comes back, ordered by the soft ones —
-including the corruption note, at the bottom, because a hard match is a hard match.
+including the corruption note, at the bottom: it carries every hard tag, so it is admitted, and
+hard tags only admit; it matches almost none of the soft tags, and soft tags only rank, so it
+ranks last.
 
 ```mermaid
 sequenceDiagram
@@ -724,8 +734,9 @@ flowchart LR
     call["remember('The Ward family — Frost Ward (2nd, cold, temp HP = level) and Ember Ward (3rd, fire, temp HP = twice level) — trades Shield's flat +5 AC for typed resistance until the end of your next turn. Weaker against weapons, stronger against breath and spells: a niche, not an upgrade. The rider doubles with the slot.',<br/>tags: domain=dnd artifact=spell task=design purpose=defensive action_economy=reaction mechanic=damage_mitigation mechanic=temporary_hp scaling=upcast_scaling kind=example tier=mid,<br/>decision: supersedes #3, seen: #1 #2 #3 #4 #5)"] --> check["service: #3 is the head of its chain — yes<br/>values in the list — yes"] --> ok["#6 written · supersedes #3 · #3 retired · snapshot v6"]
 ```
 
-**Panel 5.** The new insight is a new chain. Note `seen` now lists #6 as well — the agent
-wrote it a moment ago, and the service would hand it back otherwise. And this write holds
+**Panel 5.** The new insight is a new chain. Note `seen` now lists #6 as well: #6 became a
+head in this space a moment ago, when the agent wrote it, so it is in the candidate set —
+and had it been missing from `seen`, the service would hand it back. And this write holds
 `kind=principle`, not `procedure`: a procedure is *how*, a principle is *why*.
 
 ```mermaid
@@ -778,8 +789,9 @@ sequenceDiagram
     Note over Agent: the Ward family note is missing — it was written under task=design
 ```
 
-**Panel 2.** The agent softens `task` — a query property, not a taxonomy one — and reads
-again. Now the family note is there, and the answer follows from it.
+**Panel 2.** The agent softens `task` and reads again — hard versus soft is a property of the
+query, not of the taxonomy, so only this one read is changed and the dimension's stored
+default is not. Now the family note is there, and the answer follows from it.
 
 ```mermaid
 sequenceDiagram
@@ -800,7 +812,8 @@ flowchart TB
 ```
 
 **Panel 4.** Three balance sessions later the count crosses the threshold, and #6 carries
-`task=balance` on its own. Its content hash never moved.
+`task=balance` on its own. Its content hash never moved: the promotion added an association,
+which is index, and the content was never touched.
 
 ```mermaid
 flowchart LR
@@ -1001,8 +1014,10 @@ flowchart TB
 
 *In the model's types: [Feature 6 in section 01a](01a_model_by_scenario.md#feature-6-a-note-turns-out-to-be-wrong).*
 
-There is no edit operation. A correction is a birth plus a retirement, whichever door the
-memory came through — and it is the same `remember` call as Feature 2, with the same checks.
+There is no edit operation. A correction is a birth plus a retirement: the corrected text is
+written as a new memory that supersedes the wrong one, and the wrong one leaves retrieval —
+whichever door the memory came through. It is the same `remember` call as Feature 2, with the
+same checks.
 
 ```gherkin
 Given #6, the Ward family note, which says the resistance lasts until the end of your next turn
@@ -1116,7 +1131,8 @@ flowchart LR
 ```
 
 **Panel 6.** The next read of the space, after acceptance. The cases fold under the pattern:
-named, one `show` away, and not paid for twice.
+the read returns the principle's text, lists the four cases by number and title under it, and
+spends none of its budget on their texts — each is one `show` away.
 
 ```mermaid
 sequenceDiagram
@@ -1193,4 +1209,5 @@ Three doors in for a memory, one door out, and the way out is not a delete. One 
 a tag — the agent's analysis, whether of a whole domain's documents or of one concept — and a
 human stands at it. Every arrow in both frames leaves an audit row, which is
 what makes the history goal (G10) hold: the state of the index at any past moment is the log
+replayed to that moment.
 replayed up to that row.
