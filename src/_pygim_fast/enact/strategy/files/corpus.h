@@ -26,10 +26,13 @@ struct corpus_parse {
         while (!s.empty() && (s.back() == ' ' || s.back() == '\t' || s.back() == '\r')) s.remove_suffix(1);
         return s;
     };
+    // A line ends at \n, with the \r before it when there is one: a checkout made with git's autocrlf
+    // holds \r\n on disk, and the same notes must be the same memories, with the same digests.
     std::vector<std::string_view> lines;
     for (std::size_t pos = 0; pos <= text.size();) {
         const auto nl = text.find('\n', pos);
-        const auto end = nl == std::string_view::npos ? text.size() : nl;
+        auto end = nl == std::string_view::npos ? text.size() : nl;
+        if (end > pos && text[end - 1] == '\r') --end;
         lines.push_back(text.substr(pos, end - pos));
         if (nl == std::string_view::npos) break;
         pos = nl + 1;

@@ -996,3 +996,15 @@ class TestIngestion:
         assert mem.ingest(str(path))["superseded"] == 1
         texts = [m["text"] for m in mem.read(DESIGN)["memories"]]
         assert texts == ["Shield is the reference point for any reaction that reduces incoming harm, less so by tier 3."]
+
+    def test_a_corpus_saved_with_windows_line_endings_is_the_same_corpus(self, tmp_path, mem):
+        """A checkout made with git's autocrlf holds \\r\\n on disk. The body kept the \\r of every
+        line, so the same notes read on Windows were other memories, with other digests, than on
+        Linux (first CI run on Windows, 2026-09-28)."""
+        path = tmp_path / "spells.md"
+        path.write_bytes(self.CORPUS.replace("\n", "\r\n").encode("utf-8"))
+        assert mem.ingest(str(path))["added"] == 1
+        assert [m["text"] for m in mem.read(DESIGN)["memories"]] == [
+            "Shield is the reference point for any reaction that reduces incoming harm."]
+        path.write_bytes(self.CORPUS.encode("utf-8"))
+        assert mem.ingest(str(path))["unchanged"] == 1
