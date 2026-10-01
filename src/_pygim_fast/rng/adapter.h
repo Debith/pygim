@@ -1,17 +1,18 @@
 #pragma once
 
-// pygim.rng adapter — the pybind11 boundary around rng::RngCore: seed and
-// thread-count validation, and the Python shape of the output (numpy, list,
-// tuple, polars), which utils/py_output.h provides. All generation logic
-// lives in core.h.
+// pygim._rng adapter — the pybind11 boundary around rng::RngCore. It checks
+// the seed and thread count and fills caller-owned buffers in place; the
+// containers random()/uint64() return are built in pygim/rng.py. All
+// generation logic lives in core.h.
 
+#include <bit>
 #include <cstdint>
 #include <random>
 #include <string>
+#include <string_view>
 
 #include <pybind11/pybind11.h>
 
-#include "../utils/py_output.h"
 #include "core.h"
 
 namespace pygim {
@@ -23,22 +24,32 @@ public:
     explicit Rng(const py::object& seed, int threads = 0, bool simd = true)
         : m_core(resolve_seed(seed), validate_threads(threads), simd) {}
 
-    [[nodiscard]] py::object random(py::ssize_t n, const py::object& format) {
-        return output::emit<double>(n, format, [this](double* p, std::size_t c) { m_core.fill_f64(p, c); });
-    }
-
-    [[nodiscard]] py::object uint64(py::ssize_t n, const py::object& format) {
-        return output::emit<std::uint64_t>(n, format,
-                                           [this](std::uint64_t* p, std::size_t c) { m_core.fill_u64(p, c); });
-    }
-
+    // Fills `out` in place: float64 elements with uniforms in [0, 1), uint64
+    // elements with raw draws. Any writable, C-contiguous buffer of either
+    // type qualifies (array.array, numpy, a memoryview, ...); never a
+    // converted copy, whose writes would be silently lost.
     void fill(const py::object& out) {
-        output::fill_buffer<double>(out, "float64", [this](double* p, std::size_t c) { m_core.fill_f64(p, c); });
-    }
-
-    void fill_uint64(const py::object& out) {
-        output::fill_buffer<std::uint64_t>(out, "uint64",
-                                           [this](std::uint64_t* p, std::size_t c) { m_core.fill_u64(p, c); });
+        Buffer view(out);
+        const char* format = view.format != nullptr ? view.format : "B";
+        std::string_view code = format;
+        if (!code.empty() && (code[0] == '@' || code[0] == '=' || code[0] == kNativeOrder)) {
+            code.remove_prefix(1);  // only restates native byte order
+        }
+        const bool f64 = code == "d";
+        if (view.itemsize != 8 || !(f64 || code == "Q" || code == "L")) {
+            throw py::type_error("out must hold float64 or uint64 values, not format '" + std::string(format) + "'");
+        }
+        // (An empty buffer may point anywhere: array.array's points at a static "".)
+        if (view.len != 0 && reinterpret_cast<std::uintptr_t>(view.buf) % 8 != 0) {
+            throw py::type_error("out must be 8-byte aligned");
+        }
+        const auto n = static_cast<std::size_t>(view.len / 8);
+        py::gil_scoped_release release;
+        if (f64) {
+            m_core.fill(static_cast<double*>(view.buf), n);
+        } else {
+            m_core.fill(static_cast<std::uint64_t*>(view.buf), n);
+        }
     }
 
     [[nodiscard]] std::uint64_t seed() const noexcept { return m_core.seed(); }
@@ -53,6 +64,22 @@ public:
     }
 
 private:
+    static constexpr char kNativeOrder = std::endian::native == std::endian::little ? '<' : '>';
+
+    // A writable, C-contiguous view of an object's memory, held for the
+    // duration of a fill (the exporter cannot resize it meanwhile).
+    struct Buffer : Py_buffer {
+        explicit Buffer(const py::object& obj) : Py_buffer{} {
+            if (PyObject_GetBuffer(obj.ptr(), this, PyBUF_WRITABLE | PyBUF_FORMAT | PyBUF_C_CONTIGUOUS) != 0) {
+                py::raise_from(PyExc_TypeError, "out must be a writable, C-contiguous buffer");
+                throw py::error_already_set();
+            }
+        }
+        ~Buffer() { PyBuffer_Release(this); }
+        Buffer(const Buffer&) = delete;
+        Buffer& operator=(const Buffer&) = delete;
+    };
+
     [[nodiscard]] static int validate_threads(int threads) {
         if (threads < 0) throw py::value_error("threads must be >= 0 (0 = auto)");
         return threads;

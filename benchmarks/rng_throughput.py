@@ -101,7 +101,7 @@ def main(sizes: str, reps: int, do_uint64: bool) -> None:
             for n in ns:
                 rng = Rng(42, **kwargs)
                 out = np.empty(n, dtype=np.uint64)
-                speeds.append(gbps(n, best_of(lambda: rng.fill_uint64(out), reps)))
+                speeds.append(gbps(n, best_of(lambda: rng.fill(out), reps)))
             print(f"{label:<26}" + "".join(f"{s:>10.2f} GB/s".rjust(16) for s in speeds))
         # NOTE: asymmetric baseline — integers() allocates a fresh array per
         # call and pays bounded-range handling; numpy exposes no public

@@ -11,6 +11,10 @@
 // (counter-based, O(1) random access). Output is partitioned into fixed-size
 // blocks; block b uses streams [16b, 16b+16), which makes the sequence a pure
 // function of the seed — independent of call sizes and thread counts.
+//
+// Two element types: double (uniform in [0, 1)) and std::uint64_t (the raw
+// draw). Every kernel is one template over the element type; value<T> is the
+// only place they differ.
 
 #include <algorithm>
 #include <array>
@@ -35,7 +39,7 @@ static_assert(kBlockElems % kLanes == 0);
 inline constexpr std::uint64_t kGolden = 0x9e3779b97f4a7c15ULL;
 
 // Fills at least this large (bytes) use non-temporal stores when the
-// destination is 32-byte aligned: beyond LLC capacity the write-allocate
+// destination is 16-byte aligned: beyond LLC capacity the write-allocate
 // traffic of regular stores halves effective bandwidth.
 inline constexpr std::size_t kNtThresholdBytes = 32u << 20;
 
@@ -166,37 +170,34 @@ static_assert(splitmix64_reference());
 }  // namespace kat
 
 // ---------------------------------------------------------------------------
-// Conversions. random(): top 53 bits scaled by 2^-53 — the same mapping numpy
-// uses ((next_uint64 >> 11) * (1.0 / 9007199254740992.0)), so distribution
-// granularity matches numpy exactly.
+// The element of type T for one raw draw. double takes the top 53 bits scaled
+// by 2^-53, numpy's own mapping ((next_uint64 >> 11) * (1.0 / 2^53)), so the
+// distribution granularity matches numpy exactly.
 // ---------------------------------------------------------------------------
 
-[[nodiscard]] constexpr double u64_to_unit_double(std::uint64_t x) noexcept {
-    return static_cast<double>(x >> 11) * 0x1.0p-53;
+template <typename T>
+[[nodiscard]] constexpr T value(std::uint64_t x) noexcept {
+    static_assert(std::is_same_v<T, double> || std::is_same_v<T, std::uint64_t>,
+                  "elements are double or std::uint64_t");
+    if constexpr (std::is_same_v<T, double>) {
+        return static_cast<double>(x >> 11) * 0x1.0p-53;
+    } else {
+        return x;
+    }
 }
 
-// ---------------------------------------------------------------------------
-// Scalar kernels. A "row" is one output from each of the 16 streams.
-// ---------------------------------------------------------------------------
-
-inline void rows_scalar_f64(StreamArray& st, double* out, std::size_t rows) noexcept {
-    for (std::size_t r = 0; r < rows; ++r) {
+// Scalar kernel. A "row" is one output from each of the 16 streams.
+template <typename T>
+inline void rows_scalar(StreamArray& st, T* out, std::size_t rows) noexcept {
+    for (std::size_t r = 0; r < rows; ++r, out += kLanes) {
         for (std::size_t lane = 0; lane < kLanes; ++lane) {
-            out[r * kLanes + lane] = u64_to_unit_double(st[lane].next());
+            out[lane] = value<T>(st[lane].next());
         }
     }
 }
 
-inline void rows_scalar_u64(StreamArray& st, std::uint64_t* out, std::size_t rows) noexcept {
-    for (std::size_t r = 0; r < rows; ++r) {
-        for (std::size_t lane = 0; lane < kLanes; ++lane) {
-            out[r * kLanes + lane] = st[lane].next();
-        }
-    }
-}
-
 // ---------------------------------------------------------------------------
-// AVX2 kernels: 4 groups x 4 lanes of vertical xoshiro256++, compiled with a
+// AVX2 kernel: 4 groups x 4 lanes of vertical xoshiro256++, compiled with a
 // per-function target attribute so no global -mavx2 flag is required, and
 // dispatched at runtime. The uint64->double sequence is the exact-integer
 // conversion (Mysticial): exact for v < 2^53, hence bit-identical to the
@@ -207,8 +208,9 @@ inline void rows_scalar_u64(StreamArray& st, std::uint64_t* out, std::size_t row
 
 namespace detail {
 
+// State word k of four streams, one stream per 64-bit lane.
 struct alignas(32) LaneGroup {
-    __m256i s0, s1, s2, s3;
+    __m256i s[4];
 };
 
 __attribute__((target("avx2"))) inline __m256i rotl64(__m256i x, int k) noexcept {
@@ -216,15 +218,15 @@ __attribute__((target("avx2"))) inline __m256i rotl64(__m256i x, int k) noexcept
 }
 
 __attribute__((target("avx2"))) inline __m256i xoshiro_next(LaneGroup& g) noexcept {
-    const __m256i result =
-        _mm256_add_epi64(rotl64(_mm256_add_epi64(g.s0, g.s3), 23), g.s0);
-    const __m256i t = _mm256_slli_epi64(g.s1, 17);
-    g.s2 = _mm256_xor_si256(g.s2, g.s0);
-    g.s3 = _mm256_xor_si256(g.s3, g.s1);
-    g.s1 = _mm256_xor_si256(g.s1, g.s2);
-    g.s0 = _mm256_xor_si256(g.s0, g.s3);
-    g.s2 = _mm256_xor_si256(g.s2, t);
-    g.s3 = rotl64(g.s3, 45);
+    __m256i* s = g.s;
+    const __m256i result = _mm256_add_epi64(rotl64(_mm256_add_epi64(s[0], s[3]), 23), s[0]);
+    const __m256i t = _mm256_slli_epi64(s[1], 17);
+    s[2] = _mm256_xor_si256(s[2], s[0]);
+    s[3] = _mm256_xor_si256(s[3], s[1]);
+    s[1] = _mm256_xor_si256(s[1], s[2]);
+    s[0] = _mm256_xor_si256(s[0], s[3]);
+    s[2] = _mm256_xor_si256(s[2], t);
+    s[3] = rotl64(s[3], 45);
     return result;
 }
 
@@ -245,31 +247,36 @@ __attribute__((target("avx2"))) inline __m256d unit_double(__m256i x) noexcept {
     return _mm256_mul_pd(d, scale);
 }
 
+// The bits of value<T> for each of the four draws in x.
+template <typename T>
+__attribute__((target("avx2"))) inline __m256i value_bits(__m256i x) noexcept {
+    if constexpr (std::is_same_v<T, double>) {
+        return _mm256_castpd_si256(unit_double(x));
+    } else {
+        return x;
+    }
+}
+
+// The 16 streams' states <-> 4 groups: lane j of group g is stream 4g + j.
 __attribute__((target("avx2"))) inline void load_groups(const StreamArray& st, LaneGroup* g) noexcept {
+    alignas(32) std::uint64_t words[4];
     for (std::size_t grp = 0; grp < 4; ++grp) {
-        const auto& a = st[grp * 4 + 0].s;
-        const auto& b = st[grp * 4 + 1].s;
-        const auto& c = st[grp * 4 + 2].s;
-        const auto& d = st[grp * 4 + 3].s;
-        g[grp].s0 = _mm256_set_epi64x(static_cast<long long>(d[0]), static_cast<long long>(c[0]),
-                                      static_cast<long long>(b[0]), static_cast<long long>(a[0]));
-        g[grp].s1 = _mm256_set_epi64x(static_cast<long long>(d[1]), static_cast<long long>(c[1]),
-                                      static_cast<long long>(b[1]), static_cast<long long>(a[1]));
-        g[grp].s2 = _mm256_set_epi64x(static_cast<long long>(d[2]), static_cast<long long>(c[2]),
-                                      static_cast<long long>(b[2]), static_cast<long long>(a[2]));
-        g[grp].s3 = _mm256_set_epi64x(static_cast<long long>(d[3]), static_cast<long long>(c[3]),
-                                      static_cast<long long>(b[3]), static_cast<long long>(a[3]));
+        for (std::size_t k = 0; k < 4; ++k) {
+            for (std::size_t lane = 0; lane < 4; ++lane) {
+                words[lane] = st[grp * 4 + lane].s[k];
+            }
+            g[grp].s[k] = _mm256_load_si256(reinterpret_cast<const __m256i*>(words));
+        }
     }
 }
 
 __attribute__((target("avx2"))) inline void store_groups(const LaneGroup* g, StreamArray& st) noexcept {
-    alignas(32) std::uint64_t tmp[4];
+    alignas(32) std::uint64_t words[4];
     for (std::size_t grp = 0; grp < 4; ++grp) {
-        const __m256i regs[4] = {g[grp].s0, g[grp].s1, g[grp].s2, g[grp].s3};
         for (std::size_t k = 0; k < 4; ++k) {
-            _mm256_store_si256(reinterpret_cast<__m256i*>(tmp), regs[k]);
+            _mm256_store_si256(reinterpret_cast<__m256i*>(words), g[grp].s[k]);
             for (std::size_t lane = 0; lane < 4; ++lane) {
-                st[grp * 4 + lane].s[k] = tmp[lane];
+                st[grp * 4 + lane].s[k] = words[lane];
             }
         }
     }
@@ -277,62 +284,30 @@ __attribute__((target("avx2"))) inline void store_groups(const LaneGroup* g, Str
 
 }  // namespace detail
 
-__attribute__((target("avx2"))) inline void rows_avx2_f64(StreamArray& st, double* out, std::size_t rows) noexcept {
+// Streaming = non-temporal stores, for fills whose working set exceeds the
+// LLC: they skip the read-for-ownership traffic of regular stores, roughly
+// halving bus usage. They are 16 bytes wide, so the destination needs only
+// 16-byte alignment, which malloc, numpy and array.array buffers all have.
+template <typename T, bool Streaming = false>
+__attribute__((target("avx2"))) inline void rows_avx2(StreamArray& st, T* out, std::size_t rows) noexcept {
     detail::LaneGroup g[4];
     detail::load_groups(st, g);
-    for (std::size_t r = 0; r < rows; ++r) {
-        double* row = out + r * kLanes;
-        _mm256_storeu_pd(row + 0, detail::unit_double(detail::xoshiro_next(g[0])));
-        _mm256_storeu_pd(row + 4, detail::unit_double(detail::xoshiro_next(g[1])));
-        _mm256_storeu_pd(row + 8, detail::unit_double(detail::xoshiro_next(g[2])));
-        _mm256_storeu_pd(row + 12, detail::unit_double(detail::xoshiro_next(g[3])));
+    for (std::size_t r = 0; r < rows; ++r, out += kLanes) {
+        for (std::size_t grp = 0; grp < 4; ++grp) {
+            const __m256i v = detail::value_bits<T>(detail::xoshiro_next(g[grp]));
+            if constexpr (Streaming) {
+                auto* p = reinterpret_cast<__m128i*>(out + grp * 4);
+                _mm_stream_si128(p, _mm256_castsi256_si128(v));
+                _mm_stream_si128(p + 1, _mm256_extracti128_si256(v, 1));
+            } else {
+                _mm256_storeu_si256(reinterpret_cast<__m256i*>(out + grp * 4), v);
+            }
+        }
     }
     detail::store_groups(g, st);
-}
-
-__attribute__((target("avx2"))) inline void rows_avx2_u64(StreamArray& st, std::uint64_t* out, std::size_t rows) noexcept {
-    detail::LaneGroup g[4];
-    detail::load_groups(st, g);
-    for (std::size_t r = 0; r < rows; ++r) {
-        std::uint64_t* row = out + r * kLanes;
-        _mm256_storeu_si256(reinterpret_cast<__m256i*>(row + 0), detail::xoshiro_next(g[0]));
-        _mm256_storeu_si256(reinterpret_cast<__m256i*>(row + 4), detail::xoshiro_next(g[1]));
-        _mm256_storeu_si256(reinterpret_cast<__m256i*>(row + 8), detail::xoshiro_next(g[2]));
-        _mm256_storeu_si256(reinterpret_cast<__m256i*>(row + 12), detail::xoshiro_next(g[3]));
+    if constexpr (Streaming) {
+        _mm_sfence();
     }
-    detail::store_groups(g, st);
-}
-
-// Non-temporal variants for fills whose working set exceeds the LLC: stream
-// stores bypass the write-allocate read-for-ownership traffic, roughly
-// halving bus usage. Caller must guarantee 32-byte alignment of `out`.
-
-__attribute__((target("avx2"))) inline void rows_avx2_f64_nt(StreamArray& st, double* out, std::size_t rows) noexcept {
-    detail::LaneGroup g[4];
-    detail::load_groups(st, g);
-    for (std::size_t r = 0; r < rows; ++r) {
-        double* row = out + r * kLanes;
-        _mm256_stream_pd(row + 0, detail::unit_double(detail::xoshiro_next(g[0])));
-        _mm256_stream_pd(row + 4, detail::unit_double(detail::xoshiro_next(g[1])));
-        _mm256_stream_pd(row + 8, detail::unit_double(detail::xoshiro_next(g[2])));
-        _mm256_stream_pd(row + 12, detail::unit_double(detail::xoshiro_next(g[3])));
-    }
-    detail::store_groups(g, st);
-    _mm_sfence();
-}
-
-__attribute__((target("avx2"))) inline void rows_avx2_u64_nt(StreamArray& st, std::uint64_t* out, std::size_t rows) noexcept {
-    detail::LaneGroup g[4];
-    detail::load_groups(st, g);
-    for (std::size_t r = 0; r < rows; ++r) {
-        std::uint64_t* row = out + r * kLanes;
-        _mm256_stream_si256(reinterpret_cast<__m256i*>(row + 0), detail::xoshiro_next(g[0]));
-        _mm256_stream_si256(reinterpret_cast<__m256i*>(row + 4), detail::xoshiro_next(g[1]));
-        _mm256_stream_si256(reinterpret_cast<__m256i*>(row + 8), detail::xoshiro_next(g[2]));
-        _mm256_stream_si256(reinterpret_cast<__m256i*>(row + 12), detail::xoshiro_next(g[3]));
-    }
-    detail::store_groups(g, st);
-    _mm_sfence();
 }
 
 [[nodiscard]] inline bool cpu_has_avx2() noexcept {
@@ -346,43 +321,32 @@ __attribute__((target("avx2"))) inline void rows_avx2_u64_nt(StreamArray& st, st
 #endif  // PYGIM_RNG_X86
 
 // ---------------------------------------------------------------------------
-// Block-range fill: any [start_in_block, start_in_block + count) range within
-// one block, continuing from live stream states. Misaligned head and tail run
-// scalar; aligned full rows use the selected kernel.
+// Elements [pos, pos + count) of one block, continuing from live stream
+// states: lane by lane up to a row boundary, whole rows through the kernel,
+// then the remainder lane by lane.
 // ---------------------------------------------------------------------------
 
-namespace detail {
-
-template <typename T, typename RowKernel, typename OneFn>
-inline void fill_range_in_block(StreamArray& st, T* out, std::size_t start_in_block,
-                                std::size_t count, RowKernel&& rows_kernel, OneFn&& one) {
-    std::size_t pos = start_in_block;
-    std::size_t produced = 0;
-    // Head: advance lane-by-lane until row-aligned.
-    while (produced < count && (pos % kLanes) != 0) {
-        out[produced++] = one(st[pos % kLanes]);
-        ++pos;
-    }
-    // Body: whole rows through the kernel.
-    const std::size_t rows = (count - produced) / kLanes;
-    if (rows != 0) {
-        rows_kernel(st, out + produced, rows);
-        produced += rows * kLanes;
+template <typename T, typename Rows>
+inline void fill_in_block(StreamArray& st, T* out, std::size_t pos, std::size_t count, Rows rows_kernel) noexcept {
+    std::size_t i = 0;
+    const auto one_by_one = [&](std::size_t end) {
+        for (; i < end; ++i, ++pos) {
+            out[i] = value<T>(st[pos % kLanes].next());
+        }
+    };
+    one_by_one(std::min(count, (kLanes - pos % kLanes) % kLanes));
+    if (const std::size_t rows = (count - i) / kLanes; rows != 0) {
+        rows_kernel(st, out + i, rows);
+        i += rows * kLanes;
         pos += rows * kLanes;
     }
-    // Tail.
-    while (produced < count) {
-        out[produced++] = one(st[pos % kLanes]);
-        ++pos;
-    }
+    one_by_one(count);
 }
 
-}  // namespace detail
-
 // ---------------------------------------------------------------------------
-// RngCore: seed + absolute position + resume cache. generate() is a pure
-// function of (seed, abs_pos, n) — call sizes and thread counts do not change
-// the emitted sequence.
+// RngCore: seed + position + the live streams of an unfinished block. fill()
+// is a pure function of (seed, position, n): call sizes and thread counts do
+// not change the emitted sequence.
 // ---------------------------------------------------------------------------
 
 class RngCore {
@@ -396,169 +360,109 @@ public:
     [[nodiscard]] bool simd_active() const noexcept { return m_simd; }
     [[nodiscard]] int threads_configured() const noexcept { return m_threads; }
 
-    void fill_f64(double* out, std::size_t n) { generate<double>(out, n); }
-    void fill_u64(std::uint64_t* out, std::size_t n) { generate<std::uint64_t>(out, n); }
+    // The next n elements of the sequence: the rest of a block an earlier
+    // call started, then whole blocks, then the start of the next block.
+    template <typename T>
+    void fill(T* out, std::size_t n) {
+        // Serialize concurrent fills on the same object: the GIL is released
+        // during generation, so two Python threads sharing one generator
+        // would otherwise race on m_pos / m_cache (C++ UB, not merely
+        // nondeterminism). Uncontended cost is negligible against a fill.
+        std::lock_guard<std::mutex> guard(m_state_mutex);
+        const std::size_t head = std::min(n, (kBlockElems - m_pos % kBlockElems) % kBlockElems);
+        const std::size_t blocks = (n - head) / kBlockElems;
+        fill_partial(out, head);
+        fill_blocks(out + head, blocks);
+        fill_partial(out + head + blocks * kBlockElems, n - head - blocks * kBlockElems);
+    }
 
 private:
     template <typename T>
-    void fill_block_range(StreamArray& st, T* out, std::size_t start_in_block, std::size_t count) {
-        auto one = [](Xoshiro256pp& s) {
-            if constexpr (std::is_same_v<T, double>) {
-                return u64_to_unit_double(s.next());
-            } else {
-                return s.next();
-            }
-        };
+    void fill_range(StreamArray& st, T* out, std::size_t pos, std::size_t count) const noexcept {
 #if defined(PYGIM_RNG_X86)
         if (m_simd) {
-            if constexpr (std::is_same_v<T, double>) {
-                detail::fill_range_in_block(st, out, start_in_block, count, rows_avx2_f64, one);
-            } else {
-                detail::fill_range_in_block(st, out, start_in_block, count, rows_avx2_u64, one);
-            }
+            return fill_in_block(st, out, pos, count, rows_avx2<T>);
+        }
+#endif
+        fill_in_block(st, out, pos, count, rows_scalar<T>);
+    }
+
+    // count elements within the current block. A block's streams are derived
+    // when its first element is drawn and stay in m_cache while it is
+    // unfinished, so the next call continues exactly where this one stopped.
+    template <typename T>
+    void fill_partial(T* out, std::size_t count) noexcept {
+        if (count == 0) {
             return;
         }
-#endif
-        if constexpr (std::is_same_v<T, double>) {
-            detail::fill_range_in_block(st, out, start_in_block, count, rows_scalar_f64, one);
-        } else {
-            detail::fill_range_in_block(st, out, start_in_block, count, rows_scalar_u64, one);
+        const std::size_t pos = static_cast<std::size_t>(m_pos % kBlockElems);
+        if (pos == 0) {
+            m_cache = derive_block_streams(m_seed_base, m_pos / kBlockElems);
         }
+        fill_range(m_cache, out, pos, count);
+        m_pos += count;
     }
 
-    // Defensive resume path: unreachable through the public API today (the
-    // trailing-partial stage always leaves a valid cache), kept so a future
-    // refactor that drops the cache degrades to slow-but-correct.
-    static void fast_forward(StreamArray& st, std::size_t in_block) noexcept {
-        const std::size_t rows = in_block / kLanes;
-        const std::size_t extra = in_block % kLanes;
-        for (std::size_t lane = 0; lane < kLanes; ++lane) {
-            const std::size_t steps = rows + (lane < extra ? 1 : 0);
-            for (std::size_t k = 0; k < steps; ++k) {
-                (void)st[lane].next();
-            }
-        }
-    }
-
+    // Whole blocks from a block boundary, in parallel when there are several.
+    // Blocks are independent by construction, so any partitioning yields the
+    // same output.
     template <typename T>
-    void generate(T* out, std::size_t n) {
-        // Serialize concurrent fills on the same object: the GIL is released
-        // during generation, so two Python threads sharing one generator
-        // would otherwise race on m_abs_pos / m_cache (C++ UB, not merely
-        // nondeterminism). Uncontended cost is negligible against a fill.
-        std::lock_guard<std::mutex> guard(m_state_mutex);
-        std::size_t produced = 0;
-
-        // 1) Leading partial block: continue from the resume cache.
-        std::size_t in_block = static_cast<std::size_t>(m_abs_pos % kBlockElems);
-        if (in_block != 0 && n > 0) {
-            const std::uint64_t block = m_abs_pos / kBlockElems;
-            if (!m_cache_valid) {
-                m_cache = derive_block_streams(m_seed_base, block);
-                fast_forward(m_cache, in_block);
-                m_cache_valid = true;
-            }
-            const std::size_t take = std::min(n, kBlockElems - in_block);
-            fill_block_range(m_cache, out, in_block, take);
-            produced += take;
-            m_abs_pos += take;
-            if (m_abs_pos % kBlockElems == 0) {
-                m_cache_valid = false;
-            }
+    void fill_blocks(T* out, std::size_t blocks) {
+        if (blocks == 0) {
+            return;
         }
-
-        // 2) Full blocks, optionally in parallel. Blocks are independent by
-        //    construction, so any partitioning yields the same output.
-        const std::size_t remaining = n - produced;
-        const std::uint64_t first_block = m_abs_pos / kBlockElems;
-        const std::size_t full_blocks = remaining / kBlockElems;
-        if (full_blocks != 0) {
-            const unsigned hw = std::max(1u, std::thread::hardware_concurrency());
-            const std::size_t want =
-                m_threads > 0 ? static_cast<std::size_t>(m_threads) : static_cast<std::size_t>(hw);
-            const std::size_t nthreads = std::min({want, full_blocks, std::size_t{256}});
-
+        const std::uint64_t first = m_pos / kBlockElems;
 #if defined(PYGIM_RNG_X86)
-            const bool use_nt = m_simd &&
-                (full_blocks * kBlockElems * sizeof(T)) >= kNtThresholdBytes &&
-                (reinterpret_cast<std::uintptr_t>(out + produced) % 32) == 0;
-#else
-            constexpr bool use_nt = false;
+        const bool streaming = m_simd && blocks * kBlockElems * sizeof(T) >= kNtThresholdBytes &&
+                               reinterpret_cast<std::uintptr_t>(out) % 16 == 0;
 #endif
-
-            auto run_blocks = [&](std::uint64_t b0, std::uint64_t b1, T* dst) {
-                for (std::uint64_t b = b0; b < b1; ++b) {
-                    StreamArray st = derive_block_streams(m_seed_base, b);
-                    T* block_out = dst + (b - b0) * kBlockElems;
+        const auto run = [&](std::size_t b0, std::size_t b1) {  // blocks [b0, b1) of this fill
+            for (std::size_t b = b0; b < b1; ++b) {
+                StreamArray st = derive_block_streams(m_seed_base, first + b);
 #if defined(PYGIM_RNG_X86)
-                    if (use_nt) {
-                        if constexpr (std::is_same_v<T, double>) {
-                            rows_avx2_f64_nt(st, block_out, kBlockElems / kLanes);
-                        } else {
-                            rows_avx2_u64_nt(st, block_out, kBlockElems / kLanes);
-                        }
-                        continue;
-                    }
+                if (streaming) {
+                    rows_avx2<T, true>(st, out + b * kBlockElems, kBlockElems / kLanes);
+                    continue;
+                }
 #endif
-                    fill_block_range(st, block_out, 0, kBlockElems);
-                }
-            };
-
-            T* base = out + produced;
-            if (nthreads <= 1 || full_blocks < 2) {
-                run_blocks(first_block, first_block + full_blocks, base);
-            } else {
-                // RAII joiner: if a spawn throws mid-loop (std::system_error
-                // under thread exhaustion), unwinding joins the started
-                // workers instead of calling std::terminate as ~thread
-                // would. (std::jthread would do this, but Apple Clang's
-                // libc++ does not ship it.)
-                std::vector<std::thread> workers;
-                struct Joiner {
-                    std::vector<std::thread>& threads;
-                    ~Joiner() {
-                        for (auto& t : threads) {
-                            if (t.joinable()) t.join();
-                        }
-                    }
-                } joiner{workers};
-                workers.reserve(nthreads);
-                const std::size_t per = full_blocks / nthreads;
-                const std::size_t rem = full_blocks % nthreads;
-                std::size_t offset_blocks = 0;
-                for (std::size_t t = 0; t < nthreads; ++t) {
-                    const std::size_t nb = per + (t < rem ? 1 : 0);
-                    const std::uint64_t b0 = first_block + offset_blocks;
-                    T* dst = base + offset_blocks * kBlockElems;
-                    workers.emplace_back(
-                        [&, b0, nb, dst] { run_blocks(b0, b0 + nb, dst); });
-                    offset_blocks += nb;
-                }
-                for (auto& w : workers) {
-                    w.join();
-                }
+                fill_range(st, out + b * kBlockElems, 0, kBlockElems);
             }
-            produced += full_blocks * kBlockElems;
-            m_abs_pos += static_cast<std::uint64_t>(full_blocks) * kBlockElems;
-        }
+        };
 
-        // 3) Trailing partial block: fill and retain the cache for resume.
-        const std::size_t tail = n - produced;
-        if (tail != 0) {
-            m_cache = derive_block_streams(m_seed_base, m_abs_pos / kBlockElems);
-            fill_block_range(m_cache, out + produced, 0, tail);
-            m_cache_valid = true;
-            m_abs_pos += tail;
+        const std::size_t want = m_threads > 0 ? static_cast<std::size_t>(m_threads)
+                                               : std::max<std::size_t>(1, std::thread::hardware_concurrency());
+        const std::size_t nthreads = std::min({want, blocks, std::size_t{256}});
+        if (nthreads == 1) {
+            run(0, blocks);
+        } else {
+            // RAII joiner: if a spawn throws mid-loop (std::system_error
+            // under thread exhaustion), unwinding joins the started workers
+            // instead of calling std::terminate as ~thread would.
+            // (std::jthread would do this, but Apple Clang's libc++ does not
+            // ship it.)
+            std::vector<std::thread> workers;
+            struct Joiner {
+                std::vector<std::thread>& threads;
+                ~Joiner() {
+                    for (auto& t : threads) {
+                        if (t.joinable()) t.join();
+                    }
+                }
+            } joiner{workers};
+            workers.reserve(nthreads);
+            for (std::size_t t = 0; t < nthreads; ++t) {
+                workers.emplace_back(run, t * blocks / nthreads, (t + 1) * blocks / nthreads);
+            }
         }
+        m_pos += static_cast<std::uint64_t>(blocks) * kBlockElems;
     }
 
-    std::mutex m_state_mutex;       //!< serializes fills; the GIL is released during generation
-    std::uint64_t m_seed_base;      //!< SplitMix64 counter base derived from the user seed
-    std::uint64_t m_abs_pos = 0;    //!< absolute elements emitted so far
-    StreamArray m_cache{};          //!< live stream states of the current partial block
-    bool m_cache_valid = false;     //!< whether m_cache continues the current block
-    int m_threads;                  //!< configured threads (0 = auto)
-    bool m_simd;                    //!< AVX2 path active
+    std::mutex m_state_mutex;     //!< serializes fills; the GIL is released during generation
+    std::uint64_t m_seed_base;    //!< SplitMix64 counter base derived from the user seed
+    std::uint64_t m_pos = 0;      //!< elements emitted so far
+    StreamArray m_cache{};        //!< live streams of the current block while it is unfinished
+    int m_threads;                //!< configured threads (0 = auto)
+    bool m_simd;                  //!< AVX2 path active
 };
 
 }  // namespace pygim::rng

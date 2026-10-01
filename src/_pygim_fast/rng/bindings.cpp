@@ -4,28 +4,15 @@
 
 namespace py = pybind11;
 
-PYBIND11_MODULE(rng, m) {
+PYBIND11_MODULE(_rng, m) {
     m.doc() =
-        "High-throughput pseudo-random number generation.\n\n"
-        "16 interleaved xoshiro256++ streams evaluated with AVX2 (4 groups x 4\n"
-        "lanes) when available, with block-parallel multithreaded fills. The\n"
-        "emitted sequence is a pure function of the seed: identical across the\n"
-        "SIMD and scalar paths, thread counts, and call-size splits.";
+        "The engine behind pygim.rng: 16 interleaved xoshiro256++ streams evaluated\n"
+        "with AVX2 (4 groups x 4 lanes) when available, with block-parallel\n"
+        "multithreaded fills. The emitted sequence is a pure function of the seed:\n"
+        "identical across the SIMD and scalar paths, thread counts, and call-size\n"
+        "splits. Use pygim.rng; this module only fills buffers.";
 
-    py::class_<pygim::Rng>(m, "Rng",
-        R"doc(Deterministic high-throughput random generator.
-
-float64 outputs use the same 53-bit mapping as NumPy
-((x >> 11) * 2**-53), drawn from xoshiro256++ streams seeded via
-SplitMix64. Arrays returned by random()/uint64() are 64-byte aligned.
-
-Thread safety
--------------
-Instances are internally locked: concurrent calls from Python threads
-are safe but serialize (and their interleaving order is not
-deterministic). For parallel workloads prefer one Rng per thread with
-distinct seeds; a single fill already parallelizes internally.
-)doc")
+    py::class_<pygim::Rng>(m, "Rng")
         .def(py::init<const py::object&, int, bool>(),
              py::arg("seed") = py::none(),
              py::kw_only(),
@@ -43,21 +30,12 @@ threads : int, keyword-only
 simd : bool, keyword-only
     Allow the AVX2 path. Results are bit-identical either way.
 )doc")
-        .def("random", &pygim::Rng::random, py::arg("n"), py::kw_only(),
-             py::arg("format") = py::none(),
-             "Return n float64 uniforms in [0, 1) as `format` (see formats()).\n\n"
-             "None picks a numpy array when numpy imports, else a list.")
-        .def("uint64", &pygim::Rng::uint64, py::arg("n"), py::kw_only(),
-             py::arg("format") = py::none(),
-             "Return n raw 64-bit draws as `format` (see formats()).\n\n"
-             "None picks a numpy array when numpy imports, else a list.")
-        .def_static("formats", &pygim::output::available,
-             "The format names available in this interpreter: 'numpy', 'list', 'tuple',\n"
-             "'polars.Series', 'polars.DataFrame' (numpy and polars only when installed).")
         .def("fill", &pygim::Rng::fill, py::arg("out"),
-             "Fill a C-contiguous float64 array (any shape) in place with uniforms in [0, 1).")
-        .def("fill_uint64", &pygim::Rng::fill_uint64, py::arg("out"),
-             "Fill a C-contiguous uint64 array (any shape) in place with raw draws.")
+             R"doc(Fill a buffer in place: float64 elements with uniforms in [0, 1),
+uint64 elements with raw 64-bit draws.
+
+Any writable, C-contiguous buffer of either type works, of any shape:
+array.array('d' or 'Q'), a numpy array, a memoryview, ...)doc")
         .def_property_readonly("seed", &pygim::Rng::seed, "The 64-bit seed in use.")
         .def_property_readonly("simd", &pygim::Rng::simd, "'avx2' or 'scalar'.")
         .def_property_readonly("threads", &pygim::Rng::threads, "Configured thread count (0 = auto).")

@@ -1,4 +1,4 @@
-"""Tests for pygim.rng — correctness, determinism, and statistical sanity.
+"""Tests for pygim.rng — correctness, determinism, formats, and statistical sanity.
 
 The generator's contract: the emitted sequence is a pure function of the
 seed — identical across the SIMD and scalar paths, any thread count, and any
@@ -6,12 +6,20 @@ way the total is split across calls. Correctness is anchored to an
 independent pure-Python oracle implemented here from the published algorithm
 specs, which is itself validated against the rand_xoshiro known-answer
 vectors before it is trusted to judge the C++ implementation.
+
+Everything except the numpy-specific and statistical tests runs on the
+standard library alone, as pygim.rng itself does.
 """
+
+import ctypes
+import gc
+import sys
+from array import array
+from importlib.util import find_spec
 
 import pytest
 
-np = pytest.importorskip("numpy", reason="pygim.rng requires numpy at runtime")
-pytest.importorskip("pygim.rng", reason="C++ rng extension not built")
+pytest.importorskip("pygim._rng", reason="C++ rng extension not built")
 from pygim.rng import Rng
 
 _M = (1 << 64) - 1
@@ -135,8 +143,7 @@ def test_uint64_matches_oracle():
     or the interleaving order fails here.
     """
     seed = 42
-    got = Rng(seed).uint64(256)
-    assert list(got) == _oracle_values(seed, block=0, count=256)
+    assert Rng(seed).uint64(256) == _oracle_values(seed, block=0, count=256)
 
 
 def test_block_boundary_switches_streams():
@@ -147,10 +154,9 @@ def test_block_boundary_switches_streams():
     pins the block/stream indexing that thread-parallel fills rely on.
     """
     seed = 9001
-    n = _BLOCK + 64
-    got = Rng(seed, threads=1).uint64(n)
-    assert list(got[:64]) == _oracle_values(seed, block=0, count=64)
-    assert list(got[_BLOCK:]) == _oracle_values(seed, block=1, count=64)
+    got = Rng(seed, threads=1).uint64(_BLOCK + 64, format="array")
+    assert got[:64].tolist() == _oracle_values(seed, block=0, count=64)
+    assert got[_BLOCK:].tolist() == _oracle_values(seed, block=1, count=64)
 
 
 def test_random_uses_numpy_53bit_mapping():
@@ -160,9 +166,8 @@ def test_random_uses_numpy_53bit_mapping():
     matches numpy. Verified by cross-checking the two public APIs against
     each other from the same seed.
     """
-    u = Rng(7).uint64(4096)
-    d = Rng(7).random(4096)
-    assert np.array_equal(d, (u >> np.uint64(11)).astype(np.float64) * 2.0**-53)
+    raw = Rng(7).uint64(4096)
+    assert Rng(7).random(4096) == [(x >> 11) * 2.0**-53 for x in raw]
 
 
 # ---------------------------------------------------------------------------
@@ -176,11 +181,9 @@ def test_seed_reproducibility_and_distinct_seeds():
     The basic RNG contract, plus a guard against the seed being ignored
     (e.g. a hard-coded base slipping into stream derivation).
     """
-    a = Rng(123).random(10_000)
-    b = Rng(123).random(10_000)
-    c = Rng(124).random(10_000)
-    assert np.array_equal(a, b)
-    assert not np.array_equal(a, c)
+    a = Rng(123).random(10_000, format="array")
+    assert a == Rng(123).random(10_000, format="array")
+    assert a != Rng(124).random(10_000, format="array")
 
 
 def test_simd_and_scalar_paths_identical():
@@ -192,9 +195,8 @@ def test_simd_and_scalar_paths_identical():
     """
     if Rng(0).simd != "avx2":
         pytest.skip("AVX2 unavailable; only one path to compare")
-    fast = Rng(31, simd=True, threads=1).random(500_000)
-    slow = Rng(31, simd=False, threads=1).random(500_000)
-    assert np.array_equal(fast, slow)
+    fast = Rng(31, simd=True, threads=1).random(500_000, format="array")
+    assert fast == Rng(31, simd=False, threads=1).random(500_000, format="array")
 
 
 def test_thread_count_invariance():
@@ -205,113 +207,230 @@ def test_thread_count_invariance():
     size spanning many blocks including a partial tail.
     """
     n = 5 * _BLOCK + 12345
-    single = Rng(55, threads=1).random(n)
-    many = Rng(55, threads=8).random(n)
-    assert np.array_equal(single, many)
+    assert Rng(55, threads=1).random(n, format="array") == Rng(55, threads=8).random(n, format="array")
 
 
 def test_call_split_invariance():
     """Splitting one large request into many calls yields the same stream.
 
-    The resume cache carries live stream states across calls, so
-    random(a) + random(b) == random(a + b) elementwise — including splits
+    The cached streams of an unfinished block carry over to the next call,
+    so random(a) + random(b) == random(a + b) elementwise — including splits
     that end mid-row and mid-block.
     """
     n = _BLOCK + 4242
-    whole = Rng(2024).random(n)
     r = Rng(2024)
     chunks = [1, 15, 16, 17, 1000, _BLOCK - 1000, 0]
     chunks.append(n - sum(chunks))  # remainder ends mid-row, mid-block
-    parts = [r.random(k) for k in chunks]
-    assert sum(p.size for p in parts) == n
-    assert np.array_equal(np.concatenate(parts), whole)
+    joined = array("d")
+    for k in chunks:
+        joined += r.random(k, format="array")
+    assert joined == Rng(2024).random(n, format="array")
+
+
+def test_nt_store_path_bit_exact():
+    """The non-temporal store path emits the identical sequence.
+
+    Streaming kernels engage only for >= 32 MiB of full blocks on a 16-byte
+    aligned destination — far above the other exact tests. Any malloc'd
+    buffer is 16-byte aligned, so this size deterministically exercises them;
+    a lane permutation or offset bug confined to that path fails here and
+    nowhere else.
+    """
+    n = 40 * _BLOCK  # ~84 MB of float64, well past kNtThresholdBytes
+    a = Rng(5, threads=1).random(n, format="array")
+    assert a.buffer_info()[0] % 16 == 0  # streaming-eligible
+    assert a == Rng(5, threads=1, simd=False).random(n, format="array")
+    assert a == Rng(5, threads=8).random(n, format="array")
+
+    u = Rng(5, threads=1).uint64(n, format="array")
+    assert u == Rng(5, threads=1, simd=False).uint64(n, format="array")
+
+    # A streaming region starting after a mid-block resume must continue
+    # seamlessly (776 elements keeps it 16-byte aligned).
+    r = Rng(5, threads=1)
+    head = r.random(776, format="array")
+    assert head + r.random(n - 776, format="array") == a
+
+
+def test_related_seeds_are_independent():
+    """Seeds at small golden-ratio lattice distances share no streams.
+
+    The naive additive derivation had an exact defect: Rng(s + 4*golden)
+    re-emitted Rng(s)'s streams shifted by one lane. The mixed-counter
+    derivation breaks that lattice; draws from related seeds must be
+    disjoint (any overlap in 64-bit space is a ~2**-47 accident).
+    """
+    golden = 0x9E3779B97F4A7C15
+    base = 123456789
+    seen = set(Rng(base).uint64(100_000))
+    for delta in (golden, 4 * golden, 64 * golden):
+        assert seen.isdisjoint(Rng((base + delta) % (1 << 64)).uint64(100_000))
+
+
+def test_seed_none_gives_fresh_entropy():
+    """seed=None draws real entropy: two generators must not collide."""
+    assert Rng().random(64) != Rng().random(64)
 
 
 # ---------------------------------------------------------------------------
-# API surface
+# Formats
+# ---------------------------------------------------------------------------
+
+
+def test_formats_lists_what_this_interpreter_can_produce():
+    """list, tuple and array always; numpy and polars when they are installed."""
+    expected = ["list", "tuple", "array"]
+    if find_spec("numpy"):
+        expected.append("numpy")
+    if find_spec("polars"):
+        expected += ["polars.Series", "polars.DataFrame"]
+    assert Rng.formats() == tuple(expected)
+
+
+@pytest.mark.parametrize("method, typecode", [("random", "d"), ("uint64", "Q")])
+def test_list_tuple_and_array_carry_the_same_values(method, typecode):
+    """A list by default; the other formats hold the very same values."""
+    values = getattr(Rng(7), method)(100)
+    assert type(values) is list and len(values) == 100
+    assert getattr(Rng(7), method)(100, format="tuple") == tuple(values)
+    as_array = getattr(Rng(7), method)(100, format="array")
+    assert as_array.typecode == typecode and as_array.tolist() == values
+    assert getattr(Rng(7), method)(0, format="tuple") == ()
+    assert getattr(Rng(7), method)(0) == []
+
+
+@pytest.mark.parametrize("method, dtype", [("random", "Float64"), ("uint64", "UInt64")])
+def test_polars_formats_keep_dtype_and_values(method, dtype):
+    """One column named 'value' of the right dtype: uint64 past 2**63 must not
+    overflow, and the Series must outlive the buffer it was built on."""
+    pl = pytest.importorskip("polars")
+    values = getattr(Rng(7), method)(1000)
+    series = getattr(Rng(7), method)(1000, format="polars.Series")
+    gc.collect()
+    assert series.name == "value" and series.dtype == getattr(pl, dtype)
+    assert series.to_list() == values
+    frame = getattr(Rng(7), method)(1000, format="polars.DataFrame")
+    assert frame.columns == ["value"] and frame["value"].to_list() == values
+    if method == "uint64":
+        assert max(values) >= 2**63
+
+
+def test_unknown_format_and_bad_sizes_are_rejected():
+    with pytest.raises(ValueError, match="format must be one of"):
+        Rng(1).random(3, format="pandas")
+    with pytest.raises(ValueError):
+        Rng(1).random(-1)
+    with pytest.raises(TypeError):
+        Rng(1).random(2.0)
+
+
+def test_numpy_format_and_fill():
+    """numpy arrays come out of random()/uint64() and go into fill().
+
+    fill() takes any buffer, so numpy is just one exporter among others: its
+    dtype spellings of uint64 ('Q', and 'L' on LP64 platforms) are both
+    accepted, and arrays it cannot fill in place are refused.
+    """
+    np = pytest.importorskip("numpy")
+    floats = Rng(7).random(100, format="numpy")
+    assert floats.dtype == np.float64 and floats.tolist() == Rng(7).random(100)
+    raw = Rng(7).uint64(100, format="numpy")
+    assert raw.dtype == np.uint64 and raw.tolist() == Rng(7).uint64(100)
+
+    grid = np.zeros((250, 40))
+    Rng(1).fill(grid)
+    assert grid.ravel().tolist() == Rng(1).random(10_000)
+    for spelling in ("Q", "L", np.uint64):
+        buf = np.zeros(64, dtype=spelling)
+        if buf.dtype == np.uint64:  # 'L' is 32-bit on Windows
+            Rng(1).fill(buf)
+            assert buf.tolist() == Rng(1).uint64(64)
+
+    frozen = np.empty(8)
+    frozen.setflags(write=False)
+    for out in (
+        np.empty(8, dtype=np.float32),
+        np.empty(8, dtype=np.int64),
+        np.empty(8, dtype=">f8"),  # byte order mismatch
+        np.empty((8, 8))[:, ::2],  # not contiguous
+        frozen,
+        np.frombuffer(bytearray(65), dtype=np.float64, offset=1),  # misaligned
+    ):
+        with pytest.raises(TypeError):
+            Rng(1).fill(out)
+
+
+# ---------------------------------------------------------------------------
+# fill() and the rest of the API surface
 # ---------------------------------------------------------------------------
 
 
 def test_fill_in_place_any_shape():
-    """fill() writes into caller-owned arrays of any C-contiguous shape.
+    """fill() writes into caller-owned buffers of any C-contiguous shape.
 
     In-place filling is the zero-allocation fast path; shape must not
     matter as long as the buffer is contiguous.
     """
-    out = np.zeros((250, 40))
-    Rng(1).fill(out)
-    assert out.min() >= 0.0 and out.max() < 1.0
-    assert np.count_nonzero(out) > 9900  # zeros are ~2^-53-improbable
-
-    flat = np.empty(10_000)
+    grid = memoryview(bytearray(8 * 10_000)).cast("d", (250, 40))
+    Rng(1).fill(grid)
+    flat = array("d", bytes(8 * 10_000))
     Rng(1).fill(flat)
-    assert np.array_equal(out.ravel(), flat)
+    assert [x for row in grid.tolist() for x in row] == flat.tolist()
+    assert min(flat) >= 0.0 and max(flat) < 1.0
 
 
-def test_fill_rejects_wrong_dtype_and_noncontiguous():
+def test_fill_element_type_picks_floats_or_raw_draws():
+    """float64 buffers get uniforms, uint64 buffers raw draws, of one stream."""
+    floats, raw = array("d", bytes(800)), array("Q", bytes(800))
+    Rng(5).fill(floats)
+    Rng(5).fill(raw)
+    assert floats.tolist() == [(x >> 11) * 2.0**-53 for x in raw]
+    native = (ctypes.c_double * 100)()  # format '<d': explicit native order
+    Rng(5).fill(native)
+    assert list(native) == floats.tolist()
+
+
+def test_fill_rejects_buffers_it_cannot_fill_in_place():
     """fill() must reject buffers it cannot fill in place.
 
-    A float32 or non-contiguous array would require conversion — which
-    pybind11 does by copying, silently discarding the fill. The binding
-    forbids the conversion instead of losing writes.
+    Writing into a converted copy would silently lose the fill, so anything
+    that is not a writable, contiguous, aligned float64 or uint64 buffer is a
+    TypeError (as for read-only buffers anywhere in the standard library).
     """
-    with pytest.raises(TypeError):
-        Rng(1).fill(np.empty(8, dtype=np.float32))
-    with pytest.raises(TypeError):
-        Rng(1).fill(np.empty((8, 8))[:, ::2])
-    with pytest.raises(TypeError):
-        Rng(1).fill_uint64(np.empty(8, dtype=np.int64))
-    with pytest.raises(TypeError):
-        Rng(1).fill([0.0] * 8)  # a list would be converted, losing the fill
-    frozen = np.empty(8)
-    frozen.setflags(write=False)
-    with pytest.raises(ValueError):
-        Rng(1).fill(frozen)
-    with pytest.raises(TypeError):
-        Rng(1).fill(np.empty(8, dtype=">f8"))  # byte order mismatch
-    # element-misaligned buffer: contiguous and writable, but UB to write
-    misaligned = np.frombuffer(bytearray(65), dtype=np.float64, offset=1)
-    with pytest.raises(TypeError):
-        Rng(1).fill(misaligned)
+    foreign = ctypes.c_double.__ctype_be__ if sys.byteorder == "little" else ctypes.c_double.__ctype_le__
+    for out in (
+        [0.0] * 8,  # not a buffer: a list would be converted, losing the fill
+        memoryview(bytes(64)).cast("d"),  # read-only
+        memoryview(array("d", bytes(128)))[::2],  # not contiguous
+        array("f", bytes(32)),  # float32
+        array("q", bytes(64)),  # signed int64
+        (foreign * 8)(),  # byte order mismatch
+        memoryview(bytearray(65))[1:].cast("d"),  # contiguous and writable, but misaligned
+    ):
+        with pytest.raises(TypeError):
+            Rng(1).fill(out)
 
 
-def test_fill_accepts_equivalent_dtype_spellings():
-    """dtype equivalence, not dtype-num identity, decides acceptance.
-
-    On LP64 platforms np.dtype('Q') and np.dtype(np.uint64) compare equal
-    but carry different dtype nums; both spellings must be fillable.
-    """
-    for spelling in ("Q", "L", np.uint64):
-        buf = np.zeros(64, dtype=spelling)
-        if buf.dtype != np.dtype(np.uint64):
-            continue  # 'L' is not 64-bit on this platform
-        Rng(1).fill_uint64(buf)
-        assert np.count_nonzero(buf) > 0
-
-
-def test_size_and_seed_validation():
+def test_seed_and_thread_validation():
     """Hostile inputs fail loudly with the right exception types.
 
-    Type errors (str, Decimal) are TypeError; range errors (-1, 2**64) are
-    ValueError. Integer-likes with __index__ (numpy ints) are accepted;
+    Type errors (str, Decimal, float) are TypeError; range errors (-1, 2**64)
+    are ValueError. Integer-likes with __index__ (numpy ints) are accepted;
     Decimal must not be silently truncated.
     """
     from decimal import Decimal
 
-    with pytest.raises(ValueError):
-        Rng(1).random(-1)
-    assert Rng(1).random(0).size == 0
-    with pytest.raises(ValueError):
-        Rng(-1)
-    with pytest.raises(ValueError):
-        Rng(1 << 64)
-    with pytest.raises(TypeError):
-        Rng("not a seed")
-    with pytest.raises(TypeError):
-        Rng(Decimal("3.9"))
-    with pytest.raises(TypeError):
-        Rng(3.0)
-    assert Rng(np.uint64(5)).seed == 5
+    class Five:
+        def __index__(self):
+            return 5
+
+    for bad in (-1, 1 << 64):
+        with pytest.raises(ValueError):
+            Rng(bad)
+    for bad in ("not a seed", Decimal("3.9"), 3.0):
+        with pytest.raises(TypeError):
+            Rng(bad)
+    assert Rng(Five()).seed == 5
     with pytest.raises(ValueError):
         Rng(1, threads=-1)
 
@@ -326,103 +445,9 @@ def test_properties_and_repr():
     assert Rng(0).simd in ("avx2", "scalar")
 
 
-def test_formats_lists_what_imports():
-    """formats() always offers list and tuple, numpy here since it imports."""
-    fmts = Rng.formats()
-    assert fmts[:3] == ("numpy", "list", "tuple")
-    try:
-        import polars  # noqa: F401
-    except ImportError:
-        assert "polars.Series" not in fmts
-    else:
-        assert fmts[3:] == ("polars.Series", "polars.DataFrame")
-
-
-@pytest.mark.parametrize("method", ["random", "uint64"])
-def test_format_default_numpy_and_sequences_carry_same_values(method):
-    """Every format carries the same values; None means numpy when it imports."""
-    ref = getattr(Rng(7), method)(100)
-    assert isinstance(ref, np.ndarray)
-    assert isinstance(getattr(Rng(7), method)(100, format="numpy"), np.ndarray)
-    as_list = getattr(Rng(7), method)(100, format="list")
-    as_tuple = getattr(Rng(7), method)(100, format="tuple")
-    assert type(as_list) is list and type(as_tuple) is tuple
-    assert as_list == ref.tolist() and as_tuple == tuple(ref.tolist())
-    assert getattr(Rng(7), method)(0, format="tuple") == ()
-
-
-@pytest.mark.parametrize("method, dtype", [("random", "Float64"), ("uint64", "UInt64")])
-def test_format_polars_series_and_dataframe(method, dtype):
-    """polars output keeps the dtype (uint64 past 2**63 must not overflow)."""
-    pl = pytest.importorskip("polars")
-    ref = getattr(Rng(7), method)(1000)
-    s = getattr(Rng(7), method)(1000, format="polars.Series")
-    assert isinstance(s, pl.Series) and s.dtype == getattr(pl, dtype) and s.name == "value"
-    assert s.to_list() == ref.tolist()
-    assert getattr(Rng(7), method)(10, format="polars").equals(s.head(10))
-    df = getattr(Rng(7), method)(1000, format="polars.DataFrame")
-    assert isinstance(df, pl.DataFrame) and df.columns == ["value"]
-    assert df["value"].to_list() == ref.tolist()
-
-
-def test_format_rejects_unknown_names():
-    with pytest.raises(ValueError, match="format must be"):
-        Rng(1).random(3, format="pandas")
-    with pytest.raises(TypeError):
-        Rng(1).random(3, format=list)
-    with pytest.raises(ValueError):
-        Rng(1).random(-1, format="list")
-
-
-def test_seed_none_gives_fresh_entropy():
-    """seed=None draws real entropy: two generators must not collide."""
-    assert not np.array_equal(Rng().random(64), Rng().random(64))
-
-
-def test_nt_store_path_bit_exact():
-    """The non-temporal store path emits the identical sequence.
-
-    NT kernels engage only for >= 32 MiB of full blocks on a 32-byte-aligned
-    destination — far above the other exact tests. random() allocates
-    64-byte-aligned output, so this size deterministically exercises the NT
-    kernels; a lane permutation or offset bug confined to that path fails
-    here and nowhere else.
-    """
-    n = 40 * _BLOCK  # ~84 MB of float64, well past kNtThresholdBytes
-    a = Rng(5, threads=1).random(n)
-    assert a.ctypes.data % 64 == 0  # aligned allocation, NT-eligible
-    assert np.array_equal(a, Rng(5, threads=1, simd=False).random(n))
-    assert np.array_equal(a, Rng(5, threads=8).random(n))
-
-    u = Rng(5, threads=1).uint64(n)
-    assert np.array_equal(u, Rng(5, threads=1, simd=False).uint64(n))
-
-    # NT region starting after a mid-block resume must continue seamlessly.
-    r = Rng(5, threads=1)
-    head = r.random(777)
-    tail = r.random(n - 777)
-    assert np.array_equal(np.concatenate([head, tail]), a)
-
-
-def test_related_seeds_are_independent():
-    """Seeds at small golden-ratio lattice distances share no streams.
-
-    The naive additive derivation had an exact defect: Rng(s + 4*golden)
-    re-emitted Rng(s)'s streams shifted by one lane. The mixed-counter
-    derivation breaks that lattice; draws from related seeds must be
-    disjoint (any overlap in 64-bit space is a ~2**-47 accident).
-    """
-    golden = 0x9E3779B97F4A7C15
-    base = 123456789
-    u0 = Rng(base).uint64(100_000)
-    for delta in (golden, 4 * golden, 64 * golden):
-        other = Rng((base + delta) % (1 << 64)).uint64(100_000)
-        assert np.intersect1d(u0, other).size == 0
-
-
 # ---------------------------------------------------------------------------
 # Statistical sanity (10M samples; bounds are ~5 sigma, so false-failure
-# probability is ~1e-6 per assertion)
+# probability is ~1e-6 per assertion). numpy does the arithmetic.
 # ---------------------------------------------------------------------------
 
 
@@ -433,8 +458,9 @@ def test_uniform_statistics():
     catches gross implementation faults: biased conversion, stuck lanes,
     range escapes, or correlated interleaving.
     """
+    np = pytest.importorskip("numpy")
     n = 10_000_000
-    x = Rng(31415).random(n)
+    x = Rng(31415).random(n, format="numpy")
 
     assert x.min() >= 0.0
     assert x.max() < 1.0
@@ -470,8 +496,9 @@ def test_uint64_bit_statistics():
     collision probability ~3e-6 for a healthy 64-bit generator; duplicates
     would indicate stream overlap or state reuse).
     """
+    np = pytest.importorskip("numpy")
     n = 10_000_000
-    u = Rng(2718).uint64(n)
+    u = Rng(2718).uint64(n, format="numpy")
 
     pc = np.unpackbits(u.view(np.uint8)).sum() / n
     assert abs(pc - 32.0) < 0.02
