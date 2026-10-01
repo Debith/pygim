@@ -37,7 +37,7 @@ operation returns a plain dict, and a refused write is a result with
              "Opens the repository at `root`: loads the vocabulary (raising VocabularyError with every\n"
              "failure by file and line), replays the audit log, and joins divergent histories.")
         .def_static("init", &Enact::init, py::arg("root"),
-                    "Creates a repository at `root` with the base vocabulary (taxonomy v0).")
+                    "Creates a repository at `root` with the packaged base vocabulary, owned by the store thereafter.")
         .def_property_readonly("root", &Enact::root)
         .def_property_readonly("version", &Enact::version, "How many rows the head's history holds.")
         .def_property_readonly("head", &Enact::head, "The id of the head row — what a receipt pins.")
@@ -45,9 +45,10 @@ operation returns a plain dict, and a refused write is a result with
         .def("refresh", &Enact::refresh, "Folds in rows other processes committed.")
         .def("session", &Enact::session, "Opens a session: its number, where the store stands, reviews and proposals.")
         .def("vocabulary", &Enact::vocabulary, py::kw_only(), py::arg("dimension") = "", py::arg("brief") = false,
+             py::arg("request") = false,
              "Every live dimension and value with its codebook entry. `dimension` keeps one of them;\n"
              "`brief` gives the tag names alone, which is a twentieth of the size when all a caller\n"
-             "needs to know is which tags exist.")
+             "needs to know is which tags exist. `request` includes the first-round decision guide.")
         .def("read", &Enact::read, py::arg("hard"), py::arg("soft") = std::vector<std::string>{}, py::kw_only(),
              py::arg("max") = 8u, py::arg("budget") = 0u, py::arg("term") = "", py::arg("session") = 0ull,
              "Retrieves the context for a problem space: the procedure first, then ranked memories, with\n"
@@ -107,7 +108,7 @@ operation returns a plain dict, and a refused write is a result with
         .def("ingest", &Enact::ingest, py::arg("path"), "Ingests a hand-written corpus file, reconciled by slug and digest.")
         .def("sources", &Enact::sources, "Every vocabulary value that cites a source, with its full locator.")
         .def("write_file", &Enact::write_file, py::arg("relative"), py::arg("content"), py::arg("expected"),
-             "Replace taxonomy/pack-*.yaml or sources/inventory.yaml atomically under the commit lock, only if "
+             "Replace taxonomy/base.yaml, taxonomy/pack-*.yaml or sources/inventory.yaml atomically under the commit lock, only if "
              "it still holds what was read (`expected`: its digest, or empty for a new file). False when it "
              "changed since.")
         .def("receipts", &Enact::receipts)

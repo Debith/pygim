@@ -519,6 +519,29 @@ class TestLearningAndCurating:
         assert again.proposals() == []
         assert "purpose=corruption" in again.show(w["memory"])["tags"]   # the asker is linked, source proposed
 
+    def test_an_accepted_proposal_reaches_the_memory_that_replaced_its_asker(self, root, mem):
+        """The asker was superseded before its proposal was accepted: only heads are linked, the asker
+        was not one, and its revision never asked — so the value joined the vocabulary and no memory
+        carried it (global #65 asked for task=operate, #66 superseded it; 2026-09-30). What replaced
+        the asker is where the tag belongs."""
+        p, y, f = seed(mem)
+        w = write(mem, "Spreading a sign", "Grow the sign by whole cubes.", DESIGN + ["purpose=control", "kind=principle"],
+                  seen=[p["memory"], y["memory"], f["memory"]],
+                  proposals=[{"concept": "corruption", "dimension": "purpose", "brief": "Spreads corruption.",
+                              "when": "It creates a sign of corruption.", "when_not": "Plain necrotic damage.",
+                              "example": "Spreading Blight."}])
+        revised = write(mem, "Spreading a sign", "Grow the sign by whole cubes, never by half.",
+                        DESIGN + ["purpose=control", "kind=principle"], supersedes=[w["memory"]],
+                        seen=[p["memory"], y["memory"], f["memory"], w["memory"]])
+        path = root / "taxonomy" / "pack-dnd.yaml"
+        path.write_text(path.read_text().replace(
+            "      control:",
+            "      corruption: {entry: {brief: Spreads corruption., when: It creates a sign., when_not: Plain necrotic damage., example: Spreading Blight.}}\n      control:"),
+            encoding="utf-8")
+        again = Enact(str(root))
+        assert again.proposals() == []
+        assert "purpose=corruption" in again.show(revised["memory"])["tags"]
+
 
 class TestMovingACitation:
     """A citation is evidence *about* a memory, not part of what it says, so it moves the way a tag

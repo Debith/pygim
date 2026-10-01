@@ -7,6 +7,7 @@ from __future__ import annotations  # `str | None` in signatures on Python 3.9
 
 from subprocess import Popen, DEVNULL
 import os
+import re
 import sys
 import shutil
 import functools
@@ -507,20 +508,67 @@ class GimmicksCliApp:
 
     def _proposals_waiting(self, where: Environment):
         """Concepts waiting for a human, in every store this machine holds — a proposal raised in
-        the global store was invisible here until `proposals` was taught to read its scope."""
+        the global store was invisible here until `proposals` was taught to read its scope. Each comes
+        with the store it waits in, and the memories that asked for it by title. A store is asked once:
+        `--root` naming the global store made it the project's too, and every proposal came twice."""
         import json as _json
 
         from _pygim._mcp.enact import build
 
         server = build(where)
+        project = Path(self._store(where)).resolve()
+        found = self._stores(where).global_root()
+        stores = {"project": project}
+        if found is not None and Path(found).resolve() != project:
+            stores["global"] = Path(found).resolve()
         out = []
-        for scope in ("project", "global"):
+        for scope, root in stores.items():
             answer = server.call("proposals", {"scope": scope})
             if answer.get("isError"):
                 continue
             for concept in _json.loads(answer["content"][0]["text"]):
-                out.append((scope, concept))
+                asked = []
+                for ref in concept.get("asked_by") or []:
+                    shown = server.call("show", {"memory": ref, "scope": scope})
+                    title = "" if shown.get("isError") else _json.loads(shown["content"][0]["text"]).get("title", "")
+                    asked.append(f"{ref} {title}".strip())
+                out.append((scope, {**concept, "asked": asked}, root))
         return out
+
+    @staticmethod
+    def _show_concept(scope: str, concept: dict, index: str = "") -> None:
+        """One concept the vocabulary lacks, as a person needs it before answering for it: the value it
+        would add, its entry in full, and the memories that asked for it, by title."""
+        where_from = f"  ({scope} store)" if scope != "project" else ""
+        tag = f"{concept.get('dimension') or 'a new dimension'}={concept['concept']}"
+        click.echo(f"\n{_style.muted(index)}{_style.title(tag)}{_style.muted(where_from)}")
+        entry = concept.get("entry") or {}
+        for field in ("brief", "full", "when", "when_not", "example"):
+            if entry.get(field):
+                click.echo(f"  {_style.muted(field + ':'):<10} " + " ".join(str(entry[field]).split()))
+        for asked in concept.get("asked") or []:
+            click.echo(f"  {_style.muted('asked by')} {asked}")
+
+    def _accept_concept(self, where: Environment, scope: str, concept: dict, root) -> None:
+        from _pygim._mcp import _packs, _stores
+        from pygim.enact import Enact
+
+        done = _packs.accept_concept(Path(root), concept, project=_stores.project_root(Path(where.cwd)))
+        if not done["ok"]:
+            raise click.ClickException(done["errors"])
+        tag = f"{concept['dimension']}={concept['concept']}"
+        # Opening links the memories that asked for it, or what replaced them (service.h); say which
+        # carry it now, read back, rather than how many asked.
+        carriers = Enact(str(root)).heads([tag])
+        click.echo(_style.good("  accepted ") + f"{tag} — in {done['into']}")
+        for c in carriers:
+            click.echo(f"    now carried by {c['memory']} {c['title']}")
+        if not carriers:
+            click.echo(_style.muted("    no memory carries it yet: every memory that asked was retired"))
+
+    @staticmethod
+    def _names_a_memory(text: str) -> bool:
+        return text.startswith("#") or re.fullmatch(r"[0-9a-f]{8,}", text) is not None
 
     @staticmethod
     def _rules_in(server, scope: str, tags, most: int, term: str = ""):
@@ -723,27 +771,25 @@ class GimmicksCliApp:
                 click.echo("nothing is waiting for you")
                 return
             if proposed and not walk:
-                # A proposal is not accepted by this command — it is accepted by adding the value to
-                # a pack file — but saying nothing about it is how it stays pending for a week.
                 click.echo(_style.title(f"{len(proposed)} concept(s) the vocabulary lacks") +
-                           " — add the value to a pack under taxonomy/, then `oo enact accept --pack`:\n")
-                for scope, concept in proposed:
+                           " — accept one by name, or read each with `oo enact accept --all`:\n")
+                for scope, concept, _ in proposed:
                     where_from = f" ({scope})" if scope != "project" else ""
                     click.echo(f"  {_style.strong(concept['concept'])}{where_from}"
                                f"  {_style.muted((concept.get('dimension') or 'a new dimension') + ' — ' + concept['entry']['brief'])}")
-                    asked = concept.get("asked_by") or []
-                    if asked:
-                        click.echo(f"      {_style.muted('asked by ' + ', '.join(asked))}")
+                    for asked in concept.get("asked") or []:
+                        click.echo(f"      {_style.muted('asked by')} {asked}")
+                    click.echo(f"      {_style.muted('accept:')} oo enact accept {concept['concept']}")
                 if not waiting:
                     return
                 click.echo("")
-            if not walk:
+            if not walk and waiting:
                 click.echo(_style.title(f"{len(waiting)} waiting for you") +
                            " — read them with `oo enact accept --all`, which shows each and asks:\n")
                 for w in waiting:
                     click.echo(f"  {w['memory']} {w['title']}  {_style.muted('folds ' + str(len(w['folds'])))}")
                 return
-            accepted = 0
+            accepted, quit_ = 0, False
             for n, w in enumerate(waiting, 1):
                 self._show_waiting(w, index=f"[{n}/{len(waiting)}] ")
                 # Enter accepts: by the time this prompt appears the reader has the whole thing in front
@@ -751,6 +797,7 @@ class GimmicksCliApp:
                 answer = click.prompt("  accept this one? Enter accepts", type=click.Choice(["y", "n", "q"]),
                                       default="y", show_choices=True)
                 if answer == "q":
+                    quit_ = True
                     break
                 if answer == "n":
                     continue
@@ -760,7 +807,17 @@ class GimmicksCliApp:
                     continue
                 accepted += 1
                 click.echo(_style.good(f"  accepted") + f" — {len(w['folds'])} memories now fold under it")
-            click.echo(f"\n{_style.strong(f'accepted {accepted} of {len(waiting)}')}; the rest are still waiting")
+            for n, (scope, concept, root) in enumerate([] if quit_ else proposed, 1):
+                self._show_concept(scope, concept, index=f"[{n}/{len(proposed)}] ")
+                answer = click.prompt("  add it to the vocabulary? Enter accepts", type=click.Choice(["y", "n", "q"]),
+                                      default="y", show_choices=True)
+                if answer == "q":
+                    break
+                if answer == "n":
+                    continue
+                self._accept_concept(where, scope, concept, root)
+                accepted += 1
+            click.echo(f"\n{_style.strong(f'accepted {accepted} of {len(waiting) + len(proposed)}')}; the rest are still waiting")
             return
         if pack is not None:
             from _pygim._mcp import _packs
@@ -782,6 +839,22 @@ class GimmicksCliApp:
             for warning in done["warnings"]:
                 click.echo(f"  locator: {warning}")
             click.echo("a running MCP server picks it up at its next call")
+            return
+        if not self._names_a_memory(memory):
+            named = [(s, c, r) for s, c, r in self._proposals_waiting(where) if c["concept"] == memory]
+            if not named:
+                raise click.ClickException(f"no memory and no waiting concept is called `{memory}` — "
+                                           "`oo enact accept` lists what is waiting")
+            if len(named) > 1:
+                raise click.ClickException(f"`{memory}` waits in {len(named)} stores — name one with --root: "
+                                           + ", ".join(str(r) for _, _, r in named))
+            scope, concept, root = named[0]
+            if not assume_yes:
+                self._show_concept(scope, concept)
+                if not click.confirm("  add it to the vocabulary? Enter accepts", default=True):
+                    click.echo("left as it is")
+                    return
+            self._accept_concept(where, scope, concept, root)
             return
         store = Enact(self._store(where))
         if not assume_yes:                       # a key says nothing; show what is being approved

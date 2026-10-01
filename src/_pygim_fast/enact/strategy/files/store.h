@@ -93,7 +93,7 @@ public:
         return out;
     }
 
-    /// Replaces one of the store's own text files — a vocabulary pack (`taxonomy/pack-*.yaml`) or the
+    /// Replaces one of the store's own text files — its base or a pack (`taxonomy/*.yaml`) or the
     /// source inventory (`sources/inventory.yaml`) — atomically and under the commit lock, and only if
     /// it still holds what the caller read: *expected* is the digest of that content, or empty when the
     /// file must not exist yet. Returns false, writing nothing, when it has changed since.
@@ -105,9 +105,10 @@ public:
         const fs::path rel = fs::path(relative).lexically_normal();
         const std::string file = rel.filename().string();
         const bool pack = rel.parent_path() == fs::path("taxonomy") && file.starts_with("pack-") && rel.extension() == ".yaml";
+        const bool base = rel == fs::path("taxonomy") / "base.yaml";
         const bool inventory = rel == fs::path("sources") / "inventory.yaml";
-        if (rel.is_absolute() || !(pack || inventory))
-            throw std::invalid_argument(relative + ": the store writes only its vocabulary packs and its source inventory this way");
+        if (rel.is_absolute() || !(base || pack || inventory))
+            throw std::invalid_argument(relative + ": the store writes only its base vocabulary, packs and source inventory this way");
         auto guard = lock();
         const fs::path p = m_root / rel;
         std::error_code ec;

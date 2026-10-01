@@ -82,6 +82,15 @@ struct dimension_info {
     weight_t weight = weight_scale;
     codebook_entry entry;
     std::string pack;  // "base", or the domain a pack is named for
+    bool request = false;  // offered before retrieval; stored-memory dimensions stay out
+};
+
+/// A request's cues and decision boundaries, separate from what stored knowledge helps do.
+/// For example, task=implement can be requested while task=design knowledge is needed.
+struct request_rule {
+    std::vector<std::string> words;
+    std::string give_if;
+    std::string not_if;
 };
 
 struct tag_info {
@@ -94,6 +103,7 @@ struct tag_info {
     std::string retired_reason;
     std::string see;  // the replacement, when a retirement or rejection names one
     bool any = false; // the reserved value of a hard dimension (04 §3.2)
+    std::optional<request_rule> request;
 };
 
 struct rejection {
@@ -120,7 +130,8 @@ public:
 
     /// Adds `value` to dimension `d`; nullopt when the qualified name is taken.
     std::optional<tag_id> add_value(dimension_id d, std::string value, codebook_entry entry,
-                                    std::optional<source_ref> source = std::nullopt) {
+                                    std::optional<source_ref> source = std::nullopt,
+                                    std::optional<request_rule> request = std::nullopt) {
         std::string qualified = m_dimensions[d.value()].name + "=" + value;
         if (m_tag_names.find(qualified) != Interner::npos) return std::nullopt;
         const auto id = m_tag_names.intern(qualified);
@@ -130,6 +141,7 @@ public:
         info.dimension = d;
         info.entry = std::move(entry);
         info.source = std::move(source);
+        info.request = std::move(request);
         m_tags.push_back(std::move(info));
         return tag_id(static_cast<tag_id::value_type>(id));
     }
@@ -179,6 +191,49 @@ public:
     [[nodiscard]] std::size_t dimensions() const noexcept { return m_dimensions.size(); }
     [[nodiscard]] std::size_t tags() const noexcept { return m_tags.size(); }
     [[nodiscard]] const std::vector<rejection>& rejections() const noexcept { return m_rejections; }
+
+    /// Render only first-round dimensions, omitting retired and universal values. Visits
+    /// the tags once per selected dimension. Missing request rules are labelled explicitly.
+    /// A task=design entry therefore contributes its cues and questions, never kind=principle.
+    [[nodiscard]] std::string request_vocabulary(std::string_view dimension = {}) const {
+        std::string body;
+        for (std::size_t i = 0; i < dimensions(); ++i) {
+            const dimension_id d(static_cast<dimension_id::value_type>(i));
+            const auto& di = info(d);
+            if (!di.request || (!dimension.empty() && di.name != dimension)) continue;
+            body += "\n## " + di.name + " — " + di.entry.brief + "\n";
+            for (const auto t : values_of(d)) {
+                const auto& ti = info(t);
+                if (ti.retired || ti.any) continue;
+                body += "- `" + ti.qualified + "` — " + ti.entry.brief;
+                if (ti.request) {
+                    if (!ti.request->words.empty()) {
+                        body += " Words: ";
+                        for (std::size_t j = 0; j < ti.request->words.size(); ++j) {
+                            if (j) body += ", ";
+                            body += ti.request->words[j];
+                        }
+                        body += ".";
+                    }
+                    body += "\n  Give it if: " + ti.request->give_if + " Not if: " + ti.request->not_if + "\n";
+                } else {
+                    body += "\n  No separate request rule. Memory codebook — When: " + ti.entry.when +
+                        " Not: " + ti.entry.when_not + "\n";
+                }
+            }
+        }
+        if (body.empty()) return "No request dimensions are configured for this selection. "
+            "Use the store's memory codebook; request rules require an explicit vocabulary update.\n";
+        return "Classify the current request using its conversation context. Select every supported value in each "
+            "dimension, including several when justified. Cue words suggest candidates; apply the decision questions "
+            "before selecting them. Do not guess unknown subjects or locations. Activities describe what is requested "
+            "now; knowledge needed to carry them out is a separate retrieval concern.\n\n"
+            "Every read needs at least one hard tag. For broad supporting knowledge, activity tags can be soft so "
+            "other activities' knowledge remains eligible. "
+            "For the dedicated procedure slot, read with exactly one hard task and one hard artifact; use a separate "
+            "read for each activity whose procedure is needed. Use known domain tags to scope reads. Tag stored memories "
+            "by the activities their knowledge supports, including several when justified.\n" + body;
+    }
 
     /// The `any` value of dimension `d`, if it has one.
     [[nodiscard]] std::optional<tag_id> any_of(dimension_id d) const {
@@ -269,6 +324,21 @@ public:
             encode_field(enc, r.reason);
             encode_field(enc, r.see);
             encode_field(enc, r.pack);
+        }
+        // No suffix for old vocabularies: their frozen receipt identities remain valid.
+        for (const auto& d : m_dimensions) {
+            if (!d.request) continue;
+            encode_field(enc, "request-dimension");
+            encode_field(enc, d.name);
+        }
+        for (const auto& t : m_tags) {
+            if (!t.request) continue;
+            encode_field(enc, "request-value");
+            encode_field(enc, t.qualified);
+            encode_field(enc, decimal(t.request->words.size()));
+            for (const auto& w : t.request->words) encode_field(enc, w);
+            encode_field(enc, t.request->give_if);
+            encode_field(enc, t.request->not_if);
         }
         return digest::of(enc);
     }

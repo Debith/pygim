@@ -8,6 +8,15 @@ each session. The design is [docs/design/enact/](design/enact/00_overview.md), w
 lists the seven parts — Memory, Knowledge, Vocabulary, Adaptive Context, Retrieval Policy,
 Consolidation and Experience Learning.
 
+New stores start with twelve shared activities and F3-derived request guidance: cue words,
+positive decision questions and exclusions. The default `vocabulary` call delivers that
+guide. Classify what the current request asks for, using the conversation; tag a stored
+memory by what its knowledge helps someone do. Those can be different activities.
+Domain packs supply subjects and concerns. Existing stores keep their own vocabulary until
+explicitly migrated, so installing a newer pygim does not rewrite their definitions or tags.
+See the [request vocabulary example](examples/enact/example_01_request_vocabulary.py) and
+[vocabulary ownership rules](design/enact/02_taxonomy_and_sources.md#request-guidance-and-memory-classification).
+
 ## Set up a project
 
 After `pip install` of pygim, run one command inside the project:

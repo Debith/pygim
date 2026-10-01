@@ -435,3 +435,61 @@ class TestTheCommandItself:
         done = oo("call", "read", cwd=project, env=env, stdin=json.dumps({"hard": TAGS}))
         assert done.returncode == 0, done.stderr
         assert json.loads(done.stdout)["corpus"] == 1
+
+
+class TestAcceptingAConceptTheVocabularyLacks:
+    """A write that meets a concept with no tag proposes it; a person accepts it (overview §4.6, "During
+    work"): the value joins the vocabulary with its reviewed entry, and every memory that asked for it
+    gains the tag. `oo enact accept` listed such a concept and told the person to add it to a pack file
+    by hand, then accept the pack again — an agent passed the owner `oo enact accept --root <store>` as
+    the way to accept one, and it accepted nothing (2026-09-30)."""
+
+    POTION = {"concept": "potion", "dimension": "artifact", "brief": "A potion.",
+              "when": "The knowledge is about a potion.", "when_not": "Not a spell.", "example": "A healing potion."}
+
+    @staticmethod
+    def _asking(project, env, seeded, proposal):
+        made = call("remember", project, env, title="Potions are one action", text="Drinking one costs an action.",
+                    tags=TAGS + ["kind=principle"], reason="a rule the potions follow", seen=[seeded],
+                    proposals=[proposal])
+        assert made["ok"], made
+        return made["memory"]
+
+    def test_one_command_accepts_it_and_the_memory_that_asked_carries_it(self, project, env, store, seeded):
+        asker = self._asking(project, env, seeded, self.POTION)
+        listed = oo("accept", cwd=project, env=env)
+        assert "potion" in listed.stdout and "oo enact accept potion" in listed.stdout, listed.stdout
+        done = oo("accept", "potion", "--yes", cwd=project, env=env)
+        assert done.returncode == 0, done.stderr
+        assert "artifact=potion" in done.stdout
+        assert "now carried by" in done.stdout and "Potions are one action" in done.stdout   # read back, not counted
+        values = [v["tag"] for d in call("vocabulary", project, env, dimension="artifact")["dimensions"] for v in d["values"]]
+        assert "artifact=potion" in values
+        assert "artifact=potion" in call("show", project, env, memory=asker)["tags"]
+        assert "nothing is waiting" in oo("accept", cwd=project, env=env).stdout
+        pack = (store / "taxonomy" / "pack-dnd.yaml").read_text(encoding="utf-8")
+        assert "potion:" in pack and "# `pack: dnd` is itself the value domain=dnd" in pack   # the person's comments stay
+
+    def test_a_value_for_a_dimension_the_pack_does_not_extend_yet(self, project, env, store, seeded):
+        balance = {"concept": "balance", "dimension": "task", "brief": "Weighing a thing against its peers.",
+                   "when": "The knowledge compares power across options.", "when_not": "Not a rules question.",
+                   "example": "Is this spell stronger than Fireball?"}
+        asker = self._asking(project, env, seeded, balance)
+        done = oo("accept", "balance", "--yes", cwd=project, env=env)
+        assert done.returncode == 0, done.stderr
+        assert "task=balance" in call("show", project, env, memory=asker)["tags"]
+        kept = call("vocabulary", project, env, dimension="artifact")["dimensions"]
+        assert "artifact=spell" in [v["tag"] for d in kept for v in d["values"]]      # the rest of the pack is untouched
+
+    def test_read_one_at_a_time_enter_accepts(self, project, env, seeded):
+        asker = self._asking(project, env, seeded, self.POTION)
+        walked = oo("accept", "--all", cwd=project, env=env, stdin="\n")
+        assert walked.returncode == 0, walked.stderr
+        assert "A potion." in walked.stdout and "Potions are one action" in walked.stdout   # the entry, and who asked, by title
+        assert "artifact=potion" in call("show", project, env, memory=asker)["tags"]
+
+    def test_the_store_named_twice_is_listed_once(self, project, env, store, seeded):
+        self._asking(project, env, seeded, self.POTION)
+        same = {**env, "PYGIM_ENACT_GLOBAL": str(store)}      # the global store is the store --root names
+        listed = oo("accept", "--root", str(store), cwd=project, env=same)
+        assert listed.stdout.count("oo enact accept potion") == 1, listed.stdout

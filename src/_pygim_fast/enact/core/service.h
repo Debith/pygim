@@ -1013,12 +1013,34 @@ private:
             if (!t) continue;
             for (const auto& asker : p.asked_by) {
                 const auto snap = current();
-                const auto m = snap->find(asker);
+                auto m = snap->find(asker);
+                std::vector<std::string> lineage{asker.hex()};
+                // An asker superseded before the proposal was accepted is history: what replaced it
+                // stands where it stood, and is where the tag belongs. A revision rarely repeats its
+                // proposal, so linking heads only left the value in the vocabulary and on no memory
+                // (global #65 → #66, 2026-09-30). One retired with no successor gets nothing.
+                for (std::size_t hop = 0; m && !snap->is_head(*m) && hop < 64; ++hop) {
+                    const auto& by = snap->superseded_by(*m);
+                    if (by.empty()) {
+                        m.reset();
+                        break;
+                    }
+                    m = by.back();
+                    lineage.push_back(snap->record(*m).key.hex());
+                }
                 if (!m || !snap->is_head(*m) || snap->tags_of(*m).has(t->value())) continue;
+                // Explicit curation wins over an old proposal, including on its successor. Without
+                // this, removing an adopted tag lasts only until the next open (global #45).
+                // A new proposal on a later memory starts its own lineage and can ask again.
+                const auto& tag = m_tax->info(*t).qualified;
+                if (std::any_of(rows.begin(), rows.end(), [&](const row& r) {
+                        return r.op == ops::unlink && r.get("tag") == tag &&
+                            std::find(lineage.begin(), lineage.end(), r.get("memory")) != lineage.end();
+                    })) continue;
                 row r;
                 r.op = std::string(ops::link);
-                r.add("memory", asker.hex());
-                r.add("tag", m_tax->info(*t).qualified);
+                r.add("memory", snap->record(*m).key.hex());   // the head, which may be the asker's successor
+                r.add("tag", tag);
                 r.add("source", "proposed");
                 r.add("reason", "accepted into the vocabulary");
                 r.add("author", "service");

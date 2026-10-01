@@ -25,6 +25,7 @@ for f in docs/examples/*/example_*.py; do python "$f" || break; done
 
 | Area | Example | What it teaches |
 | ------ | --------- | ----------------- |
+| enact | [example_01_request_vocabulary.py](enact/example_01_request_vocabulary.py) | Packaged request questions, memory activity tags, and retrieval across activities |
 | ioc | [example_01_basic_container.py](ioc/example_01_basic_container.py) | Registering providers, transient vs. singleton lifecycles, named variants, decorator registration, provider decorators, interface validation, introspection |
 | ioc | [example_02_autowire.py](ioc/example_02_autowire.py) | Opt-in constructor autowiring from type hints across a multi-layer object graph, default-value fallback, guard rails |
 | ioc | [example_03_testing_with_overrides.py](ioc/example_03_testing_with_overrides.py) | Swapping real implementations for fakes in tests, strict two-way override semantics, singleton cache invalidation |

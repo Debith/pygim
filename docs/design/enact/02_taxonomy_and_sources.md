@@ -26,7 +26,7 @@ the mechanical part: it parses, checks, counts and hashes, and never judges a de
 
 ```mermaid
 flowchart LR
-    tool["pygim, installed<br/>base.yaml — taxonomy v0"] -- "copied once, at init" --> base
+    tool["pygim, installed<br/>base.yaml — taxonomy v1"] -- "copied once, at init" --> base
     subgraph repo["the repository's taxonomy/ folder"]
         base["base.yaml<br/>domain · artifact · task · kind · tier"]
         dnd["pack-dnd.yaml<br/>new dimensions, and values added to base ones"]
@@ -41,6 +41,66 @@ their back: upgrading is a set of proposals like any other, reviewed and accepte
 repository (overview §4.6). One file per pack keeps two people growing two domains out of
 each other's diffs: each domain grows in its own file, so neither person's changes turn up
 in the diffs the other reviews.
+
+The packaged base now supplies twelve activities: design, critique, evaluate, troubleshoot,
+explain, implement, document, discover, research, operate, record and plan. Its request
+guidance follows the F3 study's cue-and-question form, with implementation phrased for any
+domain. This is a deployment adaptation; the study's accuracy estimates are not validation
+of every domain or of these adapted words. Subjects and concerns belong to domain packs.
+
+### Request guidance and memory classification
+
+A request asks for an activity; a memory supports activities. They share tag names but
+answer different questions. A design constraint may carry both `task=design` and
+`task=implement` even when the current request asks only for implementation. The ordinary
+codebook describes how to tag knowledge. A value's optional `request` mapping supplies
+`words` (a list), `give_if` and `not_if` for classifying the current request in its conversation.
+Both questions are required when the mapping is present; malformed rules fail by file and line.
+Unknown fields on dimensions, values and request rules also fail by file and line, so a typo
+cannot silently remove guidance.
+
+```yaml
+dimensions:
+  task:
+    request: true
+    # role, weight and entry remain the memory taxonomy's existing fields
+    values:
+      implement:
+        # entry describes what knowledge about implementation is for
+        request:
+          words: [implement, change, build]
+          give_if: Does the request ask to carry out an already decided change?
+          not_if: Is what to build still being decided? (design)
+```
+
+Only dimensions marked `request: true` appear in the first-round guide. Retired values and
+the universal `any` value are omitted. A custom value without separate request questions
+is labelled as lacking a request rule, with its memory codebook shown separately; no built-in
+question replaces a store's definition. A selection without request dimensions says so.
+`Enact.vocabulary(request=True)` renders this guide, and the default MCP `vocabulary`
+response includes it beside the tag index. A named dimension or `full=True` returns the
+memory codebook and the structured request rules. No classifier model runs inside ENACT:
+the agent uses the supplied guide, then calls `read` with the selected tags.
+
+The guide distinguishes a broad read with soft activity tags, which keeps other activities'
+knowledge eligible, from selecting a procedure: the dedicated procedure slot requires exactly
+one hard task and one hard artifact. Several requested activities may need separate procedure
+reads. Neither rule changes `read`'s explicit hard/soft behavior or the taxonomy's hard-dimension
+requirements for stored memories. A subject names what knowledge concerns; a concern names a
+quality it addresses. Thus `subject=testing` concerns tests, whereas `concern=testing` concerns
+whether something can be proven.
+Every read needs at least one hard tag. A base-only store permits `domain=any` and `artifact=any`
+until those dimensions have live concrete values; after that, queries name concrete values.
+
+Rules are frozen with the taxonomy and included in its content identity. Old files with no
+request metadata retain their old identities. An existing store is upgraded explicitly:
+validate a complete candidate copy, preserve custom entries and values already defined in
+packs, then replace the base through `write_file` with its expected content digest. A stale
+replacement writes nothing. Link new memory tags before unlinking obsolete ones so each
+memory keeps its required dimensions. Use `link`/`unlink`, preserving keys, text and history.
+Changing vocabulary files alone does not retag memories. If a tag came from an accepted
+proposal, an explicit unlink on the asker or its successor prevents that old proposal from
+restoring the tag on reopen. A new proposal on a later memory can ask again.
 
 ### 1.2 YAML, because the file is mostly prose
 
@@ -470,7 +530,7 @@ and checks the binding; building it is the agent's work (overview §4.9).
 
 ---
 
-## Appendix — taxonomy v0, as shipped
+## Appendix — taxonomy v1, as shipped
 
 The base every repository starts from. Values marked — are added by packs.
 
@@ -478,6 +538,6 @@ The base every repository starts from. Values marked — are added by packs.
 |---|---|---|---|---|
 | `domain` | hard | 1.0 | The field the knowledge belongs to. | — one per pack |
 | `artifact` | hard | 1.0 | What is being made or examined. | — the pack says what this domain makes |
-| `task` | hard | 1.0 | What the knowledge is for doing. | **design** — making something new, not judging it · **critique** — judging a thing that exists, not changing it · **evaluate** — measuring against a standard, not an opinion · **troubleshoot** — finding why a thing fails, not improving a working one · **explain** — making a thing understood, not changing it |
+| `task` | hard | 1.0 | What the knowledge is for doing. | **design** — deciding something new · **critique** — judging what exists · **evaluate** — measuring against a standard · **troubleshoot** — finding why a thing fails · **explain** — making a thing understood · **implement** — carrying out a decided change · **document** — writing for people · **discover** — finding what a project has · **research** — weighing outside knowledge · **operate** — changing a running thing's state · **record** — keeping knowledge for agents · **plan** — ordering work toward an agreed goal |
 | `kind` | soft | 0.5 | What sort of knowledge this is. | **reference** — a fact that can be looked up · **principle** — a rule of thumb, not a sequence · **procedure** — ordered steps, not a single rule · **example** — one instance, not a generalisation · **decision** — a choice made and why, not a rule for all cases · **preference** — a taste, not a correctness claim · **question** — an open question, not a choice already made |
 | `tier` | soft | 1.0 | The level or maturity the knowledge applies to. | — the pack says how this domain bands level |

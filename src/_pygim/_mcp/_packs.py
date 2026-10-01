@@ -13,6 +13,7 @@ document from the same path.
 """
 from __future__ import annotations
 
+import os
 import re
 import shutil  # the scratch stores `check` builds, never the live one
 import tempfile
@@ -143,6 +144,95 @@ def accept(store: Path, proposal: Path, replace: bool = False, *, project: Optio
         return {"ok": False, "errors": f"{target} changed while it was being accepted — run the accept again"}
     result["inventory"], result["inventory_kept"] = _merge_inventory(store, proposal.parent / "inventory.yaml", memory)
     return result
+
+
+ENTRY_FIELDS = ("brief", "full", "when", "when_not", "example")
+
+
+def accept_concept(store: Path, concept: Dict[str, Any], *, project: Optional[Path] = None) -> Dict[str, Any]:
+    """A person's step for one concept the vocabulary lacks (overview §4.6, "During work"): the value,
+    with the entry the proposal described, is written into the store's pack that holds its dimension,
+    and that pack is accepted again — the same checks as any pack (`accept`). The memories that asked
+    for it gain the tag, with source `proposed`, when the store next opens. The pack is edited as
+    text, so the person's comments in it stay.
+
+    A proposal for a whole dimension is refused: a dimension comes with its values and roles, and
+    that is a drafted pack (`accept`), not one line."""
+    name, dimension = concept["concept"], concept.get("dimension") or ""
+    if not dimension:
+        return {"ok": False, "errors": f"`{name}` is a new dimension, not a value — a dimension comes with its roles "
+                                       "and values in a drafted pack: `oo enact accept --pack FILE`"}
+    entry = {k: concept["entry"][k] for k in ENTRY_FIELDS if concept["entry"].get(k)}
+    import pygim
+    from pygim.pathlike import PathStore
+
+    taxonomy = pygim.path(str(store / "taxonomy"), store=PathStore())
+    packs = sorted((Path(os.fspath(p)) for p in taxonomy.pathset("pack-*.yaml")), key=lambda p: p.name)
+    text = None
+    for file in packs:                                    # the pack that already holds the dimension
+        data = _yaml(file) or {}
+        if dimension in (data.get("dimensions") or {}):
+            text = _insert_under(file.read_text(encoding="utf-8"), ["dimensions", dimension, "values"], {name: {"entry": entry}})
+        elif dimension in (data.get("extends") or {}):
+            text = _insert_under(file.read_text(encoding="utf-8"), ["extends", dimension], {name: {"entry": entry}})
+        if text is not None:
+            break
+    if text is None and len(packs) == 1:                  # nobody extends it yet: the store's one pack does
+        file = packs[0]
+        body = file.read_text(encoding="utf-8")
+        text = _insert_under(body, ["extends"], {dimension: {name: {"entry": entry}}})
+        if text is None:
+            text = body.rstrip("\n") + "\n\n" + _yaml_text({"extends": {dimension: {name: {"entry": entry}}}})
+    if text is None:
+        names = ", ".join(p.name for p in packs) or "none"
+        return {"ok": False, "errors": f"no pack in {store / 'taxonomy'} holds `{dimension}` to add `{name}` to "
+                                       f"(packs: {names}) — add it to one by hand and `oo enact accept --pack` it"}
+    with tempfile.TemporaryDirectory(prefix="pygim-concept-") as tmp:
+        draft = Path(tmp) / file.name
+        draft.write_text(text, encoding="utf-8")
+        result = accept(store, draft, replace=True, project=project)
+    result["into"] = file.name
+    return result
+
+
+def _insert_under(text: str, keys: List[str], item: Dict[str, Any]) -> Optional[str]:
+    """*text* with *item* written as YAML at the end of the block under the key path *keys*, indented
+    as that block's children are; None when the path is not there. Blank lines and comments are
+    left where they are, so the file reads as its author left it."""
+    lines = text.split("\n")
+    stack: List[Tuple[int, str]] = []
+    found = None
+    for i, line in enumerate(lines):
+        bare = line.strip()
+        if not bare or bare.startswith("#"):
+            continue
+        indent = len(line) - len(line.lstrip(" "))
+        while stack and stack[-1][0] >= indent:
+            stack.pop()
+        key = re.match(r"([A-Za-z0-9_.-]+):(\s|$)", bare)
+        if key:
+            stack.append((indent, key.group(1)))
+            if [k for _, k in stack] == keys:
+                found = (i, indent)
+                break
+    if found is None:
+        return None
+    at, indent = found
+    end, child = len(lines), None
+    for j in range(at + 1, len(lines)):
+        bare = lines[j].strip()
+        if not bare or bare.startswith("#"):
+            continue
+        deeper = len(lines[j]) - len(lines[j].lstrip(" "))
+        if deeper <= indent:
+            end = j
+            break
+        child = deeper if child is None else child
+    while end > at + 1 and not lines[end - 1].strip():   # join the block, not the gap after it
+        end -= 1
+    pad = " " * (child if child is not None else indent + 2)
+    block = [pad + line if line else line for line in _yaml_text(item).rstrip("\n").split("\n")]
+    return "\n".join(lines[:end] + block + lines[end:])
 
 
 def _digest_of(file: Path) -> str:

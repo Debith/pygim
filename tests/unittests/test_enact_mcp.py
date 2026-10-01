@@ -106,12 +106,13 @@ class TestAskingForLessOfTheVocabulary:
     little of it was wanted. Reported by the D-D-2024 study as item 12, and then paid on a hot path
     when a hook began asking, before every write, only which tags were live."""
 
-    def test_by_default_it_is_an_index_and_the_entries_come_when_asked_for(self, server):
-        """Reading needs the names; only tagging a new memory needs when, when_not and example. The
-        whole vocabulary was 96% entries — 24,705 characters to deliver 1,077 of tags."""
+    def test_default_is_an_index_with_request_guidance_and_memory_entries_are_available_on_request(self, server):
+        """Classifying a request needs its rules; filing new knowledge needs the memory codebook."""
         err, index = call(server, "vocabulary")
         err, whole = call(server, "vocabulary", full=True)
-        assert len(json.dumps(index)) * 2 < len(json.dumps(whole))     # a fraction of the size
+        assert "Give it if:" in index["request"]                    # request rules arrive before the first read
+        names = {k: v for k, v in index.items() if k != "request"}
+        assert len(json.dumps(names)) * 2 < len(json.dumps(whole))    # the tag index stays compact
         names = {tag for d in index["dimensions"] for tag in d["values"]}
         assert {v["tag"] for d in whole["dimensions"] for v in d["values"]} == names
         assert all(isinstance(brief, str) for d in index["dimensions"] for brief in d["values"].values())

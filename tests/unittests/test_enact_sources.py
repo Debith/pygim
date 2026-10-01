@@ -164,10 +164,10 @@ class TestTheStoreOwnsItsBytes:
         assert memory.write_file("sources/inventory.yaml", "readme:\n  path: README.md\n", read) is False
         assert "late:" in live.read_text(encoding="utf-8")                      # the other writer's entry stands
 
-    @pytest.mark.parametrize("relative", ["memories/x.md", "taxonomy/base.yaml", "taxonomy/../x.yaml",
+    @pytest.mark.parametrize("relative", ["memories/x.md", "taxonomy/../x.yaml",
                                           "/tmp/x.yaml", "sources/other.yaml"])
     def test_nothing_else_is_written_this_way(self, store, relative):
-        with pytest.raises(Exception, match="only its vocabulary packs and its source inventory"):
+        with pytest.raises(Exception, match="only its base vocabulary, packs and source inventory"):
             Enact(str(store)).write_file(relative, "x", "")
 
     def test_the_stores_own_reader_sees_every_id_yaml_does(self, store):

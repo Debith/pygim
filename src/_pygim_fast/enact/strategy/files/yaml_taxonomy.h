@@ -8,6 +8,7 @@
 #pragma once
 
 #include <algorithm>
+#include <initializer_list>
 #include <memory>
 #include <optional>
 #include <stdexcept>
@@ -136,6 +137,16 @@ struct document {
                                  (base ? std::string("the base file declares pack: base")
                                        : "the file name says pack \"" + pack + "\""));
 
+        auto check_keys = [&](ryml::ConstNodeRef owner, const std::string& name,
+                              std::initializer_list<std::string_view> allowed) {
+            if (!owner.is_map()) return;
+            for (const auto field : owner.children()) {
+                const auto key = key_of(field);
+                if (std::find(allowed.begin(), allowed.end(), key) == allowed.end())
+                    out.errors.push_back(doc->at(field) + ": " + name + ": unknown field \"" + std::string(key) + "\"");
+            }
+        };
+
         auto entry_of = [&](ryml::ConstNodeRef owner, const std::string& name, bool warn_full) -> std::optional<codebook_entry> {
             const auto e = child(owner, "entry");
             if (!e || !e->is_map()) {
@@ -160,6 +171,7 @@ struct document {
             for (ryml::ConstNodeRef v : values.children()) {
                 const std::string value(key_of(v));
                 const std::string qualified = tax->info(d).name + "=" + value;
+                check_keys(v, qualified, {"entry", "source", "retired", "see", "request"});
                 if (value == taxonomy::any_value) {
                     out.errors.push_back(doc->at(v) + ": " + qualified + ": `any` is reserved and added by the loader");
                     continue;
@@ -178,7 +190,27 @@ struct document {
                     if (r.doc.empty() || r.line == 0) out.errors.push_back(doc->at(*s) + ": " + qualified + ": source needs doc and line");
                     src = std::move(r);
                 }
-                const auto t = tax->add_value(d, value, *e, std::move(src));
+                std::optional<request_rule> request;
+                if (const auto n = child(v, "request")) {
+                    check_keys(*n, qualified + " request", {"words", "give_if", "not_if"});
+                    request_rule rule;
+                    rule.give_if = scalar(child(*n, "give_if"));
+                    rule.not_if = scalar(child(*n, "not_if"));
+                    if (!n->is_map() || pygim::enact::detail::folded(rule.give_if).empty() ||
+                        pygim::enact::detail::folded(rule.not_if).empty())
+                        out.errors.push_back(doc->at(*n) + ": " + qualified + ": request needs give_if and not_if");
+                    if (const auto ws = child(*n, "words")) {
+                        if (!ws->is_seq()) out.errors.push_back(doc->at(*ws) + ": " + qualified + ": request words must be a list");
+                        else for (const auto w : ws->children()) {
+                            const auto word = scalar(w);
+                            if (pygim::enact::detail::folded(word).empty())
+                                out.errors.push_back(doc->at(w) + ": " + qualified + ": request word must be nonempty text");
+                            else rule.words.push_back(word);
+                        }
+                    }
+                    request = std::move(rule);
+                }
+                const auto t = tax->add_value(d, value, *e, std::move(src), std::move(request));
                 if (!t) {
                     out.errors.push_back(doc->at(v) + ": " + qualified + " is defined twice");
                     continue;
@@ -205,9 +237,16 @@ struct document {
         if (const auto dims = child(root, "dimensions")) {
             for (ryml::ConstNodeRef dn : dims->children()) {
                 const std::string name(key_of(dn));
+                check_keys(dn, name, {"role", "weight", "entry", "values", "request"});
                 dimension_info info;
                 info.name = name;
                 info.pack = pack;
+                if (const auto request = child(dn, "request")) {
+                    const auto value = scalar(request);
+                    if (value != "true" && value != "false")
+                        out.errors.push_back(doc->at(*request) + ": " + name + ": request must be true or false");
+                    info.request = value == "true";
+                }
                 const std::string r = scalar(child(dn, "role"));
                 if (r == "hard") info.default_role = role::hard;
                 else if (r == "soft") info.default_role = role::soft;

@@ -113,11 +113,12 @@ public:
     /// which are most of the weight — pygim's own taxonomy is 24,700 characters entire and 900 as
     /// names. A caller that only needs to know which tags are live paid for all of it, on every
     /// call, which is what the D-D-2024 study reported as item 12.
-    py::dict vocabulary(const std::string& dimension, bool brief) const {
+    py::dict vocabulary(const std::string& dimension, bool brief, bool request) const {
         const auto s = m_service->current();
         const auto& tax = s->tax();
         py::dict d;
         d["version"] = tax.version().hex();
+        if (request) d["request"] = tax.request_vocabulary(dimension);
         py::list dims;
         for (std::size_t i = 0; i < tax.dimensions(); ++i) {
             const dimension_id di(static_cast<dimension_id::value_type>(i));
@@ -128,6 +129,7 @@ public:
             dd["role"] = std::string(role_name(info.default_role));
             dd["weight"] = weight_text(info.weight);
             dd["pack"] = info.pack;
+            if (info.request) dd["request"] = true;
             if (!brief) dd["entry"] = entry_dict(info.entry);
             py::list values;
             for (const auto t : tax.values_of(di)) {
@@ -140,6 +142,8 @@ public:
                 py::dict vd;
                 vd["tag"] = ti.qualified;
                 vd["entry"] = entry_dict(ti.entry);
+                if (ti.request) vd["request"] = py::dict(py::arg("words") = ti.request->words,
+                    py::arg("give_if") = ti.request->give_if, py::arg("not_if") = ti.request->not_if);
                 if (ti.any) vd["any"] = true;
                 if (ti.source) vd["source"] = ti.source->doc + ":L" + decimal(ti.source->line);
                 values.append(vd);

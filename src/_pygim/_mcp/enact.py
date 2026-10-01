@@ -46,12 +46,12 @@ STANDING_BUDGET = 7500
 SESSION_START_LIMIT = 8900
 
 INSTRUCTIONS = """\
-A problem-space memory: knowledge is found by the kind of problem being solved,
-not by similarity to the prompt.
+Knowledge retrieved by the kind of problem being solved.
 
 1. Call `session` first. Its `standing` holds the owner's preferences and the
    procedures as cards (when, not, do, why); `show` one for the rest. They
-   apply to everything you do here, advice included. Then call `vocabulary`.
+   apply to everything you do here, advice included. Then call `vocabulary`;
+   use its `request` guide to classify the current request in context.
 2. `read` before you work, and before you recommend something, rule something
    out or propose a design. Hard tags filter, soft tags order, `term` narrows.
    Follow the procedure a read returns first.
@@ -63,7 +63,7 @@ not by similarity to the prompt.
    misleading — all three are evidence.
 4. A refusal names facts. Act on them and try again.
 5. Consolidate only when the user asks (the `consolidate` prompt). Only the user
-   accepts a generalisation or a pack, with `oo enact accept`.
+   accepts a generalisation, a concept (by name) or a pack, with `oo enact accept`.
 6. `scope` names another store that `session` lists; `global` holds what is
    about no single project (tag it domain=any). A #n belongs to one store.
 7. No store: tell the user to run `oo enact setup`. A new project starts with
@@ -262,8 +262,9 @@ TOOLS: List[Dict[str, Any]] = [
         "name": "vocabulary",
         "description": "The controlled vocabulary. Each dimension is one question with a closed list of answers; "
                        "role hard means it filters by default, soft means it only orders; each value's entry says "
-                       "when to use it and when not to. Tag requests and memories with these exact names. By "
-                       "default an index — every tag with its one-line brief, which is enough to read; name a "
+                       "when to use it and when not to. By default an index plus the first-round `request` guide: "
+                       "cue words and decision questions for activities requested now. Memory tags describe what "
+                       "the knowledge helps do, which can include other activities. Name a "
                        "`dimension` for its full entries (when, when_not, example) before tagging a new memory.",
         "inputSchema": _schema({"scope": _SCOPE,
                                 "dimension": {"type": "string", "description": "One dimension, with its full entries."},
@@ -272,9 +273,10 @@ TOOLS: List[Dict[str, Any]] = [
     {
         "name": "read",
         "description": "Retrieve the working context for a problem space. `hard`: tags a memory must match — at least "
-                       "one; several values of one dimension mean any of them; never `any` (name the value your work "
-                       "is: memories tagged `any` answer it too). `soft`: tags that only order. Returns the procedure "
-                       "for the artifact and task first (follow its steps), then ranked memories, each with the tags "
+                       "one; several values of one dimension mean any of them. Name concrete values: memories tagged "
+                       "`any` answer them too. Query `any` only when its dimension has no live concrete values yet. "
+                       "`soft`: tags that only order. The dedicated procedure slot requires exactly one hard artifact "
+                       "and one hard task. Returns that procedure first (follow its steps), then ranked memories, each with the tags "
                        "that admitted and ranked it; `skipped` counts the rest and `budget_dropped` how many of those the "
                        "budget had no room for, `facets` counts the tags the candidates "
                        "carry (a soft tag at 0 cannot match), and `coverage` names the documents they cite and the "
@@ -424,8 +426,9 @@ TOOLS: List[Dict[str, Any]] = [
     },
     {
         "name": "proposals",
-        "description": "Concepts the vocabulary lacks, folded, with the memories that asked. A human accepts one by "
-                       "adding it to a pack file under taxonomy/; the asking memories are then linked on the next start.",
+        "description": "Concepts the vocabulary lacks, folded, with the memories that asked. A human accepts one with "
+                       "`oo enact accept <concept>`, which adds it to the store's pack; the memories that asked — or "
+                       "what replaced them — then carry it.",
         "inputSchema": _schema({}),
     },
     {
@@ -764,19 +767,19 @@ class EnactServer:
         return result
 
     def _vocabulary_tool(self, a: Dict[str, Any]) -> Any:
-        """The index unless a dimension or everything is asked for in full. The full vocabulary is
-        96% codebook entries; reading needs the names, and the entries matter only when a new memory
-        is being tagged — measured on 2026-09-23 at 24,705 characters, of which the tags were 1,077."""
+        """An index and the store's request guide; a named dimension or full=True returns the
+        memory codebook. Classification boundaries must reach the agent before its first read."""
         memory = self._mem(a)
         if a.get("dimension") or a.get("full") or a.get("brief") is False:
             return memory.vocabulary(dimension=a.get("dimension", ""), brief=False)
-        whole = memory.vocabulary(dimension="", brief=False)
+        whole = memory.vocabulary(dimension="", brief=False, request=True)
         index = []
         for d in whole.get("dimensions", []):
             index.append({"name": d["name"], "role": d["role"],
                           "question": (d.get("entry") or {}).get("brief", ""),
                           "values": {v["tag"]: (v.get("entry") or {}).get("brief", "") for v in d.get("values", [])}})
         return {"version": whole.get("version"), "dimensions": index, "rejected": whole.get("rejected", []),
+                "request": whole["request"],
                 "full": "name a `dimension` for its when, when_not and example before tagging a new memory"}
 
     def _card(self, a: Dict[str, Any]) -> Any:
