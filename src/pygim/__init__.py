@@ -11,6 +11,7 @@ _LAZY_EXPORTS = {
     "Registry": ("pygim.registry", "Registry"),
     "Factory": ("pygim.factory", "Factory"),
     "Container": ("pygim.ioc", "Container"),
+    "Rng": ("pygim.rng", "Rng"),
     # Re-exported from the Python module (not the compiled extension directly)
     # so the top-level entry point shares its SQLAlchemy-URL translation.
     "DataStore": ("pygim.persistence", "DataStore"),
