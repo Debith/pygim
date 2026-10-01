@@ -8,8 +8,7 @@ from tempfile import TemporaryDirectory
 from pygim.enact import Enact
 
 
-with TemporaryDirectory() as directory:
-    root = Path(directory) / "example-memory"
+def demonstrate(root: Path) -> None:
     Enact.init(str(root))
     memory = Enact(str(root))
 
@@ -43,5 +42,11 @@ with TemporaryDirectory() as directory:
     # This base-only store allows `any`: its domain and artifact have no concrete values yet.
     focused = memory.read(hard=["domain=any", "artifact=any", "task=implement"])
     assert focused["procedure"]["memory"] == steps["memory"]
+
+
+with TemporaryDirectory() as directory:
+    # An open store holds local/commit.lock, and Windows cannot delete an open file: the store
+    # lives inside demonstrate() and is closed when it returns, before the folder is removed.
+    demonstrate(Path(directory) / "example-memory")
 
 print("ENACT request vocabulary OK")

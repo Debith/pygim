@@ -4,6 +4,7 @@ import os
 from pathlib import Path
 import subprocess
 import sys
+import sysconfig
 
 import pytest
 import yaml
@@ -175,7 +176,7 @@ def test_base_upgrade_uses_the_store_lock_and_rejects_a_stale_replacement(store)
     replacement = before.decode() + "\n# A reviewed base update.\n"
     assert memory.write_file("taxonomy/base.yaml", replacement, digest(before))
     assert not memory.write_file("taxonomy/base.yaml", before.decode(), digest(before))
-    assert path.read_text() == replacement
+    assert path.read_text(encoding="utf-8") == replacement
 
 
 def test_real_agent_interface_delivers_rules_and_keeps_store_override(store, tmp_path):
@@ -183,7 +184,8 @@ def test_real_agent_interface_delivers_rules_and_keeps_store_override(store, tmp
     env = {**os.environ, "HOME": str(tmp_path / "home"), "XDG_DATA_HOME": str(tmp_path / "data"),
            "PYGIM_ENACT_GLOBAL": str(tmp_path / "absent"), "PYGIM_ENACT_SESSION": "1",
            "GIT_CONFIG_GLOBAL": str(tmp_path / "gitconfig"), "GIT_CONFIG_NOSYSTEM": "1"}
-    oo = Path(sys.executable).with_name("oo.exe" if os.name == "nt" else "oo")
+    # The installed command, where pip put it for this interpreter: bin/oo, or Scripts\oo.exe on Windows.
+    oo = Path(sysconfig.get_path("scripts")) / ("oo.exe" if os.name == "nt" else "oo")
     command = [str(oo), "enact", "call", "vocabulary", "--root", str(store), "--json", "{}"]
     result = subprocess.run(command, cwd=tmp_path, env=env, capture_output=True, text=True, timeout=30)
     assert result.returncode == 0, result.stderr
