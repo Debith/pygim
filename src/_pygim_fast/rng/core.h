@@ -369,7 +369,7 @@ public:
         // would otherwise race on m_pos / m_cache (C++ UB, not merely
         // nondeterminism). Uncontended cost is negligible against a fill.
         std::lock_guard<std::mutex> guard(m_state_mutex);
-        const std::size_t head = std::min(n, (kBlockElems - m_pos % kBlockElems) % kBlockElems);
+        const std::size_t head = std::min<std::size_t>(n, (kBlockElems - m_pos % kBlockElems) % kBlockElems);
         const std::size_t blocks = (n - head) / kBlockElems;
         fill_partial(out, head);
         fill_blocks(out + head, blocks);
