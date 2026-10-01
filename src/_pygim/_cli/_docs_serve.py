@@ -120,7 +120,7 @@ a.xref{color:inherit;text-decoration:none;border-bottom:1px dotted #8a9299;curso
 </style>"""
 # Raised whenever the renderer's output changes, so a page an older renderer made is made again
 # rather than kept until its Markdown next changes.
-RENDERER = "renderer 3"
+RENDERER = "renderer 5"
 # Under a generated page's title: when the page changed, and the way to mark it read (``_commenter.READER``).
 META_LINE = '<p id="rd-meta" class="rd-meta"></p>'
 GENERATED_MARK = "<!-- generated from {src} by oo docs serve (" + RENDERER + "); edit the Markdown, not this file -->"
@@ -179,36 +179,47 @@ def _terms_of(text: str) -> dict:
 class _SiteIndex:
     """What the Markdown pages under a root define between them: numbered sections
     other pages cite as a section reference, and the terms their Term/Type tables
-    describe. Built once at startup; the renderer turns both into hover text."""
+    describe. Built once at startup, and a page written later joins it when it is first
+    rendered; the renderer turns both into hover text."""
 
-    def __init__(self):
+    def __init__(self, root=None):
+        self.root = root
         self.terms = {}        # term -> meaning
         self.sections = {}     # "4.8" -> [(page href, full heading)]
         self.pages = {}        # markdown path -> href of the HTML generated for it
 
     @classmethod
     def build(cls, root):
-        index = cls()
+        index = cls(root)
         for page in sorted(site_pages(root), key=lambda p: p.name):
-            if page.suffix != ".md":
-                continue
-            try:
-                text = _page_text(page)
-            except (OSError, RuntimeError, UnicodeDecodeError):
-                continue
-            href = _relative(root, page.with_suffix(GENERATED_SUFFIX))
-            index.pages[os.fspath(page)] = href
-            for number, heading in _HEADING_RE.findall(text):
-                index.sections.setdefault(number, []).append((href, f"{number} {heading}".strip()))
-            for term, meaning in _terms_of(text).items():
-                index.terms.setdefault(term, meaning)
+            index.add(page)
         return index
 
-    def link(self, number: str, page: str | None, qualifier: str | None = None):
+    def add(self, page):
+        """Index one Markdown page — the href of the page generated for it, its numbered
+        sections, its terms — and return that href; None for a page it cannot read."""
+        if self.root is None or page.suffix != ".md":
+            return None
+        try:
+            text = _page_text(page)
+        except (OSError, RuntimeError, UnicodeDecodeError):
+            return None
+        href = _relative(self.root, page.with_suffix(GENERATED_SUFFIX))
+        self.pages[os.fspath(page)] = href
+        for number, heading in _HEADING_RE.findall(text):
+            self.sections.setdefault(number, []).append((href, f"{number} {heading}".strip()))
+        for term, meaning in _terms_of(text).items():
+            self.terms.setdefault(term, meaning)
+        return href
+
+    def link(self, number: str, page: str | None, qualifier: str | None = None, folder: str | None = None):
         """A section reference as a link into the page that defines it. A reference
         that names its page — "section 03 §2.1", "overview §4.8" — goes there or
-        nowhere; a bare one goes to this page first, then the first page by name,
-        which is the overview a bare reference in a later section means."""
+        nowhere; a bare one goes to this page first, then to the first page by name,
+        which is the overview a bare reference in a later section means. Two folders can
+        each hold a page of that name, and then the copy nearest this page is the one
+        meant (``_nearest``) — unless the reference names the folder, "ENACT 00 §5", and a
+        copy lives in a folder of that name. A word that names no such folder is prose."""
         hits = self.sections.get(number)
         if not hits:
             return None
@@ -218,12 +229,62 @@ class _SiteIndex:
                 named = hits[:1]        # no page is called that: the first page is the overview
             if not named:
                 return None
-            href, heading = named[0]
+            if folder:
+                inside = [hit for hit in named
+                          if folder.lower() in (part.lower() for part in hit[0].strip("/").split("/")[:-1])]
+                named = inside or named
+            href, heading = _nearest(named, page)
         else:
-            href, heading = next((hit for hit in hits if hit[0] == page), hits[0])
-        target = "" if href == page else posixpath.relpath(href, posixpath.dirname(page or "/"))
-        return (f'<a class="xref" href="{target}#{_anchor(heading)}"'
-                f' title="{html.escape(heading, quote=True)}">&sect;{number}</a>')
+            href, heading = next((hit for hit in hits if hit[0] == page), None) or _nearest(hits, page)
+        return _xref(href, heading, number, page)
+
+    def file_link(self, number: str, page: str | None, file: str):
+        """A section reference that names its page by file — "`brief.md` §2",
+        "`docs/design/enact/00_overview.md` §4.7" — as a link into that file, matched by as
+        much of its path as the site holds; None when the site has no such file defining it."""
+        hits = self.sections.get(number) or []
+        parts = [part for part in file.replace("\\", "/").split("/") if part not in ("", ".")]
+        parts[-1] = parts[-1][:-len(".md")] + GENERATED_SUFFIX
+        for start in range(len(parts)):
+            tail = "/" + "/".join(parts[start:])
+            named = [hit for hit in hits if hit[0].endswith(tail)]
+            if named:
+                return _xref(*_nearest(named, page), number, page)
+        return None
+
+
+def _xref(href: str, heading: str, number: str, page: str | None) -> str:
+    """The link to section *number* of the page at *href*, relative to *page*."""
+    if page is None:
+        target = href                            # no page to be relative to: from the site's root
+    else:
+        target = "" if href == page else posixpath.relpath(href, posixpath.dirname(page))
+    return (f'<a class="xref" href="{target}#{_anchor(heading)}"'
+            f' title="{html.escape(heading, quote=True)}">&sect;{number}</a>')
+
+
+def _nearest(hits: list, page: str | None):
+    """The hit to link: the first by file name, as the index is ordered — and when pages of
+    that same name sit in several folders (``design/enact/00_overview.md`` and
+    ``design/task/00_overview.md``), the copy nearest *page*: the most folders in common with
+    it, then the fewest folders below those. Nearness never picks a different document, only
+    which copy of the one the name picked."""
+    name = posixpath.basename(hits[0][0])
+    copies = [hit for hit in hits if posixpath.basename(hit[0]) == name]
+    if not page or len(copies) == 1:
+        return hits[0]
+    here = posixpath.dirname(page).strip("/").split("/")
+
+    def distance(hit):
+        there = posixpath.dirname(hit[0]).strip("/").split("/")
+        shared = 0
+        for a, b in zip(here, there):
+            if a != b:
+                break
+            shared += 1
+        return -shared, len(there) - shared
+
+    return min(copies, key=distance)
 
 
 class ServeError(RuntimeError):
@@ -270,9 +331,14 @@ def listed_pages(root):
 
 _TERM_RE = re.compile(r"<(code|strong|th)>([^<>]+)</\1>")
 # "§4.8", optionally preceded by the page it lives in: "overview §4.8",
-# "section 03 §2.1", "01 §3", "(02, §5.3)".
+# "section 03 §2.1", "01 §3", "(02, §5.3)" — and that page by its folder: "ENACT 00 §5".
 _SECTION_REF_RE = re.compile(
-    r"(?P<q>\b(?:overview(?:'s)?|(?:section\s+)?\d{2}[a-z]?)\b,?\s+)?\u00a7(?P<n>\d+(?:\.\d+)*)")
+    r"(?P<q>\b(?:(?P<folder>[A-Za-z][\w-]*)\s+(?=\d{2}[a-z]?\b))?"
+    r"(?:overview(?:'s)?|(?:section\s+)?\d{2}[a-z]?)\b,?\s+)?\u00a7(?P<n>\d+(?:\.\d+)*)")
+
+
+# "`brief.md` §2": a file named in a code span, then the section — the renderer's HTML of it.
+_FILE_REF_RE = re.compile(r"(<code>(?P<file>[\w./-]+\.md)</code>,?\s+)\u00a7(?P<n>\d+(?:\.\d+)*)")
 
 
 def _qualifier(text: str | None) -> str | None:
@@ -293,8 +359,8 @@ _SPLIT_TAGS_RE = re.compile(r"(<[^>]+>)")
 def _linked_reference(match, site, page: str | None) -> str:
     """One section reference, rewritten as a link when its target is known; the
     page qualifier in front of it is kept as text."""
-    prefix = match.group("q") or ""
-    link = site.link(match.group("n"), page, _qualifier(prefix))
+    prefix, folder = match.group("q") or "", match.group("folder")
+    link = site.link(match.group("n"), page, _qualifier(prefix[len(folder):] if folder else prefix), folder)
     return prefix + link if link else match.group(0)
 
 
@@ -315,6 +381,10 @@ def _annotate(body: str, site, page: str | None) -> str:
                 f"{text}</{tag}>")
 
     body = _TERM_RE.sub(marked_term, body)
+    # a reference naming its page by file goes there or nowhere: unresolved, its § becomes an
+    # entity, which the bare-reference pass below does not read as a section reference
+    body = _FILE_REF_RE.sub(lambda m: m.group(1) + (site.file_link(m.group("n"), page, m.group("file"))
+                                                    or "&sect;" + m.group("n")), body)
 
     out, skip = [], 0
     for token in _SPLIT_TAGS_RE.split(body):
@@ -410,7 +480,7 @@ def _render_fragment(text: str) -> str:
         import markdown
     except ImportError:
         return f"<pre>{html.escape(text)}</pre>"
-    return markdown.markdown(text, extensions=["fenced_code", "tables"])
+    return markdown.markdown(text, extensions=["fenced_code", "tables", "md_in_html"])
 
 
 def render_markdown(text: str, title: str, *, site=None, page: str | None = None) -> str | None:
@@ -425,7 +495,8 @@ def render_markdown(text: str, title: str, *, site=None, page: str | None = None
     except ImportError:
         return None
 
-    body = markdown.markdown(_with_block_marks(text), extensions=["fenced_code", "tables", "toc"])
+    # md_in_html: a <details markdown="1"> block folds a long section and keeps what is written inside it Markdown
+    body = markdown.markdown(_with_block_marks(text), extensions=["fenced_code", "tables", "toc", "md_in_html"])
     body = _annotate(body, site, page)
     # relative links to Markdown point at the pages generated for them
     body = re.sub(r'(href=")(?![a-z][a-z0-9+.-]*:|/|#)([^"#]+)\.md(#[^"]*)?"',
@@ -489,7 +560,7 @@ def materialize_markdown(md, *, site=None):
             return out                                   # not ours: never overwritten
         if RENDERER in head and os.path.getmtime(os.fspath(out)) >= os.path.getmtime(os.fspath(md)):
             return out                                   # fresh, and made by this renderer
-    page = site.pages.get(os.fspath(md)) if site is not None else None
+    page = (site.pages.get(os.fspath(md)) or site.add(md)) if site is not None else None
     rendered = render_markdown(_page_text(md), md.stem, site=site, page=page)
     if rendered is None:
         return None

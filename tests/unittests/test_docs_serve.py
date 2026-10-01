@@ -226,6 +226,27 @@ class TestMarkdown:
         assert "mermaid.esm.min.mjs" in html
         assert _mermaid_blocks_as_a_browser_reads_them(html) == [(source, 0)]
 
+    def test_details_block_folds_markdown_written_inside_it(self, site):
+        """A long page folds its sections with ``<details markdown="1">``: the block collapses, and
+        what is written inside it is still Markdown — bold, links, several paragraphs — even with
+        the review layer's block marks between those paragraphs. Without it, a raw HTML block kept
+        its Markdown as literal text (the key review page, 2026-09-29)."""
+        (site / "fold.md").write_text(
+            "## 1. A case\n\n"
+            '<details markdown="1"><summary>The request, and why</summary>\n\n'
+            "**Request:** first paragraph\n\n"
+            "Second paragraph, see [b](b.md).\n\n"
+            "</details>\n\n"
+            "After the fold.\n", encoding="utf-8")
+        root = _docs_serve.pygim.path(site, store=PathStore())
+        html = (site / _docs_serve.materialize_markdown(root / "fold.md").name).read_text(encoding="utf-8")
+        start, end = html.index("<details"), html.index("</details>")
+        inside, after = html[start:end], html[end:]
+        assert "<summary>The request, and why</summary>" in inside
+        assert "<strong>Request:</strong>" in inside and "**Request:**" not in html
+        assert 'href="b.generated.html"' in inside
+        assert "After the fold." in after
+
     def test_markdown_index_stands_in_for_a_missing_index_html(self, temp_dir):
         (temp_dir / "README.md").write_text("# Home\n", encoding="utf-8")
         httpd = _docs_serve.make_server(temp_dir, port=0, host="127.0.0.1")
@@ -886,6 +907,90 @@ class TestCrossReferencesAndTerms:
         html = _docs_serve.render_markdown("See \u00a79.9 for that.", "x", site=site, page="/01_model.generated.html")
         body = html.split("<body>")[1]
         assert "xref" not in body and "\u00a79.9" in body
+
+    @staticmethod
+    def _two_overviews(temp_dir):
+        """Two folders, each with its own ``00_overview.md`` defining a \u00a75 \u2014 the docs tree has
+        ``design/enact/00_overview.md`` and ``design/task/00_overview.md``."""
+        (temp_dir / "enact").mkdir()
+        (temp_dir / "task" / "studies").mkdir(parents=True)
+        (temp_dir / "enact" / "00_overview.md").write_text("# ENACT\n\n## 5. Principles\n\ntext\n", encoding="utf-8")
+        (temp_dir / "task" / "00_overview.md").write_text("# Task\n\n## 5. What each part depends on\n\ntext\n",
+                                                          encoding="utf-8")
+
+    def test_a_reference_goes_to_the_nearest_page_of_that_name(self, temp_dir):
+        """A reference a page does not define itself, bare or naming "overview", went to the first
+        page by file name anywhere in the site: from a task document, \u00a75 opened the ENACT overview
+        (the phase 4 protocol, 2026-09-29). The page nearest the referring one \u2014 its own folder,
+        then each folder above \u2014 is the one meant."""
+        self._two_overviews(temp_dir)
+        (temp_dir / "enact" / "01_model.md").write_text("# Model\n\nSee \u00a75 and overview \u00a75.\n", encoding="utf-8")
+        (temp_dir / "task" / "studies" / "plan.md").write_text("# Plan\n\nSee \u00a75 and the overview's \u00a75.\n",
+                                                                encoding="utf-8")
+        # a reference that names the folder goes to that copy, however near the other one is
+        (temp_dir / "task" / "studies" / "review.md").write_text(
+            "# Review\n\nAs ENACT 00 \u00a75 says, and see 00 \u00a75.\n", encoding="utf-8")
+        root = pygim.path(temp_dir, store=PathStore()).resolve()
+        site = _docs_serve._SiteIndex.build(root)
+        for name, target in (("enact/01_model.md", '"00_overview.generated.html#5-principles"'),
+                             ("task/studies/plan.md", '"../00_overview.generated.html#5-what-each-part-depends-on"')):
+            out = _docs_serve.materialize_markdown(root.joinpath(*name.split("/")), site=site)
+            body = open(os.fspath(out), encoding="utf-8").read().split("<body>")[1]
+            assert body.count(f'class="xref" href={target}') == 2, name
+        out = _docs_serve.materialize_markdown(root / "task" / "studies" / "review.md", site=site)
+        body = open(os.fspath(out), encoding="utf-8").read().split("<body>")[1]
+        assert 'ENACT 00 <a class="xref" href="../../enact/00_overview.generated.html#5-principles"' in body
+        assert 'see 00 <a class="xref" href="../00_overview.generated.html#5-what-each-part-depends-on"' in body
+
+    def test_a_reference_naming_its_file_goes_to_that_file_or_nowhere(self, temp_dir):
+        """"Follows `brief.md` §2": the file in the code span names the page, but the renderer
+        skipped it and guessed from the bare §2 — the three study plans linked an overview's §2.
+        The file decides, by as much of its path as the site holds; a file the site does not have
+        leaves the reference as text rather than a guess."""
+        self._two_overviews(temp_dir)
+        (temp_dir / "task" / "studies" / "brief.md").write_text("# Brief\n\n## 2. The environment\n\ntext\n",
+                                                                 encoding="utf-8")
+        (temp_dir / "task" / "studies" / "plan.md").write_text(
+            "# Plan\n\nFollows `brief.md` §2; see `docs/enact/00_overview.md` §5 and `MISSING.md` §5.\n",
+            encoding="utf-8")
+        root = pygim.path(temp_dir, store=PathStore()).resolve()
+        site = _docs_serve._SiteIndex.build(root)
+        out = _docs_serve.materialize_markdown(root / "task" / "studies" / "plan.md", site=site)
+        body = open(os.fspath(out), encoding="utf-8").read().split("<body>")[1]
+        assert '<code>brief.md</code> <a class="xref" href="brief.generated.html#2-the-environment"' in body
+        assert '<code>docs/enact/00_overview.md</code> <a class="xref" href="../../enact/00_overview.generated.html#5-principles"' in body
+        assert body.count('class="xref"') == 2           # MISSING.md §5 stays text, not a guess
+
+    def test_a_page_the_index_does_not_know_links_relative_to_itself(self, temp_dir):
+        """The index is built when the server starts, so a page written afterwards had no place in
+        it; its links were then made relative to the site's root and broke in any folder below it."""
+        self._two_overviews(temp_dir)
+        root = pygim.path(temp_dir, store=PathStore()).resolve()
+        site = _docs_serve._SiteIndex.build(root)
+        (temp_dir / "task" / "studies" / "new.md").write_text("# New\n\nSee \u00a75.\n", encoding="utf-8")
+        out = _docs_serve.materialize_markdown(root / "task" / "studies" / "new.md", site=site)
+        assert 'class="xref" href="../00_overview.generated.html#5-what-each-part-depends-on"' in open(os.fspath(out), encoding="utf-8").read()
+
+    def test_a_reference_on_a_page_written_after_start_opens_its_section(self, temp_dir):
+        """End to end, as a reader meets it: the server running, a nested page written after it
+        started, the page fetched and its \u00a75 followed \u2014 to the task overview, not a 404."""
+        self._two_overviews(temp_dir)
+        httpd = _docs_serve.make_server(temp_dir, port=0, host="127.0.0.1")
+        thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+        thread.start()
+        try:
+            base = f"http://127.0.0.1:{httpd.server_address[1]}"
+            (temp_dir / "task" / "studies" / "new.md").write_text("# New\n\nSee \u00a75.\n", encoding="utf-8")
+            opener = urllib.request.build_opener()
+            with opener.open(base + "/task/studies/new.md") as resp:
+                page_url, body = resp.geturl(), resp.read().decode("utf-8")
+            href = re.search(r'class="xref" href="([^"]+)"', body).group(1)
+            status, _, target = _get(urllib.parse.urljoin(page_url, href))
+            assert status == 200 and "What each part depends on" in target.decode("utf-8")
+        finally:
+            httpd.shutdown()
+            httpd.server_close()
+            thread.join(timeout=5)
 
 
 class TestErrorRepliesDrainTheBody:
