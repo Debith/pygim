@@ -209,7 +209,7 @@ class TestWithNoStore:
     def test_every_command_says_how_to_make_one_and_makes_nothing(self, tmp_path, env):
         bare = tmp_path / "bare"
         bare.mkdir()
-        for args in (("status",), ("call", "read", "--json", json.dumps({"hard": TAGS}))):
+        for args in (("status",), ("vocabulary",), ("call", "read", "--json", json.dumps({"hard": TAGS}))):
             done = oo(*args, cwd=bare, env=env)
             assert done.returncode == 1, done.stdout
             assert "oo enact setup" in done.stderr, done.stderr
@@ -493,3 +493,65 @@ class TestAcceptingAConceptTheVocabularyLacks:
         same = {**env, "PYGIM_ENACT_GLOBAL": str(store)}      # the global store is the store --root names
         listed = oo("accept", "--root", str(store), cwd=project, env=same)
         assert listed.stdout.count("oo enact accept potion") == 1, listed.stdout
+
+
+class TestShowingTheVocabulary:
+    """A person reads the store's vocabulary with `oo enact vocabulary`, and sees what an agent's
+    `vocabulary` call returns: the same tool answers both, so the two can never disagree. Debith,
+    2026-10-02: "oo needs a command to show its current vocabulary" — until then the only way was
+    `oo enact call vocabulary`, a page of JSON."""
+
+    def test_every_dimension_and_value_with_its_brief_under_the_version(self, project, env):
+        index = call("vocabulary", project, env)
+        shown = oo("vocabulary", cwd=project, env=env)
+        assert shown.returncode == 0, shown.stderr
+        assert index["version"][:12] in shown.stdout
+        flat = " ".join(shown.stdout.split())                          # columns and wrapping aside
+        for dimension in index["dimensions"]:
+            assert f"{dimension['name']} {dimension['role']}" in flat, dimension["name"]
+            for tag, brief in dimension["values"].items():
+                assert f"{tag} {' '.join(brief.split())}" in flat, tag
+        assert "artifact=spell" in shown.stdout                       # the pack's values, not only the base
+
+    def test_a_dimension_by_name_shows_each_entry_in_full_with_its_request_rule(self, project, env):
+        task = call("vocabulary", project, env, dimension="task")["dimensions"][0]
+        shown = oo("vocabulary", "task", cwd=project, env=env)
+        assert shown.returncode == 0, shown.stderr
+        flat = " ".join(shown.stdout.split())
+        implement = next(v for v in task["values"] if v["tag"] == "task=implement")
+        assert " ".join(implement["entry"]["when"].split()) in flat
+        assert " ".join(implement["request"]["give_if"].split()) in flat
+        assert ", ".join(implement["request"]["words"]) in flat
+        assert "artifact=spell" not in shown.stdout                   # one dimension, not the rest
+
+    def test_an_unknown_dimension_fails_and_names_the_ones_there_are(self, project, env):
+        shown = oo("vocabulary", "colour", cwd=project, env=env)
+        assert shown.returncode != 0
+        assert "colour" in shown.stderr and "task" in shown.stderr, shown.stderr
+
+    def test_request_prints_the_guide_exactly_as_an_agent_receives_it(self, project, env):
+        shown = oo("vocabulary", "--request", cwd=project, env=env)
+        assert shown.returncode == 0, shown.stderr
+        assert shown.stdout.strip() == call("vocabulary", project, env)["request"].strip()
+
+    def test_json_is_the_tool_result_for_programs(self, project, env):
+        shown = oo("vocabulary", "task", "--json", cwd=project, env=env)
+        assert shown.returncode == 0, shown.stderr
+        assert json.loads(shown.stdout) == call("vocabulary", project, env, dimension="task")
+
+    def test_scope_reads_another_store_this_machine_holds(self, project, env, tmp_path):
+        place = tmp_path / "global-store"
+        wide = {**env, "PYGIM_ENACT_GLOBAL": str(place)}
+        made = oo("setup", "--global", "--path", str(place), "--no-register", cwd=project, env=wide)
+        assert made.returncode == 0, made.stderr
+        shown = oo("vocabulary", "--scope", "global", cwd=project, env=wide)
+        assert shown.returncode == 0, shown.stderr
+        assert "task=implement" in shown.stdout
+        assert "artifact=spell" not in shown.stdout                   # the project's pack is not the global store's
+        assert "artifact=spell" in oo("vocabulary", cwd=project, env=wide).stdout
+
+    def test_showing_it_writes_nothing(self, project, env, store, seeded):
+        before = fingerprint(store)
+        for args in ((), ("task",), ("--request",), ("--json",)):
+            assert oo("vocabulary", *args, cwd=project, env=env).returncode == 0, args
+        assert fingerprint(store) == before

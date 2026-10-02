@@ -172,6 +172,25 @@ def enact_stores(where, remote, root):
     GimmicksCliApp().enact_stores(where=where.with_root(root), remote=remote)
 
 
+@enact.command("vocabulary")
+@click.argument("dimension", required=False)
+@flag_opt("--request", "request",
+          help="Print the guide an agent classifies a request with — cue words and decision questions — "
+               "exactly as the default `vocabulary` call delivers it.")
+@click.option("--scope", default=None, metavar="NAME",
+              help="Another store this machine holds, by a name `oo enact stores` lists, such as global. "
+                   "Default: the project's.")
+@flag_opt("--json", "as_json", help="Print the `vocabulary` tool's result as JSON, for programs.")
+@_ROOT
+@click.pass_obj
+def enact_vocabulary(where, dimension, request, scope, as_json, root):
+    """The store's vocabulary, as an agent's `vocabulary` call receives it: every dimension, its role
+    and the brief of each value. Name a DIMENSION for each entry in full — when, when not, an example
+    and the request rule."""
+    GimmicksCliApp().enact_vocabulary(where=where.with_root(root), dimension=dimension, request=request,
+                                      scope=scope, as_json=as_json)
+
+
 @enact.command("mailbox")
 @click.option("--post", "text", default=None, help="Leave a message instead of listing.")
 @click.option("--kind", type=click.Choice(["feedback", "request", "comment"]), default="comment",

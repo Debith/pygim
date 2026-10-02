@@ -689,6 +689,105 @@ class GimmicksCliApp:
             if missing:
                 click.echo(_style.bad("not checked out here: ") + _style.strong(", ".join(missing)))
 
+    def enact_vocabulary(self, *, where: Environment, dimension: Optional[str] = None, request: bool = False,
+                         scope: Optional[str] = None, as_json: bool = False) -> None:
+        """A store's vocabulary for a person, from the same `vocabulary` tool an agent calls, so the
+        two can never disagree: every dimension with its role and each value's brief; one dimension
+        with every entry in full; or, with *request*, the guide an agent classifies a request with.
+        *scope* names another store this machine holds, as `oo enact stores` lists them."""
+        import json as _json
+        import textwrap
+
+        from _pygim._mcp.enact import build
+
+        if request and dimension:
+            raise click.ClickException("--request prints the whole guide an agent receives; leave out DIMENSION")
+        stores = self._stores(where)
+        if scope:
+            named = stores.named(scope)
+            if named is None:
+                held = ", ".join(s.name for s in stores.scopes()) or "none"
+                raise click.ClickException(f"no store called `{scope}` — this machine holds: {held}")
+            root = str(named.root)
+        else:
+            root = self._store(where)          # says how to make one when there is none
+        server = build(where)
+
+        def vocabulary(**arguments):
+            answer = server.call("vocabulary", {**arguments, **({"scope": scope} if scope else {})})
+            body = answer["content"][0]["text"]
+            if answer.get("isError"):
+                raise click.ClickException(body)
+            return _json.loads(body)
+
+        data = vocabulary(**({"dimension": dimension} if dimension else {}))
+        if dimension and not data.get("dimensions"):
+            known = ", ".join(d["name"] for d in vocabulary()["dimensions"])
+            raise click.ClickException(f"no dimension called `{dimension}` — this vocabulary has: {known}")
+        if as_json:
+            click.echo(_json.dumps(data, indent=2, ensure_ascii=False))
+            return
+        if request:
+            click.echo(data["request"].rstrip())
+            return
+
+        width = max(60, min(shutil.get_terminal_size((100, 20)).columns, 120))
+
+        def wrapped(label: str, text: str, indent: int) -> None:
+            if not text:
+                return
+            lead = " " * indent + (_style.muted(label) + " " if label else "")
+            pad = " " * (indent + (len(label) + 1 if label else 0))
+            lines = textwrap.wrap(" ".join(str(text).split()), width=width - len(pad),
+                                  break_long_words=False, break_on_hyphens=False)
+            click.echo(lead + lines[0])
+            for line in lines[1:]:
+                click.echo(pad + line)
+
+        if not dimension:
+            dims = data["dimensions"]
+            count = sum(len(d["values"]) for d in dims)
+            click.echo(_style.title(root) + f": vocabulary {_style.strong(data['version'][:12])}"
+                       + _style.muted(f" · {len(dims)} dimensions, {count} values"))
+            for d in dims:
+                click.echo("")
+                click.echo(f"{_style.strong(d['name'])} {d['role']}  " + _style.muted(d["question"]))
+                column = max((len(tag) for tag in d["values"]), default=0)
+                for tag, brief in d["values"].items():
+                    lead = f"  {tag:<{column}}  "      # the briefs start in one column, and wrap back to it
+                    lines = textwrap.wrap(" ".join(brief.split()), width=max(width - len(lead), 30),
+                                          break_long_words=False, break_on_hyphens=False) or [""]
+                    click.echo(lead + lines[0])
+                    for line in lines[1:]:
+                        click.echo(" " * len(lead) + line)
+            for r in data.get("rejected") or []:
+                click.echo("\n" + _style.title("Rejected") + _style.muted(" — concepts a person turned down, and why"))
+                wrapped(f"{r['concept']}:", r.get("reason", "") + (f" (see {r['see']})" if r.get("see") else ""), 2)
+            click.echo("\n" + _style.muted("`oo enact vocabulary DIMENSION` gives each entry in full · --request, the "
+                                           "guide an agent classifies a request with · --json, for programs"))
+            return
+
+        d = data["dimensions"][0]
+        asked = " · asked of requests" if d.get("request") else ""
+        click.echo(_style.title(d["name"]) + f" {d['role']}" +
+                   _style.muted(f" · pack {d['pack']} · weight {d['weight']}{asked} · vocabulary {data['version'][:12]}"))
+        entry = d.get("entry") or {}
+        wrapped("", entry.get("brief", ""), 2)
+        for label, key in (("when:", "when"), ("not:", "when_not"), ("example:", "example")):
+            wrapped(label, entry.get(key, ""), 2)
+        for v in d["values"]:
+            e, rule = v.get("entry") or {}, v.get("request")
+            click.echo("")
+            click.echo(_style.strong(v["tag"]) + "  " + e.get("brief", "") + (_style.muted("  (any)") if v.get("any") else ""))
+            for label, key in (("when:", "when"), ("not:", "when_not"), ("example:", "example")):
+                wrapped(label, e.get(key, ""), 4)
+            if rule:
+                wrapped("words:", ", ".join(rule.get("words") or []), 4)
+                wrapped("give it if:", rule.get("give_if", ""), 4)
+                wrapped("not if:", rule.get("not_if", ""), 4)
+            if v.get("source"):
+                wrapped("source:", v["source"], 4)
+
     def enact_mailbox(self, *, where: Environment, text: Optional[str], kind: str, to: Optional[str], about: Optional[str],
                        resolves: Optional[str], show_all: bool) -> None:
         """List the store's mailbox, or leave a message in it."""

@@ -211,6 +211,7 @@ printed by the session-start hook, so a new session sees them without being aske
 | `oo enact reload` | ask running servers to restart into the installed code (`--signal` reaches other projects') |
 | `oo enact mailbox [--post TEXT]` | read or leave messages for other sessions and agents |
 | `oo enact status` | which store, its version, reviews waiting, proposals |
+| `oo enact vocabulary [DIMENSION]` | the store's current vocabulary: every dimension and value, or one dimension in full (`--request`: the guide an agent classifies a request with; `--scope global`: another store) |
 | `oo enact accept [--all]` | see what is waiting, in words, and accept what you agree with |
 | `oo enact accept --pack <proposal>` | make a drafted vocabulary pack live |
 | `oo enact ingest <file>` | bring in hand-written memories |

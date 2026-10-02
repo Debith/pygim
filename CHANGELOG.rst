@@ -78,6 +78,7 @@ Removed
 
 Added
 ~~~~~
+- ENACT: Add ``oo enact vocabulary [DIMENSION] [--request] [--scope NAME] [--json]`` to show a store's current vocabulary to a person. It uses the same ``vocabulary`` tool an agent calls and writes nothing. Without arguments it lists every dimension, its role and each value's brief. A DIMENSION gives each entry in full with its request rule. ``--request`` prints the guide an agent classifies requests with.
 - PathLike: Add a JSON Lines engine — ``.jsonl``/``.ndjson`` (or ``engine="jsonl"``) read as a list, one item per document, via simdjson's document stream, and write one compact JSON document per line from a list root; ``pygim.pathlike.jsonlpath`` is the typed class and ``.engine`` reports ``simdjson-ndjson``. Parse errors name the file and line.
 - PathLike: Add ``file.write_bytes(data)`` and ``file.mkdir(parents=, exist_ok=)`` (pathlib parity).
 - CLI: Add ``pygim stubs [--check]`` — regenerates the engine block of ``pygim/pathlike.pyi`` from the built module (a test keeps it current).
