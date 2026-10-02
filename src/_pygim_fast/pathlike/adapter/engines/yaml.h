@@ -85,6 +85,20 @@ inline py::object node_to_py(ryml::ConstNodeRef node, KeyCache& keys) {
     return py::none();                                    // empty document
 }
 
+// Text -> tree, with no Python involved, so callers run it with the GIL
+// released. A parse error names `origin` (the file, or what the text is).
+[[nodiscard]] inline ryml::Tree parse_yaml(std::string_view text, std::string_view origin) {
+    ensure_throwing_callbacks();
+    ryml::Tree tree;
+    try {
+        tree = ryml::parse_in_arena(ryml::csubstr(text.data(), text.size()));
+    } catch (const std::runtime_error& e) {
+        throw std::runtime_error(std::string(e.what()) + " in " + std::string(origin));
+    }
+    tree.resolve();                                 // expand anchors / *aliases
+    return tree;
+}
+
 // File I/O and parsing run with the GIL RELEASED (pure C++; the throwing ryml
 // callback is GIL-free too), so reads scale across Python threads. Only the
 // materialisation into Python objects reacquires the GIL.
@@ -92,15 +106,19 @@ inline py::object node_to_py(ryml::ConstNodeRef node, KeyCache& keys) {
     ryml::Tree tree;
     {
         py::gil_scoped_release nogil;
-        ensure_throwing_callbacks();
         const std::string bytes = f.read_bytes();
         require_utf8(bytes, f.fspath());
-        try {
-            tree = ryml::parse_in_arena(ryml::csubstr(bytes.data(), bytes.size()));
-        } catch (const std::runtime_error& e) {
-            throw std::runtime_error(std::string(e.what()) + " in " + f.fspath());
-        }
-        tree.resolve();                             // expand anchors / *aliases
+        tree = parse_yaml(bytes, f.fspath());
+    }
+    return node_to_py(tree.crootref(), keys);
+}
+
+// The same from text in memory (front matter inside a markdown file).
+[[nodiscard]] inline py::object loads_yaml(std::string_view text, std::string_view origin, KeyCache& keys) {
+    ryml::Tree tree;
+    {
+        py::gil_scoped_release nogil;
+        tree = parse_yaml(text, origin);
     }
     return node_to_py(tree.crootref(), keys);
 }
@@ -181,21 +199,25 @@ inline void py_to_node(ryml::Tree& tree, ryml::NodeRef node, py::handle obj, boo
 }
 
 // The document model is built under the GIL (it reads Python objects); emit
-// and the file write run with the GIL released.
-inline void write_ryml(const file& f, py::handle obj, bool json_mode) {
+// runs with the GIL released.
+[[nodiscard]] inline std::string dumps_ryml(py::handle obj, bool json_mode) {
     ryml::Tree tree;
     ryml::NodeRef root = tree.rootref();
     py_to_node(tree, root, obj, json_mode);
-    {
-        py::gil_scoped_release nogil;
-        std::string text;
-        if (json_mode) {
-            ryml::emitrs_json(tree, tree.root_id(), &text);
-        } else {
-            ryml::emitrs_yaml(tree, tree.root_id(), &text);
-        }
-        write_text_file(f, text);
+    py::gil_scoped_release nogil;
+    std::string text;
+    if (json_mode) {
+        ryml::emitrs_json(tree, tree.root_id(), &text);
+    } else {
+        ryml::emitrs_yaml(tree, tree.root_id(), &text);
     }
+    return text;
+}
+
+inline void write_ryml(const file& f, py::handle obj, bool json_mode) {
+    const std::string text = dumps_ryml(obj, json_mode);
+    py::gil_scoped_release nogil;
+    write_text_file(f, text);
 }
 
 }  // namespace pygim::pathlike::detail
@@ -221,6 +243,11 @@ struct yaml {
 
     static py::object load(const file& f, detail::KeyCache& keys) { return detail::load_yaml(f, keys); }
     static void write(const file& f, py::handle obj) { detail::write_ryml(f, obj, /*json_mode=*/false); }
+    // The text half (adapter.h TextEngine): what markdown front matter parses and writes through.
+    static py::object loads(std::string_view text, std::string_view origin, detail::KeyCache& keys) {
+        return detail::loads_yaml(text, origin, keys);
+    }
+    static std::string dumps(py::handle obj) { return detail::dumps_ryml(obj, /*json_mode=*/false); }
 };
 
 }  // namespace pygim::pathlike::engines

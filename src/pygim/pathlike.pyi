@@ -11,7 +11,7 @@ a test.
 """
 
 import os
-from typing import Any, Iterable, Iterator, Literal, NamedTuple, overload
+from typing import Any, Iterable, Iterator, Literal, NamedTuple, TypeVar, overload
 
 PathLike = str | bytes | os.PathLike[str] | path
 
@@ -200,11 +200,129 @@ def default_store() -> PathStore:
     """The module's default PathStore: what path(text) without store= interns into."""
 
 
+class markdown:
+    """The ``pygim.pathlike.markdown`` submodule (bound by the markdown engine; typed here
+    as a namespace because the extension is one module). ``path("x.md").read()`` returns
+    a ``Document``; each block is an instance of its kind's class (``Heading``, ``Code``,
+    ``Table``, ...), which holds only that kind's properties. The functions build markdown
+    text: what they are given is markdown, and ``escape()`` makes plain text safe."""
+
+    class Block:
+        """One block of a Document: a view (the document and an index), never a copy."""
+        lines: tuple[int, int]
+        span: tuple[int, int]
+        text: str
+        plain: str
+        children: list[markdown.Block]
+        parent: markdown.Block | None
+        def html(self) -> str: ...
+
+    class FrontMatter(Block):
+        raw: str
+        engine: str
+
+    class Heading(Block):
+        level: int
+        title: str
+        slug: str
+        content: str
+
+    class Paragraph(Block):
+        content: str
+
+    class Code(Block):
+        fenced: bool
+        info: str | None
+        lang: str | None
+        code: str
+
+    class Html(Block):
+        raw: str
+
+    class ThematicBreak(Block): ...
+
+    class Quote(Block): ...
+
+    class List(Block):
+        ordered: bool
+        start: int | None
+        tight: bool
+
+    class Item(Block):
+        checked: bool | None
+
+    class Table(Block):
+        header: list[str]
+        rows: list[list[str]]
+        align: list[str | None]
+
+    class Definition(Block):
+        label: str
+        destination: str
+        title: str
+
+    class Section:
+        """A top-level heading and everything up to the next top-level heading of the
+        same or a higher level (it owns the blank lines before that heading)."""
+        heading: markdown.Heading
+        level: int
+        title: str
+        slug: str
+        lines: tuple[int, int]
+        span: tuple[int, int]
+        text: str
+        blocks: list[markdown.Block]
+        subsections: list[markdown.Section]
+        parent: markdown.Section | None
+
+    class Document:
+        """A parsed markdown document: the exact source text and its block tree.
+        Immutable; edits return a new Document and leave every other byte as it was."""
+        def __init__(self, text: str, *, dialect: Literal["gfm", "commonmark"] = "gfm",
+                     slugs: Literal["github", "toc"] = "github", front_matter: bool = True) -> None: ...
+        text: str
+        dialect: str
+        slugs: str
+        front_matter: Any
+        blocks: list[markdown.Block]
+        sections: list[markdown.Section]
+        plain: str
+        def walk(self) -> list[markdown.Block]: ...
+        def find(self, cls: type[_B]) -> list[_B]: ...
+        def section(self, key: str) -> markdown.Section: ...
+        def html(self) -> str: ...
+        def replace(self, target: markdown.Block | markdown.Section, text: str) -> markdown.Document: ...
+        def with_front_matter(self, data: Any, *, engine: Literal["yaml", "toml"] | None = None) -> markdown.Document: ...
+        def stats(self) -> dict[str, int]: ...
+
+    @staticmethod
+    def escape(text: str) -> str: ...
+    @staticmethod
+    def heading(level: int, text: str) -> str: ...
+    @staticmethod
+    def code(text: str, lang: str = "") -> str: ...
+    @staticmethod
+    def table(header: Iterable[object], rows: Iterable[Iterable[object]], *,
+              align: Iterable[str | None] | None = None) -> str: ...
+    @staticmethod
+    def bullets(items: Iterable[str], *, numbered: bool = False, start: int = 1) -> str: ...
+    @staticmethod
+    def quote(text: str) -> str: ...
+    @staticmethod
+    def front_matter(data: Any, *, engine: Literal["yaml", "toml"] = "yaml") -> str: ...
+    @staticmethod
+    def join(blocks: Iterable[str]) -> str: ...
+
+
+_B = TypeVar("_B", bound="markdown.Block")
+
+
 # --- generated: engines (regenerate with `pygim stubs`) ---
 # Selection accepts FORMAT names, LIBRARY labels and aliases; .engine reports the label.
 Engine = Literal[
     "json", "simdjson",
     "jsonl", "simdjson-ndjson", "ndjson",
+    "md", "pygim-md", "markdown",
     "toml", "toml++", "tomlplusplus",
     "yaml", "rapidyaml", "yml",
 ]
@@ -215,6 +333,10 @@ class jsonpath(path):
 
 class jsonlpath(path):
     """JSON Lines (ndjson) via simdjson's document stream: reads as a list, one item per document, and writes one compact document per line from a list root. Constructing one pins the engine (simdjson-ndjson)."""
+    def __init__(self, path: str | bytes | os.PathLike[str], *, store: PathStore | None = None) -> None: ...
+
+class mdpath(path):
+    """Markdown (CommonMark 0.31.2 with GFM tables, strikethrough and task items) via pygim's own parser: read() returns a markdown.Document (blocks with lines and spans, sections, front matter, HTML) and write() takes a Document or str, so the file round-trips byte for byte. Constructing one pins the engine (pygim-md)."""
     def __init__(self, path: str | bytes | os.PathLike[str], *, store: PathStore | None = None) -> None: ...
 
 class tomlpath(path):

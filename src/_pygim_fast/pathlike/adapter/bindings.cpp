@@ -216,6 +216,7 @@ PYBIND11_MODULE(pathlike, m) {
     const path_docs docs{file_doc(), engine_doc(), read_doc(), write_doc()};
     py::class_<pathview> path_cls = bind_path(Engines{}, m, docs);   // path + <engine>path classes (pathview.h)
     bind_pathset(Engines{}, m, path_cls);                            // PathSet, Filter, Query (pathset.h)
+    bind_extras(Engines{}, m);                                       // an engine's own types (markdown.Document, ...)
 
     // The registry, introspectable: a tuple of EngineInfo(name, label, extensions, aliases, doc).
     m.attr("ENGINES") = engines_record(Engines{});

@@ -44,6 +44,7 @@ for f in docs/examples/*/example_*.py; do python "$f" || break; done
 | pathlike | [example_12_path_stores.py](pathlike/example_12_path_stores.py) | `PathStore` and `store=`: the default table and a private one, derived paths inheriting their table, equality across stores without identity, a PathSet over a store, a lifetime chosen by argument |
 | utils | [example_01_process_memory.py](utils/example_01_process_memory.py) | `rss_bytes` / `peak_rss_bytes` and the MiB forms: a before/after delta around an allocation, and why only the delta means anything |
 | pathlike | [example_11_path_collections.py](pathlike/example_11_path_collections.py) | `PathSet` as one table: set semantics, `+`/`-` with paths or sets, `clone`, Filters (`ext`/`name`/`absolute`, `& | ~`) and lazy Queries, `read_all_files`, `match_pattern`, counting without building |
+| pathlike | [example_13_markdown.py](pathlike/example_13_markdown.py) | Markdown as a `Document`: front matter through the YAML engine, headings with anchors, sections by slug, code by language, table cells, a lossless `replace()`, the builders (`escape`/`table`/`code`/`bullets`/`join`) and HTML |
 | persistence | [arrow_bcp_quickstart.md](arrow_bcp_quickstart.md) | Quickstart for the Arrow/BCP persistence layer (prose walkthrough, requires a database) |
 
 ## Conventions
