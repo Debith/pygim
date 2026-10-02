@@ -197,8 +197,46 @@ class TestGatheringFromADirectory:
         nothing — so a design that starts from a manifest is dead on arrival."""
         assert _inventory.declared_in(project) == []
 
+    def test_a_manifest_is_read_on_a_python_without_tomllib(self, project, monkeypatch):
+        """`tomllib` arrived in Python 3.11; a None in sys.modules is what an import finds on 3.9 and 3.10."""
+        (project / "pyproject.toml").write_text(
+            '[project]\nname = "lib"\ndependencies = ["click>=8"]\n\n'
+            '[project.optional-dependencies]\ntest = ["pytest", "tomli; python_version < \'3.11\'"]\n',
+            encoding="utf-8")
+        monkeypatch.setitem(sys.modules, "tomllib", None)
+        assert _inventory.declared_in(project) == ["click", "pytest", "tomli"]
+
+    def test_a_manifest_that_is_not_toml_declares_nothing_rather_than_failing(self, project):
+        (project / "pyproject.toml").write_text("[project\nname = ", encoding="utf-8")
+        assert _inventory.declared_in(project) == []
+
 
 class TestTheCommandAHumanRuns:
+    def test_a_manifest_is_read_where_python_has_no_tomllib(self, tmp_path):
+        """`tomllib` arrived in Python 3.11. On 3.9 and 3.10 reading a pyproject.toml crashed both the
+        inventory and the map every session starts with — found 2026-10-02 by running it under this
+        machine's py39 environment, while CI's 3.9 and 3.10 jobs stayed green: no test read a real
+        manifest. The shadow package stands in for those Pythons: an import of tomllib that fails."""
+        project = tmp_path / "proj"
+        project.mkdir()
+        (project / "run.py").write_text("import json\n", encoding="utf-8")
+        (project / "pyproject.toml").write_text(
+            '[project]\nname = "proj"\ndependencies = ["no-such-distribution-here"]\n\n'
+            '[project.scripts]\nproj = "proj:main"\n', encoding="utf-8")
+        shadow = tmp_path / "python-without-tomllib" / "tomllib"
+        shadow.mkdir(parents=True)
+        (shadow / "__init__.py").write_text(
+            "raise ModuleNotFoundError(\"No module named 'tomllib'\", name='tomllib')\n", encoding="utf-8")
+        env = {**os.environ, "NO_COLOR": "1", "HOME": str(tmp_path / "home"), "PYTHONPATH": str(shadow.parent)}
+        done = subprocess.run([str(OO), "inventory", "--path", str(project)],
+                              capture_output=True, text=True, env=env, timeout=120)
+        assert done.returncode == 0, done.stderr
+        assert "no-such-distribution-here" in done.stdout          # declared, and not installed here
+        mapped = subprocess.run([str(OO), "inventory", "--map", "--path", str(project)],
+                                capture_output=True, text=True, env=env, timeout=120)
+        assert mapped.returncode == 0, mapped.stderr
+        assert "run as: proj" in mapped.stdout
+
     def test_it_prints_the_join_for_a_project_it_was_pointed_at(self, tmp_path):
         lib = tmp_path / "src" / "lib"
         lib.mkdir(parents=True)

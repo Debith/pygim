@@ -335,22 +335,30 @@ def commands_of(distributions) -> Set[str]:
     return found
 
 
+def manifest_of(root: Path) -> dict:
+    """The project's pyproject.toml as data, or {} when it has none or it is not TOML.
+
+    Read by pygim's own TOML engine, not `tomllib`: that arrived in Python 3.11, and on 3.9 and 3.10
+    importing it crashed the inventory and the project map every session starts with."""
+    from pygim.pathlike import path
+
+    manifest = path(str(root)) / "pyproject.toml"
+    if not manifest.is_file():
+        return {}
+    try:
+        data = manifest.read()
+    except (OSError, RuntimeError, ValueError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
 def declared_in(root: Path) -> List[str]:
     """The distributions a manifest asks for, or nothing when the project has no manifest.
 
     Many projects have none — the dnd project on this machine imports pygim and declares nothing —
     so an empty list is ordinary, and must not be read as "this project declares no dependencies".
     """
-    manifest = root / "pyproject.toml"
-    if not manifest.is_file():
-        return []
-    import tomllib
-
-    try:
-        data = tomllib.loads(manifest.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return []
-    project = data.get("project", {})
+    project = manifest_of(root).get("project", {})
     wanted = list(project.get("dependencies", []) or [])
     for extra in (project.get("optional-dependencies", {}) or {}).values():
         wanted.extend(extra)
@@ -658,16 +666,9 @@ def project_map(root: Path, *, home: Optional[Path] = None, recent: int = 3) -> 
         if elsewhere:
             lines.append("reaches for: " + ", ".join(elsewhere))
 
-    manifest = root / "pyproject.toml"
-    if manifest.is_file():
-        import tomllib
-
-        try:
-            scripts = tomllib.loads(manifest.read_text(encoding="utf-8")).get("project", {}).get("scripts", {})
-        except ValueError:
-            scripts = {}
-        if scripts:
-            lines.append("run as: " + ", ".join(sorted(scripts)))
+    scripts = manifest_of(root).get("project", {}).get("scripts", {})
+    if scripts:
+        lines.append("run as: " + ", ".join(sorted(scripts)))
 
     log = git(["log", f"-{recent}", "--format=%h %s"], root)
     if log:
