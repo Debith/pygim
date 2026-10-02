@@ -25,7 +25,9 @@
 // Line 2 belongs to no block: blank lines between blocks are kept by the
 // splice, never owned by a block.
 
+#include <cstddef>
 #include <cstdint>
+#include <iterator>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -51,23 +53,17 @@ enum class kind : std::uint8_t {
     definition,      // a link reference definition: `[label]: /url "title"`
 };
 
-[[nodiscard]] constexpr std::string_view kind_name(kind k) noexcept {
-    switch (k) {
-        case kind::document: return "document";
-        case kind::front_matter: return "front_matter";
-        case kind::heading: return "heading";
-        case kind::paragraph: return "paragraph";
-        case kind::code: return "code";
-        case kind::html: return "html";
-        case kind::thematic_break: return "thematic_break";
-        case kind::quote: return "quote";
-        case kind::list: return "list";
-        case kind::item: return "item";
-        case kind::table: return "table";
-        case kind::definition: return "definition";
-    }
-    return "?";
-}
+/// The name of every kind, indexed by its value: the one table the adapter
+/// derives its class names from. With reflection (GCC 16) the proofs check
+/// it against the enumerators' own identifiers.
+inline constexpr std::string_view kind_names[] = {
+    "document", "front_matter", "heading", "paragraph", "code", "html",
+    "thematic_break", "quote", "list", "item", "table", "definition",
+};
+inline constexpr std::size_t kind_count = std::size(kind_names);
+static_assert(static_cast<std::size_t>(kind::definition) + 1 == kind_count, "every kind has a name, in order");
+
+[[nodiscard]] constexpr std::string_view kind_name(kind k) noexcept { return kind_names[static_cast<std::size_t>(k)]; }
 
 /// A GFM table column's alignment.
 enum class align : std::uint8_t { none, left, center, right };
@@ -132,6 +128,24 @@ struct tree {
     [[nodiscard]] constexpr const definition* lookup(const std::string& label) const {
         const std::uint32_t* d = labels.try_get_const(label);
         return d ? &definitions[*d] : nullptr;
+    }
+
+    /// The heap bytes this tree holds, exactly: every vector's capacity and
+    /// every string that does not fit in its own object.
+    [[nodiscard]] std::size_t bytes() const noexcept {
+        const auto heap = [](const std::string& s) noexcept -> std::size_t {
+            const char* p = s.data();
+            const char* self = reinterpret_cast<const char*>(&s);
+            return p >= self && p < self + sizeof(s) ? 0 : s.capacity() + 1;   // a short string lives in the object
+        };
+        std::size_t n = blocks.capacity() * sizeof(block) + segments.capacity() * sizeof(segment) +
+                        aligns.capacity() * sizeof(align) + definitions.capacity() * sizeof(definition) +
+                        line_starts.capacity() * sizeof(std::uint32_t);
+        for (const definition& d : definitions) n += heap(d.label) + heap(d.destination) + heap(d.title);
+        const auto& items = labels.storage().items();
+        n += items.capacity() * sizeof(items[0]);
+        for (const auto& item : items) n += heap(item.first);
+        return n;
     }
 
     /// The byte offset where line `n` (1-based) starts; the source size past the last line.

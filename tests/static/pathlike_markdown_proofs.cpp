@@ -12,6 +12,7 @@
 // function returning a bool computed on local objects, so no std::string
 // escapes into an assertion (GCC 13 and 14 cannot constant-evaluate that).
 
+#include "../../src/_pygim_fast/pathlike/engine_list.h"   // PYGIM_PATHLIKE_REFLECTION
 #include "../../src/_pygim_fast/pathlike/markdown/document.h"
 #include "../../src/_pygim_fast/pathlike/markdown/writer.h"
 
@@ -22,6 +23,23 @@
 namespace {
 
 using namespace pygim::pathlike::markdown;
+
+// ── the kinds: their names are the one table the adapter's classes come from ──
+static_assert(kind_name(kind::front_matter) == "front_matter" && kind_name(kind::definition) == "definition");
+#if PYGIM_PATHLIKE_REFLECTION
+// With P2996 reflection (GCC 16) the compiler lists the enumerators itself:
+// kind_names must spell every one of them, in order — so a kind added to the
+// enum without a name, or a name out of step, does not build.
+consteval bool kind_names_are_the_enumerators() {
+    std::size_t i = 0;
+    for (std::meta::info e : std::meta::enumerators_of(^^kind)) {
+        if (i >= kind_count || std::meta::identifier_of(e) != kind_names[i]) return false;
+        ++i;
+    }
+    return i == kind_count;
+}
+static_assert(kind_names_are_the_enumerators(), "kind_names must spell the kind enumerators, in order");
+#endif
 
 // ── line classifiers ───────────────────────────────────────────────────────
 static_assert(atx_level("# x") == 1 && atx_level("###### x") == 6 && atx_level("#") == 1 && atx_level("#\tx") == 1);

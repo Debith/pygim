@@ -10,7 +10,9 @@ Three questions, three sections:
 2. **The stop scan** — the SIMD policy this build uses (SSE2 on x86-64,
    NEON on AArch64) against the scalar reference, over the same corpus
    joined into one text: the A/B of scan.h, both compiled into the same
-   extension and timed in one process.
+   extension and timed in one process. It needs the probes a release does
+   not export: build with ``PYGIM_MARKDOWN_PROBES=1`` (setup.py), else the
+   section is skipped and says so.
 3. **Reading files** — ``path(p).read()`` (read, UTF-8 check, block parse)
    over every file, against ``Path.read_text`` (the read alone).
 
@@ -59,7 +61,9 @@ def main():
     texts = [p.read_text(encoding="utf-8", errors="replace") for p in files]
     size = sum(len(t.encode("utf-8")) for t in texts)
     joined = "\n".join(texts)
-    print(f"corpus: {len(files)} files, {size / 1e6:.2f} MB under {args.corpus} (scan policy: {md.SCAN})\n")
+    probes = hasattr(md, "_stops")   # only in a PYGIM_MARKDOWN_PROBES=1 build
+    print(f"corpus: {len(files)} files, {size / 1e6:.2f} MB under {args.corpus}"
+          f" (scan policy: {md._scan if probes else 'not shown without probes'})\n")
 
     # 1. parse and render
     def parse_all():
@@ -94,13 +98,17 @@ def main():
     print(tabulate(rows, headers=["parse and render", "ms", "MB/s", "vs Python-Markdown"]), "\n")
 
     # 2. the stop scan: SIMD policy against the scalar reference, same process
-    stops = md._stops(joined, "scalar", True)
-    assert stops == md._stops(joined, "simd", True)
-    scan = {name: best(md._stops, joined, name, True) for name in ("scalar", "simd")}
-    print(tabulate([[f"{name} ({md.SCAN if name == 'simd' else 'table'})", f"{s * 1e3:.2f}", f"{size / s / 1e6:.0f}",
-                     f"{scan['scalar'] / s:.2f}x"] for name, s in scan.items()],
-                   headers=["stop scan", "ms", "MB/s", "vs scalar"]))
-    print(f"{stops} stops: one every {size / max(stops, 1):.0f} bytes\n")
+    scan, stops = {}, None
+    if probes:
+        stops = md._stops(joined, "scalar", True)
+        assert stops == md._stops(joined, "simd", True)
+        scan = {name: best(md._stops, joined, name, True) for name in ("scalar", "simd")}
+        print(tabulate([[f"{name} ({md._scan if name == 'simd' else 'table'})", f"{s * 1e3:.2f}", f"{size / s / 1e6:.0f}",
+                         f"{scan['scalar'] / s:.2f}x"] for name, s in scan.items()],
+                       headers=["stop scan", "ms", "MB/s", "vs scalar"]))
+        print(f"{stops} stops: one every {size / max(stops, 1):.0f} bytes\n")
+    else:
+        print("stop scan: skipped — build with PYGIM_MARKDOWN_PROBES=1 to compare the SIMD and scalar policies\n")
 
     # 3. reading files
     def read_pygim():
@@ -116,7 +124,8 @@ def main():
                    headers=["reading every file", "ms", "us per file"]))
 
     sections = {
-        "corpus": {"root": str(args.corpus), "files": len(files), "bytes": size, "stops": stops, "scan": md.SCAN},
+        "corpus": {"root": str(args.corpus), "files": len(files), "bytes": size, "stops": stops,
+                   "scan": md._scan if probes else None},
         "parse": parse,
         "scan": scan,
         "read": reads,

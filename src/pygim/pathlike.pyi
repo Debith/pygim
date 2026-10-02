@@ -11,7 +11,7 @@ a test.
 """
 
 import os
-from typing import Any, Iterable, Iterator, Literal, NamedTuple, overload
+from typing import Any, Iterable, Iterator, Literal, NamedTuple, TypeVar, overload
 
 PathLike = str | bytes | os.PathLike[str] | path
 
@@ -203,47 +203,68 @@ def default_store() -> PathStore:
 class markdown:
     """The ``pygim.pathlike.markdown`` submodule (bound by the markdown engine; typed here
     as a namespace because the extension is one module). ``path("x.md").read()`` returns
-    a ``Document``; the functions below build markdown text: what they are given is
-    markdown, and ``escape()`` makes plain text safe to give them."""
-
-    SCAN: str
-    """The stop-scan policy this build uses: 'sse2', 'neon' or 'scalar'."""
+    a ``Document``; each block is an instance of its kind's class (``Heading``, ``Code``,
+    ``Table``, ...), which holds only that kind's properties. The functions build markdown
+    text: what they are given is markdown, and ``escape()`` makes plain text safe."""
 
     class Block:
-        """One block of a Document: a view (the document and an index), never a copy.
-        Properties that do not apply to its ``kind`` are None."""
-        kind: str
-        """'front_matter', 'heading', 'paragraph', 'code', 'html', 'thematic_break',
-        'quote', 'list', 'item', 'table' or 'definition'."""
+        """One block of a Document: a view (the document and an index), never a copy."""
         lines: tuple[int, int]
         span: tuple[int, int]
         text: str
         plain: str
-        content: str | None
         children: list[markdown.Block]
         parent: markdown.Block | None
-        level: int | None
-        title: str | None
-        slug: str | None
+        def html(self) -> str: ...
+
+    class FrontMatter(Block):
+        raw: str
+        engine: str
+
+    class Heading(Block):
+        level: int
+        title: str
+        slug: str
+        content: str
+
+    class Paragraph(Block):
+        content: str
+
+    class Code(Block):
+        fenced: bool
         info: str | None
         lang: str | None
-        code: str | None
-        raw: str | None
-        ordered: bool | None
+        code: str
+
+    class Html(Block):
+        raw: str
+
+    class ThematicBreak(Block): ...
+
+    class Quote(Block): ...
+
+    class List(Block):
+        ordered: bool
         start: int | None
-        tight: bool | None
+        tight: bool
+
+    class Item(Block):
         checked: bool | None
-        header: list[str] | None
-        rows: list[list[str]] | None
-        align: list[str | None] | None
-        label: str | None
-        destination: str | None
-        def html(self) -> str: ...
+
+    class Table(Block):
+        header: list[str]
+        rows: list[list[str]]
+        align: list[str | None]
+
+    class Definition(Block):
+        label: str
+        destination: str
+        title: str
 
     class Section:
         """A top-level heading and everything up to the next top-level heading of the
         same or a higher level (it owns the blank lines before that heading)."""
-        heading: markdown.Block
+        heading: markdown.Heading
         level: int
         title: str
         slug: str
@@ -267,8 +288,7 @@ class markdown:
         sections: list[markdown.Section]
         plain: str
         def walk(self) -> list[markdown.Block]: ...
-        def find(self, kind: str | None = None, *, level: int | None = None,
-                 lang: str | None = None) -> list[markdown.Block]: ...
+        def find(self, cls: type[_B]) -> list[_B]: ...
         def section(self, key: str) -> markdown.Section: ...
         def html(self) -> str: ...
         def replace(self, target: markdown.Block | markdown.Section, text: str) -> markdown.Document: ...
@@ -292,6 +312,9 @@ class markdown:
     def front_matter(data: Any, *, engine: Literal["yaml", "toml"] = "yaml") -> str: ...
     @staticmethod
     def join(blocks: Iterable[str]) -> str: ...
+
+
+_B = TypeVar("_B", bound="markdown.Block")
 
 
 # --- generated: engines (regenerate with `pygim stubs`) ---

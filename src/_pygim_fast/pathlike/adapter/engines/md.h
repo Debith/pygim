@@ -36,13 +36,13 @@ namespace pygim::pathlike::detail {
         bytes = f.read_bytes();
         require_utf8(bytes, f.fspath());
     }
-    return py::cast(markdown_py::document_ref{markdown_py::make_doc(std::move(bytes), "gfm", "github", true, f.fspath())});
+    return py::cast(markdown_py::document_ref{markdown_py::parse(std::move(bytes), "gfm", "github", true, f.fspath())});
 }
 
 inline void write_markdown(const file& f, py::handle obj) {
     std::string text;
     if (py::isinstance<markdown_py::document_ref>(obj)) {
-        text = obj.cast<const markdown_py::document_ref&>().doc->source();
+        text = obj.cast<const markdown_py::document_ref&>().doc->core().source();
     } else if (py::isinstance<py::str>(obj)) {
         text = obj.cast<std::string>();
     } else {

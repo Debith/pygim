@@ -11,9 +11,7 @@ the YAML and TOML engines, and builders whose output parses back.
 import importlib.util
 import json
 import pathlib
-import random
 import time
-import unicodedata
 
 import pytest
 
@@ -118,12 +116,33 @@ def test_a_parse_never_fails_but_invalid_utf8_does(temp_dir):
 # --------------------------------------------------------------------------- #
 # Blocks: kinds, lines, spans that slice the source
 # --------------------------------------------------------------------------- #
-def test_blocks_are_the_top_level_structure():
+def names(blocks):
+    return [type(b).__name__ for b in blocks]
+
+
+def test_blocks_are_the_top_level_structure_each_of_its_own_class():
     doc = md.Document(NOTES)
-    assert [b.kind for b in doc.blocks] == [
-        "front_matter", "heading", "paragraph", "heading", "paragraph", "code",
-        "heading", "table", "list", "quote", "definition",
+    assert names(doc.blocks) == [
+        "FrontMatter", "Heading", "Paragraph", "Heading", "Paragraph", "Code",
+        "Heading", "Table", "List", "Quote", "Definition",
     ]
+    assert all(isinstance(b, md.Block) for b in doc.walk())
+
+
+def test_a_block_has_only_its_own_kind_s_properties():
+    doc = md.Document(NOTES)
+    (heading, paragraph) = doc.blocks[1:3]
+    assert heading.level == 1 and not hasattr(paragraph, "level")
+    assert not hasattr(heading, "rows") and not hasattr(heading, "lang")
+    assert doc.find(md.Table)[0].align == ["left", "right"]
+
+
+def test_find_takes_a_block_class():
+    doc = md.Document(NOTES)
+    assert names(doc.find(md.Heading)) == ["Heading"] * 3
+    assert doc.find(md.Block) == doc.walk()
+    with pytest.raises(TypeError, match="Block class"):
+        doc.find("heading")
 
 
 def test_every_block_slices_the_source_by_span_and_lines():
@@ -138,52 +157,49 @@ def test_every_block_slices_the_source_by_span_and_lines():
 
 def test_walk_is_depth_first_and_children_know_their_parent():
     doc = md.Document("> - a\n>   - b\n")
-    kinds = [b.kind for b in doc.walk()]
-    assert kinds == ["quote", "list", "item", "paragraph", "list", "item", "paragraph"]
-    inner = doc.find("paragraph")[1]
-    assert inner.plain == "b" and inner.parent.kind == "item" and inner.parent.parent.kind == "list"
+    assert names(doc.walk()) == ["Quote", "List", "Item", "Paragraph", "List", "Item", "Paragraph"]
+    inner = doc.find(md.Paragraph)[1]
+    assert inner.plain == "b" and isinstance(inner.parent, md.Item) and isinstance(inner.parent.parent, md.List)
     assert doc.blocks[0].parent is None
 
 
 def test_headings_have_level_title_and_unique_github_slugs():
     doc = md.Document(NOTES)
-    hs = doc.find("heading")
+    hs = doc.find(md.Heading)
     assert [(h.level, h.title, h.slug) for h in hs] == [(1, "Notes", "notes"), (2, "Usage", "usage"), (2, "Usage", "usage-1")]
-    assert doc.find("heading", level=2) == hs[1:]
 
 
 def test_toc_slugs_match_python_markdowns_anchors():
     doc = md.Document("# Ünïcode  café\n\n# Ünïcode  café\n\n# C++ & C#\n", slugs="toc")
-    assert [h.slug for h in doc.find("heading")] == ["unicode-cafe", "unicode-cafe_1", "c-c"]
+    assert [h.slug for h in doc.find(md.Heading)] == ["unicode-cafe", "unicode-cafe_1", "c-c"]
     github = md.Document("# Ünïcode  café\n\n# C++ & C#\n")
-    assert [h.slug for h in github.find("heading")] == ["ünïcode--café", "c--c"]
+    assert [h.slug for h in github.find(md.Heading)] == ["ünïcode--café", "c--c"]
 
 
 def test_hashes_inside_fenced_code_are_not_headings():
     doc = md.Document("# Real\n\n```md\n# Fake\n## 1. Fake\n```\n\n    # indented\n")
-    assert [h.title for h in doc.find("heading")] == ["Real"]
+    assert [h.title for h in doc.find(md.Heading)] == ["Real"]
     assert [s.title for s in doc.sections] == ["Real"]
 
 
 def test_setext_headings_are_headings():
     doc = md.Document("Title\n=====\n\nSub\n---\n")
-    assert [(h.level, h.title) for h in doc.find("heading")] == [(1, "Title"), (2, "Sub")]
-    assert doc.find("heading")[0].lines == (1, 2)
+    assert [(h.level, h.title) for h in doc.find(md.Heading)] == [(1, "Title"), (2, "Sub")]
+    assert doc.find(md.Heading)[0].lines == (1, 2)
 
 
 def test_code_blocks_give_language_info_and_code():
     doc = md.Document(NOTES)
-    (code,) = doc.find("code")
-    assert (code.lang, code.info, code.code) == ("bash", "bash", "oo enact read\n")
-    assert doc.find("code", lang="bash") == [code] and doc.find("code", lang="python") == []
-    nested = md.Document("- item\n\n  ```py title=\"x\"\n  a = 1\n    b\n  ```\n").find("code")[0]
+    (code,) = doc.find(md.Code)
+    assert (code.lang, code.info, code.code, code.fenced) == ("bash", "bash", "oo enact read\n", True)
+    nested = md.Document("- item\n\n  ```py title=\"x\"\n  a = 1\n    b\n  ```\n").find(md.Code)[0]
     assert (nested.lang, nested.info, nested.code) == ("py", 'py title="x"', "a = 1\n  b\n")
-    indented = md.Document("    x = 1\n").find("code")[0]
-    assert (indented.lang, indented.info, indented.code) == (None, None, "x = 1\n")
+    indented = md.Document("    x = 1\n").find(md.Code)[0]
+    assert (indented.lang, indented.info, indented.code, indented.fenced) == (None, None, "x = 1\n", False)
 
 
 def test_tables_give_header_rows_and_alignment_as_plain_text():
-    (t,) = md.Document(NOTES).find("table")
+    (t,) = md.Document(NOTES).find(md.Table)
     assert t.header == ["Term", "Meaning"]
     assert t.rows == [["a|b", "bold"]]
     assert t.align == ["left", "right"]
@@ -191,26 +207,26 @@ def test_tables_give_header_rows_and_alignment_as_plain_text():
 
 def test_lists_and_task_items():
     doc = md.Document(NOTES)
-    (lst,) = doc.find("list")
+    (lst,) = doc.find(md.List)
     assert (lst.ordered, lst.start, lst.tight) == (False, None, True)
     assert [i.checked for i in lst.children] == [True, False]
     assert [i.plain for i in lst.children] == ["done", "open"]
-    ordered = md.Document("3. a\n\n4. b\n").find("list")[0]
+    ordered = md.Document("3. a\n\n4. b\n").find(md.List)[0]
     assert (ordered.ordered, ordered.start, ordered.tight) == (True, 3, False)
-    assert md.Document("- a\n").find("item")[0].checked is None
+    assert md.Document("- a\n").find(md.Item)[0].checked is None
 
 
 def test_quotes_contain_blocks():
-    (q,) = md.Document(NOTES).find("quote")
-    assert [c.kind for c in q.children] == ["paragraph"]
+    (q,) = md.Document(NOTES).find(md.Quote)
+    assert names(q.children) == ["Paragraph"]
     assert q.plain == "quoted\ntext"
 
 
 def test_definitions_are_blocks_and_resolve_references():
     doc = md.Document(NOTES + "\nSee [the site][ref].\n")
-    (d,) = doc.find("definition")
+    (d,) = doc.find(md.Definition)
     assert (d.label, d.destination, d.title) == ("ref", "https://example.com", "Example")
-    assert doc.find("paragraph")[-1].plain == "See the site."
+    assert doc.find(md.Paragraph)[-1].plain == "See the site."
     assert '<a href="https://example.com" title="Example">the site</a>' in doc.html()
 
 
@@ -226,9 +242,9 @@ def test_crlf_line_endings_change_nothing_but_the_bytes(temp_dir):
     f.write_bytes(NOTES.replace("\n", "\r\n").encode("utf-8"))   # written as bytes: a text write would not test it
     crlf = pygim.path(f).read()
     lf = md.Document(NOTES)
-    assert [(b.kind, b.lines, b.plain) for b in crlf.walk()] == [(b.kind, b.lines, b.plain) for b in lf.walk()]
+    assert [(type(b), b.lines, b.plain) for b in crlf.walk()] == [(type(b), b.lines, b.plain) for b in lf.walk()]
     assert crlf.front_matter == lf.front_matter
-    assert crlf.find("code")[0].code == "oo enact read\n"
+    assert crlf.find(md.Code)[0].code == "oo enact read\n"
     for b in crlf.walk():
         assert crlf.text[b.span[0]:b.span[1]] == b.text
 
@@ -238,11 +254,14 @@ def test_stats_report_exact_bytes():
     s = doc.stats()
     assert s["source"] == len(NOTES.encode("utf-8")) and s["blocks"] == len(doc.walk()) and s["lines"] == NOTES.count("\n")
     assert s["bytes"] > s["source"]
+    bigger = md.Document(NOTES * 4).stats()
+    assert bigger["bytes"] > s["bytes"]
 
 
-def test_repr_names_kind_and_lines():
+def test_repr_names_class_and_lines():
     doc = md.Document(NOTES)
-    assert repr(doc.blocks[1]) == "Block(heading, lines 5-5, 'Notes')"
+    assert repr(doc.blocks[1]) == "Heading(lines 5-5, 'Notes')"
+    assert repr(doc.sections[1]) == "Section(2, 'Usage', lines 9-16)"
     assert repr(doc).startswith("Document(gfm, 11 blocks, 29 lines")
 
 
@@ -265,14 +284,14 @@ def test_toml_front_matter_reads_through_the_toml_engine():
 def test_no_front_matter_is_none_and_an_unclosed_fence_is_a_rule():
     assert md.Document("# x\n").front_matter is None
     doc = md.Document("---\nnot closed\n")
-    assert doc.front_matter is None and doc.blocks[0].kind == "thematic_break"
-    assert md.Document(NOTES, front_matter=False).blocks[0].kind == "thematic_break"
+    assert doc.front_matter is None and isinstance(doc.blocks[0], md.ThematicBreak)
+    assert isinstance(md.Document(NOTES, front_matter=False).blocks[0], md.ThematicBreak)
 
 
 def test_invalid_front_matter_names_the_lines_and_the_file(temp_dir):
     f = _write(temp_dir, "bad.md", "---\nkey: [unclosed\n---\n# x\n")
     doc = pygim.path(f).read()
-    assert doc.find("heading")[0].title == "x"   # the body still reads
+    assert doc.find(md.Heading)[0].title == "x"   # the body still reads
     with pytest.raises(RuntimeError, match=r"front matter \(lines 1-3\) of .*bad\.md"):
         doc.front_matter
 
@@ -297,7 +316,7 @@ def test_sections_nest_by_level_and_own_their_lines():
     assert (notes.title, notes.level, notes.slug, notes.lines) == ("Notes", 1, "notes", (5, 29))
     assert (usage.lines, usage1.lines) == ((9, 16), (17, 29))
     assert notes.subsections == [usage, usage1] and usage.parent == notes and notes.parent is None
-    assert [b.kind for b in usage.blocks] == ["paragraph", "code"]
+    assert names(usage.blocks) == ["Paragraph", "Code"]
     assert usage.text == doc.text[usage.span[0]:usage.span[1]] and usage.text.startswith("## Usage\n")
     assert doc.section("usage-1") == usage1 and doc.section("Notes") == notes
 
@@ -325,8 +344,10 @@ def test_replacing_a_block_keeps_its_separator_and_empty_text_deletes():
 
 def test_replace_refuses_a_nested_block_and_a_foreign_one():
     doc = md.Document("> a\n")
-    with pytest.raises(ValueError, match="top-level"):
-        doc.replace(doc.find("paragraph")[0], "x")
+    with pytest.raises(ValueError, match="top-level.*a paragraph inside a quote"):
+        doc.replace(doc.find(md.Paragraph)[0], "x")
+    with pytest.raises(TypeError):
+        doc.replace("not a block", "x")
     with pytest.raises(ValueError, match="another document"):
         doc.replace(md.Document("x\n").blocks[0], "y")
 
@@ -386,7 +407,7 @@ TRICKY = ["a*b*c", "[x](y)", "# not a heading", "1. not a list", "- not a list",
 @pytest.mark.parametrize("text", TRICKY)
 def test_escaped_text_reads_back_as_itself(text):
     assert md.Document(md.escape(text)).blocks[0].plain == text
-    assert md.Document(md.heading(2, md.escape(text))).find("heading")[0].title == text
+    assert md.Document(md.heading(2, md.escape(text))).find(md.Heading)[0].title == text
 
 
 def test_heading_validates_its_level():
@@ -399,16 +420,16 @@ def test_code_picks_a_fence_its_code_cannot_close():
     text = "```\nnot the end\n````\n"
     block = md.code(text, lang="md")
     assert block.startswith("`````md\n")
-    (c,) = md.Document(block).find("code")
+    (c,) = md.Document(block).find(md.Code)
     assert (c.code, c.lang) == (text, "md")
-    assert md.Document(md.code("x", lang="weird`lang")).find("code")[0].info == "weird`lang"
+    assert md.Document(md.code("x", lang="weird`lang")).find(md.Code)[0].info == "weird`lang"
 
 
 def test_table_round_trips_its_cells_and_lines_up():
     rows = [["a|b", 1], ["multi\nline", "`x|y`"], ["short"]]
     text = md.table(["Key", "Value"], rows, align=["left", "right"])
     assert text.splitlines()[:2] == ["| Key           |  Value |", "| :------------ | -----: |"]   # widest cell: multi<br>line
-    (t,) = md.Document(text).find("table")
+    (t,) = md.Document(text).find(md.Table)
     assert t.header == ["Key", "Value"] and t.align == ["left", "right"]
     assert t.rows == [["a|b", "1"], ["multiline", "x|y"], ["short", ""]]
     with pytest.raises(ValueError, match="align"):
@@ -419,7 +440,7 @@ def test_bullets_quote_and_join_build_documents():
     text = md.join([md.heading(1, "T"), md.bullets(["one", "two\nlines"]), md.bullets(["a", "b"], numbered=True, start=3),
                     md.quote("q\n\nr"), ""])
     doc = md.Document(text)
-    assert [b.kind for b in doc.blocks] == ["heading", "list", "list", "quote"]
+    assert names(doc.blocks) == ["Heading", "List", "List", "Quote"]
     assert [i.plain for i in doc.blocks[1].children] == ["one", "two\nlines"]
     assert doc.blocks[2].start == 3 and doc.blocks[3].plain == "q\n\nr"
     assert text.endswith("> r\n") and "\n\n\n" not in text
@@ -428,34 +449,53 @@ def test_bullets_quote_and_join_build_documents():
 def test_front_matter_builder_uses_the_engines():
     assert md.front_matter({"a": 1}) == "---\na: 1\n---\n"
     assert md.front_matter({"a": 1}, engine="toml") == "+++\na = 1\n+++\n"
-    with pytest.raises(ValueError, match="yaml or toml"):
+    with pytest.raises(ValueError, match="yaml, toml"):
         md.front_matter({"a": 1}, engine="json")
 
 
 # --------------------------------------------------------------------------- #
-# The SIMD stop scan equals the scalar one; the generated tables are current
+# The module's surface; the SIMD stop scan at every byte offset; generated tables
 # --------------------------------------------------------------------------- #
-def test_simd_stop_scan_equals_the_scalar_reference():
-    rng = random.Random(20261002)
-    alphabet = "ab \n\\`*_[]!<&~é|#"
-    texts = [ex["markdown"] for ex in COMMONMARK]
-    texts += ["".join(rng.choice(alphabet) for _ in range(rng.randrange(0, 300))) for _ in range(300)]
-    texts += ["x" * n + "*" for n in range(0, 140)]   # a stop at every position around the 16- and 64-byte edges
-    for t in texts:
-        assert md._stops(t, "simd") == md._stops(t, "scalar"), repr(t)
-    assert md._stops("a *b*", "scalar") == [2, 4]
+PUBLIC = {"Block", "Code", "Definition", "Document", "FrontMatter", "Heading", "Html", "Item", "List", "Paragraph",
+          "Quote", "Section", "Table", "ThematicBreak",
+          "bullets", "code", "escape", "front_matter", "heading", "join", "quote", "table"}
+
+
+def test_the_module_exports_its_api_and_no_test_hooks():
+    assert {n for n in dir(md) if not n.startswith("_")} == PUBLIC
+
+
+# Each stop byte, at every offset across two 64-byte words, must change the parse
+# as markup does: a stop the SIMD scan missed would leave the markup as text.
+STOPS = {
+    "*": ("*a*", "a"), "_": ("-_a_", "-a"), "`": ("`a`", "a"), "[": ("[a](u)", "a"), "!": ("![a](u)", "a"),
+    "<": ("<b>a</b>", "a"), "&": ("&amp;", "&"), "\\": ("\\*", "*"), "~": ("~~a~~", "a"),
+}
+
+
+@pytest.mark.parametrize("stop", sorted(STOPS))
+def test_the_stop_scan_finds_every_stop_at_every_offset(stop):
+    markup, text = STOPS[stop]
+    for n in range(140):
+        assert md.Document("x" * n + markup).blocks[0].plain == "x" * n + text, (stop, n)
+    for n in range(1, 140):   # a line break: two trailing spaces make a hard break only if the newline is seen
+        assert "<br />" in md.Document("x" * n + "  \nb").html(), n
 
 
 def test_generated_unicode_tables_are_current():
+    """tables.h records the generator's digest and its own body's: a stale or
+    hand-edited table fails here without regenerating 1.1 million code points."""
+    import hashlib
+
     root = pathlib.Path(__file__).parents[2]
     gen = root / "tests" / "static" / "gen_markdown_tables.py"
     header = root / "src" / "_pygim_fast" / "pathlike" / "markdown" / "tables.h"
     if not header.is_file():
         pytest.skip("source tree not present (installed wheel)")
     text = header.read_text(encoding="utf-8")
-    if f"Unicode {unicodedata.unidata_version} " not in text:
-        pytest.skip(f"tables.h records another Unicode version than this interpreter's {unicodedata.unidata_version}")
-    spec = importlib.util.spec_from_file_location("gen_markdown_tables", gen)
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    assert mod.render() == text, "stale: run tests/static/gen_markdown_tables.py"
+    head, body = text.split("\n\n", 1)
+    generator = hashlib.sha256(gen.read_bytes().replace(b"\r\n", b"\n")).hexdigest()   # CRLF read as LF (#31)
+    assert f"generator sha256 {generator}" in head, \
+        "stale: tests/static/gen_markdown_tables.py changed; run it"
+    assert f"body sha256 {hashlib.sha256(body.encode('utf-8')).hexdigest()}" in head, \
+        "tables.h was edited by hand; run tests/static/gen_markdown_tables.py"

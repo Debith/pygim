@@ -4,6 +4,8 @@
 // Unicode 15.0.0 (Python's unicodedata) and the HTML5 named character
 // references (html.entities.html5). Every table is sorted, so a lookup is a binary search
 // (unicode.h). Regenerate after a Python upgrade that changes the Unicode version.
+// generator sha256 e5f9b2c748cf25a098df277aa12758676e1acea31ba61965ea8d6f51413d6d7d
+// body sha256 f670dc5a064e9ed841b09c33affa0034281e6f4042096474da066f891b022647
 
 #include <string_view>
 

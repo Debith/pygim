@@ -27,6 +27,10 @@ base_macros = [("VERSION_INFO", repr(scm_version))]
 
 if os.environ.get("PYGIM_BCP_PROFILING", "").strip() == "1":
     base_macros.append(("PYGIM_BCP_PROFILING", "1"))
+# Opt-in: pygim.pathlike.markdown binds its test and benchmark probes (_stops,
+# _scan) only in a build made with PYGIM_MARKDOWN_PROBES=1; a release has none.
+if os.environ.get("PYGIM_MARKDOWN_PROBES", "").strip() == "1":
+    base_macros.append(("PYGIM_MARKDOWN_PROBES", "1"))
 
 
 # Ensure macOS deployment target is high enough for C++23 library features

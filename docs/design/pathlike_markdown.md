@@ -66,7 +66,7 @@ Its `blocks` are `[table]`.
 
 **Scenario: a `#` inside code is not a heading.**
 Given a file with `# not a heading` on a line inside a fenced code block,
-when `doc.find("heading")` is called,
+when `doc.find(markdown.Heading)` is called,
 then the result is empty. The line is content of the code block, because the block parser
 opened the fence before it ever looks for headings.
 
@@ -153,14 +153,21 @@ classDiagram
         writes a Document or a str
         binds the markdown submodule
     }
-    class DocBase {
-        one document whatever its policies
-        turns byte offsets into characters
+    class AnyDocument {
+        a document whose policies are named at run time
+        a variant over dialect x slug rule
+    }
+    class DocumentCore {
+        owns the source and the tree
+        lines, text, finding, splicing an edit
     }
     class Document {
-        owns the source and the tree
-        derives headings, slugs, sections
-        splices an edit
+        <<dialect, slug, scan policies>>
+        inline text, HTML, slugs, sections
+    }
+    class BlockClasses {
+        one Python class per block kind
+        bound by a fold over the kind pack
     }
     class BlockParser {
         <<dialect policy>>
@@ -188,8 +195,10 @@ classDiagram
         <<TextEngine>>
         front matter as TOML
     }
-    MdEngine ..> DocBase : returns
-    DocBase <|-- Document : one per dialect and slug rule
+    MdEngine ..> AnyDocument : returns
+    AnyDocument *-- Document : one of four
+    DocumentCore <|-- Document
+    MdEngine ..> BlockClasses : wraps blocks in
     Document *-- BlockParser : parses with
     Document ..> InlineParser : on demand
     Document ..> HtmlRenderer : html
@@ -201,8 +210,8 @@ classDiagram
 
 | Layer | Files | What it does |
 |---|---|---|
-| core | `pathlike/markdown/*.h` | pybind-free and constexpr: `basic_block_parser<Dialect>` (blocks.h), `basic_inline_parser<Dialect, Scan>` (inlines.h), `basic_stop_index<Scan>` (scan.h), `basic_html_renderer` (render.h), `basic_document<Dialect, Slug, Scan>` (document.h), the writer (writer.h), the link grammars (syntax.h), Unicode and entity lookups (unicode.h over the generated tables.h) |
-| adapter | `adapter/markdown.h` | `Document`, `Block` and `Section` for Python; the four dialect × slug instantiations behind one virtual `doc_base`; character offsets; the builders |
+| core | `pathlike/markdown/*.h` | pybind-free and constexpr: `basic_block_parser<Dialect>` (blocks.h), `basic_inline_parser<Dialect, Scan>` (inlines.h), `basic_stop_index<Scan>` (scan.h), `basic_html_renderer` (render.h), `document_core` and `basic_document<Dialect, Slug, Scan>` (document.h), `any_document` choosing the policies by name (any_document.h), the writer (writer.h), the link grammars (syntax.h), Unicode and entity lookups (unicode.h over the generated tables.h) |
+| adapter | `adapter/markdown.h` | Python objects only: `Document`, `Section`, and one class per block kind from the kind pack; the front matter formats over the YAML and TOML engines; the builders. Probes for tests and benchmarks only in a `PYGIM_MARKDOWN_PROBES=1` build |
 | engine | `adapter/engines/md.h` | `.md`/`.markdown` → `mdpath`; `read()` builds a Document; `write()` writes its text; `bind` adds `pathlike.markdown` |
 | proofs | `tests/static/pathlike_markdown_proofs.cpp` | every line classifier, the link grammars, entities, both slug policies, the scalar scan, the writer, and whole parses under both dialects, evaluated at compile time in every build |
 | tables | `tests/static/gen_markdown_tables.py` | generates `tables.h` from Python: Unicode punctuation and whitespace, case folding, NFKD-to-ASCII folding, the 2,125 HTML5 entities |
@@ -232,7 +241,7 @@ sequenceDiagram
 | 2 | the file is read and checked as UTF-8 (simdjson's validator) without the GIL | 41 µs per file with step 3; `Path.read_text` takes 29 µs |
 | 3 | the block parser walks the lines once, with no inline parsing | 13.0 ms in all (1.5 GB/s) |
 | 4 | the Document owns the source and the tree, and Python holds it by a shared pointer | — |
-| 5 | `section()` and `find("heading")` parse only the headings' inlines, once | — |
+| 5 | `section()` and `find(Heading)` parse only the headings' inlines, once | — |
 | 6 | `html()` parses every leaf's inlines and renders them without the GIL | 104 ms in all |
 
 ## Measured
@@ -293,9 +302,32 @@ noisy diffs. It would also change the block digests that `oo docs serve` uses to
 reader has already seen.
 
 **Policies, chosen by argument.** The dialect (`commonmark`, `gfm`), the slug rule (`github`,
-`toc`) and the scan (`scalar_scan`, `sse2_scan`, `neon_scan`) are template parameters (#81). Python
-chooses the first two by argument, and the adapter type-erases the four instantiations behind
-`doc_base`. The scan is chosen per platform at compile time.
+`toc`) and the scan (`scalar_scan`, `sse2_scan`, `neon_scan`) are template parameters (#81). The
+scan is chosen per platform at compile time. A caller names the other two, so the core's
+`any_document` turns the names into positions in two policy packs and holds a `std::variant`
+over their product, built through a table of constructors at that position. Adding a dialect is
+adding a type to its pack: there is no if-chain to grow. What does not depend on the policies —
+the source, the tree, lines, finding, the edits — is `document_core`, a non-template base, so it
+is compiled once rather than four times, and reached without a visit. A first version
+type-erased the four instantiations behind a virtual interface in the adapter: 32 lines of
+forwarding, and two if-chains on the names. Debith's review asked for less of the adapter and
+none of the chains.
+
+**A block's class is its kind.** A Block is an instance of its kind's class — `Heading`, `Code`,
+`Table`, ... — and each class holds only its kind's properties, so no property tests which kind
+it is on (a first version had one `Block` class whose 17 kind-specific properties each began by
+testing the kind and returning None otherwise: 23 such gates). The classes are a pack of
+descriptors folded into bindings, the idiom of [the engine registry](pathlike_engine_registry.md):
+a descriptor is its kind's tag, docstring and properties; its class name comes from the kind's
+name; a table indexed by the kind wraps a block in its class. Every build proves the pack covers
+every kind exactly once; with C++26 reflection (GCC 16) it also proves the kind names spell the
+enumerators of `kind`, in order. `Document.find` takes the class.
+
+**No test hooks in a release.** The SIMD scan is checked through public behaviour: every stop
+byte, at every offset across two 64-byte words, must change the parse as markup does — a stop the
+scan missed would leave the markup as text. The scalar-against-SIMD comparison the benchmark
+needs (`_stops`, `_scan`) is compiled in only by the opt-in build flag `PYGIM_MARKDOWN_PROBES=1`,
+as `PYGIM_BCP_PROFILING` is for persistence; a release has neither.
 
 **SIMD at the baseline width, 64 bytes a word.** SSE2 is present on every x86-64 CPU and NEON on
 every AArch64 CPU, so no wheel needs a run-time CPU check. AVX2 was rejected: it would need that
@@ -313,14 +345,18 @@ the front matter's lines and the file.
 `StaticRegistryCore` (the flat engine). It is filled once, at the end of the parse, in label
 order, so every insert appends and the build stays O(n log n): 30,000 definitions parse in 17 ms.
 `register_value` keeps the entry already there, which is CommonMark's rule that the first
-definition of a label wins. The adapter's heading index is a `DynamicRegistryCore`. Two stores are
-not registries yet, both for reasons ENACT #131 records:
-- the four-way dialect × slug dispatch is a handful of entries, which #131 exempts;
+definition of a label wins. The Python class of each block kind maps to its kind through a
+`DynamicRegistryCore` (what `find` looks up). Three tables are not registries, for reasons
+ENACT #131 records:
+- the dialect, slug rule, alignment and front matter engine names are a handful of entries each,
+  which #131 exempts;
+- a heading's index by block id is a dense array indexed by the id (constexpr, O(1));
 - the generated Unicode and entity tables are sorted constexpr arrays: a registry that outlives
   constant evaluation (#131's missing static engine) is what they need, and they move when it exists.
 
 **Spans in characters.** The core counts bytes. Python slices `Document.text` by characters, so
-the adapter translates through a per-line table built on first use. `doc.text[a:b] == block.text`
+the core also answers in code points (`document_core::code_points`), through a per-line table
+built on first use. `doc.text[a:b] == block.text`
 holds for every block, and the tests check it with non-ASCII text before the blocks.
 
 ## Rules to keep
@@ -328,12 +364,17 @@ holds for every block, and the tests check it with non-ASCII text before the blo
 - A block's span is whole physical lines. Blank lines between blocks belong to no block, so a
   splice keeps them.
 - Every walk over blocks or inlines is iterative.
-- Every scan policy produces the scalar policy's stop bits; `test_simd_stop_scan_equals_the_scalar_reference`
-  fuzzes this, and CI's macOS runners are the only machines that run the NEON policy.
+- Every scan policy finds every stop: `test_the_stop_scan_finds_every_stop_at_every_offset` checks
+  it through public behaviour on every platform CI runs (its macOS runners are the only machines
+  that run the NEON policy); a `PYGIM_MARKDOWN_PROBES=1` build compares the policies bit for bit.
+- A property belongs to its kind's class; a new kind is a descriptor in `block_kinds`, and the
+  build refuses a kind without one.
+- No test or benchmark hook in a release: probes only behind `PYGIM_MARKDOWN_PROBES=1`.
 - Builders take markdown; `escape()` makes plain text safe.
 - A change to the parser keeps every spec example passing; the test names any that fail.
 - `tables.h` is generated; regenerate it with `tests/static/gen_markdown_tables.py` when Python's
-  Unicode version changes (a test compares it under the version it records).
+  Unicode version changes. It records the generator's sha256 and its own body's, so a test knows
+  in a millisecond that it is current and was not edited by hand.
 
 ## Open
 
