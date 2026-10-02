@@ -206,16 +206,13 @@ def python_files(root: Path) -> List[Tuple[str, str]]:
     from pygim.pathlike import PathSet, path
 
     found = PathSet(path(str(root)).rglob("*.py"))
-    members, texts = found.to_list(), found.read_all_files()
-    if len(members) != len(texts):
+    texts = found.read_all_files()
+    if len(found) != len(texts):
         return []
-    here = Path(root)
     out = []
-    for member, text in zip(members, texts):
-        file = Path(str(member))
-        relative = (file.relative_to(here) if file.is_relative_to(here) else file).as_posix()
-        if not (NOT_OURS & set(relative.split("/"))):
-            out.append((relative, text))
+    for member, text in zip(found.relative_to(str(root)), texts):      # the same members, in order
+        if not (NOT_OURS & set(member.parts)):
+            out.append(("/".join(member.parts), text))
     return out
 
 
@@ -384,7 +381,6 @@ def standard_library() -> Collection[str]:
     them (`sys.stdlib_module_names`); before that they are read off the library's own folders — its
     modules and packages, its compiled extensions (lib-dynload, or DLLs on Windows), and the modules
     built into the interpreter. Part of what `from_machine` looks at, so called only from there."""
-    import os
     import sys
     import sysconfig
     from pygim.pathlike import path
@@ -394,13 +390,15 @@ def standard_library() -> Collection[str]:
         return frozenset(listed)
     names = set(sys.builtin_module_names)
     lib = {sysconfig.get_paths()["stdlib"], sysconfig.get_paths()["platstdlib"]}
-    for folder in lib | {os.path.join(f, "lib-dynload") for f in lib} | {os.path.join(sys.base_prefix, "DLLs")}:
-        if not os.path.isdir(folder):
+    folders = {str(path(f) / below) for f in lib for below in (".", "lib-dynload")} | {str(path(sys.base_prefix) / "DLLs")}
+    for folder in sorted(folders):
+        here = path(folder)
+        if not here.is_dir():
             continue
-        for entry in path(folder).iterdir():
-            name = os.path.basename(str(entry))
+        for entry in here.iterdir():
+            name = entry.name
             head = name.split(".", 1)[0]
-            module = name.endswith((".py", ".so", ".pyd")) or os.path.isfile(os.path.join(folder, name, "__init__.py"))
+            module = name.endswith((".py", ".so", ".pyd")) or (entry / "__init__.py").is_file()
             if module and head.isidentifier() and name != "site-packages":
                 names.add(head)
     return frozenset(names)
@@ -420,20 +418,19 @@ def text_files(root: Path) -> List[Tuple[str, str]]:
     from pygim.pathlike import PathSet, path
     from _pygim._mcp._stores import git
 
+    here = path(str(root))
     listed = git(["ls-files", "-z"], Path(root))
     if listed is not None:
-        names = [n for n in listed.split("\0") if n and n.endswith(TEXT)]
-        found = PathSet([path(str(Path(root) / n)) for n in names])
+        found = PathSet([here / n for n in listed.split("\0") if n and n.endswith(TEXT)])
     else:
-        found = PathSet(path(str(root)).rglob("*"))
-    members, texts = found.to_list(), found.read_all_files()
-    if len(members) != len(texts):
+        found = PathSet(here.rglob("*"))
+    texts = found.read_all_files()
+    if len(found) != len(texts):
         return []
-    here, out = Path(root), []
-    for member, text in zip(members, texts):
-        file = Path(str(member))
-        relative = (file.relative_to(here) if file.is_relative_to(here) else file).as_posix()
-        if relative.endswith(TEXT) and not (NOT_OURS & set(relative.split("/"))):
+    out = []
+    for member, text in zip(found.relative_to(str(root)), texts):      # the same members, in order
+        relative = "/".join(member.parts)
+        if relative.endswith(TEXT) and not (NOT_OURS & set(member.parts)):
             out.append((relative, text if isinstance(text, str) else text.decode("utf-8", "replace")))
     return out
 
@@ -461,9 +458,11 @@ class Host:
         """A command installed in this environment, by path — a session's shell does not activate it.
         POSIX environments keep commands in bin/; Windows ones in Scripts\\, as .exe, with a conda
         environment's python.exe at its root."""
+        from pygim.pathlike import path
+
         for found in (self.prefix / "bin" / name, self.prefix / "Scripts" / f"{name}.exe",
                       self.prefix / "Scripts" / name, self.prefix / f"{name}.exe"):
-            if found.exists():
+            if path(str(found)).exists():
                 return found
         return None
 
@@ -484,24 +483,24 @@ def environments(root: Path, home: Path) -> List[Host]:
     the conda environment by itself and the other gave up on the inventory. An editable install says
     which checkout it came from (`direct_url.json`), which is what makes this work for any project
     developed with `pip install -e`, not only this one. *home* is the one the program was given."""
-    import json
-    import os
     from urllib.parse import urlparse
     from urllib.request import url2pathname
     from pygim.pathlike import path
 
-    root = Path(root).resolve()
+    here = path(str(root)).resolve()
+    root = Path(str(here))
     candidates: List[Tuple[Path, str, str]] = []
     for base in CONDA_ROOTS:
-        conda = Path(home) / base
+        conda = path(str(home)) / base
         if (conda / "conda-meta").is_dir():
-            candidates.append((conda, "conda env", "base"))
+            candidates.append((Path(str(conda)), "conda env", "base"))
         if (conda / "envs").is_dir():
-            candidates += [(Path(str(env)), "conda env", env.name) for env in path(str(conda / "envs")).iterdir()]
-    candidates += [(root / name, "venv", name) for name in LOCAL_ENVS if (root / name / "pyvenv.cfg").is_file()]
+            candidates += [(Path(str(env)), "conda env", env.name) for env in (conda / "envs").iterdir()]
+    candidates += [(root / name, "venv", name) for name in LOCAL_ENVS if (here / name / "pyvenv.cfg").is_file()]
     named = ""
-    if (root / "environment.yml").is_file():
-        for line in (root / "environment.yml").read_text(encoding="utf-8", errors="replace").splitlines():
+    environment = here / "environment.yml"
+    if environment.is_file():
+        for line in environment.read_bytes().decode("utf-8", "replace").splitlines():
             if line.startswith("name:"):
                 named = line.split(":", 1)[1].strip()
 
@@ -511,20 +510,22 @@ def environments(root: Path, home: Path) -> List[Host]:
         records = [record for layout in SITE_PACKAGES
                    for record in path(str(prefix)).glob(layout + "/*.dist-info/direct_url.json")]
         for record in records:
-            real = os.path.realpath(str(record))
-            if real in seen:                      # lib/python3.1 may be a link to lib/python3.12
+            real = record.resolve()
+            if str(real) in seen:                 # lib/python3.1 may be a link to lib/python3.12
                 continue
-            seen.add(real)
+            seen.add(str(real))
             try:
-                data = json.loads(Path(real).read_text(encoding="utf-8"))
-            except (OSError, ValueError):
+                data = real.read()                # pygim's JSON engine
+            except (OSError, RuntimeError, ValueError):
+                continue
+            if not isinstance(data, dict):
                 continue
             url = urlparse(data.get("url", ""))          # pip writes file:///C:/… on Windows
             if url.scheme == "file" and (data.get("dir_info") or {}).get("editable") \
-                    and Path(url2pathname(url.path)).resolve() == root:
-                installs.append(_dist(Path(real).parent.name))
-                record = Path(real).parent / "RECORD"
-                owned.append({line.split(",", 1)[0] for line in record.read_text(encoding="utf-8").splitlines()
+                    and path(url2pathname(url.path)).resolve() == here:
+                installs.append(_dist(real.parent.name))
+                record = real.parent / "RECORD"
+                owned.append({line.split(",", 1)[0] for line in record.read_bytes().decode("utf-8").splitlines()
                               if line and "dist-info" not in line.split(",", 1)[0]} if record.is_file() else set())
         inside = kind == "venv"
         if not (installs or inside or (named and name == named)):
@@ -544,29 +545,31 @@ def _python_version(prefix: Path) -> str:
     """"3.12", read off what the environment keeps — its python link on POSIX, else its pyvenv.cfg,
     else conda-meta's record of the python package, which is all a Windows conda environment has;
     "" when none of them says."""
-    import os
     from pygim.pathlike import path
 
-    linked = os.path.basename(os.path.realpath(str(prefix / "bin" / "python")))
+    env = path(str(prefix))
+    linked = (env / "bin" / "python").resolve().name
     if linked.startswith("python3"):
         return linked[len("python"):]
-    config = prefix / "pyvenv.cfg"
+    config = env / "pyvenv.cfg"
     if config.is_file():
-        for line in config.read_text(encoding="utf-8", errors="replace").splitlines():
+        for line in config.read_bytes().decode("utf-8", "replace").splitlines():
             key, _, value = line.partition("=")
             if key.strip() in ("version", "version_info"):
                 return ".".join(value.strip().split(".")[:2])
-    if (prefix / "conda-meta").is_dir():
-        for record in path(str(prefix / "conda-meta")).glob("python-3*.json"):
-            return ".".join(os.path.basename(str(record))[len("python-"):].split(".")[:2])
+    if (env / "conda-meta").is_dir():
+        for record in (env / "conda-meta").glob("python-3*.json"):
+            return ".".join(record.name[len("python-"):].split(".")[:2])
     return ""
 
 
 def _shown(target: Path, home: Path) -> str:
     """*target* as a person types it: under *home* as ~/…, and with forward slashes, which every shell
     a session runs commands in accepts, Windows' included."""
+    from pygim.pathlike import path
+
     try:
-        return "~/" + Path(target).relative_to(home).as_posix()
+        return "~/" + ("/".join(path(str(target)).relative_to(str(home)).parts) or ".")
     except ValueError:
         return Path(target).as_posix()
 
@@ -591,16 +594,18 @@ def project_map(root: Path, *, home: Optional[Path] = None, recent: int = 3) -> 
     idle in its own work, what it reaches for, how it is run, and what changed last. Under 1.5 KB.
     """
     from _pygim._mcp._stores import git
+    from pygim.pathlike import path
 
     root = Path(root)
+    here = path(str(root))
     listed = git(["ls-files"], root)
     names = [n for n in (listed or "").splitlines() if n]
     lines: List[str] = []
 
     title, about = root.name, ""
     for readme in ("README.md", "README.rst", "README.txt", "README"):
-        if (root / readme).is_file():
-            text = (root / readme).read_text(encoding="utf-8", errors="replace")
+        if (here / readme).is_file():
+            text = (here / readme).read_bytes().decode("utf-8", "replace")
             heads = [ln.strip("#= ").strip() for ln in text.splitlines() if ln.startswith("#")]
             heads = [h for h in heads if h and not h.startswith(("!", "<", "["))]
             title = heads[0] if heads else title
@@ -619,7 +624,7 @@ def project_map(root: Path, *, home: Optional[Path] = None, recent: int = 3) -> 
         lines.append("layout: " + " · ".join(
             f"{d}/ ({ROLES[d] + ', ' if d in ROLES else ''}{n} files)"
             for d, n in sorted(tops.items(), key=lambda kv: -kv[1])[:8]))
-    manifests = [m for m in MANIFESTS if (root / m).is_file()]
+    manifests = [m for m in MANIFESTS if (here / m).is_file()]
     if manifests:
         lines.append("built by: " + ", ".join(manifests))
 

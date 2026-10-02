@@ -112,8 +112,10 @@ class GimmicksCliApp:
         from _pygim import _inventory
         from _pygim._inventory import canonical
 
+        import pygim
+
         root = Path(path) if path else Path(where.cwd)
-        if not root.is_dir():
+        if not pygim.path(str(root)).is_dir():
             raise click.ClickException(f"{root} is not a directory")
         if brief:
             click.echo(_inventory.project_map(root, home=Path(where.home)))
