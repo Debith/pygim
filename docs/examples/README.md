@@ -3,8 +3,9 @@
 Runnable, self-verifying examples for the public `pygim` API. Every file is a
 standalone script: it sets up everything it needs, backs every behaviour
 claim with an `assert`, and prints a single `... OK` line at the end -- so
-the examples double as living documentation that can be executed to verify
-the library.
+each example is documentation that is also a check: running the file executes
+its asserts, and a claim the library no longer honours fails instead of
+reading as if it were still true.
 
 ## Running
 
@@ -24,6 +25,7 @@ for f in docs/examples/*/example_*.py; do python "$f" || break; done
 
 | Area | Example | What it teaches |
 | ------ | --------- | ----------------- |
+| enact | [example_01_request_vocabulary.py](enact/example_01_request_vocabulary.py) | Packaged request questions, memory activity tags, and retrieval across activities |
 | ioc | [example_01_basic_container.py](ioc/example_01_basic_container.py) | Registering providers, transient vs. singleton lifecycles, named variants, decorator registration, provider decorators, interface validation, introspection |
 | ioc | [example_02_autowire.py](ioc/example_02_autowire.py) | Opt-in constructor autowiring from type hints across a multi-layer object graph, default-value fallback, guard rails |
 | ioc | [example_03_testing_with_overrides.py](ioc/example_03_testing_with_overrides.py) | Swapping real implementations for fakes in tests, strict two-way override semantics, singleton cache invalidation |
@@ -67,6 +69,9 @@ for f in docs/examples/*/example_*.py; do python "$f" || break; done
   instead, pointing up (`▲ ... └─`), so it never interrupts the call.
 - Examples clean up any files they create and require nothing beyond an
   installed `pygim` (the persistence quickstart is the documented exception).
-- Each file starts with `# type: ignore`: the compiled extension modules
-  ship no type stubs yet, and the examples favour runtime-verified behaviour
-  over static typing.
+- Each file starts with `# type: ignore`. Part of the public surface carries
+  stubs (`src/pygim/*.pyi` — pathlike, enact, core.testing — kept current by
+  `pygim stubs` and a test), but the rest of the compiled modules the examples
+  call (registry, ioc, each, …) ship none yet, so a type checker would flag
+  every call into those; the marker silences that, and the examples favour
+  runtime-verified behaviour over static typing.

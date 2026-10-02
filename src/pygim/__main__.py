@@ -4,19 +4,13 @@ Python Gimmicks Command-Line Interface.
 """
 
 import click
+from _pygim._cli._banner import BannerGroup
 from _pygim._cli._cli_app import GimmicksCliApp, flag_opt
 
 
-@click.group()
+@click.group(cls=BannerGroup, tagline="Python Gimmicks")
 def cli():
-    r"""\b
-     ___        ___ _
-    | _ \_  _  / __(_)\_ __
-    |  _/ || || (_ | | '  \ \b
-    |_|  \_, / \___|_|_|_|_|
-        |_/Python Gimmicks
-
-    """
+    pass
 
 
 @cli.command()
@@ -53,37 +47,251 @@ def stubs(check):
     GimmicksCliApp().stubs(check=check)
 
 
-class _OoGroup(click.Group):
-    """`oo <verb> ...` runs a verb (``docs serve``); anything else is free text
-    for the assistant; nothing at all shows the help."""
+class _OoGroup(BannerGroup):
+    """`oo <verb> ...` runs a verb; nothing at all shows the help; anything else is an error.
 
-    def parse_args(self, ctx, args):
-        if args and not args[0].startswith("-") and args[0] not in self.commands:
-            ctx.meta["free_text"] = " ".join(args)
-            ctx.args = []
-            return []
-        return super().parse_args(ctx, args)
+    An unknown word used to be taken as free text for an assistant that was never built, which
+    printed a sentence and exited 0 — so `oo memory reload`, a command renamed away on 2026-09-22
+    and still named in the knowledge every session receives, reported success and did nothing. A
+    command that does not exist has to say so, and say it with a status a script can see."""
 
-    def invoke(self, ctx):
-        text = ctx.meta.get("free_text")
-        if text is not None:
-            return GimmicksCliApp().ai(text)
-        return super().invoke(ctx)
+    def resolve_command(self, ctx, args):
+        name = click.utils.make_str(args[0]) if args else ""
+        if args and not name.startswith("-") and self.get_command(ctx, name) is None:
+            import difflib
+
+            near = difflib.get_close_matches(name, self.list_commands(ctx), n=1, cutoff=0.6)
+            ctx.fail(f"No such command {name!r}." + (f" Did you mean {near[0]!r}?" if near else "")
+                     + " Run `oo --help` for the list.")
+        return super().resolve_command(ctx, args)
 
 
-@click.group(cls=_OoGroup, invoke_without_command=True)
+@click.group(cls=_OoGroup, invoke_without_command=True, tagline="AI powered Python Gimmicks")
+@flag_opt("--no-color", "no_color", help="Never colour the output. Colour is already off when the output is "
+                                         "not a terminal, when NO_COLOR is set, or when TERM is dumb.")
 @click.pass_context
-def cli_oo(ctx):
-    r"""\b
-     ___        ___ _
-    | _ \_  _  / __(_)\_ __
-    |  _/ || || (_ | | '  \ \b
-    |_|  \_, / \___|_|_|_|_|
-        |_/ AI powered Python Gimmicks
+def cli_oo(ctx, no_color):
+    """The composition root for the commands: the environment is read once, here, and every command
+    is handed the result. Nothing below reads it again (see `_pygim._config`)."""
+    from _pygim import _config
+    from _pygim._cli import _style
 
-    """
-    if ctx.invoked_subcommand is None and ctx.meta.get("free_text") is None:
+    ctx.obj = _config.from_process(colour=False if no_color else None)
+    _style.use(ctx.obj.colour)
+    if ctx.invoked_subcommand is None:
         click.echo(ctx.get_help())
+
+
+@cli_oo.group()
+def enact():
+    """ENACT: knowledge found by the kind of problem being solved, and what is learned from using it."""
+
+
+_ROOT = click.option("--root", default=None, type=click.Path(file_okay=False),
+                     help="The ENACT store. Default: $PYGIM_ENACT_ROOT, then `git config pygim.enact` "
+                          "(shared by every worktree), then a .enact above the working directory.")
+
+
+@enact.command("setup")
+@click.option("--user", "kind", flag_value="user", help="Create the store in your user data directory.")
+@click.option("--branch", "kind", flag_value="branch",
+              help="Keep the store on an orphan `enact` branch, checked out as a worktree of its own.")
+@click.option("--local", "kind", flag_value="local",
+              help="Keep the store in the project as .enact, committed with the code on this branch.")
+@click.option("--global", "kind", flag_value="global",
+              help="Create this machine's global store, for knowledge about no single project "
+                   "(domain=any): every project's sessions read it, and each write is committed at once.")
+@click.option("--name", default=None, help="--user: the store's name (default: the project directory's name).")
+@click.option("--path", "path", default=None, type=click.Path(file_okay=False),
+              help="--branch: where to check the branch out (default: beside the main worktree). "
+                   "--global: where the global store lives (default: your user data directory).")
+@click.option("--from", "source", default=None, type=click.Path(exists=True, file_okay=False),
+              help="Start the new store as a copy of an existing one, such as a project's .enact.")
+@click.option("--no-register", is_flag=True, help="Do not register the MCP server with Claude Code.")
+@click.pass_obj
+def enact_setup(where, kind, name, path, source, no_register):
+    """Set this project and machine up to use an ENACT store: find or create the store, point every
+    worktree of the clone at it, and register the MCP server with Claude Code at user scope.
+    Run it again on another machine to join a project whose store already exists."""
+    GimmicksCliApp().enact_setup(where=where, kind=kind, name=name, path=path, source=source, register=not no_register)
+
+
+@enact.command("call")
+@click.argument("name")
+@click.option("--json", "arguments", default=None,
+              help="The tool's arguments as a JSON object. Without it, they are read from stdin.")
+@click.option("--session", type=int, default=None,
+              help="Write as this session, so several calls belong together and `review` can gather "
+                   "them. Default: each call is a session of its own.")
+@_ROOT
+@click.pass_obj
+def enact_call(where, name, arguments, session, root):
+    """Call one tool of the agent surface from a shell, and print its JSON result.
+
+    The same dispatch the MCP server uses, so a script drives the whole stack through commands:
+
+        oo enact call read --json '{"hard": ["domain=pygim", "artifact=store", "task=implement"]}'
+
+    Each call is a process, and a process is a session. To make several calls one session:
+
+        export PYGIM_ENACT_SESSION=$(oo enact call session --json '{}' | jq -r .session)
+
+    A refusal is a result: it prints with `refused` and exits 0. Exit 1 means the call could not be
+    made at all — no such tool, or the arguments were not JSON.
+    """
+    GimmicksCliApp().enact_call(where=where.with_root(root).with_session(session), name=name, arguments=arguments)
+
+
+@enact.command("hook")
+@click.pass_obj
+def enact_hook(where):
+    """Answer an agent host's hook, reading its JSON on stdin and writing JSON on stdout.
+
+    Handles SessionStart (the standing knowledge) and PreToolUse (only what the path being written
+    is about). Silent when there is nothing to say, so it can be wired to every write.
+    """
+    GimmicksCliApp().enact_hook(where=where)
+
+
+@enact.command("mcp")
+@_ROOT
+@click.pass_obj
+def enact_mcp(where, root):
+    """Serve the project's store to an agent over MCP (stdio). With no --root it is found from the
+    directory the host starts it in, so one registration serves every project and worktree."""
+    GimmicksCliApp().enact_mcp(where=where.with_root(root))
+
+
+@enact.command("stores")
+@flag_opt("--remote", "remote", help="Also list the stores kept in the remote that are not checked out here.")
+@_ROOT
+@click.pass_obj
+def enact_stores(where, remote, root):
+    """List the stores this machine holds, as a session can name them with `scope`. Nothing is
+    configured: a store is found by its policy's name or its directory's."""
+    GimmicksCliApp().enact_stores(where=where.with_root(root), remote=remote)
+
+
+@enact.command("vocabulary")
+@click.argument("dimension", required=False)
+@flag_opt("--request", "request",
+          help="Print the guide an agent classifies a request with — cue words and decision questions — "
+               "exactly as the default `vocabulary` call delivers it.")
+@click.option("--scope", default=None, metavar="NAME",
+              help="Another store this machine holds, by a name `oo enact stores` lists, such as global. "
+                   "Default: the project's.")
+@flag_opt("--json", "as_json", help="Print the `vocabulary` tool's result as JSON, for programs.")
+@_ROOT
+@click.pass_obj
+def enact_vocabulary(where, dimension, request, scope, as_json, root):
+    """The store's vocabulary, as an agent's `vocabulary` call receives it: every dimension, its role
+    and the brief of each value. Name a DIMENSION for each entry in full — when, when not, an example
+    and the request rule."""
+    GimmicksCliApp().enact_vocabulary(where=where.with_root(root), dimension=dimension, request=request,
+                                      scope=scope, as_json=as_json)
+
+
+@enact.command("mailbox")
+@click.option("--post", "text", default=None, help="Leave a message instead of listing.")
+@click.option("--kind", type=click.Choice(["feedback", "request", "comment"]), default="comment",
+              help="--post: what kind of message it is.")
+@click.option("--to", "to", default=None, help="--post: who it is for (default: whoever reads next).")
+@click.option("--about", default=None, help="--post: what it concerns — a memory, a path, a report.")
+@click.option("--resolves", default=None, help="--post: the message id this closes.")
+@flag_opt("--all", "show_all", help="List resolved messages too.")
+@_ROOT
+@click.pass_obj
+def enact_mailbox(where, text, kind, to, about, resolves, show_all, root):
+    """Messages other sessions, agents and people left in this store — feedback, requests and
+    comments. Lists what is open; `--post` leaves one."""
+    GimmicksCliApp().enact_mailbox(where=where.with_root(root), text=text, kind=kind, to=to, about=about, resolves=resolves,
+                                    show_all=show_all)
+
+
+@enact.command("reload")
+@flag_opt("--signal", "signal_servers",
+          help="Also SIGHUP every running server, including other projects'. A server older than "
+               "this feature has no handler for SIGHUP and will exit instead of reloading.")
+@click.pass_obj
+def enact_reload(where, signal_servers):
+    """Ask the MCP servers on this project's store, and on the global one, to restart into the
+    installed code — after upgrading pygim, or editing the server. Each reloads between messages,
+    so the host's connection survives."""
+    GimmicksCliApp().enact_reload(where=where, signal_servers=signal_servers)
+
+
+@enact.command("ingest")
+@click.argument("corpus", type=click.Path(exists=True, dir_okay=False))
+@_ROOT
+@click.pass_obj
+def enact_ingest(where, corpus, root):
+    """Ingest a hand-written corpus file, reconciled by slug and digest."""
+    GimmicksCliApp().enact_ingest(where=where.with_root(root), corpus=corpus)
+
+
+@enact.command("accept")
+@click.argument("memory_ref", metavar="[MEMORY]", required=False)
+@click.option("--pack", "pack", default=None, type=click.Path(exists=True, dir_okay=False),
+              help="Accept a drafted vocabulary pack instead: check it, make it live, add its cited documents.")
+@click.option("--reason", default="", help="MEMORY: why the pattern holds; kept in the audit log.")
+@click.option("--replace", is_flag=True, help="--pack: replace a pack of the same name that is already live.")
+@flag_opt("--all", "walk", help="Read every generalisation waiting for you, one at a time, and answer each.")
+@flag_opt("-y", "--yes", "assume_yes", help="Accept without showing it first. For scripts; a person should read it.")
+@_ROOT
+@click.pass_obj
+def enact_accept(where, memory_ref, pack, reason, replace, walk, assume_yes, root):
+    """Accept what the agent drafted, after reading it: a generalisation, whose instances then fold
+    under it; or a vocabulary pack (--pack), which then becomes the vocabulary. With no argument it
+    shows what is waiting, in words rather than keys. A person runs this — the agent has no tool for it."""
+    GimmicksCliApp().enact_accept(where=where.with_root(root), memory=memory_ref, pack=pack, reason=reason, replace=replace,
+                                   walk=walk, assume_yes=assume_yes)
+
+
+@enact.command("status")
+@flag_opt("--standing", "standing",
+          help="Print the standing knowledge instead — every preference in full, as a session receives "
+               "it — and nothing else, so a host's session-start hook can put it in front of an agent.")
+@flag_opt("--stale", "stale",
+          help="Check every store on this machine for what its memories name and no longer exists: commands "
+               "and their options, paths, names in the project's code, links between memories, and code "
+               "citing a superseded global memory. A dead reference in a card is stale; in a body it may be "
+               "history, and is listed with --all.")
+@flag_opt("--all", "everything", help="With --stale: list the body mentions too, not only the count.")
+@flag_opt("--triggers", "triggers",
+          help="Check the store's trigger map: what each pattern would actually deliver, and which "
+               "deliver nothing. A trigger that is silent fails silently.")
+@click.option("--for", "for_path", default=None, metavar="PATH",
+              help="Print only what applies to the space PATH is in, as the store's "
+                   "triggers.yaml maps it. Silent when the path is in no space it names, "
+                   "so a hook may call it before every write.")
+@_ROOT
+@click.pass_obj
+def enact_status(where, standing, stale, everything, triggers, for_path, root):
+    """Where the store stands: its version, reviews and pending proposals."""
+    if stale:
+        GimmicksCliApp().enact_stale(where=where.with_root(root), everything=everything)
+        return
+    if triggers:
+        GimmicksCliApp().enact_triggers(where=where.with_root(root))
+        return
+    GimmicksCliApp().enact_status(where=where.with_root(root), standing=standing, for_path=for_path)
+
+
+@cli_oo.command("inventory")
+@click.option("--path", default=None, type=click.Path(exists=True, file_okay=False),
+              help="The project to survey (default: the current directory).")
+@flag_opt("--map", "brief", help="Print the project map every session starts with instead: what the project "
+                                 "is, its layout, what it ships and leaves idle, how it runs, what changed last.")
+@click.pass_obj
+def inventory(where, path, brief):
+    """What a project already has, against what its code reaches for.
+
+    A component you already have is invisible where you would have used it: an import of the
+    standard library reads as correct whether or not the project, or something it depends on,
+    already ships an answer. This prints the join — what is shipped, declared and installed
+    against what is actually imported — and nothing else can show it.
+    """
+    GimmicksCliApp().inventory(where=where, path=path, brief=brief)
 
 
 @cli_oo.group()
@@ -102,8 +310,16 @@ def docs():
                    "site/, docs/, build/html/, docs/_build/html/ that has one).")
 @click.option("--rebuild", default=None,
               help="A shell command run in the served directory before serving; a non-zero exit aborts.")
-def docs_serve(port, directory, host, index, rebuild):
+@click.option("--reload/--no-reload", default=True, show_default=True,
+              help="Restart when the server's own code changes; open pages reload with it.")
+def docs_serve(port, directory, host, index, rebuild, reload):
     """Serve a docs directory with the review layer: every HTML page gets the
     commenter (comments land in __notes__/site-comments.jsonl under the served
     root) and images dropped on a page are written under images/."""
-    GimmicksCliApp().docs_serve(port=port, directory=directory, host=host, index=index, rebuild=rebuild)
+    GimmicksCliApp().docs_serve(port=port, directory=directory, host=host, index=index, rebuild=rebuild,
+                                reload=reload)
+
+
+if __name__ == "__main__":
+    # `python -m pygim` runs what the `pygim` script runs; `oo` is the other entry point.
+    cli()

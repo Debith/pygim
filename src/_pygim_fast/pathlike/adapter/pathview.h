@@ -319,6 +319,20 @@ py::class_<pathview> bind_path(engine_list<Es...> es, py::module_& m, const path
                 for (const std::uint32_t r : v.table->parents(v.row)) out.append(wrap(es, v.at(r)));
                 return out;
             }, "Ancestor directories, closest first.")
+        .def("relative_to", [es](const pathview& v, py::handle other) {
+                const text_arg t = text_view_of_arg(other);
+                const file base(t.view);
+                if (const auto rest = v.value().relative_to(base)) return wrap(es, v.intern(*rest));
+                throw py::value_error("'" + v.fspath() + "' is not in the subpath of '" + base.fspath() + "'");
+            }, py::arg("other"),
+             "This path with *other* taken off its front, like pathlib's relative_to(): `path('/a/b/c')`\n"
+             "relative to '/a' is `b/c`, and a path relative to itself is '.'. *other* is text, an\n"
+             "os.PathLike or a path. Raises ValueError when this path is neither *other* nor beneath it.\n"
+             "Compared as written, as == compares: on Windows letter case is not folded.")
+        .def("is_relative_to", [](const pathview& v, py::handle other) {
+                const text_arg t = text_view_of_arg(other);
+                return v.value().is_relative_to(file(t.view));
+            }, py::arg("other"), "Whether relative_to(other) would succeed: this path is *other* or beneath it.")
         // -- derived paths whose rules live in the core value --
         .def("with_suffix", [es](const pathview& v, const std::string& s) { return wrap(es, v.intern(v.value().with_suffix(s))); },
              py::arg("suffix"), "A copy with the final suffix replaced.")

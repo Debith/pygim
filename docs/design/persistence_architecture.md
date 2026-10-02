@@ -130,7 +130,9 @@ bindings.cpp
 ### 4.1 Concepts as Core Contracts
 
 `BackendPolicy` and `DialectPolicy` are defined in `core/` with no knowledge
-of concrete backends. New backends satisfy the concepts — no core code changes.
+of concrete backends. A new backend is written to satisfy the concepts, and the
+compiler checks that it does. Core code depends only on the concepts, so adding
+a backend changes no core code.
 
 ```cpp
 template <typename B>
@@ -152,8 +154,9 @@ concept BackendPolicy = requires(std::string_view s, int packet_size,
 ### 4.2 Dialect-Based SQL Rendering
 
 `Query` stores intent (columns, table, where, limit). Each backend's `Dialect`
-renders intent into backend-specific SQL. `build_sql(Query, Dialect)` dispatches
-at compile time.
+renders intent into backend-specific SQL. `build_sql(Query, Dialect)` takes the
+dialect as a type, so the compiler resolves which dialect's rendering runs;
+no dispatch is left for run time.
 
 - `MssqlDialect` → `SELECT TOP N [col] FROM [schema].[table] WHERE ...`
 - (future) `PostgresDialect` → `SELECT "col" FROM "table" WHERE ... LIMIT N`
@@ -169,14 +172,18 @@ verifies concept satisfaction at compile time.
 
 `RepositoryAdapter<Backend>` in `adapter/adapter.h` owns `core::Repository<Backend>`
 directly — ONE hop, matching the Registry/Factory adapter pattern. Format is a
-runtime `enum class Format { Polars, Pandas }` member, yielding ONE template
-instantiation per backend (not 2×).
+runtime `enum class Format { Polars, Pandas }` member. Had Format been a template
+parameter, every backend would need one instantiation per format — two per
+backend. As a runtime member, the format is chosen when the call runs, so each
+backend needs exactly ONE template instantiation.
 
 ### 4.5 Template Instantiation at the Edge
 
 `bindings.cpp` is the single production translation unit. All template
-instantiations happen here. `test_bindings.cpp` uses `py::module_local()`
-to avoid type conflicts with the production module.
+instantiations happen here. Some of the C++ types `test_bindings.cpp` binds are
+also bound by the production module, and loading both modules in one process
+would make those registrations conflict. `py::module_local()` keeps the test
+module's bindings local to it, so the two modules can coexist.
 
 ### 4.6 RepositoryAdapter Owns Core Directly
 
@@ -195,8 +202,10 @@ Python  →  RepositoryAdapter<MssqlBackend>  →  core::Repository<MssqlBackend
 
 `ArrowBuilder` in `core/` does NOT include ODBC headers. Instead, it defines
 portable structs (`detail::DateStruct`, `detail::TimestampStruct`, `detail::Time2Struct`)
-that are binary-compatible with their ODBC counterparts. The strategy layer
-(`load_dispatch.h`) includes a `static_assert` verifying layout compatibility.
+with the same byte layout as their ODBC counterparts, so core code can read a
+buffer the ODBC driver filled through its own structs, without the ODBC
+headers. The strategy layer (`load_dispatch.h`) includes a `static_assert`
+verifying layout compatibility.
 This keeps the core layer free of platform-specific ODBC dependencies.
 
 ### 4.8 RAII Arrow Export
@@ -237,9 +246,12 @@ Save/metadata connections are short-lived checkouts. Don't merge them.
 ### 4.12 LoadCache Pattern
 
 `MssqlLoadCache` persists a `LoadConnectionPool` across multiple `load()` calls.
-Invalidates when `conn_str` or `pool_size` changes. `NullLoadCache` is zero-cost
-for non-MSSQL backends (empty struct). Eliminates 0.06–0.15s per-load connection
-establishment overhead for repeated load operations.
+Without the cache, each parallel load establishes its worker connections anew,
+at 0.06–0.15s per load; with the pool kept alive, the next load reuses the
+connections already established, so repeated loads pay that cost once. The
+cache invalidates when `conn_str` or `pool_size` changes: the cached pool was
+built with the old values, so it can no longer serve the new call.
+`NullLoadCache` is zero-cost for non-MSSQL backends (empty struct).
 
 ### 4.13 O(1) Dispatch Tables
 
@@ -249,7 +261,10 @@ Both save and load paths use function-pointer dispatch tables indexed by
 - **Save**: `bcp_bind_dispatch` — per-type bind functions; `bcp_rebind_dispatch` — fast pointer-only rebind
 - **Load**: `load_dispatch` — per-type block-append functions with nullable flag
 
-Zero branching in hot loops. Type resolution happens once during schema setup.
+A column's Arrow type is resolved once, during schema setup: the type indexes
+the array, and the function pointer it selects is stored for that column. The
+hot loops then call each column's stored pointer directly, so no type branch
+runs per row or per block.
 
 ### 4.14 Block Cursor Architecture
 
@@ -313,7 +328,7 @@ All components are fully implemented and tested.
 4. `init_session()`: `bcp_init(table, DB_IN)` + optional `bcp_control(BCPHINTS, "TABLOCK")`
 5. Per-RecordBatch:
    - First batch: `bind_columns()` — full `bcp_bind` per column via `bcp_bind_dispatch`
-   - Subsequent batches: `rebind_columns()` — pointer-only update via `bcp_rebind_dispatch` (same schema)
+   - Subsequent batches: `rebind_columns()` — the schema is unchanged across batches, so the type bindings from the first batch still hold and only the buffer pointers need updating, via `bcp_rebind_dispatch`
    - Classify columns: fixed/string/temporal + check `any_has_nulls`
    - Fast path (no nulls): `row_loop_fast()` — memcpy staging + `bcp_sendrow`
    - General path (has nulls): `row_loop_general()` — per-cell null check → `bcp_collen(SQL_NULL_DATA)`
@@ -432,7 +447,7 @@ Repository::load(table, load_workers=N)
 On connection errors (`SQLSTATE 08S01, 08001, HY000`) during parallel load:
 1. Clear `MssqlLoadCache` (force fresh connections on retry)
 2. Retry the entire parallel load once with new connections
-3. No proactive health checks (avoids latency on the common path)
+3. No proactive health checks — checking each connection before use would add latency to every load, including the common case where nothing is wrong; a stale connection is instead detected by its error and handled by this retry
 
 ### 7.4 LoadResult / LoadMetrics
 
@@ -541,7 +556,7 @@ All parameters are configurable via `acquire_datastore()` and the benchmark CLI:
 - `block_size=4096` is the user-facing default; internal benchmark constant `kDefaultBlockSize` is 8192 — consider propagating to adapter defaults
 - `block_size=16384` can improve load by ~28% but increases memory per worker
 - `batch_size=100K` is optimal — both smaller and larger values degrade write
-- `packet_size` is capped at 16384 with `Encrypt=yes` (TLS record limit)
+- with `Encrypt=yes` the packets travel inside TLS records, and a TLS record carries at most 16384 bytes — so `packet_size` is capped at 16384
 
 ---
 

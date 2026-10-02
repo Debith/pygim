@@ -19,9 +19,11 @@ without it; the incident reports below are the evidence.
 
 The extensions are built with a newer GCC (conda's `gxx_linux-64`, or the
 manylinux toolchain in CI) than the libstdc++ available at runtime in some
-target environments. Statically bundling the runtime means an extension
-built with GCC *N* still loads on a system whose shared libstdc++ predates
-GCC *N*'s symbols.
+target environments. Linked dynamically, an extension built with GCC *N*
+would ask the target system's shared libstdc++ for symbols that first appear
+in GCC *N*'s runtime; on a system whose libstdc++ predates them, the load
+fails. Statically bundling the runtime removes the demand: the extension
+carries its own copy, so it still loads there.
 
 ## Incident: the libstdc++ interposition segfault (2026-09-01)
 
@@ -34,8 +36,10 @@ problem. It was not.
 
 **Mechanism.** `-static-libstdc++` copies the C++ runtime *into* each
 extension, but by default those ~2,500 `std::` symbols were **exported**
-from the `.so` (static archives are compiled without hidden visibility, so
-`pybind11`'s `-fvisibility=hidden` does not cover them). Meanwhile
+from the `.so`: the linker copies the archive's objects as they were
+compiled, and libstdc++.a was compiled without hidden visibility —
+`pybind11`'s `-fvisibility=hidden` applies only to the sources it compiles,
+so it does not cover them. Meanwhile
 `libarrow.so` — loaded by `import pyarrow` — links the *system*
 `libstdc++.so.6` dynamically. Two different builds of the C++ runtime were
 now live in one process with overlapping, interposable symbol tables: some
@@ -51,7 +55,10 @@ class of crash, with no reproducible recipe beyond "sometimes pathlike
 segfaults".
 
 **Fix.** Link every extension with `-Wl,--exclude-libs,ALL`, which marks
-symbols pulled from static archives (i.e. libstdc++.a) as local. Each
+symbols pulled from static archives (i.e. libstdc++.a) as local. A local
+symbol does not enter the extension's dynamic symbol table, so the dynamic
+loader can no longer resolve another module's reference into the extension's
+copy, and the extension's own references bind to its internal copy. Each
 extension now uses its own bundled runtime consistently; libarrow uses the
 system one; neither can interpose the other. Exported `std::` symbols went
 from ~2,463 to 5 (libstdc++'s inline Unicode tables — `STB_GNU_UNIQUE`
@@ -83,10 +90,13 @@ load time via, in order:
 3. **Already-loaded library with the same SONAME** — the dynamic loader
    reuses `libarrow.so.<major>` if `import pyarrow` already brought it in.
 
-Path 3 is what makes **editable installs** work: the extension sits in
-`src/pygim/`, so `$ORIGIN/../pyarrow` points nowhere. Therefore
-`pygim.persistence` and `create_df` import `pyarrow` *before* touching the
-extension, and `tests/conftest.py` preloads it before any test module.
+Path 3 is what makes **editable installs** work. In an editable install the
+extension sits in `src/pygim/`, so `$ORIGIN/../pyarrow` points nowhere; the
+extension then depends on `libarrow` already being loaded when it is. That is
+why `pygim.persistence` and `create_df` import `pyarrow` *before* touching
+the extension, and `tests/conftest.py` preloads it before any test module:
+importing `pyarrow` brings `libarrow` into the process, and the extension's
+load reuses it.
 Because build-time and runtime pyarrow must share the SONAME major, always
 build with `--no-build-isolation` in a dev environment — an isolated build
 pulls the newest pyarrow, links its SONAME, and the resulting extension

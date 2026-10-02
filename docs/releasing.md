@@ -20,8 +20,10 @@ gh run list --workflow release.yml                 # the cut, then the release i
 ```
 
 Run on `main`, the workflow only cuts: it picks the version (the latest `v*`
-tag bumped, or the one given), creates `release/<version>` from `main`, and
-starts the release on that branch. That second run is the release. Run on any
+tag bumped, or the one given) and creates `release/<version>` from `main`.
+Creating that branch is a push, and a push to a `release/*` branch starts the
+workflow on it — so the cut sets off a second run, on the new branch, and that
+second run is the release. Run on any
 other branch, the workflow refuses.
 
 You can also cut a branch yourself. The push starts its release:
@@ -44,7 +46,8 @@ release without a new commit, use `gh workflow run release.yml --ref release/0.1
   version is a new version: cut `release/0.1.1` from `release/0.1.0` plus the
   fix.
 - A pre-release version (`rc`, `b`, `a`) becomes a GitHub pre-release. A
-  patch or minor bump ignores pre-release tags.
+  patch or minor bump ignores pre-release tags: the version it bumps is the
+  latest final release's.
 
 The logic is in `.github/scripts/release_version.py` and is tested by
 `tests/unittests/test_release_version.py`.
@@ -67,16 +70,20 @@ flowchart LR
   tag is created only after publishing, so setuptools_scm cannot read it from
   git during the build.
 - **pyarrow is pinned in the wheel metadata** to the `major.minor` release
-  the wheel was built against (`setup.py::_pin_arrow_abi`). The extensions
-  link Arrow's versioned shared libraries, so no other pyarrow can load them.
-  Arrow's libraries are excluded when the wheel is repaired and are loaded
-  from the pinned pyarrow instead.
+  the wheel was built against (`setup.py::_pin_arrow_abi`). The pin follows
+  from linking: the extensions link Arrow's shared libraries by their
+  versioned names, a different pyarrow release ships them under different
+  versioned names, and with those the extensions cannot load. Repairing the
+  wheel would normally copy Arrow's libraries into it; they are excluded
+  instead, so at runtime the extensions load them from the pinned pyarrow.
 - **Tests run against the repaired wheel** in a clean environment
   (`pytest {project}/tests`), not against a source build. What is tested is
   what PyPI serves.
 - **macOS builds its own unixODBC** (`.github/scripts/build_unixodbc_macos.sh`)
-  for the wheels' deployment target, 13.3. Homebrew's bottle targets a newer
-  macOS, which delocate rejects.
+  for the wheels' deployment target, 13.3. Every library bundled into a
+  wheel must support that target, and delocate rejects one built for a newer
+  macOS. Homebrew's bottle is built for a newer macOS, so the workflow
+  compiles unixODBC against 13.3 itself.
 
 A pull request that changes the workflow or its scripts runs all of this as
 a dry run (version `<next patch>.dev0`, nothing published).
@@ -101,12 +108,16 @@ stored in the repository. It needs:
 1. **A trusted publisher on the PyPI project `pygim`**
    (<https://pypi.org/manage/project/pygim/settings/publishing/>): owner
    `Debith`, repository `pygim`, workflow `release.yml`, environment `pypi`.
-   Every field must match what the workflow sends; a failed upload prints
-   those claims. A publisher cannot be edited, only removed and added again.
+   The workflow sends these values as claims with the upload, and PyPI
+   accepts the upload only when every field matches; a failed upload prints
+   those claims, so the mismatched field can be read off. A publisher cannot
+   be edited, only removed and added again.
 2. **The `pypi` environment on GitHub** (*Settings* → *Environments*). A
    first run creates it, but configure it before then:
    - *Deployment branches and tags*: *Selected branches and tags*, with the
-     single rule `release/*`. PyPI uploads can then only come from a release
+     single rule `release/*`. The job that uploads to PyPI runs inside this
+     environment, and GitHub admits a run into the environment only from a
+     branch the rule matches — so a PyPI upload can only come from a release
      branch.
    - *Required reviewers* (optional): you approve every upload to PyPI before
      it happens. Everything before the upload has already passed by then.

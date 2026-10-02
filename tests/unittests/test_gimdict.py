@@ -92,3 +92,48 @@ def test_gimdict_conflict_error_for_invalid_sum_operation():
     right = utils.gimdict({"k": 1})
     with pytest.raises(TypeError):
         _ = left | right
+
+
+def test_gimdict_deep_strategy_merges_nested_mappings_recursively():
+    sheet = utils.gimdict({"abilities": {"DEX": 3, "STR": 0}}, dict=utils.deep)
+    feat = utils.gimdict({"abilities": {"DEX": 1, "WIS": 2}})
+    merged = (sheet | feat).to_dict()
+    assert merged["abilities"] == {"DEX": 4, "STR": 0, "WIS": 2}   # leaves stack
+
+
+def test_gimdict_deep_strategy_recurses_to_any_depth():
+    d1 = utils.gimdict({"a": {"b": {"c": 1}}}, dict=utils.deep)
+    d2 = utils.gimdict({"a": {"b": {"c": 2, "d": 9}}})
+    assert (d1 | d2).to_dict() == {"a": {"b": {"c": 3, "d": 9}}}
+
+
+def test_gimdict_deep_falls_back_to_replace_for_non_mappings():
+    d1 = utils.gimdict({"a": {"b": 1}}, dict=utils.deep)
+    d2 = utils.gimdict({"a": "flat"})
+    assert (d1 | d2).to_dict() == {"a": "flat"}
+
+
+def test_gimdict_extend_concatenates_sequences():
+    d1 = utils.gimdict({"w": ["a"]}, list=utils.extend)
+    d2 = utils.gimdict({"w": ["b", "a"]})
+    assert (d1 | d2).to_dict() == {"w": ["a", "b", "a"]}
+
+
+def test_gimdict_union_appends_only_unseen_elements():
+    d1 = utils.gimdict({"gear": ["Dagger", "Rope"]}, list=utils.union)
+    d2 = utils.gimdict({"gear": ["Dagger", "Lantern"]})
+    assert (d1 | d2).to_dict() == {"gear": ["Dagger", "Rope", "Lantern"]}
+
+
+def test_gimdict_union_on_non_lists_replaces():
+    d1 = utils.gimdict({"x": "a"})
+    d1.set_strategy("x", "union")
+    d2 = utils.gimdict({"x": "b"})
+    assert (d1 | d2).to_dict() == {"x": "b"}
+
+
+@pytest.mark.parametrize("name", ["deep", "extend", "union"])
+def test_gimdict_new_strategy_aliases_round_trip(name):
+    d = utils.gimdict({})
+    d.set_type_strategy("list", name)
+    assert d.type_strategy("list") == name

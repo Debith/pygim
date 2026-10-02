@@ -1,8 +1,9 @@
 # The mapping toolkit
 
 The pybind-free tables every fast component is built from and the laws each
-one keeps. Everything here is `constexpr` end to end, so the same code is a
-runtime table and a compile-time proof.
+one keeps. Everything here is `constexpr` end to end, so the same code serves
+twice: at run time it is the table a component uses, and in a constant
+evaluation it is the object the proofs assert their laws over.
 
 Status: implemented · Owner: Debith · Date: 2026-09-08
 Where: `src/_pygim_fast/mapping/` (core), `src/_pygim_fast/utils/` (hashing,
@@ -22,9 +23,11 @@ Two shapes of table recur across pygim and they are not the same thing:
   *assigns* the value: the id is the insertion index. It is a bijection
   (bytes -> id, id -> bytes), it is looked up by bytes that may live anywhere,
   and it is append-only, so an id never moves and a row elsewhere may hold
-  it. Those three properties are exactly what `storage` cannot express
-  (owned-key `find`, caller-supplied value, mandatory `erase`) — which is why
-  this is a second concept beside it rather than a storage engine.
+  it. Those three properties are exactly what `storage` cannot express:
+  `storage` is probed by the key type it owns, an interner by borrowed bytes;
+  `storage` takes its value from the caller, an interner assigns it; `storage`
+  must offer `erase`, an interner may never remove. That is why this is a
+  second concept beside `storage` rather than one of its engines.
   (`intern.h`)
 
 The rule for this folder is pygim's: it is a generic library meant for
@@ -40,7 +43,7 @@ consumer has to earn.
 |---|---|---|---|---|
 | `intern.h` | `interner` | `basic_flat_interner<Id>` (sorted id index, binary search, small tables + constant evaluation), `basic_hashed_interner<Id>` (open addressing, load <= 1/2, also constexpr-capable); `flat_interner` / `hashed_interner` are the 32-bit defaults | every distinct string once, dense ids in insertion order | `pathlike::basic_path_table` (segments) |
 | `trie.h` | `basic_trie<RowId, Key>`; `trie` = `<uint32_t, uint32_t>` | — | hash-consed rows of `(parent, key)`: a shared prefix is one row; `child()` is find-or-add; `with_chain()` gathers a chain leaf-first into a stack buffer; `row_map` maps rows from another trie memoised per source row through a key translator | `basic_path_table` (the directory tree) |
-| `id_set.h` | `basic_id_set<Id, Word>`; `id_set` = `<uint32_t, uint64_t>` | — | dense ids of any unsigned width in the machine's word: insertion-ordered members plus a bitmap; `where`, `united`, `intersected`, `subtracted` at a few ns per element; `count_united` & co answer the SIZE of an algebra result as a popcount over the bitmaps, 64 ids per step, no set built (20-90x the build at 1M paths) | `pathlike::PathSet` (`count_union`, `count_intersection`, `count_difference`) |
+| `id_set.h` | `basic_id_set<Id, Word>`; `id_set` = `<uint32_t, uint64_t>` | — | dense ids of any unsigned width in the machine's word: insertion-ordered members plus a bitmap; `where`, `united`, `intersected`, `subtracted` at a few ns per element; `count_united` & co answer the SIZE of an algebra result as a popcount over the bitmaps, 64 ids per step, no set built — at 1M paths, 20-90x faster than building the result set and counting it | `pathlike::PathSet` (`count_union`, `count_intersection`, `count_difference`) |
 | `../utils/memory.h` | `memory::resident_bytes`, `peak_resident_bytes` | — | the process's resident memory as one syscall (Linux procfs pread on a descriptor opened once, Mach task info, Windows working set): a benchmark's before/after probe, never a per-object size — components report exact `bytes()`; `pygim.utils.rss_bytes()` et al. | `benchmarks/_bench.py` |
 | `../utils/hash.h` | — | — | `fnv1a`, `mix_string`, `mix64`, `combine`, `slots_for`: one definition of every hash the tables share | core.h, intern.h, trie.h, the wiring adapters' key hashes |
 
@@ -97,8 +100,10 @@ comments in `path_table.h`; now a build that breaks one does not link.
 
 The set keeps two views of one membership: the members in the order they
 were noted (what iteration yields) and a bitmap (what makes `has` one load
-and the algebra a pass over bits). For the default `id_set`, id 70 is bit 6
-of word 1; a word one side does not have is treated as all zeros.
+and the algebra a pass over bits). For the default `id_set`, whose words are
+64 bits wide, id 70 is bit 6 of word 1: dividing the id by 64 names the word,
+the remainder names the bit. A word one side does not have is treated as all
+zeros.
 
 ```cpp
 using pygim::mapping::id_set;
@@ -164,7 +169,8 @@ On popcount: the extensions compiling the toolkit pass `-mpopcnt` when the
 compiler accepts it (`flags_if_supported`). Measured under the build's
 `-march=nocona`, `std::popcount` without it is a library call at 3.4 ns per
 word, an 8-lookup byte table 2.1 ns, the SWAR bit-parallel form 1.6 ns and the
-instruction 1.1 ns — so the flag, not a table, is the fix; MSVC and ARM pick
+instruction 1.1 ns — so the fix is the flag, which lets `std::popcount`
+compile to the instruction, not a lookup table of our own; MSVC and ARM pick
 the instruction on their own.
 
 ## Rules
@@ -181,6 +187,7 @@ the instruction on their own.
   `hash_storage<std::string, V>` can be probed with a `string_view`; the
   one-off transparent hash in `pathlike/adapter/materialize.h` (`KeyCache`)
   then goes away.
-- The trie and the interners are the remaining non-templates over their id
-  width; `basic_trie<RowId, Key>` and `basic_hashed_interner<Id>` would
-  complete the pattern `basic_id_set` set.
+- Done since this list was written: the trie is `basic_trie<RowId, Key>` and the
+  interners are `basic_flat_interner<Id>` and `basic_hashed_interner<Id>` over
+  `basic_intern_arena<Id>`, with `using` aliases keeping the plain names — the
+  `basic_id_set` pattern now holds across the toolkit.

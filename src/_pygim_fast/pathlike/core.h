@@ -24,6 +24,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
+#include <optional>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -617,6 +618,28 @@ public:
         }
         return out;
     }
+
+    // pathlib's relative_to: this path with `base` taken off its front, or nullopt when this path is
+    // neither `base` nor beneath it. Same anchor (root, drive, share) and every segment of `base` a
+    // leading segment of this one, compared as written — the equality `==` uses, so unlike
+    // PureWindowsPath it does not fold case. Lexical, as pathlib's is: ".." is a segment like any
+    // other. "/a/b" relative to "/a/" -> "b"; "/ab/c" relative to "/a" -> nullopt; a path relative to
+    // itself -> ".".
+    [[nodiscard]] constexpr std::optional<basic_file> relative_to(const basic_file& base) const {
+        const uri& a = m_uri;
+        const uri& b = base.m_uri;
+        if (a.scheme != b.scheme || a.has_authority != b.has_authority || a.authority != b.authority ||
+            a.absolute != b.absolute || b.segments.size() > a.segments.size()) {
+            return std::nullopt;
+        }
+        for (std::size_t i = 0; i < b.segments.size(); ++i) {
+            if (a.segments[i] != b.segments[i]) return std::nullopt;
+        }
+        uri rest;   // relative: no scheme, no authority, no root
+        rest.segments.assign(a.segments.begin() + static_cast<std::ptrdiff_t>(b.segments.size()), a.segments.end());
+        return basic_file(std::move(rest), m_pin);
+    }
+    [[nodiscard]] constexpr bool is_relative_to(const basic_file& base) const { return relative_to(base).has_value(); }
 
     // pathlib's rule: a name is any non-empty component without a separator
     // that is not "." (".." is allowed, as in pathlib).

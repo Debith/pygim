@@ -193,6 +193,27 @@ public:
         return where([&](std::uint32_t r) { return m_table->is_absolute<native_strategy>(r); });
     }
 
+    // ── derived sets ──────────────────────────────────────────────────────
+
+    /// Every member with `base` taken off its front (file::relative_to), as a set
+    /// over the same table, in member order. A member that is not `base` or beneath
+    /// it is an error that names it: a set never drops a member quietly.
+    ///
+    ///     {"/r/a.py", "/r/pkg/c.py"}.relative_to("/r") -> {"a.py", "pkg/c.py"}
+    [[nodiscard]] PathSet relative_to(const file& base) const {
+        PathSet out(m_table);
+        out.m_ids.reserve(size());
+        for (const std::uint32_t r : members()) {
+            const auto rest = file(m_table->value(r)).relative_to(base);
+            if (!rest) {
+                throw std::invalid_argument("'" + m_table->render<native_strategy>(r) +
+                                            "' is not in the subpath of '" + base.fspath() + "'");
+            }
+            out.add_value(rest->value());
+        }
+        return out;
+    }
+
     // ── set algebra (bitmaps when the tables are shared, row mapping otherwise) ──
 
     /// this ∪ o. Shared table: a bitmap union, "mine, then theirs", ~2 ns per
@@ -583,6 +604,14 @@ void bind_pathset(engine_list<Es...> es, py::module_& m, py::class_<pathview>& p
              "len(self & other) without building the set.")
         .def("count_difference", &PathSet::count_difference, py::arg("other"),
              "len(self - other) without building the set.")
+        .def("relative_to", [](const PathSet& ps, py::handle other) {
+                const text_arg t = text_view_of_arg(other);
+                return ps.relative_to(file(t.view));
+            }, py::arg("other"),
+             "Every member with *other* taken off its front, like pathlib's relative_to() per path, as a\n"
+             "set over the same table in member order: `path(d).pathset('**/*').relative_to(d)` names\n"
+             "everything beneath d from d. Raises ValueError naming the first member that is neither\n"
+             "*other* nor beneath it.")
         .def("to_list", [](const PathSet& ps) {
             py::list out;
             for (const std::uint32_t r : ps.members()) out.append(str_from_text(ps.table()->render<native_strategy>(r)));
