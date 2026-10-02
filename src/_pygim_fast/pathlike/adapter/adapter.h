@@ -39,6 +39,15 @@ concept Engine = EngineMeta<E> && requires(const file& f, detail::KeyCache& keys
     { E::write(f, obj) } -> std::same_as<void>;
 };
 
+// An engine that also reads and writes TEXT (not only files): the text half
+// one format borrows from another — markdown front matter is YAML or TOML.
+// Optional: an engine without it is still a complete Engine.
+template <class E>
+concept TextEngine = Engine<E> && requires(std::string_view text, detail::KeyCache& keys, py::handle obj) {
+    { E::loads(text, text, keys) } -> std::same_as<py::object>;
+    { E::dumps(obj) } -> std::same_as<std::string>;
+};
+
 // Instantiated per pack element by all_implemented(): a descriptor that is not
 // a complete Engine fails HERE, with the diagnostic naming that descriptor
 // rather than a fold expression.

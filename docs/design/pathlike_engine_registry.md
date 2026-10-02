@@ -96,7 +96,7 @@ same proofs pass on GCC 13.4, GCC 14.3 and GCC 16 (verified).
 | vocabulary | `pathlike/uri.h`, `pathlike/core.h` | pybind-free: the RFC 3986 `uri` value; `engine_info` (name, label, doc, extensions, aliases), `sv_list`; the strategies and `basic_file<Strategy>` (pins `const engine_info*`) |
 | registry | `pathlike/engine_list.h` | pybind-free: `EngineMeta` concept, `engine_list<Es...>` (the extension and selector tables as `StaticRegistryCore` over `flat_storage`, inventories, `visit`/`for_each`, `resolve`, the proofs, `conflict_report`) |
 | discovery | `setup.py::_apply_typelist` + `[extension.typelist]` in `ext.pathlike.toml` | globs `adapter/engines/*.h` (sorted by stem) into `build/gen/pathlike/pathlike_engines.gen.h`: the includes and `using Engines = engine_list<engines::json, ...>` |
-| dispatch | `adapter/adapter.h` | `Engine` concept (adds `load`/`write`), `load()`, `write()`, `wrap()`, `bind_typed()`, `engines_record()` — every one a fold over the pack |
+| dispatch | `adapter/adapter.h` | `Engine` concept (adds `load`/`write`), the optional `TextEngine` concept (adds `loads`/`dumps`), `load()`, `write()`, `wrap()`, `bind_typed()`, `engines_record()` — every one a fold over the pack |
 | bindings | `adapter/bindings.cpp` | includes the generated header; docstrings, error inventories, typed classes and `ENGINES` are derived; asserts the proofs on the real pack |
 | proofs | `tests/static/pathlike_core_proofs.cpp` | the same predicates on synthetic packs, positive and negative |
 | Python | `pygim/_stubs.py`, `pygim stubs` | renders the stub's generated block from `pathlike.ENGINES`; a test keeps it current |
@@ -106,6 +106,16 @@ Identity is the address of each engine's `static constexpr engine_info info`
 `engine_list::index_of` turns it into a pack index and `visit(i, f)` calls the
 descriptor's static function — one dispatch primitive for reading, writing,
 wrapping and binding.
+
+**The text half.** A format sometimes sits inside another: markdown's front
+matter is YAML or TOML. So an engine may also parse and emit TEXT —
+`loads(text, origin, keys) -> py::object` and `dumps(obj) -> std::string`,
+the `TextEngine` concept — and its file `load`/`write` are those plus the
+file I/O. `origin` names the text in a parse error the way a path does for a
+file ("front matter of notes.md"). It is optional: `yaml` and `toml` have it,
+because front matter needs them; `json` and `jsonl` do not yet. A format that
+borrows another names it directly (`engines::yaml::loads`), so the borrowing
+is visible in its header rather than routed through the registry.
 
 ## What every build proves
 
