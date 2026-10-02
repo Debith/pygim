@@ -206,6 +206,29 @@ class TestGatheringFromADirectory:
         monkeypatch.setitem(sys.modules, "tomllib", None)
         assert _inventory.declared_in(project) == ["click", "pytest", "tomli"]
 
+    # A member the walk lists and the read skips — a folder, a tracked file deleted from disk, a broken
+    # link — once made both lists misalign, and every file was dropped: the whole class, tested here.
+    def test_outside_git_the_text_files_are_found_beside_folders(self, project):
+        found = dict(_inventory.text_files(project))
+        assert "src/lib/paths.py" in found and "tests/test_idle.py" in found
+        assert not any(name.startswith("build/") for name in found)
+
+    def test_a_tracked_file_deleted_from_disk_is_left_out_not_everything(self, project):
+        git = lambda *args: subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@t", *args],
+                                           cwd=project, capture_output=True, text=True, check=True)
+        git("init", "-q")
+        git("add", "src", "tests")
+        git("commit", "-q", "-m", "x")
+        (project / "src" / "lib" / "idle.py").unlink()
+        found = dict(_inventory.text_files(project))
+        assert "src/lib/paths.py" in found and "src/lib/idle.py" not in found
+
+    @pytest.mark.skipif(os.name == "nt", reason="symbolic links need a privilege on Windows")
+    def test_a_broken_link_named_like_python_is_left_out_not_everything(self, project):
+        (project / "src" / "lib" / "gone.py").symlink_to(project / "nowhere.py")
+        found = dict(_inventory.python_files(project))
+        assert "src/lib/paths.py" in found and "src/lib/gone.py" not in found
+
     def test_a_manifest_that_is_not_toml_declares_nothing_rather_than_failing(self, project):
         (project / "pyproject.toml").write_text("[project\nname = ", encoding="utf-8")
         assert _inventory.declared_in(project) == []

@@ -200,3 +200,37 @@ def test_the_command_runs_on_a_python_that_does_not_list_its_standard_library(tm
     said = oo("status", "--stale")
     assert said.exit_code == 0, said.output
     assert "1 stale" in said.stdout and "no such command: `oo memory`" in said.stdout
+
+
+def test_a_checkout_with_a_tracked_file_deleted_is_still_read_for_paths_and_names(tmp_path):
+    """`git ls-files` still lists a tracked file deleted from disk, the read skipped it, the lists no
+    longer lined up, and `text_files` returned nothing — so mid-work, with one file removed and not yet
+    committed, `status --stale` checked no code names and called every partial path "found nowhere in
+    the project" (2026-10-02)."""
+    project = tmp_path / "proj"
+    (project / "src" / "pkg").mkdir(parents=True)
+    (project / "src" / "pkg" / "mod.py").write_text("def handler():\n    pass\n", encoding="utf-8")
+    (project / "src" / "pkg" / "old.py").write_text("", encoding="utf-8")
+    home = tmp_path / "home"
+    home.mkdir()
+    env = {**os.environ, "HOME": str(home), "NO_COLOR": "1", "XDG_DATA_HOME": str(tmp_path / "data"),
+           "PYGIM_ENACT_GLOBAL": str(tmp_path / "no-global"), "GIT_CONFIG_GLOBAL": str(tmp_path / "gitconfig"),
+           "GIT_CONFIG_NOSYSTEM": "1"}
+    git = lambda *args: subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@t", *args], cwd=project,
+                                       env=env, capture_output=True, text=True, check=True)
+    git("init", "-q")
+    git("add", "src")
+    git("commit", "-q", "-m", "x")
+    run = lambda *args: subprocess.run([str(OO), "enact", *args], cwd=project, env=env,
+                                       capture_output=True, text=True, timeout=120)
+    assert run("setup", "--local", "--no-register").returncode == 0
+    (project / ".enact" / "policy.yaml").write_text("project: ..\n", encoding="utf-8")   # the checkout it serves
+    made = json.loads(run("call", "remember", "--json", json.dumps({
+        "title": "The handler lives in the package module", "tags": ["domain=any", "artifact=any", "task=design"],
+        "when": "changing how requests are handled", "why": "there is one handler",
+        "do": "edit `pkg/mod.py`", "text": "See `pkg/mod.py`."})).stdout)
+    assert made["ok"], made
+    (project / "src" / "pkg" / "old.py").unlink()                 # deleted, not yet committed
+    said = run("status", "--stale", "--all").stdout
+    assert "no project" not in said, said
+    assert "0 to look at" in said and "found nowhere" not in said, said

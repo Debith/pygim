@@ -55,6 +55,7 @@ Changed
 
 Fixed
 ~~~~~
+- Inventory: the file collectors read only regular files. A tracked file deleted from disk, a folder in the non-git walk or a broken ``*.py`` link made ``read_all_files`` skip a member, the lists stopped lining up, and every file was dropped — so mid-work, with one file removed, ``oo enact status --stale`` checked no code names and called real partial paths "found nowhere in the project".
 - PathSet: Fix interpreter crash when filtering: ``ext()`` captured a dangling ``string_view`` and ``Query`` held a non-owning pointer to a source ``PathSet`` that Python could garbage-collect before evaluation. The filter now owns its extension string and the ``&``/``|`` bindings keep the source alive (``py::keep_alive``).
 - PathSet: Fix ``__add__`` discarding the left operand; ``a + b`` now returns the union of both path sets.
 - Each: Accessing an attribute missing from any element now raises ``AttributeError`` immediately, per the Proxy's documented contract; previously the exception *instances* were silently collected into the result list.

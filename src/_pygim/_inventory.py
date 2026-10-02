@@ -199,13 +199,14 @@ def python_files(root: Path) -> List[Tuple[str, str]]:
     """Every .py file the project owns, as a path relative to *root* with its text.
 
     Walked and read by pygim's own path table: a tool whose whole subject is using what a project
-    ships would be a poor joke if it walked the tree with pathlib. `read_all_files` skips a member
-    that is not a regular file, so its list can be shorter than the membership, and the two are
-    checked against each other rather than trusted.
+    ships would be a poor joke if it walked the tree with pathlib. Only regular files are read:
+    `read_all_files` skips anything else — a folder named like a module, a broken link — and its list
+    would no longer line up with the members. A file removed between the check and the read still
+    misaligns them, and that is checked rather than trusted.
     """
     from pygim.pathlike import PathSet, path
 
-    found = PathSet(path(str(root)).rglob("*.py"))
+    found = PathSet([p for p in path(str(root)).rglob("*.py") if p.is_file()])
     texts = found.read_all_files()
     if len(found) != len(texts):
         return []
@@ -414,25 +415,24 @@ def text_files(root: Path) -> List[Tuple[str, str]]:
     In a git checkout that is what `git ls-files` lists, so ignored build output, virtual
     environments and caches are left out by the project's own rules rather than by a guess; outside
     one, the walk falls back to everything not in `NOT_OURS`. Read by pygim's path table either way.
+
+    Only regular files are read. A tracked file deleted from disk is still listed by git, and the walk
+    lists folders; `read_all_files` skips both, its list no longer lined up with the members, and the
+    whole result was dropped — so mid-work, with one file removed, `status --stale` checked no names.
     """
     from pygim.pathlike import PathSet, path
     from _pygim._mcp._stores import git
 
     here = path(str(root))
     listed = git(["ls-files", "-z"], Path(root))
-    if listed is not None:
-        found = PathSet([here / n for n in listed.split("\0") if n and n.endswith(TEXT)])
-    else:
-        found = PathSet(here.rglob("*"))
+    named = (here / n for n in listed.split("\0") if n) if listed is not None else here.rglob("*")
+    found = PathSet([p for p in named if p.name.endswith(TEXT)
+                     and not (NOT_OURS & set(p.relative_to(here).parts)) and p.is_file()])   # skipped before any read
     texts = found.read_all_files()
-    if len(found) != len(texts):
+    if len(found) != len(texts):                  # a file removed between the check and the read
         return []
-    out = []
-    for member, text in zip(found.relative_to(str(root)), texts):      # the same members, in order
-        relative = "/".join(member.parts)
-        if relative.endswith(TEXT) and not (NOT_OURS & set(member.parts)):
-            out.append((relative, text if isinstance(text, str) else text.decode("utf-8", "replace")))
-    return out
+    return [("/".join(member.parts), text if isinstance(text, str) else text.decode("utf-8", "replace"))
+            for member, text in zip(found.relative_to(str(root)), texts)]      # the same members, in order
 
 
 CONDA_ROOTS = ("miniconda3", "anaconda3", "miniforge3", "mambaforge", ".conda")
