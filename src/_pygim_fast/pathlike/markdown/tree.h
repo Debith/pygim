@@ -30,6 +30,8 @@
 #include <string_view>
 #include <vector>
 
+#include "../../wiring/registry/core.h"   // StaticRegistryCore: the label table is a registry (ENACT #131)
+
 namespace pygim::pathlike::markdown {
 
 inline constexpr std::uint32_t none = 0xFFFFFFFFu;
@@ -118,20 +120,18 @@ struct tree {
     std::vector<segment> segments;
     std::vector<align> aligns;
     std::vector<definition> definitions;           // document order
-    std::vector<std::uint32_t> by_label;           // definitions sorted by (label, order): binary-searched
+    /// Folded label -> its FIRST definition: a registry over the flat (sorted)
+    /// engine, filled once at the end of the parse in label order, so every
+    /// insert appends (O(n log n) in all) and register_value's "keep what is
+    /// there" is CommonMark's "the first definition of a label wins".
+    ::pygim::core::StaticRegistryCore<std::string, std::uint32_t> labels;
     std::vector<std::uint32_t> line_starts;        // line n starts at line_starts[n - 1]
     std::uint32_t size = 0;                        // source bytes
 
-    /// The first definition of a folded label, or nullptr (the first of a label
-    /// wins). O(log n): a binary search over `by_label`.
-    [[nodiscard]] constexpr const definition* lookup(std::string_view label) const noexcept {
-        std::size_t lo = 0, hi = by_label.size();
-        while (lo < hi) {
-            const std::size_t mid = (lo + hi) / 2;
-            if (definitions[by_label[mid]].label < label) lo = mid + 1;
-            else hi = mid;
-        }
-        return lo < by_label.size() && definitions[by_label[lo]].label == label ? &definitions[by_label[lo]] : nullptr;
+    /// The first definition of a folded label, or nullptr. O(log n).
+    [[nodiscard]] constexpr const definition* lookup(const std::string& label) const {
+        const std::uint32_t* d = labels.try_get_const(label);
+        return d ? &definitions[*d] : nullptr;
     }
 
     /// The byte offset where line `n` (1-based) starts; the source size past the last line.

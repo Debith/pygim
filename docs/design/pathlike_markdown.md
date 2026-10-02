@@ -309,6 +309,16 @@ without touching the parser.
 markdown front matter follows exactly the same YAML rules as a `.yaml` file. A parse error names
 the front matter's lines and the file.
 
+**Keyed stores are registries.** Link definitions are looked up by label in a
+`StaticRegistryCore` (the flat engine). It is filled once, at the end of the parse, in label
+order, so every insert appends and the build stays O(n log n): 30,000 definitions parse in 17 ms.
+`register_value` keeps the entry already there, which is CommonMark's rule that the first
+definition of a label wins. The adapter's heading index is a `DynamicRegistryCore`. Two stores are
+not registries yet, both for reasons ENACT #131 records:
+- the four-way dialect × slug dispatch is a handful of entries, which #131 exempts;
+- the generated Unicode and entity tables are sorted constexpr arrays: a registry that outlives
+  constant evaluation (#131's missing static engine) is what they need, and they move when it exists.
+
 **Spans in characters.** The core counts bytes. Python slices `Document.text` by characters, so
 the adapter translates through a per-line table built on first use. `doc.text[a:b] == block.text`
 holds for every block, and the tests check it with non-ASCII text before the blocks.

@@ -956,15 +956,17 @@ private:
     }
 
     constexpr void index_definitions() {
-        m_t.by_label.resize(m_t.definitions.size());
-        for (std::uint32_t i = 0; i < m_t.by_label.size(); ++i) m_t.by_label[i] = i;
-        // by label, then document order: the first definition of a label sorts first
-        // (std::sort, not stable_sort: only the former is constexpr before C++26)
-        std::sort(m_t.by_label.begin(), m_t.by_label.end(), [&](std::uint32_t a, std::uint32_t b) {
+        // by label, then document order (std::sort, not stable_sort: only the
+        // former is constexpr before C++26) — so the first definition of a label
+        // registers first, and every insert lands at the end of the flat engine
+        std::vector<std::uint32_t> order(m_t.definitions.size());
+        for (std::uint32_t i = 0; i < order.size(); ++i) order[i] = i;
+        std::sort(order.begin(), order.end(), [&](std::uint32_t a, std::uint32_t b) {
             const std::string& la = m_t.definitions[a].label;
             const std::string& lb = m_t.definitions[b].label;
             return la < lb || (la == lb && a < b);
         });
+        for (std::uint32_t i : order) m_t.labels.register_value(m_t.definitions[i].label, i);   // a later duplicate is kept out
     }
 
     /// `---` (YAML) or `+++` (TOML) on the first line, closed by the same

@@ -29,12 +29,12 @@
 #include <optional>
 #include <string>
 #include <string_view>
-#include <unordered_map>
 #include <vector>
 
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 
+#include "../../wiring/registry/core.h"
 #include "../markdown/document.h"
 #include "../markdown/writer.h"
 #include "common.h"
@@ -98,17 +98,18 @@ public:
 
     /// The heading_info of heading block `i`.
     [[nodiscard]] const mk::heading_info& heading_of(std::uint32_t i) const {
-        if (m_heading_index.empty()) {
+        if (m_heading_index.size() == 0) {
             const auto& hs = headings();
-            for (std::size_t k = 0; k < hs.size(); ++k) m_heading_index.emplace(hs[k].block, k);
+            m_heading_index.reserve(hs.size());
+            for (std::size_t k = 0; k < hs.size(); ++k) m_heading_index.register_value(hs[k].block, k);
         }
-        return headings()[m_heading_index.at(i)];
+        return headings()[*m_heading_index.try_get_const(i)];
     }
 
 private:
     mutable std::optional<std::vector<std::size_t>> m_chars;
     mutable std::size_t m_total = 0;
-    mutable std::unordered_map<std::uint32_t, std::size_t> m_heading_index;
+    mutable ::pygim::core::DynamicRegistryCore<std::uint32_t, std::size_t> m_heading_index;   // heading block -> headings() index
 
     [[nodiscard]] static std::size_t count(std::string_view v) noexcept {
         std::size_t n = 0;
@@ -444,6 +445,8 @@ inline void bind(py::module_& parent) {
                 const mk::tree& t = d.doc->structure();
                 std::size_t strings = 0;
                 for (const auto& def : t.definitions) strings += def.label.capacity() + def.destination.capacity() + def.title.capacity();
+                const auto& labels = t.labels.storage().items();
+                for (const auto& item : labels) strings += item.first.capacity();
                 py::dict out;
                 out["source"] = d.doc->source().size();
                 out["blocks"] = walk_of(*d.doc).size();
@@ -451,7 +454,7 @@ inline void bind(py::module_& parent) {
                 out["bytes"] = sizeof(doc_base) + d.doc->source().capacity() + t.blocks.capacity() * sizeof(mk::block) +
                                t.segments.capacity() * sizeof(mk::segment) + t.aligns.capacity() * sizeof(mk::align) +
                                t.definitions.capacity() * sizeof(mk::definition) + strings +
-                               t.by_label.capacity() * sizeof(std::uint32_t) + t.line_starts.capacity() * sizeof(std::uint32_t);
+                               labels.capacity() * sizeof(labels[0]) + t.line_starts.capacity() * sizeof(std::uint32_t);
                 return out;
             }, "Sizes: 'source' bytes, 'blocks', 'lines', and 'bytes' — the source plus the tree, exactly.");
 
