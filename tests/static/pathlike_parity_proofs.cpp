@@ -35,6 +35,10 @@ struct probe {
     static consteval bool with_name_is(std::string_view s, std::string_view n, std::string_view want) { B f(s); B r = f.with_name(n); return r.fspath() == want; }
     static consteval bool with_suffix_is(std::string_view s, std::string_view x, std::string_view want) { B f(s); B r = f.with_suffix(x); return r.fspath() == want; }
     static consteval bool with_stem_is(std::string_view s, std::string_view x, std::string_view want) { B f(s); B r = f.with_stem(x); return r.fspath() == want; }
+    static consteval bool relative_to_is(std::string_view s, std::string_view b, std::string_view want) {
+        B f(s); B base(b); const auto r = f.relative_to(base); return r.has_value() && r->fspath() == want && f.is_relative_to(base);
+    }
+    static consteval bool not_relative(std::string_view s, std::string_view b) { B f(s); B base(b); return !f.relative_to(base) && !f.is_relative_to(base); }
     static consteval bool same(const std::vector<std::string>& got, std::initializer_list<std::string_view> want) {
         if (got.size() != want.size()) return false;
         std::size_t i = 0;
@@ -350,6 +354,20 @@ static_assert(px::with_suffix_is("a/b.tar.gz", "", "a/b.tar"));
 static_assert(px::with_suffix_is("no_ext", ".txt", "no_ext.txt"));
 static_assert(px::with_stem_is("a/b.yaml", "q", "a/q.yaml"));
 static_assert(px::with_stem_is("a/b.tar.gz", "q", "a/q.gz"));
+// relative_to
+static_assert(px::relative_to_is("/a/b/c.yaml", "/a", "b/c.yaml"));
+static_assert(px::relative_to_is("/a/b", "/a/", "b"));
+static_assert(px::relative_to_is("a/b/c", "a", "b/c"));
+static_assert(px::relative_to_is("a/b", "a/b", "."));
+static_assert(px::relative_to_is("/a", "/", "a"));
+static_assert(px::relative_to_is("a/../b", "a", "../b"));
+static_assert(px::relative_to_is("a/b", "", "a/b"));
+static_assert(px::relative_to_is("a/b", ".", "a/b"));
+static_assert(px::not_relative("/ab/c", "/a"));
+static_assert(px::not_relative("/a/b", "a"));
+static_assert(px::not_relative("a/b", "/a"));
+static_assert(px::not_relative("a", "a/b"));
+static_assert(px::not_relative("x/y", "a"));
 
 // ── PureWindowsPath ────────────────────────────────────────────────────────
 // 'a.yaml'
@@ -753,6 +771,27 @@ static_assert(wx::with_suffix_is("a/b.tar.gz", "", "a\\b.tar"));
 static_assert(wx::with_suffix_is("no_ext", ".txt", "no_ext.txt"));
 static_assert(wx::with_stem_is("a/b.yaml", "q", "a\\q.yaml"));
 static_assert(wx::with_stem_is("a/b.tar.gz", "q", "a\\q.gz"));
+// relative_to
+static_assert(wx::relative_to_is("/a/b/c.yaml", "/a", "b\\c.yaml"));
+static_assert(wx::relative_to_is("/a/b", "/a/", "b"));
+static_assert(wx::relative_to_is("a/b/c", "a", "b\\c"));
+static_assert(wx::relative_to_is("a/b", "a/b", "."));
+static_assert(wx::relative_to_is("/a", "/", "a"));
+static_assert(wx::relative_to_is("a/../b", "a", "..\\b"));
+static_assert(wx::relative_to_is("a/b", "", "a\\b"));
+static_assert(wx::relative_to_is("a/b", ".", "a\\b"));
+static_assert(wx::not_relative("/ab/c", "/a"));
+static_assert(wx::not_relative("/a/b", "a"));
+static_assert(wx::not_relative("a/b", "/a"));
+static_assert(wx::not_relative("a", "a/b"));
+static_assert(wx::not_relative("x/y", "a"));
+static_assert(wx::relative_to_is("C:\\a\\b", "C:\\a", "b"));
+static_assert(wx::relative_to_is("C:\\a\\b", "C:\\", "a\\b"));
+static_assert(wx::not_relative("C:\\a\\b", "D:\\a"));
+static_assert(wx::relative_to_is("C:\\a", "C:\\a", "."));
+static_assert(wx::not_relative("C:\\a\\b", "a"));
+static_assert(wx::relative_to_is("\\\\srv\\share\\x\\y", "\\\\srv\\share", "x\\y"));
+static_assert(wx::not_relative("\\\\srv\\share\\x", "\\\\srv\\other"));
 
 [[maybe_unused]] constexpr bool kParityProofsCompiled = true;
 

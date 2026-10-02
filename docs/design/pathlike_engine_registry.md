@@ -64,6 +64,13 @@ Consequences that are visible from Python:
   non-pchar byte (`file:///a%20b`, `file://host/share/x`); a relative path
   keeps the `file://<path>` spelling.
 - `with_name` / `with_suffix` validate their arguments like pathlib.
+- `relative_to` / `is_relative_to` follow pathlib's lexical rule: the same
+  anchor, and the base's segments a prefix of the path's (`..` is a segment like
+  any other), so `/ab/c` is not relative to `/a`. They compare as `==` does, so
+  on Windows letter case is not folded where `PureWindowsPath` folds it.
+  `PathSet.relative_to` applies the rule to every member, as a set over the same
+  table in member order, and raises naming the first member outside the base.
+  The parity proofs check both strategies against pathlib at compile time.
 
 Where the RFC and pathlib disagree, pathlib wins for the path algebra and the
 RFC governs only the text form. Parsing a *path* collapses empty segments and

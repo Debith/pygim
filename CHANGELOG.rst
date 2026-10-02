@@ -78,6 +78,7 @@ Removed
 
 Added
 ~~~~~
+- PathLike: Add ``path.relative_to(other)`` and ``path.is_relative_to(other)`` (pathlib parity: ``path("/a/b/c").relative_to("/a")`` is ``b/c``; a path outside the base raises ``ValueError``) and ``PathSet.relative_to(other)``, every member relative to *other* as a set over the same table, in member order. Relative names no longer have to be cut out of path text, which went wrong silently on a trailing separator or on a sibling sharing the base's prefix (``/ab/c`` against ``/a``).
 - ENACT: Add ``oo enact vocabulary [DIMENSION] [--request] [--scope NAME] [--json]`` to show a store's current vocabulary to a person. It uses the same ``vocabulary`` tool an agent calls and writes nothing. Without arguments it lists every dimension, its role and each value's brief. A DIMENSION gives each entry in full with its request rule. ``--request`` prints the guide an agent classifies requests with.
 - PathLike: Add a JSON Lines engine — ``.jsonl``/``.ndjson`` (or ``engine="jsonl"``) read as a list, one item per document, via simdjson's document stream, and write one compact JSON document per line from a list root; ``pygim.pathlike.jsonlpath`` is the typed class and ``.engine`` reports ``simdjson-ndjson``. Parse errors name the file and line.
 - PathLike: Add ``file.write_bytes(data)`` and ``file.mkdir(parents=, exist_ok=)`` (pathlib parity).

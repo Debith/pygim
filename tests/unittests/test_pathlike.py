@@ -1272,3 +1272,57 @@ def test_relative_file_uri_rejection_matches_pathlib(bad):
         pathlib.Path.from_uri(bad)
     with pytest.raises(ValueError):
         pygim.path(bad)
+
+
+# --------------------------------------------------------------------------- #
+# relative_to — a path, and every member of a PathSet, with a base taken off
+# --------------------------------------------------------------------------- #
+# Debith, 2026-10-02: "Both pathset and pathlike should have relative_to methods." Until then callers
+# cut the base's text off the front (project memory #25), which a trailing separator, another spelling
+# of the base or a sibling sharing its prefix turned into nonsense without a word.
+
+@pytest.mark.parametrize("p,base", [
+    ("/a/b/c.yaml", "/a"), ("/a/b", "/a/"), ("/a/b", "/a//"), ("a/b/c", "a"), ("a/b", "a/b"), ("/a", "/"),
+    ("a/../b", "a"), ("a/b", ""), ("a/b", "."),
+])
+def test_relative_to_matches_pathlib(p, base):
+    assert os.fspath(pygim.path(p).relative_to(base)) == str(pathlib.PurePath(p).relative_to(base))
+    assert pygim.path(p).is_relative_to(base)
+
+
+@pytest.mark.parametrize("p,base", [("/ab/c", "/a"), ("/a/b", "a"), ("a/b", "/a"), ("a", "a/b"), ("x/y", "a")])
+def test_relative_to_refuses_a_path_outside_the_base(p, base):
+    with pytest.raises(ValueError):
+        pathlib.PurePath(p).relative_to(base)            # the oracle refuses too
+    with pytest.raises(ValueError, match="not in the subpath of"):
+        pygim.path(p).relative_to(base)
+    assert not pygim.path(p).is_relative_to(base)
+
+
+def test_relative_to_takes_text_a_pathlike_or_a_path_and_keeps_the_pin(tmp_path):
+    from pygim.pathlike import yamlpath
+
+    target = tmp_path / "sub" / "doc.txt"
+    for base in (str(tmp_path), tmp_path, pygim.path(str(tmp_path))):
+        got = pygim.path(str(target)).relative_to(base)
+        assert got.parts == ["sub", "doc.txt"]
+    pinned = yamlpath(str(target)).relative_to(tmp_path)
+    assert isinstance(pinned, yamlpath)                       # the pin travels, as with with_name
+
+
+def test_a_pathset_is_relative_to_a_base_member_by_member_in_order(tmp_path):
+    (tmp_path / "pkg").mkdir()
+    (tmp_path / "a.py").write_text("", encoding="utf-8")
+    (tmp_path / "pkg" / "c.py").write_text("", encoding="utf-8")
+    walked = pygim.path(str(tmp_path)).pathset("**/*")
+    relative = walked.relative_to(tmp_path)
+    assert isinstance(relative, pathlike.PathSet) and len(relative) == len(walked)
+    want = [str(pathlib.PurePath(m).relative_to(tmp_path)) for m in walked.to_list()]
+    assert relative.to_list() == want                         # the same members, the same order
+    assert sorted(relative.to_list()) == sorted(str(p.relative_to(tmp_path)) for p in tmp_path.rglob("*"))
+
+
+def test_a_pathset_with_a_member_outside_the_base_names_it(tmp_path):
+    members = pathlike.PathSet([str(tmp_path / "in.py"), str(tmp_path.parent / "out.py")])
+    with pytest.raises(ValueError, match="out.py"):
+        members.relative_to(tmp_path)
