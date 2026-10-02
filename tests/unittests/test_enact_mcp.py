@@ -196,6 +196,11 @@ class TestProtocol:
         assert resp["result"]["capabilities"] == {"tools": {"listChanged": False}, "prompts": {"listChanged": False}}
         assert "read" in resp["result"]["instructions"]
 
+    def test_initialize_reports_the_installed_pygim_version(self, server):
+        from importlib.metadata import version
+        resp = server.handle({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}})
+        assert resp["result"]["serverInfo"]["version"] == version("pygim")
+
     def test_standing_knowledge_reaches_every_session_without_a_read(self, tmp_path):
         root = tmp_path / "standing"
         Enact.init(str(root))
