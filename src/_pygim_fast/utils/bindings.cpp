@@ -9,6 +9,7 @@
 #include "adapter_utils.h"
 #include "memory.h"
 #include "../mapping/dynamic_merge_map.h"
+#include "initialised.h"
 
 namespace py = pybind11;
 
@@ -294,4 +295,5 @@ PYBIND11_MODULE(utils, m) {
 
     // Convenience named strategy for ergonomic kwargs like str=utils.replace
     m.attr("replace") = py::str("replace");
+    pygim::adapter::refuse_uninitialised(m);   // last: every class above is registered (utils/initialised.h)
 }

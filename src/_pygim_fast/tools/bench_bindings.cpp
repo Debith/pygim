@@ -8,6 +8,7 @@
 
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
+#include "../utils/initialised.h"
 
 namespace py = pybind11;
 
@@ -111,4 +112,5 @@ PYBIND11_MODULE(_fetch_benchmark, m) {
           py::arg("total_rows"), py::arg("worker_counts"),
           py::arg("block_size") = 512,
           "Parallel range-partitioned SQLFetch benchmark.");
+    pygim::adapter::refuse_uninitialised(m);   // last: every class above is registered (utils/initialised.h)
 }

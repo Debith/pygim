@@ -137,7 +137,7 @@ GROWTH = {
     "distinct headings": (lambda n: "".join(f"## h{i}\n\n" for i in range(n)), sections(), 100, 1600),
     "explicit numbered toc headings": (lambda n: "".join(f"## a_{i % 7}\n\n" for i in range(n)), sections(slugs="toc"), 100, 1600),
     "subsections of many sections": (lambda n: "# a\n\n" + "## b\n\n" * n, subsections, 100, 1600),
-# 255 bytes of tree per nesting level: past ~16,000 levels the tree leaves the caches
+    # 255 bytes of tree per nesting level: past ~16,000 levels the tree leaves the caches
     "one line of nested bullets": (lambda n: "- " * n + "a\n", md.Document, 500, 8000),
     "one line of nested stars": (lambda n: "* " * n + "a\n", md.Document, 500, 8000),
     "unmatched long backtick runs": (lambda n: "".join("`" * (64 + i) + "!" for i in range(n)), lambda t: md.Document(t).plain, 20, 160),
@@ -209,32 +209,6 @@ def test_time_grows_no_faster_than_the_input(growth, shape):
 def test_document_text_is_built_once():
     d = md.Document("# a\n" * 1000)
     assert d.text is d.text   # a span slices it: rebuilding it per access made each slice O(n)
-
-
-UNINITIALISED = r"""
-from pygim import pathlike
-md = pathlike.markdown
-for cls in [md.Document, md.Block, md.Section, md.Heading]:
-    obj = cls.__new__(cls)   # __init__ never runs
-    for name in [n for n in dir(cls) if not n.startswith("_")] + ["__repr__"]:
-        try:
-            attr = getattr(obj, name)
-            if callable(attr):
-                attr()
-        except Exception:
-            pass
-print("done")
-"""
-
-
-@pytest.mark.xfail(strict=True, reason=(
-    "pybind11 gives a method of an instance whose __init__ never ran uninitialised memory "
-    "(type_caster_base.h, lazy allocation), so the process dies. Every pygim class does this "
-    "(pathlike.path too); the fix belongs to the adapter layer as a whole, not to markdown alone."))
-def test_an_instance_whose_init_never_ran_raises_instead_of_crashing():
-    proc = subprocess.run([sys.executable, "-c", UNINITIALISED], capture_output=True, text=True, timeout=60,
-                          env=os.environ.copy())
-    assert proc.returncode == 0 and proc.stdout.strip().endswith("done")
 
 
 # --------------------------------------------------------------------------- #

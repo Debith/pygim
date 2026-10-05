@@ -14,6 +14,7 @@
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 #include <pybind11/functional.h>
+#include "../../utils/initialised.h"
 
 namespace py = pybind11;
 using namespace pygim;
@@ -104,4 +105,5 @@ PYBIND11_MODULE(_persistence_test, m) {
         .def_property_readonly("format",
              [](MssqlRepo const& r) { return r.format(); })
         .def("__repr__", &MssqlRepo::repr);
+    pygim::adapter::refuse_uninitialised(m);   // last: every class above is registered (utils/initialised.h)
 }

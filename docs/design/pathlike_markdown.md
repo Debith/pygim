@@ -481,7 +481,3 @@ holds for every block, and the tests check it with non-ASCII text before the blo
 - **Table width.** Columns are padded by code points, so wide East Asian characters misalign.
 - **The inline node's size.** About 120 bytes, with two strings only links use; moving those to a
   side table and literals to offsets into the subject would keep large paragraphs in the CPU caches.
-- **An instance whose `__init__` never ran.** `Document.__new__(Document)` then any method crashes:
-  pybind11 hands it uninitialised memory, and `py::smart_holder` does not catch that case. Every
-  pygim class behaves so (`pathlike.path` too), so the fix belongs to the adapter layer as a whole;
-  a strict xfail in the hostile tests records it.

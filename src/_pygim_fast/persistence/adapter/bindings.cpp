@@ -14,6 +14,7 @@
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 #include <pybind11/functional.h>
+#include "../../utils/initialised.h"
 
 namespace py = pybind11;
 using namespace pygim;
@@ -114,4 +115,5 @@ PYBIND11_MODULE(_persistence, m) {
           packet_size : int
               ODBC connection packet size (default: 16384).
           )doc");
+    pygim::adapter::refuse_uninitialised(m);   // last: every class above is registered (utils/initialised.h)
 }
