@@ -435,6 +435,11 @@ holds for every block, and the tests check it with non-ASCII text before the blo
 - Every walk over blocks or inlines is iterative.
 - No input crashes the process or runs away: a new shape that does goes into the hostile tests
   first.
+- Every parse keeps the invariants in `tests/unittests/_markdown_invariants.py` — the text kept,
+  spans and lines that slice it, nesting, walk and find, identity edits, determinism, sections,
+  unique slugs, CRLF read as LF, the dialects agreeing without GFM syntax, no NUL out, no markup
+  the renderer did not write — checked over generated documents and mutated spec examples by
+  `test_pathlike_markdown_adversarial.py` (`PYGIM_MARKDOWN_FUZZ=50000` for a deeper run, 15 s).
 - Every scan policy finds every stop: `test_the_stop_scan_finds_every_stop_at_every_offset` checks
   it through public behaviour on every platform CI runs (its macOS runners are the only machines
   that run the NEON policy); a `PYGIM_MARKDOWN_PROBES=1` build compares the policies bit for bit.
@@ -468,6 +473,11 @@ holds for every block, and the tests check it with non-ASCII text before the blo
   inline API (links with their positions) and an mdast export are the direction.
 - **Nested edits.** Replacing a block inside a quote or a list needs its container's prefixes
   re-applied to the new text.
+- **A safe mode for untrusted input.** `html()` renders as CommonMark's reference renderer does:
+  raw HTML passes through and a `javascript:` link stays a link, so HTML from someone untrusted
+  needs a sanitizer after it (`test_html_is_not_a_sanitizer` states it). cmark's own default is
+  the opposite — raw HTML omitted, dangerous schemes emptied — and `html(safe=True)` would bring
+  that here; whether it should be the default is a decision for the owner.
 - **Table width.** Columns are padded by code points, so wide East Asian characters misalign.
 - **The inline node's size.** About 120 bytes, with two strings only links use; moving those to a
   side table and literals to offsets into the subject would keep large paragraphs in the CPU caches.

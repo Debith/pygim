@@ -295,7 +295,13 @@ inline void py_to_node(ryml::Tree& tree, ryml::NodeRef node, py::handle obj, boo
     }
     if (py::isinstance<py::str>(obj)) {
         const std::string s = obj.cast<std::string>();
-        set_scalar(s, json_mode || !scalar_is_string(s) || s.empty());
+        // A control character other than tab and line feed — a CR above all — is only kept
+        // double-quoted (written escaped): plain and single-quoted scalars fold or drop it.
+        const bool control = std::any_of(s.begin(), s.end(), [](char ch) {
+            const auto c = static_cast<unsigned char>(ch);
+            return (c < 0x20 && c != '\t' && c != '\n') || c == 0x7F;
+        });
+        set_scalar(s, json_mode || !scalar_is_string(s) || s.empty() || control);
         return;
     }
     if (py::isinstance<py::dict>(obj)) {

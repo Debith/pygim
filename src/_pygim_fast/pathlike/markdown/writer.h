@@ -103,9 +103,10 @@ constexpr void escape_line(std::string_view line, std::string& out) {
         escape_line(line.substr(lead, trail - lead), out);
         for (std::size_t i = trail; i < line.size(); ++i) reference(line[i]);
         if (last) break;
-        // A line break drops the spaces before it, decoded ones too (CommonMark 6.7),
-        // so after trailing whitespace the break itself is a reference: no line ends there.
-        out += trail < line.size() ? "&#10;" : "\n";
+        // A line break drops the spaces before it, decoded ones too (CommonMark 6.7), so
+        // after a line ending in whitespace — a whitespace-only line too — the break itself
+        // is a reference: no line ends there.
+        out += !line.empty() && is_space_or_tab(line.back()) ? "&#10;" : "\n";
         pos = end + 1;
     }
     return out;
@@ -148,7 +149,8 @@ constexpr void escape_line(std::string_view line, std::string& out) {
 
 /// A fenced code block. The fence is backticks (tildes when the info string
 /// holds a backtick), one longer than any run of that character in the code,
-/// so no line of the code can close it.
+/// so no line of the code can close it. A CR in the code is a line ending, as
+/// it is anywhere in markdown, so it reads back as a line feed.
 [[nodiscard]] constexpr std::string code(std::string_view text, std::string_view info) {
     const char ch = info.find('`') != std::string_view::npos ? '~' : '`';
     const std::string fence(std::max<std::size_t>(3, longest_run(text, ch) + 1), ch);
