@@ -75,7 +75,7 @@ inline void write_jsonl(const file& f, py::handle obj) {
         ryml::Tree tree;
         py_to_node(tree, tree.rootref(), item, /*json_mode=*/true);
         std::string line;
-        ryml::emitrs_json(tree, tree.root_id(), &line);
+        ryml::emitrs_json(tree, tree.root_id(), ryml::EmitOptions().max_depth(static_cast<ryml::id_type>(yaml_max_depth + 1)), &line);   // ryml defaults to 64
         if (line.find('\n') != std::string::npos) {
             throw std::runtime_error("jsonl: emitter produced a multi-line document");
         }

@@ -14,6 +14,7 @@ import time
 
 import pytest
 
+import pygim
 from pygim import pathlike
 
 md = pathlike.markdown
@@ -200,3 +201,93 @@ def test_an_instance_whose_init_never_ran_raises_instead_of_crashing():
     proc = subprocess.run([sys.executable, "-c", UNINITIALISED], capture_output=True, text=True, timeout=60,
                           env=os.environ.copy())
     assert proc.returncode == 0 and proc.stdout.strip().endswith("done")
+
+
+# --------------------------------------------------------------------------- #
+# Hostile YAML, through front matter and through a .yaml file: refused, never
+# a crash or gigabytes. rapidyaml parses and resolves recursively, and
+# resolving copies what an alias names.
+# --------------------------------------------------------------------------- #
+def _alias_bomb(levels):
+    lines = ["a0: &a0 [x, x, x, x, x, x, x, x, x, x]"]
+    lines += [f"a{i}: &a{i} [" + ", ".join([f"*a{i - 1}"] * 10) + "]" for i in range(1, levels + 1)]
+    return "\n".join(lines) + "\n"
+
+
+YAML_HOSTILE = {
+    "flow collections 100,000 deep": "a: " + "[" * 100_000 + "]" * 100_000 + "\n",
+    "compact sequences 100,000 deep": "- " * 100_000 + "x\n",
+    "an alias bomb of 10^7 nodes in 400 bytes": _alias_bomb(6),
+    "brackets hidden in quoted closers": "a: [" + "']', [" * 50_000 + "]" * 50_000 + "]\n",
+}
+
+YAML_CHILD = r"""
+import json, sys, tempfile, threading, time, os
+import pygim
+from pygim import pathlike
+md = pathlike.markdown
+cases = json.load(sys.stdin)
+folder = tempfile.mkdtemp()
+
+def outcome(read):
+    t = time.perf_counter()
+    try:
+        read()
+        result = "read"
+    except RuntimeError as e:
+        result = "refused" if "YAML refused" in str(e) else "error: " + str(e)[:120]
+    return result, time.perf_counter() - t
+
+def run():
+    for name, text in cases:
+        print("front matter:", name, flush=True)
+        r = outcome(lambda: md.Document("---\n" + text + "---\n# x\n").front_matter)
+        print(json.dumps(["front matter", name, *r]), flush=True)
+        print("file:", name, flush=True)
+        p = pygim.path(os.path.join(folder, "x.yaml"))
+        p.write_bytes(text.encode())
+        r = outcome(p.read)
+        print(json.dumps(["file", name, *r]), flush=True)
+    print("done", flush=True)
+
+threading.stack_size(1 << 20)
+t = threading.Thread(target=run)
+t.start(); t.join()
+"""
+
+
+def test_hostile_yaml_is_refused_quickly_and_never_crashes():
+    proc = subprocess.run([sys.executable, "-c", YAML_CHILD], input=json.dumps(sorted(YAML_HOSTILE.items())),
+                          capture_output=True, text=True, encoding="utf-8", timeout=120, env=os.environ.copy())
+    lines = proc.stdout.splitlines()
+    assert proc.returncode == 0 and lines[-1:] == ["done"], f"the child died (rc={proc.returncode}) at: {lines[-1:]}"
+    results = [json.loads(line) for line in lines if line.startswith("[")]
+    assert len(results) == 2 * len(YAML_HOSTILE)
+    for via, name, result, seconds in results:
+        assert result == "refused", f"{via}, {name}: {result}"
+        assert seconds < 1.0, f"{via}, {name}: refused only after {seconds:.1f} s"
+
+
+def test_yaml_within_the_bounds_reads_and_writes(temp_dir):
+    deep = "a: " + "[" * 999 + "]" * 999 + "\n"
+    assert md.Document("---\n" + deep + "---\n").front_matter is not None
+    assert len(md.Document("---\n" + _alias_bomb(3) + "---\n").front_matter["a3"]) == 10   # 10^4 nodes: fine
+    value = "x"
+    for _ in range(100):   # ryml's emitter stopped at 64 levels, with a "parse error" naming its own source line
+        value = [value]
+    p = pygim.path(temp_dir) / "deep.yaml"
+    p.write({"v": value})
+    assert p.read() == {"v": value}
+    for _ in range(1000):
+        value = [value]
+    with pytest.raises(ValueError, match="yaml write: the value nests deeper than 1000 levels"):
+        p.write({"v": value})
+
+
+def test_json_lines_write_values_as_deep_as_yaml_does(temp_dir):
+    value = "x"
+    for _ in range(100):   # the shared ryml emitter stopped at 64 levels
+        value = [value]
+    p = pygim.path(temp_dir) / "deep.jsonl"
+    p.write([{"v": value}])
+    assert p.read() == [{"v": value}]

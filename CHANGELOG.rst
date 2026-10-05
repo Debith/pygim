@@ -65,6 +65,7 @@ Changed
 
 Fixed
 ~~~~~
+- PathLike/YAML (security): hostile YAML — a ``.yaml`` file, or markdown front matter — is refused before it costs the process: flow collections or compact sequences nested past 1,000 levels crashed it (rapidyaml and the materialiser recurse; 100,000 levels is a segfault), and 400 bytes of nested anchors resolved to 10^7 nodes and 2.5 GB. Nesting is bounded before parsing (a pre-scan that reads quotes and comments as YAML does) and after it, and an alias expansion beyond max(100,000, 100x the document's nodes) is refused as a bomb, all without resolving. Writing YAML or JSON Lines nested past 64 levels failed with a misleading "parse error" from ryml's emitter; both now write to the same 1,000-level bound reading has. (PR #37)
 - PathSet: Fix interpreter crash when filtering: ``ext()`` captured a dangling ``string_view`` and ``Query`` held a non-owning pointer to a source ``PathSet`` that Python could garbage-collect before evaluation. The filter now owns its extension string and the ``&``/``|`` bindings keep the source alive (``py::keep_alive``).
 - PathSet: Fix ``__add__`` discarding the left operand; ``a + b`` now returns the union of both path sets.
 - Each: Accessing an attribute missing from any element now raises ``AttributeError`` immediately, per the Proxy's documented contract; previously the exception *instances* were silently collected into the result list.
