@@ -14,11 +14,19 @@ table this script writes as constexpr data:
   entity reference is only recognised with its semicolon);
 - ASCII folding: what Python-Markdown's heading ids keep of a character
   (NFKD, then only its ASCII part: ``é`` -> ``e``, ``ﬁ`` -> ``fi``), for the
-  ``toc_slug`` policy.
+  ``toc_slug`` policy;
+- lower-casing: the full Unicode lower-case mapping (``İ`` -> ``i̇``), and
+  the Cased and Case_Ignorable properties its Final_Sigma rule reads (``Σ``
+  ending a word is ``ς``), for the ``github_slug`` policy — GitHub lower-cases
+  with JavaScript's toLowerCase, which is this mapping, not case folding.
 
 The interpreter is the oracle: ``unicodedata`` for the categories,
-``str.casefold`` for folding, ``html.entities.html5`` for entities and
-``unicodedata.normalize("NFKD")`` for ASCII folding.
+``str.casefold`` for folding, ``str.lower`` for lower-casing,
+``html.entities.html5`` for entities and ``unicodedata.normalize("NFKD")`` for
+ASCII folding. Python exposes neither Cased nor Case_Ignorable, so both are
+read off ``str.lower`` itself, whose Final_Sigma rule is Unicode's: a ``Σ``
+after a cased letter is ``σ`` when a cased letter follows (case-ignorable
+code points skipped) and ``ς`` otherwise.
 The header records this script's sha256 and the sha256 of the tables below
 it, so tests/unittests/test_pathlike_markdown.py checks in a millisecond that
 the committed file is this script's output and was not edited by hand,
@@ -62,12 +70,31 @@ def ranges(pred) -> list[tuple[int, int]]:
     return out
 
 
+def _sigma(after: str) -> str:
+    """What str.lower makes of a Sigma after a cased letter and before `after`."""
+    return ("A\u03a3" + after).lower()[1]
+
+
+def case_ignorable(cp: int) -> bool:
+    # Skipped, the B that follows is cased; not skipped, the code point itself decides.
+    return _sigma(chr(cp) + "B") == "\u03c3" and _sigma(chr(cp)) == "\u03c2"
+
+
+def cased(cp: int) -> bool:
+    # A cased code point after the Sigma keeps it medial (case-ignorable ones are skipped first).
+    return _sigma(chr(cp)) == "\u03c3"
+
+
 def render() -> str:
     punct = ranges(lambda cp: unicodedata.category(chr(cp))[0] in "PS")
     space = [cp for cp in range(sys.maxunicode + 1) if unicodedata.category(chr(cp)) == "Zs"]
     space = sorted(set(space) | {0x09, 0x0A, 0x0C, 0x0D})
     folds = [(cp, chr(cp).casefold()) for cp in range(sys.maxunicode + 1)
              if not 0xD800 <= cp <= 0xDFFF and chr(cp).casefold() != chr(cp)]
+    lowers = [(cp, chr(cp).lower()) for cp in range(sys.maxunicode + 1)
+              if not 0xD800 <= cp <= 0xDFFF and chr(cp).lower() != chr(cp)]
+    ignorable = ranges(lambda cp: not 0xD800 <= cp <= 0xDFFF and case_ignorable(cp))
+    is_cased = ranges(lambda cp: not 0xD800 <= cp <= 0xDFFF and cased(cp))
     entities = sorted((name[:-1], text) for name, text in html.entities.html5.items() if name.endswith(";"))
     ascii_folds = []
     for cp in range(0x80, sys.maxunicode + 1):
@@ -114,6 +141,18 @@ def render() -> str:
               "inline constexpr fold casefold[] = {"]
     for i in range(0, len(folds), 4):
         lines.append("    " + " ".join(f"{{0x{cp:X}, {cpp_bytes(to)}}}," for cp, to in folds[i:i + 4]))
+    lines += ["};", "", f"// Full lower-casing (str.lower, one code point at a time): {len(lowers)} code points that change.",
+              "inline constexpr fold lowercase[] = {"]
+    for i in range(0, len(lowers), 4):
+        lines.append("    " + " ".join(f"{{0x{cp:X}, {cpp_bytes(to)}}}," for cp, to in lowers[i:i + 4]))
+    lines += ["};", "", f"// Case_Ignorable, as str.lower's Final_Sigma rule reads it: {len(ignorable)} ranges.",
+              "inline constexpr cp_range case_ignorable[] = {"]
+    for i in range(0, len(ignorable), 4):
+        lines.append("    " + " ".join(f"{{0x{lo:X}, 0x{hi:X}}}," for lo, hi in ignorable[i:i + 4]))
+    lines += ["};", "", f"// Cased and not case-ignorable, as the same rule reads it: {len(is_cased)} ranges.",
+              "inline constexpr cp_range cased[] = {"]
+    for i in range(0, len(is_cased), 4):
+        lines.append("    " + " ".join(f"{{0x{lo:X}, 0x{hi:X}}}," for lo, hi in is_cased[i:i + 4]))
     lines += ["};", "", f"// HTML5 named character references ending in ';' (name without '&' and ';'): {len(entities)}.",
               "inline constexpr entity entities[] = {"]
     for name, text in entities:

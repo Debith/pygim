@@ -426,8 +426,8 @@ def test_toml_write_datetimes_roundtrip(temp_dir):
 
 def test_toml_write_rejections_are_loud(temp_dir):
     p = pygim.path(temp_dir / "bad.toml")
-    with pytest.raises(ValueError, match="must be a mapping"):
-        p.write([1, 2])                       # TOML documents are tables
+    with pytest.raises(TypeError, match="toml write: content must be a mapping.*list"):
+        p.write([1, 2])                       # TOML documents are tables: a list is the wrong kind
     with pytest.raises(ValueError, match="no null"):
         p.write({"a": None})
     with pytest.raises(ValueError, match="64-bit"):
@@ -490,9 +490,9 @@ def test_json_write_rejects_non_finite(temp_dir):
 
 def test_write_rejects_non_str_keys_and_unknown_types(temp_dir):
     p = pygim.path(temp_dir / "x.yaml")
-    with pytest.raises(ValueError, match="keys must be str"):
+    with pytest.raises(TypeError, match="yaml write: mapping keys must be str, got int"):
         p.write({1: "a"})
-    with pytest.raises(ValueError, match="unsupported type"):
+    with pytest.raises(TypeError, match="yaml write: cannot write a value of type set"):
         p.write({"a": {1, 2}})
 
 

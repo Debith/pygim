@@ -173,8 +173,8 @@ inline void py_to_node(ryml::Tree& tree, ryml::NodeRef node, py::handle obj, boo
         node |= ryml::MAP;
         for (auto item : obj.cast<py::dict>()) {
             if (!py::isinstance<py::str>(item.first)) {
-                throw std::invalid_argument("write: mapping keys must be str, got " +
-                                            py::str(py::type::of(item.first)).cast<std::string>());
+                throw py::type_error(std::string(json_mode ? "json" : "yaml") + " write: mapping keys must be str, got " +
+                                     py::str(py::type::of(item.first).attr("__name__")).cast<std::string>());
             }
             const std::string k = item.first.cast<std::string>();
             ryml::NodeRef child = node.append_child();
@@ -194,8 +194,8 @@ inline void py_to_node(ryml::Tree& tree, ryml::NodeRef node, py::handle obj, boo
         }
         return;
     }
-    throw std::invalid_argument("write: unsupported type " +
-                                py::str(py::type::of(obj)).cast<std::string>());
+    throw py::type_error(std::string(json_mode ? "json" : "yaml") + " write: cannot write a value of type " +
+                         py::str(py::type::of(obj).attr("__name__")).cast<std::string>());
 }
 
 // The document model is built under the GIL (it reads Python objects); emit

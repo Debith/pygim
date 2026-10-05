@@ -18,8 +18,10 @@
 //     "a_1", "a_1"            a_1, a_1-1            a_1, a_2
 //     "", ""                  "", -1                _1, _2
 //
-// github_slug follows GitHub's anchors (github-slugger): lower-case; drop
-// punctuation and symbols except `-` and `_`; every space a `-`, runs kept.
+// github_slug follows GitHub's anchors (github-slugger): lower-case as
+// JavaScript's toLowerCase does (the full Unicode mapping, a word-final Σ as
+// ς; not case folding, so µ and ſ stay); drop punctuation and symbols except
+// `-` and `_`; every space a `-`, runs kept.
 // toc_slug follows Python-Markdown's toc extension, which `oo docs serve`
 // renders with today: NFKD to ASCII, drop what is not a word character,
 // space or `-`, lower-case, collapse runs of space and `-` into one `-`.
@@ -60,11 +62,7 @@ struct github_slug {
             } else if (c.cp < 0x20 || (c.cp >= 0x7F && c.cp < 0xA0) || is_whitespace(c.cp) || is_punctuation(c.cp)) {
                 continue;
             } else {
-                std::string folded;
-                append_fold(c.cp, folded);
-                // lower-case, not case-fold: keep the letter when folding would expand it (ß -> ss)
-                if (decode(folded, 0).len == folded.size()) out += folded;
-                else encode(c.cp, out);
+                append_lower_at(text, i - c.len, out);   // JavaScript's toLowerCase, Final_Sigma included
             }
         }
     }

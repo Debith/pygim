@@ -162,8 +162,8 @@ inline void py_to_toml_value(py::handle obj, Insert&& ins) {
     if (py::isinstance<py::list>(obj) || py::isinstance<py::tuple>(obj)) {
         return ins(py_to_toml_array(obj));
     }
-    throw std::invalid_argument("toml write: unsupported type " +
-                                py::str(py::type::of(obj)).cast<std::string>());
+    throw py::type_error("toml write: cannot write a value of type " +
+                         py::str(py::type::of(obj).attr("__name__")).cast<std::string>());
 }
 
 [[nodiscard]] inline toml::array py_to_toml_array(py::handle obj) {
@@ -178,8 +178,8 @@ inline void py_to_toml_value(py::handle obj, Insert&& ins) {
     toml::table out;
     for (auto item : obj.cast<py::dict>()) {
         if (!py::isinstance<py::str>(item.first)) {
-            throw std::invalid_argument("write: mapping keys must be str, got " +
-                                        py::str(py::type::of(item.first)).cast<std::string>());
+            throw py::type_error("toml write: mapping keys must be str, got " +
+                                 py::str(py::type::of(item.first).attr("__name__")).cast<std::string>());
         }
         const std::string key = item.first.cast<std::string>();
         py_to_toml_value(item.second, [&out, &key](auto&& v) {
@@ -192,8 +192,8 @@ inline void py_to_toml_value(py::handle obj, Insert&& ins) {
 [[nodiscard]] inline std::string dumps_toml(py::handle obj,
                                            toml::format_flags flags = toml::toml_formatter::default_flags) {
     if (!py::isinstance<py::dict>(obj)) {
-        throw std::invalid_argument(
-            "toml write: content must be a mapping (TOML documents are tables)");
+        throw py::type_error("toml write: content must be a mapping (TOML documents are tables), got " +
+                             py::str(py::type::of(obj).attr("__name__")).cast<std::string>());
     }
     toml::table root = py_to_toml_table(obj);
     py::gil_scoped_release nogil;

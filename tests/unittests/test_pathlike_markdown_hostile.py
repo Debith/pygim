@@ -174,3 +174,29 @@ def test_time_grows_no_faster_than_the_input(shape):
 def test_document_text_is_built_once():
     d = md.Document("# a\n" * 1000)
     assert d.text is d.text   # a span slices it: rebuilding it per access made each slice O(n)
+
+
+UNINITIALISED = r"""
+from pygim import pathlike
+md = pathlike.markdown
+for cls in [md.Document, md.Block, md.Section, md.Heading]:
+    obj = cls.__new__(cls)   # __init__ never runs
+    for name in [n for n in dir(cls) if not n.startswith("_")] + ["__repr__"]:
+        try:
+            attr = getattr(obj, name)
+            if callable(attr):
+                attr()
+        except Exception:
+            pass
+print("done")
+"""
+
+
+@pytest.mark.xfail(strict=True, reason=(
+    "pybind11 gives a method of an instance whose __init__ never ran uninitialised memory "
+    "(type_caster_base.h, lazy allocation), so the process dies. Every pygim class does this "
+    "(pathlike.path too); the fix belongs to the adapter layer as a whole, not to markdown alone."))
+def test_an_instance_whose_init_never_ran_raises_instead_of_crashing():
+    proc = subprocess.run([sys.executable, "-c", UNINITIALISED], capture_output=True, text=True, timeout=60,
+                          env=os.environ.copy())
+    assert proc.returncode == 0 and proc.stdout.strip().endswith("done")

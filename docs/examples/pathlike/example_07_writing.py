@@ -71,8 +71,8 @@ tml.write({"title": "svc", "port": 8080, "day": datetime.date(2024, 1, 15)})
 assert tml.read() == {"title": "svc", "port": 8080, "day": datetime.date(2024, 1, 15)}
 
 try:
-    tml.write([1, 2])
-except ValueError as e:
+    tml.write([1, 2])                 # a list is the wrong kind for a TOML document: TypeError
+except TypeError as e:
     assert "mapping" in str(e)
 else:
     raise AssertionError("Expected TOML write to require a mapping root")

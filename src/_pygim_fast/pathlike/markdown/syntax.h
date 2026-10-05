@@ -18,6 +18,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <utility>
 
 #include "unicode.h"
 
@@ -31,6 +32,17 @@ namespace pygim::pathlike::markdown {
         n /= 10;
     } while (n);
     return s;
+}
+
+/// Where the line starting at `pos` ends, before its line ending, and where
+/// the next line starts. A line ends at LF, CRLF or a lone CR (CommonMark).
+[[nodiscard]] constexpr std::pair<std::size_t, std::size_t> line_from(std::string_view src, std::size_t pos) noexcept {
+    std::size_t e = src.find('\n', pos);   // two memchr-speed searches, not a byte loop: this runs per line
+    if (e == std::string_view::npos) e = src.size();
+    const std::size_t cr = src.substr(pos, e - pos).find('\r');
+    if (cr == std::string_view::npos) return {e, e < src.size() ? e + 1 : e};
+    e = pos + cr;   // a CR, alone or before the LF, ends the line
+    return {e, e + 1 < src.size() && src[e + 1] == '\n' ? e + 2 : e + 1};
 }
 
 [[nodiscard]] constexpr bool is_space_or_tab(char c) noexcept { return c == ' ' || c == '\t'; }

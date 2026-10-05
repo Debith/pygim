@@ -38,14 +38,18 @@ struct code_point {
     const unsigned char c = b(i);
     if (c < 0x80) return {c, 1};
     const auto cont = [&](std::size_t k) { return k < s.size() && (b(k) & 0xC0) == 0x80; };
-    if ((c & 0xE0) == 0xC0 && cont(i + 1)) return {static_cast<char32_t>(((c & 0x1F) << 6) | (b(i + 1) & 0x3F)), 2};
-    if ((c & 0xF0) == 0xE0 && cont(i + 1) && cont(i + 2)) {
-        return {static_cast<char32_t>(((c & 0x0F) << 12) | ((b(i + 1) & 0x3F) << 6) | (b(i + 2) & 0x3F)), 3};
-    }
-    if ((c & 0xF8) == 0xF0 && cont(i + 1) && cont(i + 2) && cont(i + 3)) {
-        return {static_cast<char32_t>(((c & 0x07) << 18) | ((b(i + 1) & 0x3F) << 12) | ((b(i + 2) & 0x3F) << 6) |
-                                      (b(i + 3) & 0x3F)),
-                4};
+    // Each length keeps only the values it alone may spell: an overlong form
+    // (C0 80 for U+0000), a surrogate (ED A0 80) or a value past U+10FFFF is malformed.
+    if ((c & 0xE0) == 0xC0 && cont(i + 1)) {
+        const auto v = static_cast<char32_t>(((c & 0x1F) << 6) | (b(i + 1) & 0x3F));
+        if (v >= 0x80) return {v, 2};
+    } else if ((c & 0xF0) == 0xE0 && cont(i + 1) && cont(i + 2)) {
+        const auto v = static_cast<char32_t>(((c & 0x0F) << 12) | ((b(i + 1) & 0x3F) << 6) | (b(i + 2) & 0x3F));
+        if (v >= 0x800 && (v < 0xD800 || v > 0xDFFF)) return {v, 3};
+    } else if ((c & 0xF8) == 0xF0 && cont(i + 1) && cont(i + 2) && cont(i + 3)) {
+        const auto v = static_cast<char32_t>(((c & 0x07) << 18) | ((b(i + 1) & 0x3F) << 12) | ((b(i + 2) & 0x3F) << 6) |
+                                             (b(i + 3) & 0x3F));
+        if (v >= 0x10000 && v <= 0x10FFFF) return {v, 4};
     }
     return {0xFFFD, 1};
 }
@@ -86,12 +90,64 @@ constexpr void encode(char32_t cp, std::string& out) {
 }
 
 /// A Unicode punctuation character: general category P or S (CommonMark 0.31.2).
+/// Whether `cp` lies in one of a sorted table's ranges.
+template <std::size_t N>
+[[nodiscard]] constexpr bool in_ranges(const tables::cp_range (&table)[N], char32_t cp) noexcept {
+    const auto* it = std::upper_bound(std::begin(table), std::end(table), cp,
+                                      [](char32_t v, const tables::cp_range& r) { return v < r.lo; });
+    return it != std::begin(table) && cp <= (it - 1)->hi;
+}
+
 [[nodiscard]] constexpr bool is_punctuation(char32_t cp) noexcept {
     if (cp < 0x80) return is_ascii_punctuation(static_cast<char>(cp));
-    const auto* end = std::end(tables::punctuation);
-    const auto* it = std::upper_bound(std::begin(tables::punctuation), end, cp,
-                                      [](char32_t v, const tables::cp_range& r) { return v < r.lo; });
-    return it != std::begin(tables::punctuation) && cp <= (it - 1)->hi;
+    return in_ranges(tables::punctuation, cp);
+}
+
+/// Appends `cp` lower-cased by the full Unicode mapping (İ -> i̇), as str.lower
+/// and JavaScript's toLowerCase do — but for Σ, whose form depends on its
+/// neighbours (append_lower_at). Not case folding: µ, ſ and ꭰ stay themselves.
+constexpr void append_lower(char32_t cp, std::string& out) {
+    if (cp < 0x80) {
+        out.push_back(cp >= 'A' && cp <= 'Z' ? static_cast<char>(cp + 32) : static_cast<char>(cp));
+        return;
+    }
+    const auto* end = std::end(tables::lowercase);
+    const auto* it = std::lower_bound(std::begin(tables::lowercase), end, cp,
+                                      [](const tables::fold& f, char32_t v) { return f.cp < v; });
+    if (it != end && it->cp == cp) out += it->to;
+    else encode(cp, out);
+}
+
+/// Appends the code point at byte `i` of `text` lower-cased in its context:
+/// a Σ is ς when it ends a word — a cased letter before it and none after it,
+/// case-ignorable code points (marks, apostrophes, ...) skipped both ways —
+/// Unicode's Final_Sigma, as str.lower and toLowerCase apply it.
+constexpr void append_lower_at(std::string_view text, std::size_t i, std::string& out) {
+    const code_point c = decode(text, i);
+    if (c.cp != 0x3A3) {
+        append_lower(c.cp, out);
+        return;
+    }
+    const auto cased_or_stop = [](char32_t cp) { return !in_ranges(tables::case_ignorable, cp); };
+    bool before = false;
+    for (std::size_t k = i; k > 0;) {
+        const code_point p = decode_before(text, k);
+        k -= p.len;
+        if (cased_or_stop(p.cp)) {
+            before = in_ranges(tables::cased, p.cp);
+            break;
+        }
+    }
+    bool after = false;
+    for (std::size_t k = i + c.len; k < text.size();) {
+        const code_point n = decode(text, k);
+        k += n.len;
+        if (cased_or_stop(n.cp)) {
+            after = in_ranges(tables::cased, n.cp);
+            break;
+        }
+    }
+    out += before && !after ? "\xCF\x82" : "\xCF\x83";   // ς : σ
 }
 
 /// Unicode whitespace: category Zs, tab, line feed, form feed, carriage return.

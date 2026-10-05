@@ -142,7 +142,7 @@ def test_find_takes_a_block_class():
     doc = md.Document(NOTES)
     assert names(doc.find(md.Heading)) == ["Heading"] * 3
     assert doc.find(md.Block) == doc.walk()
-    with pytest.raises(TypeError, match="Block class"):
+    with pytest.raises(TypeError, match="markdown's block classes"):
         doc.find("heading")
 
 
@@ -489,6 +489,124 @@ def test_front_matter_builder_uses_the_engines():
     assert md.front_matter({"a": 1}, engine="toml") == "+++\na = 1\n+++\n"
     with pytest.raises(ValueError, match="yaml, toml"):
         md.front_matter({"a": 1}, engine="json")
+
+
+# --------------------------------------------------------------------------- #
+# Answers the review found wrong, each against its reference
+# --------------------------------------------------------------------------- #
+# escape(): whitespace a paragraph would strip or read as structure, and a lone
+# CR, are written as character references, so the text comes back exactly.
+EDGE_TEXT = [" > q", "  - x", "   1. x", "    code", "\tx", "\t- x", "a\n ===", "a\n  ---", "a\n:-:",
+             "a\r- b", "a\r\nb", "trailing  ", "a  \nb", "  ", "x\n\ty"]
+
+
+@pytest.mark.parametrize("text", EDGE_TEXT, ids=repr)
+def test_escape_round_trips_whitespace_and_line_starts(text):
+    doc = md.Document(md.escape(text))
+    assert [type(b).__name__ for b in doc.blocks] == ["Paragraph"] and doc.blocks[0].plain == text
+    if "\n" not in text and "\r" not in text:
+        assert md.Document(md.heading(2, md.escape(text))).find(md.Heading)[0].title == text
+
+
+def test_quote_and_bullets_treat_every_line_ending_as_one():
+    assert [type(b).__name__ for b in md.Document(md.quote("a\r# b")).blocks] == ["Quote"]
+    assert [type(b).__name__ for b in md.Document(md.bullets(["a\r# b"])).blocks] == ["List"]
+    assert md.table(["h"], [["a\rb"]]) == md.table(["h"], [["a\nb"]]) == md.table(["h"], [["a\r\nb"]])   # a <br>
+
+
+def test_indented_code_ends_at_its_last_line_of_code():
+    assert md.Document("    code\n\n\npara\n").blocks[0].lines == (1, 1)   # blank lines belong to no block
+    # so the blank line after it separates list items, and the list is loose (CommonMark 5.3)
+    assert md.Document("-     code\n\n- b\n").html() == (
+        "<ul>\n<li>\n<pre><code>code\n</code></pre>\n</li>\n<li>\n<p>b</p>\n</li>\n</ul>\n")
+
+
+@pytest.mark.parametrize("title, slug", [
+    ("Λόγος", "λόγος"), ("ΛΌΓΟΣ ΚΑΙ ΣΑΣ", "λόγος-και-σας"),   # lower-case with the final sigma, as JS does
+    ("µs", "µs"), ("ſtraße", "ſtraße"), ("ꭰ", "ꭰ"),            # lower-casing, not case folding
+    ("İstanbul", "i̇stanbul"),                                   # İ lower-cases to i + U+0307
+])
+def test_github_slugs_lower_case_as_github_does(title, slug):
+    assert md.Document(f"# {title}\n").find(md.Heading)[0].slug == slug
+    assert slug == title.lower().replace(" ", "-")   # Python's str.lower is the same mapping as JS toLowerCase here
+
+
+def test_a_document_is_text_not_bytes():
+    with pytest.raises(TypeError, match="str"):
+        md.Document(b"# a\n")
+
+
+@pytest.mark.parametrize("call", [
+    pytest.param(lambda: md.Document("# a\ud800\n"), id="Document"),
+    pytest.param(lambda: (lambda d: d.replace(d.blocks[0], "x\ud800"))(md.Document("# a\n")), id="replace"),
+    pytest.param(lambda: md.heading(1, "\ud800"), id="heading"),
+    pytest.param(lambda: md.escape("\ud800"), id="escape"),
+    pytest.param(lambda: md.bullets(["\ud800"]), id="bullets"),
+])
+def test_text_that_is_not_utf8_is_a_value_error_naming_it(call):
+    with pytest.raises(ValueError, match="UTF-8"):
+        call()
+
+
+def test_writing_a_lone_surrogate_names_the_engine(temp_dir):
+    with pytest.raises(ValueError, match="md write.*UTF-8"):
+        pygim.path(temp_dir / "s.md").write("# a\ud800\n")
+
+
+def test_nul_reaches_no_output():
+    assert md.Document("<div>\x00</div>\n").html() == "<div>\ufffd</div>\n"   # raw HTML block
+    assert md.Document('a <span title="\x00">x</span>\n').html() == '<p>a <span title="\ufffd">x</span></p>\n'
+    assert md.Document("a\x00b\n").plain == "a\ufffdb"
+
+
+def test_a_backslash_before_a_pipe_escapes_it_in_a_table_cell():
+    table = md.Document("| a | b |\n|---|---|\n| x \\\\| y | z |\n").find(md.Table)[0]
+    assert table.rows == [["x | y", "z"]]   # cmark-gfm: a pipe after a backslash never splits a cell
+
+
+@pytest.mark.parametrize("start, n", [(-1, 1), (999_999_999, 2), (4_294_967_295, 1), (1_000_000_000, 1)])
+def test_an_ordered_list_numbers_within_nine_digits(start, n):
+    with pytest.raises(ValueError, match="9 digits"):
+        md.bullets(["x"] * n, numbered=True, start=start)
+    assert md.bullets(["a", "b"], numbered=True, start=999_999_998).startswith("999999998. a")
+
+
+def test_a_table_refuses_cells_its_header_cannot_hold():
+    with pytest.raises(ValueError, match="row 1 has 3 cells"):
+        md.table(["a", "b"], [["1", "2", "3"]])
+    with pytest.raises(ValueError, match="align"):
+        md.table(["a", "b"], [["1", "2"]], align=["left"])
+
+
+def test_an_absent_definition_title_is_none():
+    d = md.Document("[x]: /u\n").find(md.Definition)[0]
+    assert d.title is None and d.destination == "/u"
+
+
+def test_find_names_the_classes_it_takes():
+    class Mine(md.Heading):
+        pass
+
+    with pytest.raises(TypeError, match="markdown's block classes"):
+        md.Document("# a\n").find(Mine)
+
+
+def test_a_document_copies_and_pickles_as_its_text_and_policies():
+    import copy
+    import pickle
+
+    doc = md.Document("+++\na = 1\n+++\n# A\n", dialect="commonmark", slugs="toc")
+    assert copy.copy(doc) is doc and copy.deepcopy(doc) is doc   # immutable: a copy is itself
+    back = pickle.loads(pickle.dumps(doc))
+    assert (back.text, back.dialect, back.slugs, back.front_matter) == (doc.text, "commonmark", "toc", {"a": 1})
+    assert pickle.loads(pickle.dumps(md.Document("---\n", front_matter=False))).blocks[0].__class__ is md.ThematicBreak
+
+
+def test_engine_writes_refuse_a_wrong_kind_with_a_type_error_naming_the_engine():
+    with pytest.raises(TypeError, match="yaml write: .*set"):
+        md.front_matter({"a": {1, 2}})
+    with pytest.raises(TypeError, match="toml write: .*mapping"):
+        md.front_matter([1], engine="toml")
 
 
 # --------------------------------------------------------------------------- #

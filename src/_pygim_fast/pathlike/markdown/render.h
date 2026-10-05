@@ -90,6 +90,14 @@ private:
         m_out += s;
         m_last = s.back();
     }
+    /// Raw HTML, as written — except NUL, which CommonMark replaces with U+FFFD everywhere.
+    constexpr void raw(std::string_view s) {
+        for (char c : s) {
+            if (c == '\0') m_out += "\xEF\xBF\xBD";
+            else m_out.push_back(c);
+        }
+        m_last = s.empty() ? m_last : m_out.back();
+    }
     constexpr void esc(std::string_view s) {
         if (s.empty()) return;
         escape_html(s, m_out);
@@ -240,7 +248,7 @@ private:
             }
             case kind::html:
                 cr();
-                lit(literal_text(m_src, *m_t, b, false));
+                raw(literal_text(m_src, *m_t, b, false));
                 cr();
                 break;
             case kind::thematic_break:
@@ -333,7 +341,7 @@ private:
                 esc(n.literal);
                 tag("/code");
                 break;
-            case inline_kind::html: lit(n.literal); break;
+            case inline_kind::html: raw(n.literal); break;
             case inline_kind::emph: tag("em"); break;
             case inline_kind::strong: tag("strong"); break;
             case inline_kind::del: tag("del"); break;

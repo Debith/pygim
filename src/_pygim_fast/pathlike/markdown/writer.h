@@ -34,36 +34,28 @@
 
 namespace pygim::pathlike::markdown::write {
 
-/// Plain text made safe as markdown inline content: the characters that can
-/// start inline markup are backslash-escaped everywhere (`\ ` * _ [ ] < | ~ #`),
-/// the ones that only start a block at the beginning of a line are escaped
-/// there (`> + - =`, the `.`/`)` after digits), and `&` where it would read
-/// as an entity reference. Line breaks are kept.
-[[nodiscard]] constexpr std::string escape(std::string_view text) {
-    std::string out;
-    out.reserve(text.size() + text.size() / 8);
-    bool line_start = true;
-    for (std::size_t i = 0; i < text.size(); ++i) {
-        const char c = text[i];
-        if (c == '\n') {
-            out.push_back(c);
-            line_start = true;
-            continue;
-        }
-        if (line_start) {
-            line_start = false;
-            if (c == '>' || c == '+' || c == '-' || c == '=') {
+/// One line's text, escaped from its first character as a line start: the
+/// characters that can start inline markup are backslash-escaped everywhere
+/// (`\ ` * _ [ ] < | ~ #`), those that only start a block at the beginning
+/// of a line are escaped there (`> + - = :`, the `.`/`)` after digits — `:`
+/// so no line reads as a table's delimiter row), `&` where it would read as
+/// an entity reference, and a carriage return becomes `&#13;`.
+constexpr void escape_line(std::string_view line, std::string& out) {
+    for (std::size_t i = 0; i < line.size(); ++i) {
+        const char c = line[i];
+        if (i == 0) {
+            if (c == '>' || c == '+' || c == '-' || c == '=' || c == ':') {
                 out.push_back('\\');
                 out.push_back(c);
                 continue;
             }
             if (is_ascii_digit(c)) {   // "1. x" would start an ordered list
                 std::size_t j = i;
-                while (j < text.size() && is_ascii_digit(text[j])) ++j;
-                if (j < text.size() && (text[j] == '.' || text[j] == ')')) {
-                    out.append(text.substr(i, j - i));
+                while (j < line.size() && is_ascii_digit(line[j])) ++j;
+                if (j < line.size() && (line[j] == '.' || line[j] == ')')) {
+                    out.append(line.substr(i, j - i));
                     out.push_back('\\');
-                    out.push_back(text[j]);
+                    out.push_back(line[j]);
                     i = j;
                     continue;
                 }
@@ -75,12 +67,59 @@ namespace pygim::pathlike::markdown::write {
                 out.push_back(c);
                 break;
             case '&':
-                if (match_entity(text, i)) out.push_back('\\');
+                if (match_entity(line, i)) out.push_back('\\');
                 out.push_back(c);
+                break;
+            case '\r':
+                out += "&#13;";
                 break;
             default:
                 out.push_back(c);
         }
+    }
+}
+
+/// Plain text made safe as markdown inline content, so that parsing it back
+/// gives the text exactly (escape_line says what is escaped). Whitespace a
+/// paragraph would strip or read as indentation — spaces and tabs at the
+/// start or the end of a line — is written as character references (`&#32;`,
+/// `&#9;`), and a carriage return as `&#13;`, so `" > q"` stays text and
+/// `"a\r\nb"` reads back with its CR. Line feeds are kept as line breaks,
+/// except after a line's trailing whitespace, where the line feed is `&#10;`.
+[[nodiscard]] constexpr std::string escape(std::string_view text) {
+    std::string out;
+    out.reserve(text.size() + text.size() / 8);
+    const auto reference = [&](char c) { out += c == ' ' ? "&#32;" : "&#9;"; };
+    for (std::size_t pos = 0;;) {
+        std::size_t end = text.find('\n', pos);
+        const bool last = end == std::string_view::npos;
+        if (last) end = text.size();
+        const std::string_view line = text.substr(pos, end - pos);
+        std::size_t lead = 0;
+        while (lead < line.size() && is_space_or_tab(line[lead])) ++lead;
+        std::size_t trail = line.size();
+        while (trail > lead && is_space_or_tab(line[trail - 1])) --trail;
+        for (std::size_t i = 0; i < lead; ++i) reference(line[i]);
+        escape_line(line.substr(lead, trail - lead), out);
+        for (std::size_t i = trail; i < line.size(); ++i) reference(line[i]);
+        if (last) break;
+        // A line break drops the spaces before it, decoded ones too (CommonMark 6.7),
+        // so after trailing whitespace the break itself is a reference: no line ends there.
+        out += trail < line.size() ? "&#10;" : "\n";
+        pos = end + 1;
+    }
+    return out;
+}
+
+/// The lines of `text`, split at LF, CRLF or a lone CR (as the parser reads them).
+[[nodiscard]] constexpr std::vector<std::string_view> lines_of(std::string_view text) {
+    std::vector<std::string_view> out;
+    for (std::size_t pos = 0;;) {
+        const auto [end, next] = line_from(text, pos);
+        out.push_back(text.substr(pos, end - pos));
+        if (next == end) break;   // the last line had no line ending
+        pos = next;
+        if (pos == text.size()) break;
     }
     return out;
 }
@@ -136,13 +175,15 @@ namespace pygim::pathlike::markdown::write {
 [[nodiscard]] constexpr std::string cell(std::string_view text) {
     std::string out;
     std::size_t backslashes = 0;
+    bool prev_cr = false;
     for (char c : trim_whitespace(text)) {
-        if (c == '\n') {
-            out += "<br>";
+        if (c == '\n' || c == '\r') {   // LF, CRLF and a lone CR are each one line break
+            if (!(c == '\n' && prev_cr)) out += "<br>";
+            prev_cr = c == '\r';
             backslashes = 0;
             continue;
         }
-        if (c == '\r') continue;
+        prev_cr = false;
         if (c == '|' && backslashes % 2 == 0) out.push_back('\\');
         backslashes = c == '\\' ? backslashes + 1 : 0;
         out.push_back(c);
@@ -151,15 +192,24 @@ namespace pygim::pathlike::markdown::write {
 }
 
 /// A GFM table: the header row, the delimiter row (alignment colons from
-/// `aligns`, `none` for columns it does not cover) and the body rows. Rows
-/// shorter than the widest are padded with empty cells; every column is
-/// padded to its widest cell, so the source reads as a grid.
+/// `aligns`: none, or one per column) and the body rows. A row shorter than
+/// the header is padded with empty cells; a longer one is refused, since a
+/// reader drops the cells past the header's. Every column is padded to its
+/// widest cell, so the source reads as a grid.
 [[nodiscard]] constexpr std::string table(const std::vector<std::string>& header,
                                           const std::vector<std::vector<std::string>>& rows,
                                           const std::vector<align>& aligns) {
-    std::size_t columns = header.size();
-    for (const auto& r : rows) columns = std::max(columns, r.size());
+    const std::size_t columns = header.size();
     if (columns == 0) throw std::invalid_argument("markdown table needs at least one column");
+    for (std::size_t k = 0; k < rows.size(); ++k) {   // GFM drops the cells past the header's: refuse, not lose them
+        if (rows[k].size() > columns) {
+            throw std::invalid_argument("table: row " + decimal(k + 1) + " has " + decimal(rows[k].size()) +
+                                        " cells, the header " + decimal(columns) + " (a reader drops the rest)");
+        }
+    }
+    if (!aligns.empty() && aligns.size() != columns) {
+        throw std::invalid_argument("table: align has " + decimal(aligns.size()) + " values for " + decimal(columns) + " columns");
+    }
     std::vector<std::vector<std::string>> grid;
     grid.reserve(rows.size() + 1);
     const auto add = [&](const std::vector<std::string>& r) {
@@ -205,23 +255,32 @@ namespace pygim::pathlike::markdown::write {
 
 /// A bullet list, or a numbered one from `start`. An item's continuation
 /// lines are indented under its first character, so a multi-line item stays one item.
-[[nodiscard]] constexpr std::string items(const std::vector<std::string>& texts, bool ordered, std::uint32_t start) {
+///
+/// An ordered list's numbers have at most nine digits (CommonMark 5.2: a
+/// longer one is not a list marker, and the items would merge), so `start`
+/// and the last item's number must lie in 0-999999999 (std::invalid_argument).
+[[nodiscard]] constexpr std::string items(const std::vector<std::string>& texts, bool ordered, std::int64_t start) {
+    constexpr std::int64_t most = 999'999'999;
+    const auto last = start + static_cast<std::int64_t>(texts.empty() ? 0 : texts.size() - 1);
+    if (ordered && (start < 0 || last > most)) {
+        const auto signed_decimal = [](std::int64_t v) {
+            return v < 0 ? "-" + decimal(static_cast<std::uint64_t>(-v)) : decimal(static_cast<std::uint64_t>(v));
+        };
+        throw std::invalid_argument("bullets: an ordered list's numbers have at most 9 digits (0-999999999); start=" +
+                                    signed_decimal(start) + " with " + decimal(texts.size()) + " items ends at " +
+                                    signed_decimal(last));
+    }
     std::string out;
-    std::uint32_t n = start;
+    std::uint64_t n = ordered ? static_cast<std::uint64_t>(start) : 0;
     for (const std::string& t : texts) {
         const std::string marker = ordered ? decimal(n++) + ". " : std::string("- ");
         out += marker;
         bool first = true;
-        std::string_view rest = trim_whitespace(t);
-        for (;;) {
-            const std::size_t e = rest.find('\n');
-            const std::string_view line = rest.substr(0, e);
+        for (const std::string_view line : lines_of(trim_whitespace(t))) {
             if (!first && !trim_space_tab(line).empty()) out.append(marker.size(), ' ');
             out += line;
             out.push_back('\n');
             first = false;
-            if (e == std::string_view::npos) break;
-            rest = rest.substr(e + 1);
         }
     }
     return out;
@@ -230,15 +289,10 @@ namespace pygim::pathlike::markdown::write {
 /// A block quote: every line prefixed with `> ` (a blank line with `>`).
 [[nodiscard]] constexpr std::string quote(std::string_view text) {
     std::string out;
-    std::string_view rest = trim_whitespace(text);
-    for (;;) {
-        const std::size_t e = rest.find('\n');
-        const std::string_view line = rest.substr(0, e);
+    for (const std::string_view line : lines_of(trim_whitespace(text))) {   // LF, CRLF, lone CR alike
         if (trim_space_tab(line).empty()) out += ">";
         else (out += "> ") += line;
         out.push_back('\n');
-        if (e == std::string_view::npos) break;
-        rest = rest.substr(e + 1);
     }
     return out;
 }

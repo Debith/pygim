@@ -312,13 +312,14 @@ public:
     /// block gives its code, a table its cells (tab between, line per row),
     /// a container its blocks one blank line apart; HTML, front matter,
     /// definitions and breaks give nothing.
+    /// NUL reads as U+FFFD (CommonMark 2.3), here as in the HTML.
     [[nodiscard]] constexpr std::string plain(std::uint32_t i) const {
         std::string out;
         append_plain_block(i, out);
-        return out;
+        return without_nul(std::move(out));
     }
     [[nodiscard]] constexpr std::string cell_plain(std::uint32_t table, std::uint32_t row, std::uint32_t col) const {
-        return inline_plain(cell_source(table, row, col));
+        return without_nul(inline_plain(cell_source(table, row, col)));
     }
     /// The first line of plain(i) — what a reader sees first — from the first
     /// block below `i` that gives any text, without building the rest: a
@@ -336,7 +337,7 @@ public:
             }
             std::string text;
             append_plain_leaf(b, text);
-            if (!text.empty()) return text.substr(0, text.find('\n'));
+            if (!text.empty()) return without_nul(text.substr(0, text.find('\n')));
         }
         return {};
     }
@@ -466,6 +467,16 @@ private:
         const inline_tree it = basic_inline_parser<D, Scan>{}.parse(text, structure());
         std::string out;
         append_plain(it, 0, out);
+        return out;
+    }
+
+    [[nodiscard]] static constexpr std::string without_nul(std::string s) {
+        if (s.find('\0') == std::string::npos) return s;
+        std::string out;
+        for (char c : s) {
+            if (c == '\0') out += "\xEF\xBF\xBD";
+            else out.push_back(c);
+        }
         return out;
     }
 

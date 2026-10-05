@@ -68,6 +68,23 @@ using mk::type_list;
 
 [[nodiscard]] inline py::str str_of(std::string_view s) { return py::str(s.data(), s.size()); }
 
+/// The UTF-8 of a Python str, for `what` (the call it is given to). TypeError
+/// for anything else — bytes too: a document is text — and ValueError for a
+/// str that UTF-8 cannot hold (a lone surrogate), with Python's own reason.
+[[nodiscard]] inline std::string utf8(py::handle obj, std::string_view what) {
+    if (!PyUnicode_Check(obj.ptr())) {
+        throw py::type_error(std::string(what) + ": text must be str, got " +
+                             py::str(py::type::of(obj).attr("__name__")).cast<std::string>());
+    }
+    Py_ssize_t n = 0;
+    const char* data = PyUnicode_AsUTF8AndSize(obj.ptr(), &n);
+    if (data == nullptr) {
+        py::error_already_set reason;   // the UnicodeEncodeError
+        throw py::value_error(std::string(what) + ": text is not valid UTF-8 (" + py::str(reason.value()).cast<std::string>() + ")");
+    }
+    return std::string(data, static_cast<std::size_t>(n));
+}
+
 /// What Python's Document, Block and Section share: the parsed document and
 /// the name errors give it (the file, or "<string>").
 struct document {
@@ -359,7 +376,8 @@ struct definition {
     static void bind(C& c) {
         c.def_property_readonly("label", [](const self& b) { return str_of(def(b).label); }, "Case-folded, as references match it.")
          .def_property_readonly("destination", [](const self& b) { return str_of(def(b).destination); })
-         .def_property_readonly("title", [](const self& b) { return str_of(def(b).title); });
+         .def_property_readonly("title", [](const self& b) { return none_if_empty(def(b).title); },
+                                "Its title; None when it has none.");
     }
     static const mk::definition& def(const block_ref& b) { return b.doc->core().definition_of(b.index); }
 };
@@ -463,9 +481,10 @@ inline void same_document(const doc_ptr& a, const doc_ptr& b, std::string_view w
 }
 using edit_target = std::variant<block_ref, section_ref>;
 
-[[nodiscard]] inline std::vector<std::string> strings_of(py::handle seq) {
+/// str() of each value, as UTF-8, for `what`.
+[[nodiscard]] inline std::vector<std::string> strings_of(py::handle seq, std::string_view what) {
     std::vector<std::string> out;
-    for (py::handle x : seq) out.push_back(py::str(x).cast<std::string>());
+    for (py::handle x : seq) out.push_back(utf8(py::str(x), what));
     return out;
 }
 
@@ -582,8 +601,8 @@ inline void bind(py::module_& parent) {
         });
 
     doc_cls
-        .def(py::init([](const std::string& text, const std::string& dialect, const std::string& slugs, bool front_matter) {
-                 return document_ref{parse(text, dialect, slugs, front_matter, "<string>"), py::object()};
+        .def(py::init([](py::handle text, const std::string& dialect, const std::string& slugs, bool front_matter) {
+                 return document_ref{parse(utf8(text, "Document"), dialect, slugs, front_matter, "<string>"), py::object()};
              }),
              py::arg("text"), py::kw_only(), py::arg("dialect") = "gfm", py::arg("slugs") = "github",
              py::arg("front_matter") = true,
@@ -617,7 +636,8 @@ inline void bind(py::module_& parent) {
             if (cls.ptr() == block_type) return wrapped(d.doc, d.doc->core().walk());
             const mk::kind* k = PyType_Check(cls.ptr()) ? class_kinds().try_get_const(reinterpret_cast<PyTypeObject*>(cls.ptr())) : nullptr;
             if (!k) {
-                throw py::type_error("find: give a Block class (Heading, Code, Table, ...), got " + py::repr(cls).cast<std::string>());
+                throw py::type_error("find: give one of markdown's block classes (Block, Heading, Code, Table, ...), got " +
+                                     py::repr(cls).cast<std::string>());
             }
             return wrapped(d.doc, d.doc->core().find(*k));
         }, py::arg("cls"), "The blocks of a class (markdown.Heading, markdown.Code, ...), depth-first; Block gives every block.")
@@ -643,9 +663,9 @@ inline void bind(py::module_& parent) {
         }, "The document as HTML, as CommonMark's reference renderer writes it (front matter and definitions render nothing).")
         .def_property_readonly("plain", [](const document_ref& d) { return str_of(d.doc->plain(0)); },
                                "The text a reader sees, inline markup resolved, blocks one blank line apart.")
-        .def("replace", [](const document_ref& d, const edit_target& target, const std::string& text) {
+        .def("replace", [](const document_ref& d, const edit_target& target, py::handle text) {
             const auto [begin, end] = std::visit([&](const auto& t) { return region(d.doc, t); }, target);
-            return document_ref{reparse(*d.doc, d.doc->core().splice(begin, end, text))};
+            return document_ref{reparse(*d.doc, d.doc->core().splice(begin, end, utf8(text, "replace")))};
         }, py::arg("target"), py::arg("text"),
            "A new Document with a top-level block or a section replaced by text; every other byte, and the "
            "blank lines that separated the target from what follows, unchanged. Empty text deletes it.")
@@ -657,6 +677,20 @@ inline void bind(py::module_& parent) {
         }, py::arg("data"), py::kw_only(), py::arg("engine") = py::none(),
            "A new Document with its front matter set to data (None removes it), written by the YAML or TOML "
            "engine (engine= picks; default: the one already there, else yaml). The body is unchanged.")
+        // Immutable, so a copy is the document itself; a pickle is its text and the choices it was parsed with.
+        .def("__copy__", [](py::handle self) { return py::reinterpret_borrow<py::object>(self); })
+        .def("__deepcopy__", [](py::handle self, py::handle) { return py::reinterpret_borrow<py::object>(self); }, py::arg("memo"))
+        .def(py::pickle(
+            [](const document_ref& d) {
+                return py::make_tuple(str_of(d.doc->core().source()), str_of(d.doc->doc.dialect()), str_of(d.doc->doc.slugs()),
+                                      d.doc->core().recognises_front_matter());
+            },
+            [](py::tuple t) {
+                if (t.size() != 4) throw py::value_error("Document pickle: expected (text, dialect, slugs, front_matter)");
+                return document_ref{parse(utf8(t[0], "Document"), t[1].cast<std::string>(), t[2].cast<std::string>(),
+                                          t[3].cast<bool>(), "<string>"),
+                                    py::object()};
+            }))
         .def("stats", [](const document_ref& d) {
             py::dict out;
             out["source"] = d.doc->core().source().size();
@@ -667,34 +701,36 @@ inline void bind(py::module_& parent) {
         }, "Sizes: 'source' bytes, 'blocks', 'lines', and 'bytes' — every heap byte behind the document, exactly.");
 
     // ── builders: markdown in, markdown text out ──
-    m.def("escape", [](const std::string& text) { return str_of(mk::write::escape(text)); }, py::arg("text"),
-          "Plain text made safe as markdown: what could start markup is backslash-escaped, line breaks kept.");
-    m.def("heading", [](int level, const std::string& text) { return str_of(mk::write::heading(level, text)); },
+    m.def("escape", [](py::handle text) { return str_of(mk::write::escape(utf8(text, "escape"))); }, py::arg("text"),
+          "Plain text made safe as markdown, so it reads back exactly: what could start markup is backslash-escaped, "
+          "spaces and tabs at a line's start or end and carriage returns become character references, line feeds stay.");
+    m.def("heading", [](int level, py::handle text) { return str_of(mk::write::heading(level, utf8(text, "heading"))); },
           py::arg("level"), py::arg("text"), "An ATX heading line ('## text'); level 1-6. text is markdown (escape() plain text).");
-    m.def("code", [](const std::string& text, const std::string& lang) { return str_of(mk::write::code(text, lang)); },
+    m.def("code", [](py::handle text, py::handle lang) { return str_of(mk::write::code(utf8(text, "code"), utf8(lang, "code"))); },
           py::arg("text"), py::arg("lang") = "", "A fenced code block whose fence no line of text can close; lang is its info string.");
     m.def("table", [](py::handle header, py::handle rows, py::object align) {
         std::vector<std::vector<std::string>> body;
-        for (py::handle r : rows) body.push_back(strings_of(r));
+        for (py::handle r : rows) body.push_back(strings_of(r, "table"));
         std::vector<mk::align> al;
         if (!align.is_none()) {
             for (py::handle a : align) al.push_back(align_from(a));
         }
-        return str_of(mk::write::table(strings_of(header), body, al));
+        return str_of(mk::write::table(strings_of(header, "table"), body, al));
     }, py::arg("header"), py::arg("rows"), py::kw_only(), py::arg("align") = py::none(),
        "A GFM table, columns padded to line up. Cells are str() of the values and are markdown; a '|' "
        "in a cell is escaped and a line break becomes <br>. align: 'left', 'center', 'right' or None per column.");
-    m.def("bullets", [](py::handle items, bool numbered, std::uint32_t start) {
-        return str_of(mk::write::items(strings_of(items), numbered, start));
+    m.def("bullets", [](py::handle items, bool numbered, std::int64_t start) {
+        return str_of(mk::write::items(strings_of(items, "bullets"), numbered, start));
     }, py::arg("items"), py::kw_only(), py::arg("numbered") = false, py::arg("start") = 1,
-       "A bullet list (or numbered from start); an item's later lines are indented under it.");
-    m.def("quote", [](const std::string& text) { return str_of(mk::write::quote(text)); }, py::arg("text"),
+       "A bullet list (or numbered from start: the numbers must stay within 9 digits); an item's later lines "
+       "are indented under it.");
+    m.def("quote", [](py::handle text) { return str_of(mk::write::quote(utf8(text, "quote"))); }, py::arg("text"),
           "A block quote: every line prefixed with '> '.");
     m.def("front_matter", [](py::handle data, const std::string& engine) {
         return str_of(dump_front_matter(front_matter_formats{}, data, engine));
     }, py::arg("data"), py::kw_only(), py::arg("engine") = "yaml",
        "Front matter text: data written by the YAML (---) or TOML (+++) engine.");
-    m.def("join", [](py::handle blocks) { return str_of(mk::write::join(strings_of(blocks))); }, py::arg("blocks"),
+    m.def("join", [](py::handle blocks) { return str_of(mk::write::join(strings_of(blocks, "join"))); }, py::arg("blocks"),
           "Blocks joined into a document: one blank line between, empty ones dropped, one final line ending.");
 
     if constexpr (probes) bind_probes(m);

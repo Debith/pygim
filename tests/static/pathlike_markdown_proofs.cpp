@@ -148,6 +148,15 @@ static_assert(slug_is<github_slug>("C++ & C#", "c--c") && slug_is<toc_slug>("C++
 static_assert(slug_is<github_slug>("2.1 snake_case", "21-snake_case") && slug_is<toc_slug>("2.1 snake_case", "21-snake_case"));
 static_assert(slug_is<github_slug>("Stra\xC3\x9F" "e", "stra\xC3\x9F" "e") && slug_is<toc_slug>("\xEF\xAC\x81le", "file"));   // ß stays; ﬁ folds
 
+// GitHub lower-cases as JavaScript's toLowerCase: the full mapping, a word-final Σ as ς,
+// case-ignorables (the apostrophe) skipped; not case folding, so µ and ſ stay.
+static_assert(slug_is<github_slug>("\xCE\x9B\xCE\x8C\xCE\x93\xCE\x9F\xCE\xA3 \xCE\x9A\xCE\x91\xCE\x99 \xCE\xA3\xCE\x91\xCE\xA3", "\xCE\xBB\xCF\x8C\xCE\xB3\xCE\xBF\xCF\x82-\xCE\xBA\xCE\xB1\xCE\xB9-\xCF\x83\xCE\xB1\xCF\x82"));   // ΛΌΓΟΣ ΚΑΙ ΣΑΣ -> λόγος-και-σας
+static_assert(slug_is<github_slug>("\xCE\x9B\xCF\x8C\xCE\xB3\xCE\xBF\xCF\x82", "\xCE\xBB\xCF\x8C\xCE\xB3\xCE\xBF\xCF\x82"));   // Λόγος -> λόγος
+static_assert(slug_is<github_slug>("\xC2\xB5s", "\xC2\xB5s"));   // µs -> µs
+static_assert(slug_is<github_slug>("\xC5\xBFtra\xC3\x9F" "e", "\xC5\xBFtra\xC3\x9F" "e"));   // ſtraße -> ſtraße
+static_assert(slug_is<github_slug>("\xC4\xB0stanbul", "i\xCC\x87stanbul"));   // İstanbul -> i̇stanbul
+static_assert(slug_is<github_slug>("\xCE\x91\xCE\xA3'\xCE\x92", "\xCE\xB1\xCF\x83\xCE\xB2"));   // ΑΣ'Β -> ασβ
+
 // Repeats, as slug.h's table states them: each rule de-duplicates as its reference does.
 template <SlugPolicy S>
 consteval bool anchors_are(std::initializer_list<std::string_view> slugs, std::initializer_list<std::string_view> expected) {
@@ -166,6 +175,14 @@ static_assert(anchors_are<github_slug>({"a-1", "a", "a", "a"}, {"a-1", "a", "a-2
 // Python-Markdown takes the trailing number as an integer, and a jump never skips a free id.
 static_assert(anchors_are<toc_slug>({"x_007", "x_007", "x_9", "x_9", "x", "x"}, {"x_007", "x_8", "x_9", "x_10", "x", "x_1"}));
 static_assert(anchors_are<toc_slug>({"a", "a", "a", "a_1", "a"}, {"a", "a_1", "a_2", "a_3", "a_4"}));
+
+// ── UTF-8: each length spells only its own values ────────────────────────────
+consteval bool malformed(std::string_view s) { const auto c = decode(s, 0); return c.cp == 0xFFFD && c.len == 1; }
+static_assert(malformed("\xC0\x80") && malformed("\xC1\xBF"));            // overlong 2-byte (U+0000, U+007F)
+static_assert(malformed("\xE0\x80\x80") && malformed("\xED\xA0\x80"));  // overlong 3-byte; a surrogate
+static_assert(malformed("\xF0\x80\x80\x80") && malformed("\xF4\x90\x80\x80") && malformed("\x80"));
+static_assert(decode("\xC2\x80", 0).cp == 0x80 && decode("\xEF\xBF\xBF", 0).cp == 0xFFFF &&
+              decode("\xF4\x8F\xBF\xBF", 0).cp == 0x10FFFF && decode("\xF4\x8F\xBF\xBF", 0).len == 4);
 
 // ── the scalar stop scan (the SIMD policies are checked at run time through public
 // behaviour: every stop byte at every offset must change the parse) ──

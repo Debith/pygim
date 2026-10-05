@@ -93,17 +93,6 @@ concept Dialect = requires {
     return i == s.size() ? (s[0] == '=' ? 1 : 2) : 0;
 }
 
-/// Where the line starting at `pos` ends, before its line ending, and where
-/// the next line starts. A line ends at LF, CRLF or a lone CR (CommonMark).
-[[nodiscard]] constexpr std::pair<std::size_t, std::size_t> line_from(std::string_view src, std::size_t pos) noexcept {
-    std::size_t e = src.find('\n', pos);   // two memchr-speed searches, not a byte loop: this runs per line
-    if (e == std::string_view::npos) e = src.size();
-    const std::size_t cr = src.substr(pos, e - pos).find('\r');
-    if (cr == std::string_view::npos) return {e, e < src.size() ? e + 1 : e};
-    e = pos + cr;   // a CR, alone or before the LF, ends the line
-    return {e, e + 1 < src.size() && src[e + 1] == '\n' ? e + 2 : e + 1};
-}
-
 /// Where checking `s` for a thematic break (three or more of one of `*`, `-`,
 /// `_`, with spaces and tabs between and after) is decided: s.size() + 1 when
 /// it is one, otherwise the offset of the byte that rules it out (s.size() when
@@ -243,8 +232,8 @@ constexpr void table_cells(std::string_view s, std::vector<std::pair<std::size_t
     };
     std::size_t cell = i;
     for (std::size_t j = i; j < n; ++j) {
-        if (s[j] == '\\' && j + 1 < n) {
-            ++j;
+        if (s[j] == '\\' && j + 1 < n && s[j + 1] == '|') {
+            ++j;   // a pipe after a backslash never splits a cell, whatever precedes the backslash (cmark-gfm)
         } else if (s[j] == '|') {
             push(cell, j);
             cell = j + 1;
@@ -855,15 +844,13 @@ private:
                         --b.nseg;
                     }
                 } else {
-                    while (b.nseg > 0 && spaces_only(m_t.segments[b.seg + b.nseg - 1])) --b.nseg;
+                    trim_blank_lines(i);
                 }
                 break;
             }
-            case kind::html: {
-                block& b = at(i);
-                while (b.nseg > 0 && spaces_only(m_t.segments[b.seg + b.nseg - 1])) --b.nseg;
+            case kind::html:
+                trim_blank_lines(i);
                 break;
-            }
             case kind::list:
                 finalize_list(i);
                 break;
@@ -874,6 +861,18 @@ private:
                 break;
         }
         m_tip = above;
+    }
+
+    /// Drops the blank lines at the end of an indented code or HTML block —
+    /// from its content and from its lines and span: blank lines between blocks
+    /// belong to no block, and a list's looseness is read from those gaps.
+    constexpr void trim_blank_lines(std::uint32_t i) {
+        block& b = at(i);
+        while (b.nseg > 0 && spaces_only(m_t.segments[b.seg + b.nseg - 1])) --b.nseg;
+        if (b.nseg > 0) {
+            b.last_line = m_t.segments[b.seg + b.nseg - 1].line;
+            b.end = line_end(b.last_line);
+        }
     }
 
     [[nodiscard]] constexpr bool spaces_only(const segment& s) const noexcept {

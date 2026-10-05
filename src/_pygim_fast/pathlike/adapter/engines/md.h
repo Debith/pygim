@@ -19,6 +19,7 @@
 #include <array>
 #include <string>
 #include <string_view>
+#include <variant>
 
 #include <pybind11/pybind11.h>
 
@@ -39,16 +40,22 @@ namespace pygim::pathlike::detail {
     return py::cast(markdown_py::document_ref{markdown_py::parse(std::move(bytes), "gfm", "github", true, f.fspath())});
 }
 
+/// What a .md file is written from, and the text each kind writes.
+using md_content = std::variant<markdown_py::document_ref, py::str>;
+struct md_text {
+    std::string operator()(const markdown_py::document_ref& d) const { return d.doc->core().source(); }
+    std::string operator()(const py::str& s) const { return markdown_py::utf8(s, "md write"); }
+};
+
 inline void write_markdown(const file& f, py::handle obj) {
-    std::string text;
-    if (py::isinstance<markdown_py::document_ref>(obj)) {
-        text = obj.cast<const markdown_py::document_ref&>().doc->core().source();
-    } else if (py::isinstance<py::str>(obj)) {
-        text = obj.cast<std::string>();
-    } else {
+    md_content content;
+    try {
+        content = obj.cast<md_content>();
+    } catch (const py::cast_error&) {
         throw py::type_error("md write: content must be a markdown Document or str, got " +
                              py::str(py::type::of(obj).attr("__name__")).cast<std::string>());
     }
+    const std::string text = std::visit(md_text{}, content);
     py::gil_scoped_release nogil;
     write_text_file(f, text);
 }
