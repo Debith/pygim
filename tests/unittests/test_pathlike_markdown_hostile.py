@@ -137,8 +137,9 @@ GROWTH = {
     "distinct headings": (lambda n: "".join(f"## h{i}\n\n" for i in range(n)), sections(), 100, 1600),
     "explicit numbered toc headings": (lambda n: "".join(f"## a_{i % 7}\n\n" for i in range(n)), sections(slugs="toc"), 100, 1600),
     "subsections of many sections": (lambda n: "# a\n\n" + "## b\n\n" * n, subsections, 100, 1600),
-    "one line of nested bullets": (lambda n: "- " * n + "a\n", md.Document, 1000, 16000),
-    "one line of nested stars": (lambda n: "* " * n + "a\n", md.Document, 1000, 16000),
+# 255 bytes of tree per nesting level: past ~16,000 levels the tree leaves the caches
+    "one line of nested bullets": (lambda n: "- " * n + "a\n", md.Document, 500, 8000),
+    "one line of nested stars": (lambda n: "* " * n + "a\n", md.Document, 500, 8000),
     "unmatched long backtick runs": (lambda n: "".join("`" * (64 + i) + "!" for i in range(n)), lambda t: md.Document(t).plain, 20, 160),
     "backtick runs of every length": (lambda n: "".join("e" + "`" * i for i in range(1, n)), lambda t: md.Document(t).html(), 50, 200),
     "nested emphasis": (lambda n: "*a **a " * n + "b** b*" * n, lambda t: md.Document(t).html(), 250, 4000, FLAT_EMPHASIS),
@@ -182,10 +183,17 @@ def _growth_names():
     return sorted(space["GROWTH"])
 
 
+# glibc returns a large freed block to the OS and faults it back in on the next parse, so in one
+# process that times many shapes a big run can pay page faults a fresh process does not (3.7 ms
+# against 0.65 ms for 16,000 nested markers). Keeping freed memory makes the child time the parser,
+# not the allocator's history; other platforms' allocators ignore these.
+STABLE_HEAP = {"MALLOC_MMAP_THRESHOLD_": str(1 << 30), "MALLOC_TRIM_THRESHOLD_": str(1 << 30)}
+
+
 @pytest.fixture(scope="module")
 def growth():
     proc = subprocess.run([sys.executable, "-c", GROWTH_CHILD], capture_output=True, text=True, timeout=300,
-                          env=os.environ.copy())
+                          env={**os.environ, **STABLE_HEAP})
     assert proc.returncode == 0, proc.stderr[-2000:]
     return json.loads(proc.stdout.splitlines()[-1])
 
