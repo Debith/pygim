@@ -12,6 +12,11 @@
 // Document type and the builders live. Front matter is read and written by
 // the YAML and TOML engines (their text half, adapter.h TextEngine).
 //
+// Lifetime and threading: a read parses with the GIL released (the bytes and
+// the parse are owned C++ values) and returns a Document that owns its text; a
+// write copies the text out of the Document or str first, then writes with the
+// GIL released. Nothing here is shared between calls.
+//
 //     pygim.path("notes.md").read()             -> Document(gfm, 11 blocks, 29 lines, notes.md)
 //     pygim.path("notes.md").write(doc)         -> the document's text, unchanged
 //     pygim.path("notes.md").write("# T\n")     -> that text

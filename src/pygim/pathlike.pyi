@@ -202,91 +202,139 @@ def default_store() -> PathStore:
 
 class markdown:
     """The ``pygim.pathlike.markdown`` submodule (bound by the markdown engine; typed here
-    as a namespace because the extension is one module). ``path("x.md").read()`` returns
-    a ``Document``; each block is an instance of its kind's class (``Heading``, ``Code``,
-    ``Table``, ...), which holds only that kind's properties. The functions build markdown
-    text: what they are given is markdown, and ``escape()`` makes plain text safe."""
+    as a namespace because the extension is one module — for a type checker, import it as
+    ``from pygim.pathlike import markdown``). ``path("x.md").read()`` returns a ``Document``;
+    each block is an instance of its kind's class (``Heading``, ``Code``, ``Table``, ...),
+    which holds only that kind's properties. The functions build markdown text: what they
+    are given is markdown, and ``escape()`` makes plain text safe."""
 
     class Block:
         """One block of a Document: a view (the document and an index), never a copy."""
-        lines: tuple[int, int]
-        span: tuple[int, int]
-        text: str
-        plain: str
-        children: list[markdown.Block]
-        parent: markdown.Block | None
+        @property
+        def lines(self) -> tuple[int, int]: ...
+        @property
+        def span(self) -> tuple[int, int]: ...
+        @property
+        def text(self) -> str: ...
+        @property
+        def plain(self) -> str: ...
+        @property
+        def children(self) -> list[markdown.Block]: ...
+        @property
+        def parent(self) -> markdown.Block | None: ...
         def html(self) -> str: ...
 
     class FrontMatter(Block):
-        raw: str
-        engine: str
+        @property
+        def raw(self) -> str: ...
+        @property
+        def engine(self) -> str: ...
 
     class Heading(Block):
-        level: int
-        title: str
-        slug: str
-        content: str
+        @property
+        def level(self) -> int: ...
+        @property
+        def title(self) -> str: ...
+        @property
+        def slug(self) -> str: ...
+        @property
+        def content(self) -> str: ...
 
     class Paragraph(Block):
-        content: str
+        @property
+        def content(self) -> str: ...
 
     class Code(Block):
-        fenced: bool
-        info: str | None
-        lang: str | None
-        code: str
+        @property
+        def fenced(self) -> bool: ...
+        @property
+        def info(self) -> str | None: ...
+        @property
+        def lang(self) -> str | None: ...
+        @property
+        def code(self) -> str: ...
 
     class Html(Block):
-        raw: str
+        @property
+        def raw(self) -> str: ...
 
     class ThematicBreak(Block): ...
 
     class Quote(Block): ...
 
     class List(Block):
-        ordered: bool
-        start: int | None
-        tight: bool
+        @property
+        def ordered(self) -> bool: ...
+        @property
+        def start(self) -> int | None: ...
+        @property
+        def tight(self) -> bool: ...
 
     class Item(Block):
-        checked: bool | None
+        @property
+        def checked(self) -> bool | None: ...
 
     class Table(Block):
-        header: list[str]
-        rows: list[list[str]]
-        align: list[str | None]
+        @property
+        def header(self) -> list[str]: ...
+        @property
+        def rows(self) -> list[list[str]]: ...
+        @property
+        def align(self) -> list[str | None]: ...
 
     class Definition(Block):
-        label: str
-        destination: str
-        title: str
+        @property
+        def label(self) -> str: ...
+        @property
+        def destination(self) -> str: ...
+        @property
+        def title(self) -> str | None: ...
 
     class Section:
         """A top-level heading and everything up to the next top-level heading of the
         same or a higher level (it owns the blank lines before that heading)."""
-        heading: markdown.Heading
-        level: int
-        title: str
-        slug: str
-        lines: tuple[int, int]
-        span: tuple[int, int]
-        text: str
-        blocks: list[markdown.Block]
-        subsections: list[markdown.Section]
-        parent: markdown.Section | None
+        @property
+        def heading(self) -> markdown.Heading: ...
+        @property
+        def level(self) -> int: ...
+        @property
+        def title(self) -> str: ...
+        @property
+        def slug(self) -> str: ...
+        @property
+        def lines(self) -> tuple[int, int]: ...
+        @property
+        def span(self) -> tuple[int, int]: ...
+        @property
+        def text(self) -> str: ...
+        @property
+        def blocks(self) -> list[markdown.Block]: ...
+        @property
+        def subsections(self) -> list[markdown.Section]: ...
+        @property
+        def parent(self) -> markdown.Section | None: ...
 
     class Document:
         """A parsed markdown document: the exact source text and its block tree.
-        Immutable; edits return a new Document and leave every other byte as it was."""
+        Immutable; edits return a new Document and leave every other byte as it was.
+        A copy is the document itself; a pickle is its text and the choices it was parsed with."""
         def __init__(self, text: str, *, dialect: Literal["gfm", "commonmark"] = "gfm",
                      slugs: Literal["github", "toc"] = "github", front_matter: bool = True) -> None: ...
-        text: str
-        dialect: str
-        slugs: str
-        front_matter: Any
-        blocks: list[markdown.Block]
-        sections: list[markdown.Section]
-        plain: str
+        @property
+        def text(self) -> str: ...
+        @property
+        def dialect(self) -> str: ...
+        @property
+        def slugs(self) -> str: ...
+        @property
+        def front_matter(self) -> Any: ...
+        @property
+        def blocks(self) -> list[markdown.Block]: ...
+        @property
+        def sections(self) -> list[markdown.Section]: ...
+        @property
+        def plain(self) -> str: ...
+        def __str__(self) -> str: ...
         def walk(self) -> list[markdown.Block]: ...
         def find(self, cls: type[_B]) -> list[_B]: ...
         def section(self, key: str) -> markdown.Section: ...
@@ -305,13 +353,13 @@ class markdown:
     def table(header: Iterable[object], rows: Iterable[Iterable[object]], *,
               align: Iterable[str | None] | None = None) -> str: ...
     @staticmethod
-    def bullets(items: Iterable[str], *, numbered: bool = False, start: int = 1) -> str: ...
+    def bullets(items: Iterable[object], *, numbered: bool = False, start: int = 1) -> str: ...
     @staticmethod
     def quote(text: str) -> str: ...
     @staticmethod
     def front_matter(data: Any, *, engine: Literal["yaml", "toml"] = "yaml") -> str: ...
     @staticmethod
-    def join(blocks: Iterable[str]) -> str: ...
+    def join(blocks: Iterable[object]) -> str: ...
 
 
 _B = TypeVar("_B", bound="markdown.Block")

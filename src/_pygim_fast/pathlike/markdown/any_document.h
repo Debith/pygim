@@ -56,6 +56,20 @@ constexpr std::size_t position(const std::array<std::string_view, N>& names, std
     throw std::invalid_argument(std::string(what) + " must be one of " + known + ", got '" + std::string(name) + "'");
 }
 
+/// Whether a pack of descriptors (each with a `tag`, a kind) names every kind
+/// but the document exactly once: the adapter's one-class-per-kind pack is
+/// proven complete with it, and tests/static proves it refuses a gap or a repeat.
+template <class... Ks>
+consteval bool covers_every_kind(type_list<Ks...>) {
+    std::array<int, kind_count> seen{};
+    ((++seen[static_cast<std::size_t>(Ks::tag)]), ...);
+    if (seen[static_cast<std::size_t>(kind::document)] != 0) return false;
+    for (std::size_t k = 0; k < kind_count; ++k) {
+        if (k != static_cast<std::size_t>(kind::document) && seen[k] != 1) return false;
+    }
+    return true;
+}
+
 using dialects = type_list<gfm, commonmark>;
 using slug_rules = type_list<github_slug, toc_slug>;
 

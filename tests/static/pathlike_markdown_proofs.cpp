@@ -13,6 +13,7 @@
 // escapes into an assertion (GCC 13 and 14 cannot constant-evaluate that).
 
 #include "../../src/_pygim_fast/pathlike/engine_list.h"   // PYGIM_PATHLIKE_REFLECTION
+#include "../../src/_pygim_fast/pathlike/markdown/any_document.h"
 #include "../../src/_pygim_fast/pathlike/markdown/document.h"
 #include "../../src/_pygim_fast/pathlike/markdown/writer.h"
 
@@ -175,6 +176,20 @@ static_assert(anchors_are<github_slug>({"a-1", "a", "a", "a"}, {"a-1", "a", "a-2
 // Python-Markdown takes the trailing number as an integer, and a jump never skips a free id.
 static_assert(anchors_are<toc_slug>({"x_007", "x_007", "x_9", "x_9", "x", "x"}, {"x_007", "x_8", "x_9", "x_10", "x", "x_1"}));
 static_assert(anchors_are<toc_slug>({"a", "a", "a", "a_1", "a"}, {"a", "a_1", "a_2", "a_3", "a_4"}));
+
+// ── one Python class per block kind: the check the adapter's pack must pass ──
+template <kind K>
+struct tagged {
+    static constexpr kind tag = K;
+};
+using every_kind = type_list<tagged<kind::front_matter>, tagged<kind::heading>, tagged<kind::paragraph>, tagged<kind::code>,
+                             tagged<kind::html>, tagged<kind::thematic_break>, tagged<kind::quote>, tagged<kind::list>,
+                             tagged<kind::item>, tagged<kind::table>, tagged<kind::definition>>;
+static_assert(covers_every_kind(every_kind{}));
+static_assert(!covers_every_kind(type_list<tagged<kind::front_matter>, tagged<kind::heading>>{}));   // kinds missing
+static_assert(!covers_every_kind(every_kind{} + type_list<tagged<kind::heading>>{}));                // a kind twice
+static_assert(!covers_every_kind(every_kind{} + type_list<tagged<kind::document>>{}));               // the document has none
+static_assert(every_kind::size + 1 == kind_count);   // the pack names every enumerator but the document
 
 // ── UTF-8: each length spells only its own values ────────────────────────────
 consteval bool malformed(std::string_view s) { const auto c = decode(s, 0); return c.cp == 0xFFFD && c.len == 1; }

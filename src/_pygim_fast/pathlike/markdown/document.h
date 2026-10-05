@@ -101,6 +101,8 @@ public:
     /// The code of a code block, every line ended by '\n'; its info string, unescaped.
     [[nodiscard]] constexpr std::string code(std::uint32_t i) const { return literal_text(m_source, m_tree, at(i), true); }
     [[nodiscard]] constexpr std::string info(std::uint32_t i) const { return info_text(m_source, at(i)); }
+    /// A code block's language: its info string's first word, as the HTML's class names it.
+    [[nodiscard]] constexpr std::string language(std::uint32_t i) const { return std::string(info_language(info(i))); }
     /// What definition block `i` defines; std::invalid_argument for a block of another kind.
     [[nodiscard]] constexpr const definition& definition_of(std::uint32_t i) const {
         if (at(i).type != kind::definition) throw not_a(i, kind::definition);
@@ -232,9 +234,10 @@ public:
         return out;
     }
 
-    /// The heap bytes of the source, the tree and the code-point table, exactly.
+    /// The heap bytes of the source, the tree and the code-point table, exactly
+    /// (a short string stored inside its object holds none).
     [[nodiscard]] std::size_t bytes() const noexcept {
-        return m_source.capacity() + 1 + m_tree.bytes() + (m_code_points ? m_code_points->capacity() * sizeof(std::size_t) : 0);
+        return heap_bytes(m_source) + m_tree.bytes() + (m_code_points ? m_code_points->capacity() * sizeof(std::size_t) : 0);
     }
 
 protected:
@@ -446,7 +449,7 @@ public:
         std::size_t n = document_core::bytes() + m_heading_of.capacity() * sizeof(std::uint32_t);
         if (m_headings) {
             n += m_headings->capacity() * sizeof(heading_info);
-            for (const heading_info& h : *m_headings) n += h.title.capacity() + h.slug.capacity();
+            for (const heading_info& h : *m_headings) n += heap_bytes(h.title) + heap_bytes(h.slug);
         }
         if (m_sections) n += m_sections->capacity() * sizeof(section);
         return n;

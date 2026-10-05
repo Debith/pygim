@@ -27,8 +27,15 @@
 // (1,376 MB/s), SSE2 6.4 ms (3,069 MB/s) — 2.2x. AVX2 is not used: a probe
 // (ENACT #130, not a recorded benchmark) found AVX2 at 32 bytes a word no
 // faster than SSE2 at 64, and it would need a run-time CPU check.
-// Every policy must produce the same words — tests/unittests/test_pathlike_markdown.py
-// fuzzes them against scalar_scan through `markdown._stops`.
+// Every policy must produce the same words. tests/unittests/test_pathlike_markdown.py
+// checks it through public behaviour — each stop byte at every offset across two
+// 64-byte words must change Document(...).plain as markup does — and a build with
+// PYGIM_MARKDOWN_PROBES=1 also binds `_stops` to compare the scans directly.
+//
+// The choice below is by ARCHITECTURE, not by availability (the definition of
+// done forbids an availability #ifdef): SSE2 and NEON are part of the x86-64 and
+// AArch64 baselines, so no build for those can lack them, and every other
+// architecture uses scalar_scan — the specification, not a degraded fallback.
 
 #include <array>
 #include <bit>

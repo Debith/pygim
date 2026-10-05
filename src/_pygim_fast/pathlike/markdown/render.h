@@ -54,6 +54,13 @@ namespace pygim::pathlike::markdown {
     return unescape(trim_whitespace(src.substr(b.info.begin, b.info.end - b.info.begin)));
 }
 
+/// A code block's language: its info string's first word ("python title=x" -> "python").
+[[nodiscard]] constexpr std::string_view info_language(std::string_view info) noexcept {
+    std::size_t w = 0;
+    while (w < info.size() && !is_ascii_whitespace(info[w])) ++w;
+    return info.substr(0, w);
+}
+
 /// A table cell's text: `\|` is a pipe inside a cell.
 [[nodiscard]] constexpr std::string cell_text(std::string_view src, const segment& s) {
     std::string out;
@@ -236,10 +243,11 @@ private:
                 cr();
                 tag("pre");
                 const std::string info = info_text(m_src, b);
-                std::size_t w = 0;
-                while (w < info.size() && !is_ascii_whitespace(info[w])) ++w;
-                if (w > 0) tag("code class=\"language-" + escape_html(std::string_view(info).substr(0, w)) + "\"");
-                else tag("code");
+                if (const std::string_view lang = info_language(info); !lang.empty()) {
+                    tag("code class=\"language-" + escape_html(lang) + "\"");
+                } else {
+                    tag("code");
+                }
                 esc(literal_text(m_src, *m_t, b, true));
                 tag("/code");
                 tag("/pre");

@@ -45,6 +45,7 @@
 #include "../../wiring/registry/core.h"
 #include "../markdown/any_document.h"
 #include "../markdown/writer.h"
+#include "adapter.h"
 #include "common.h"
 #include "engines/toml.h"
 #include "engines/yaml.h"
@@ -136,7 +137,7 @@ using doc_ptr = std::shared_ptr<const document>;
 
 // ── front matter formats ────────────────────────────────────────────────────
 
-template <class E, char Marker>
+template <TextEngine E, char Marker>   // reads and writes text: the engine's text half (adapter.h)
 struct front_matter_format {
     using engine = E;
     static constexpr char marker = Marker;
@@ -229,9 +230,6 @@ struct section_ref {
 [[nodiscard]] inline py::object none_if_empty(std::string_view s) {
     return s.empty() ? py::object(py::none()) : py::object(str_of(s));
 }
-[[nodiscard]] inline std::string first_word(std::string_view s) {
-    return std::string(s.substr(0, std::min(s.find_first_of(" \t\n\v\f\r"), s.size())));
-}
 
 // ── one descriptor per block kind ───────────────────────────────────────────
 // `tag` is the kind, `doc` the class docstring, `bind` adds the properties
@@ -286,7 +284,7 @@ struct code {
         c.def_property_readonly("fenced", [](const self& b) { return b.at().fenced; })
          .def_property_readonly("info", [](const self& b) { return none_if_empty(b.doc->core().info(b.index)); },
                                 "A fenced block's info string ('py title=\"x\"'), unescaped; None when there is none.")
-         .def_property_readonly("lang", [](const self& b) { return none_if_empty(first_word(b.doc->core().info(b.index))); },
+         .def_property_readonly("lang", [](const self& b) { return none_if_empty(b.doc->core().language(b.index)); },
                                 "The info string's first word, its language; None when there is none.")
          .def_property_readonly("code", [](const self& b) {
              return str_of(b.doc->core().code(b.index));
@@ -388,18 +386,7 @@ using block_kinds = type_list<kinds::front_matter, kinds::heading, kinds::paragr
                               kinds::thematic_break, kinds::quote, kinds::list, kinds::item, kinds::table,
                               kinds::definition>;
 
-/// Every kind but the document has exactly one class: the pack is complete.
-template <class... Ks>
-consteval bool covers_every_kind(type_list<Ks...>) {
-    std::array<int, mk::kind_count> seen{};
-    ((++seen[static_cast<std::size_t>(Ks::tag)]), ...);
-    if (seen[0] != 0) return false;
-    for (std::size_t k = 1; k < mk::kind_count; ++k) {
-        if (seen[k] != 1) return false;
-    }
-    return true;
-}
-static_assert(covers_every_kind(block_kinds{}), "every block kind needs exactly one descriptor in block_kinds");
+static_assert(mk::covers_every_kind(block_kinds{}), "every block kind needs exactly one descriptor in block_kinds");
 
 /// "front_matter" -> "FrontMatter", as a NUL-terminated buffer with static storage.
 template <class K>
@@ -696,9 +683,10 @@ inline void bind(py::module_& parent) {
             out["source"] = d.doc->core().source().size();
             out["blocks"] = d.doc->core().walk().size();
             out["lines"] = d.doc->core().structure().line_starts.size();
-            out["bytes"] = d.doc->visit([](const auto& x) { return x.bytes(); }) + d.doc->origin.capacity();
+            out["bytes"] = d.doc->visit([](const auto& x) { return x.bytes(); }) + mk::heap_bytes(d.doc->origin);
             return out;
-        }, "Sizes: 'source' bytes, 'blocks', 'lines', and 'bytes' — every heap byte behind the document, exactly.");
+        }, "Sizes: 'source' bytes, 'blocks', 'lines', and 'bytes' — the heap bytes the document's buffers hold, "
+           "exactly (the text, the tree, the caches filled so far; not the Python objects).");
 
     // ── builders: markdown in, markdown text out ──
     m.def("escape", [](py::handle text) { return str_of(mk::write::escape(utf8(text, "escape"))); }, py::arg("text"),

@@ -10,6 +10,7 @@ the YAML and TOML engines, and builders whose output parses back.
 
 import importlib.util
 import json
+import os
 import re
 import pathlib
 import time
@@ -257,6 +258,13 @@ def test_stats_report_exact_bytes():
     assert s["bytes"] > s["source"]
     bigger = md.Document(NOTES * 4).stats()
     assert bigger["bytes"] > s["bytes"]
+
+
+def test_stats_bytes_count_each_buffer_once():
+    # Two documents with the same tree that differ only in their text: the bytes differ by the text
+    # (allocators round a capacity up a little, never by a second copy of anything).
+    small, big = md.Document("x" * 10_000 + "\n"), md.Document("x" * 20_000 + "\n")
+    assert abs((big.stats()["bytes"] - small.stats()["bytes"]) - 10_000) < 64
 
 
 def test_repr_names_class_and_lines():
@@ -618,7 +626,66 @@ PUBLIC = {"Block", "Code", "Definition", "Document", "FrontMatter", "Heading", "
 
 
 def test_the_module_exports_its_api_and_no_test_hooks():
-    assert {n for n in dir(md) if not n.startswith("_")} == PUBLIC
+    # Only a build made with PYGIM_MARKDOWN_PROBES=1 binds the probes; any other name is a leak.
+    probes = {"_stops", "_scan"} if os.environ.get("PYGIM_MARKDOWN_PROBES") == "1" else set()
+    assert {n for n in dir(md) if not n.startswith("__")} == PUBLIC | probes
+
+
+def _stub_markdown():
+    """The stub's `class markdown:` as {class: {name: kind}} and {function: [parameters]}."""
+    import ast
+
+    from pygim import _stubs
+
+    tree = ast.parse(_stubs.stub_path().read_text(encoding="utf-8"))
+    ns = next(n for n in tree.body if isinstance(n, ast.ClassDef) and n.name == "markdown")
+
+    def kind(f):
+        return "property" if any(getattr(d, "id", None) == "property" for d in f.decorator_list) else "method"
+
+    def params(f):
+        a = f.args
+        names = [x.arg for x in a.posonlyargs + a.args if x.arg != "self"]
+        return names + (["*"] + [x.arg for x in a.kwonlyargs] if a.kwonlyargs else [])
+
+    classes = {c.name: {f.name: kind(f) for f in c.body if isinstance(f, ast.FunctionDef)}
+               for c in ns.body if isinstance(c, ast.ClassDef)}
+    functions = {f.name: params(f) for f in ns.body if isinstance(f, ast.FunctionDef)}
+    methods = {f.name: params(f) for c in ns.body if isinstance(c, ast.ClassDef) and c.name == "Document"
+               for f in c.body if isinstance(f, ast.FunctionDef) and kind(f) == "method"}
+    return classes, functions, methods
+
+
+def _runtime_params(fn):
+    """Parameter names from pybind11's signature line: `bullets(items: object, *, numbered: bool = False, ...)`."""
+    head = fn.__doc__.splitlines()[0]
+    inside = head[head.index("(") + 1:head.rindex(")")]
+    out = []
+    for part in [p.strip() for p in inside.split(",") if p.strip()]:
+        name = part.split(":")[0].split("=")[0].strip()
+        if name != "self":
+            out.append(name)
+    return out
+
+
+def test_the_stub_matches_the_module():
+    classes, functions, methods = _stub_markdown()
+    for name, members in classes.items():
+        cls = getattr(md, name)
+        runtime = {n: "property" if isinstance(v, property) else "method"
+                   for n, v in vars(cls).items() if not n.startswith("_")}
+        stubbed = {n: k for n, k in members.items() if not n.startswith("_")}
+        assert runtime == stubbed, f"markdown.{name}: runtime {runtime} != stub {stubbed}"
+        for dunder in (n for n in members if n.startswith("__")):
+            assert dunder in vars(cls), f"markdown.{name}.{dunder} is in the stub but not bound"
+    assert set(classes) == {n for n in dir(md) if not n.startswith("_") and isinstance(getattr(md, n), type)}
+    assert set(functions) == {n for n in dir(md) if not n.startswith("_") and not isinstance(getattr(md, n), type)}
+    for name, stub_params in functions.items():
+        assert _runtime_params(getattr(md, name)) == stub_params, f"markdown.{name}()"
+    for name, stub_params in methods.items():
+        if not name.startswith("__"):
+            assert _runtime_params(getattr(md.Document, name)) == stub_params, f"Document.{name}()"
+    assert _runtime_params(md.Document.__init__) == ["text", "*", "dialect", "slugs", "front_matter"]
 
 
 # Each stop byte, at every offset across two 64-byte words, must change the parse

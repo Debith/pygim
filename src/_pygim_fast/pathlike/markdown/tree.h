@@ -70,6 +70,14 @@ enum class align : std::uint8_t { none, left, center, right };
 
 /// Content: source bytes [begin, end) of one line, preceded by `pad`
 /// synthetic spaces (what remains of a tab that indentation only partly consumed).
+/// The heap bytes behind a string: none for a short one stored inside the
+/// object (the small-string buffer), its capacity and terminator otherwise.
+[[nodiscard]] inline std::size_t heap_bytes(const std::string& s) noexcept {
+    const char* p = s.data();
+    const char* self = reinterpret_cast<const char*>(&s);
+    return p >= self && p < self + sizeof(s) ? 0 : s.capacity() + 1;
+}
+
 struct segment {
     std::uint32_t begin = 0;
     std::uint32_t end = 0;
@@ -133,18 +141,13 @@ struct tree {
     /// The heap bytes this tree holds, exactly: every vector's capacity and
     /// every string that does not fit in its own object.
     [[nodiscard]] std::size_t bytes() const noexcept {
-        const auto heap = [](const std::string& s) noexcept -> std::size_t {
-            const char* p = s.data();
-            const char* self = reinterpret_cast<const char*>(&s);
-            return p >= self && p < self + sizeof(s) ? 0 : s.capacity() + 1;   // a short string lives in the object
-        };
         std::size_t n = blocks.capacity() * sizeof(block) + segments.capacity() * sizeof(segment) +
                         aligns.capacity() * sizeof(align) + definitions.capacity() * sizeof(definition) +
                         line_starts.capacity() * sizeof(std::uint32_t);
-        for (const definition& d : definitions) n += heap(d.label) + heap(d.destination) + heap(d.title);
+        for (const definition& d : definitions) n += heap_bytes(d.label) + heap_bytes(d.destination) + heap_bytes(d.title);
         const auto& items = labels.storage().items();
         n += items.capacity() * sizeof(items[0]);
-        for (const auto& item : items) n += heap(item.first);
+        for (const auto& item : items) n += heap_bytes(item.first);
         return n;
     }
 
