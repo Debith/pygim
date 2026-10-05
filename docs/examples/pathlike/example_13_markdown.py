@@ -19,18 +19,15 @@ This example demonstrates:
 """
 
 import tempfile
-from pathlib import Path
 
 import pygim
 from pygim import pathlike
 
 md = pathlike.markdown
 
-tmp = tempfile.TemporaryDirectory()
-root = Path(tmp.name)
-
-notes = root / "notes.md"
-notes.write_bytes(b"""\
+tmp = tempfile.TemporaryDirectory()          # pygim has no scratch directory of its own
+notes = pygim.path(tmp.name) / "notes.md"    # an mdpath: .md selects the markdown engine
+notes.write("""\
 ---
 title: Release notes
 version: 2
@@ -58,56 +55,107 @@ A second heading with the same title gets its own anchor.
 # ----------------------------------------------------------------------------
 # 1. Read: a Document, its front matter, its blocks
 # ----------------------------------------------------------------------------
-doc = pygim.path(notes).read()                       # an mdpath: .md dispatches to the markdown engine
+doc = notes.read()
 assert isinstance(doc, md.Document)
-assert doc.text == notes.read_text(encoding="utf-8")  # the exact text, nothing normalised
-assert doc.front_matter == {"title": "Release notes", "version": 2}   # YAML, through pathlike's YAML engine
-assert [type(b).__name__ for b in doc.blocks][:3] == ["FrontMatter", "Heading", "Heading"]
-assert isinstance(doc.blocks[1], md.Heading) and doc.blocks[1].level == 1   # a Heading has .level; a Table has .rows
+
+# The text is the file's, byte for byte: nothing is normalised.
+assert doc.text.encode("utf-8") == notes.read_bytes()
+
+# Front matter is read by pathlike's YAML engine.
+assert doc.front_matter == {"title": "Release notes", "version": 2}
+
+# Each top-level block is an instance of its kind's class.
+kinds = [type(block).__name__ for block in doc.blocks]
+assert kinds == ["FrontMatter", "Heading", "Heading", "Code",
+                 "Heading", "Table", "Heading", "Paragraph"]
+
+# A class holds only its kind's properties: a Heading has .level, a Table .rows.
+title = doc.blocks[1]
+assert title.level == 1
+assert not hasattr(title, "rows")
 
 # ----------------------------------------------------------------------------
 # 2. Find: headings with anchors, sections, code by language, table cells
 # ----------------------------------------------------------------------------
-assert [h.slug for h in doc.find(md.Heading)] == ["release-notes", "install", "formats", "install-1"]   # find() takes a class
-formats = doc.section("formats")                     # by slug (or by title)
-assert formats.lines == (13, 19)                     # the heading and everything up to the next ## (blank lines included)
-(table,) = doc.find(md.Table)
-assert table.header == ["Format", "Engine"] and table.rows[1] == ["JSON", "simdjson"]
-(code,) = [c for c in doc.find(md.Code) if c.lang == "bash"]
-assert code.code == "pip install pygim\n" and code.lines == (9, 11)
-assert doc.text[code.span[0]:code.span[1]] == code.text   # spans slice the text Python holds
+#                   ┌─ cls: a block class; its blocks, in document order
+#                   ▼
+headings = doc.find(md.Heading)
+slugs = [h.slug for h in headings]
+assert slugs == ["release-notes", "install", "formats", "install-1"]
 
-# A '#' inside a fenced block is code, not a heading — the tree knows, a regex does not:
-assert md.Document("```md\n# not a heading\n```\n").find(md.Heading) == []
+#                     ┌─ key: a slug, or a heading's title
+#                     ▼
+formats = doc.section("formats")
+assert formats.title == "Formats"
+assert formats.lines == (13, 19)       # up to the next ##, its blank line included
+
+table = doc.find(md.Table)[0]
+assert table.header == ["Format", "Engine"]
+assert table.rows[1] == ["JSON", "simdjson"]
+
+bash = [c for c in doc.find(md.Code) if c.lang == "bash"][0]
+assert bash.code == "pip install pygim\n"
+assert bash.lines == (9, 11)
+
+# A span is (start, end) in characters, so it slices the text Python holds.
+start, end = bash.span
+assert doc.text[start:end] == bash.text
+
+# A '#' inside a fenced block is code, not a heading: the tree knows, a regex does not.
+fenced = md.Document("```md\n# not a heading\n```\n")
+assert fenced.find(md.Heading) == []
 
 # ----------------------------------------------------------------------------
 # 3. Edit losslessly: replace one section, nothing else moves
 # ----------------------------------------------------------------------------
-new_table = md.table(["Format", "Engine"], [["YAML", "rapidyaml"], ["JSON", "simdjson"], ["Markdown", "pygim-md"]])
-edited = doc.replace(formats, md.join([md.heading(2, "Formats"), new_table]))
-before, after = formats.span
-assert edited.text.startswith(doc.text[:before]) and edited.text.endswith(doc.text[after:])
+new_table = md.table(
+    ["Format", "Engine"],
+    [["YAML", "rapidyaml"], ["JSON", "simdjson"], ["Markdown", "pygim-md"]],
+)
+new_section = md.join([md.heading(2, "Formats"), new_table])
+
+#                    ┌─ target: a top-level block or a section
+#                    │        ┌─ text: the markdown that takes its place
+#                    ▼        ▼
+edited = doc.replace(formats, new_section)
+
+start, end = formats.span
+assert edited.text[:start] == doc.text[:start]       # every byte before: unchanged
+assert edited.text.endswith(doc.text[end:])          # every byte after: unchanged
 assert edited.find(md.Table)[0].rows[-1] == ["Markdown", "pygim-md"]
-edited = edited.with_front_matter({"title": "Release notes", "version": 3})   # rewritten by the YAML engine
-pygim.path(notes).write(edited)                       # a Document (or a str) writes its text
-assert pygim.path(notes).read().front_matter["version"] == 3
+
+# The front matter is rewritten by the YAML engine; the body is untouched.
+edited = edited.with_front_matter({"title": "Release notes", "version": 3})
+notes.write(edited)                                  # a Document (or a str) writes its text
+assert notes.read().front_matter["version"] == 3
 
 # ----------------------------------------------------------------------------
 # 4. Write markdown: builders take markdown, escape() makes plain text safe
 # ----------------------------------------------------------------------------
-title = "Totals for *all* users | 2026"                # plain text with markdown's own characters in it
-text = md.join([
-    md.heading(1, md.escape(title)),
-    md.bullets(["parsed", "rendered"], numbered=True),
-    md.code("print('`ticks` inside')\n", lang="python"),   # the fence is chosen so no line can close it
-])
-out = md.Document(text)
-assert out.find(md.Heading)[0].title == title          # escaped text reads back as itself
-assert out.find(md.List)[0].start == 1 and out.find(md.Code)[0].lang == "python"
+heading_text = "Totals for *all* users | 2026"     # plain text holding markdown's characters
+heading = md.heading(1, md.escape(heading_text))
+assert heading == "# Totals for \\*all\\* users \\| 2026\n"
+
+#                                          ┌─ numbered: "1." items instead of "-"
+#                                          ▼
+steps = md.bullets(["parsed", "rendered"], numbered=True)
+assert steps == "1. parsed\n2. rendered\n"
+
+# The fence is one longer than any backtick run in the code, so no line can close it.
+#                                      ┌─ lang: the fence's info string
+#                                      ▼
+sample = md.code("```\nnested\n```\n", lang="md")
+assert sample == "````md\n```\nnested\n```\n````\n"
+
+out = md.Document(md.join([heading, steps, sample]))
+assert out.find(md.Heading)[0].title == heading_text     # escaped text reads back as itself
+assert out.find(md.Code)[0].code == "```\nnested\n```\n"
 
 # ----------------------------------------------------------------------------
 # 5. HTML, as the CommonMark reference renderer writes it
 # ----------------------------------------------------------------------------
-assert md.Document("Some *emphasis* and `code`.\n").html() == "<p>Some <em>emphasis</em> and <code>code</code>.</p>\n"
+html = md.Document("Some *emphasis* and `code`.\n").html()
+assert html == "<p>Some <em>emphasis</em> and <code>code</code>.</p>\n"
 
 tmp.cleanup()
+print("pathlike markdown example OK:", slugs)

@@ -99,6 +99,10 @@ private:
     }
     /// Raw HTML, as written — except NUL, which CommonMark replaces with U+FFFD everywhere.
     constexpr void raw(std::string_view s) {
+        if (s.find('\0') == std::string_view::npos) {   // the usual case: one append
+            lit(s);
+            return;
+        }
         for (char c : s) {
             if (c == '\0') m_out += "\xEF\xBF\xBD";
             else m_out.push_back(c);

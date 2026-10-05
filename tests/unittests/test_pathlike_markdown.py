@@ -9,10 +9,8 @@ the YAML and TOML engines, and builders whose output parses back.
 """
 
 import importlib.util
-import json
 import os
 import re
-import pathlib
 import time
 
 import pytest
@@ -22,11 +20,11 @@ from pygim import pathlike
 
 md = pathlike.markdown
 
-DATA = pathlib.Path(__file__).parent / "data" / "markdown"
+DATA = pygim.path(__file__).parent / "data" / "markdown"
 
 
 def _write(temp_dir, name, text):
-    p = temp_dir / name
+    p = pygim.path(temp_dir) / name
     p.write_bytes(text.encode("utf-8"))   # exact bytes on every platform
     return p
 
@@ -96,9 +94,10 @@ def test_read_returns_a_document_over_the_exact_text(temp_dir):
 def test_write_round_trips_the_bytes(temp_dir):
     f = _write(temp_dir, "notes.md", NOTES)
     doc = pygim.path(f).read()
-    out = pygim.path(temp_dir / "copy.md")
+    out = pygim.path(temp_dir) / "copy.md"
     out.write(doc)
-    assert out.read_bytes() == f.read_bytes()
+    with open(out, "rb") as written:   # read back without pygim: the check must not share what it checks
+        assert written.read() == NOTES.encode("utf-8")
     out.write("# Plain text\n")
     assert out.read_bytes() == b"# Plain text\n"
 
@@ -109,7 +108,7 @@ def test_write_refuses_what_is_not_markdown(temp_dir):
 
 
 def test_a_parse_never_fails_but_invalid_utf8_does(temp_dir):
-    f = temp_dir / "bad.md"
+    f = pygim.path(temp_dir) / "bad.md"
     f.write_bytes(b"# ok\n\xff\xfe broken\n")
     with pytest.raises(RuntimeError, match="not valid UTF-8"):
         pygim.path(f).read()
@@ -240,7 +239,7 @@ def test_plain_text_resolves_inline_markup():
 
 
 def test_crlf_line_endings_change_nothing_but_the_bytes(temp_dir):
-    f = temp_dir / "crlf.md"
+    f = pygim.path(temp_dir) / "crlf.md"
     f.write_bytes(NOTES.replace("\n", "\r\n").encode("utf-8"))   # written as bytes: a text write would not test it
     crlf = pygim.path(f).read()
     lf = md.Document(NOTES)
@@ -416,8 +415,8 @@ def test_replace_refuses_a_nested_block_and_a_foreign_one():
 # --------------------------------------------------------------------------- #
 # HTML: the spec's own examples, compared as its runner compares them
 # --------------------------------------------------------------------------- #
-COMMONMARK = json.loads((DATA / "commonmark-0.31.2.json").read_text(encoding="utf-8"))
-GFM = json.loads((DATA / "gfm-0.29-extensions.json").read_text(encoding="utf-8"))
+COMMONMARK = (DATA / "commonmark-0.31.2.json").read()   # through pathlike's JSON engine
+GFM = (DATA / "gfm-0.29-extensions.json").read()
 
 
 def test_every_commonmark_example_renders_as_the_spec_says():
@@ -710,12 +709,12 @@ def test_generated_unicode_tables_are_current():
     hand-edited table fails here without regenerating 1.1 million code points."""
     import hashlib
 
-    root = pathlib.Path(__file__).parents[2]
+    root = pygim.path(__file__).parents[2]
     gen = root / "tests" / "static" / "gen_markdown_tables.py"
     header = root / "src" / "_pygim_fast" / "pathlike" / "markdown" / "tables.h"
     if not header.is_file():
         pytest.skip("source tree not present (installed wheel)")
-    text = header.read_text(encoding="utf-8")
+    text = header.read_bytes().replace(b"\r\n", b"\n").decode("utf-8")   # an autocrlf checkout holds CRLF (#31)
     head, body = text.split("\n\n", 1)
     generator = hashlib.sha256(gen.read_bytes().replace(b"\r\n", b"\n")).hexdigest()   # CRLF read as LF (#31)
     assert f"generator sha256 {generator}" in head, \
