@@ -39,6 +39,15 @@ concept Engine = EngineMeta<E> && requires(const file& f, detail::KeyCache& keys
     { E::write(f, obj) } -> std::same_as<void>;
 };
 
+// An engine that also reads and writes TEXT (not only files): the text half
+// one format borrows from another — markdown front matter is YAML or TOML.
+// Optional: an engine without it is still a complete Engine.
+template <class E>
+concept TextEngine = Engine<E> && requires(std::string_view text, detail::KeyCache& keys, py::handle obj) {
+    { E::loads(text, text, keys) } -> std::same_as<py::object>;
+    { E::dumps(obj) } -> std::same_as<std::string>;
+};
+
 // Instantiated per pack element by all_implemented(): a descriptor that is not
 // a complete Engine fails HERE, with the diagnostic naming that descriptor
 // rather than a fold expression.
@@ -155,6 +164,18 @@ inline py::str str_from_text(std::string_view text) {
     return py::reinterpret_steal<py::str>(
         PyUnicode_DecodeFSDefaultAndSize(text.data(), static_cast<py::ssize_t>(text.size())));
 #endif
+}
+
+// An engine may bind Python types of its own — markdown binds its Document and
+// builders as `pathlike.markdown` — through an optional `static void
+// bind(py::module_&)`; bindings.cpp calls this fold once, after the path classes.
+template <Engine E>
+void bind_extra(py::module_& m) {
+    if constexpr (requires { E::bind(m); }) E::bind(m);
+}
+template <Engine... Es>
+void bind_extras(engine_list<Es...>, py::module_& m) {
+    (bind_extra<Es>(m), ...);
 }
 
 template <Engine E>

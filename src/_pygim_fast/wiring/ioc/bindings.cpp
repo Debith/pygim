@@ -1,6 +1,7 @@
 #include <pybind11/pybind11.h>
 
 #include "adapter.h"
+#include "../../utils/initialised.h"
 
 namespace py = pybind11;
 
@@ -99,4 +100,5 @@ PYBIND11_MODULE(ioc, m) {
         .def("__contains__", &pygim::Container::contains)
         .def("__len__", &pygim::Container::size)
         .def("__repr__", &pygim::Container::repr);
+    pygim::adapter::refuse_uninitialised(m);   // last: every class above is registered (utils/initialised.h)
 }

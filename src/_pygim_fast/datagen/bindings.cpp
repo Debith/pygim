@@ -7,6 +7,7 @@
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 #include "adapter.h"
+#include "../utils/initialised.h"
 
 namespace py = pybind11;
 
@@ -69,4 +70,5 @@ Examples
     // ── supported_types() ───────────────────────────────────────────────
     m.def("supported_types", &supported_types,
           "Return a list of all supported column type names.");
+    pygim::adapter::refuse_uninitialised(m);   // last: every class above is registered (utils/initialised.h)
 }

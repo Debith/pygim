@@ -2,6 +2,7 @@
 #include <pybind11/pybind11.h>
 
 #include "adapter.h"
+#include "../../utils/initialised.h"
 
 namespace pygim {
 namespace py = pybind11;
@@ -46,6 +47,7 @@ PYBIND11_MODULE(factory, m) {
              "Return a list of all registered creator names.")
         .def("use_module", &Factory::use_module, py::arg("module_name"),
              "Import a Python module by name to trigger registration side effects.");
+    pygim::adapter::refuse_uninitialised(m);   // last: every class above is registered (utils/initialised.h)
 }
 
 } // namespace pygim

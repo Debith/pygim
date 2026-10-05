@@ -70,19 +70,38 @@ namespace pygim::pathlike::detail {
     throw std::runtime_error("toml: unhandled node type");
 }
 
-[[nodiscard]] inline py::object load_toml(const file& f, KeyCache& keys) {
-    toml::parse_result result = [&f] {
-        py::gil_scoped_release nogil;
-        const std::string bytes = f.read_bytes();
-        return toml::parse(std::string_view(bytes), std::string_view(f.fspath()));
-    }();
+// Text -> table, with no Python involved (callers release the GIL). A parse
+// error names `origin` (the file, or what the text is) and the line.
+[[nodiscard]] inline toml::parse_result parse_toml(std::string_view text, std::string_view origin) {
+    return toml::parse(text, origin);
+}
+
+[[nodiscard]] inline py::object table_or_throw(const toml::parse_result& result, std::string_view origin, KeyCache& keys) {
     if (!result) {
         const auto& err = result.error();
-        throw std::runtime_error("TOML parse error (" + f.fspath() + ", line " +
+        throw std::runtime_error("TOML parse error (" + std::string(origin) + ", line " +
                                  std::to_string(err.source().begin.line) +
                                  "): " + std::string(err.description()));
     }
     return toml_to_py(result.table(), keys);
+}
+
+[[nodiscard]] inline py::object load_toml(const file& f, KeyCache& keys) {
+    toml::parse_result result = [&f] {
+        py::gil_scoped_release nogil;
+        const std::string bytes = f.read_bytes();
+        return parse_toml(bytes, f.fspath());
+    }();
+    return table_or_throw(result, f.fspath(), keys);
+}
+
+// The same from text in memory (front matter inside a markdown file).
+[[nodiscard]] inline py::object loads_toml(std::string_view text, std::string_view origin, KeyCache& keys) {
+    toml::parse_result result = [&] {
+        py::gil_scoped_release nogil;
+        return parse_toml(text, origin);
+    }();
+    return table_or_throw(result, origin, keys);
 }
 
 // ── Write side ─────────────────────────────────────────────────────────────
@@ -143,8 +162,8 @@ inline void py_to_toml_value(py::handle obj, Insert&& ins) {
     if (py::isinstance<py::list>(obj) || py::isinstance<py::tuple>(obj)) {
         return ins(py_to_toml_array(obj));
     }
-    throw std::invalid_argument("toml write: unsupported type " +
-                                py::str(py::type::of(obj)).cast<std::string>());
+    throw py::type_error("toml write: cannot write a value of type " +
+                         py::str(py::type::of(obj).attr("__name__")).cast<std::string>());
 }
 
 [[nodiscard]] inline toml::array py_to_toml_array(py::handle obj) {
@@ -159,8 +178,8 @@ inline void py_to_toml_value(py::handle obj, Insert&& ins) {
     toml::table out;
     for (auto item : obj.cast<py::dict>()) {
         if (!py::isinstance<py::str>(item.first)) {
-            throw std::invalid_argument("write: mapping keys must be str, got " +
-                                        py::str(py::type::of(item.first)).cast<std::string>());
+            throw py::type_error("toml write: mapping keys must be str, got " +
+                                 py::str(py::type::of(item.first).attr("__name__")).cast<std::string>());
         }
         const std::string key = item.first.cast<std::string>();
         py_to_toml_value(item.second, [&out, &key](auto&& v) {
@@ -170,16 +189,23 @@ inline void py_to_toml_value(py::handle obj, Insert&& ins) {
     return out;
 }
 
-inline void write_toml(const file& f, py::handle obj) {
+[[nodiscard]] inline std::string dumps_toml(py::handle obj,
+                                           toml::format_flags flags = toml::toml_formatter::default_flags) {
     if (!py::isinstance<py::dict>(obj)) {
-        throw std::invalid_argument(
-            "toml write: content must be a mapping (TOML documents are tables)");
+        throw py::type_error("toml write: content must be a mapping (TOML documents are tables), got " +
+                             py::str(py::type::of(obj).attr("__name__")).cast<std::string>());
     }
     toml::table root = py_to_toml_table(obj);
     py::gil_scoped_release nogil;
     std::stringstream ss;
-    ss << root << '\n';
-    write_text_file(f, ss.str());
+    ss << toml::toml_formatter(root, flags) << '\n';
+    return ss.str();
+}
+
+inline void write_toml(const file& f, py::handle obj) {
+    const std::string text = dumps_toml(obj);
+    py::gil_scoped_release nogil;
+    write_text_file(f, text);
 }
 
 }  // namespace pygim::pathlike::detail
@@ -201,6 +227,16 @@ struct toml {
 
     static py::object load(const file& f, detail::KeyCache& keys) { return detail::load_toml(f, keys); }
     static void write(const file& f, py::handle obj) { detail::write_toml(f, obj); }
+    // The text half (adapter.h TextEngine): what markdown front matter parses and writes through.
+    static py::object loads(std::string_view text, std::string_view origin, detail::KeyCache& keys) {
+        return detail::loads_toml(text, origin, keys);
+    }
+    static std::string dumps(py::handle obj) { return detail::dumps_toml(obj); }
+    /// Text to embed in another document (markdown front matter): strings stay
+    /// on one line, escaped, so no line of a value can read as a `+++` fence.
+    static std::string dumps_embedded(py::handle obj) {
+        return detail::dumps_toml(obj, ::toml::toml_formatter::default_flags & ~::toml::format_flags::allow_multi_line_strings);
+    }
 };
 
 }  // namespace pygim::pathlike::engines

@@ -6,6 +6,7 @@
 
 #include <pybind11/pybind11.h>
 #include "adapter.h"
+#include "../utils/initialised.h"
 
 namespace py = pybind11;
 
@@ -31,4 +32,5 @@ an iterable class) or as a *factory* (`each(iterable)`).
         .def("__getattr__", &Each::getattr)
         .def("__set_name__", &Each::set_name)
         .def("__get__", &Each::get);
+    pygim::adapter::refuse_uninitialised(m);   // last: every class above is registered (utils/initialised.h)
 }

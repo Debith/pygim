@@ -2,6 +2,7 @@
 #include <pybind11/pybind11.h>
 
 #include "adapter.h"
+#include "../../utils/initialised.h"
 
 namespace py = pybind11;
 
@@ -66,4 +67,5 @@ PYBIND11_MODULE(registry, m) {
         .def("__repr__", &pygim::Registry::repr,
              "Stable representation exposing policy, hooks flag, and size.\n"
              "Used by tests; do not change field order without updating tests.");
+    pygim::adapter::refuse_uninitialised(m);   // last: every class above is registered (utils/initialised.h)
 }
