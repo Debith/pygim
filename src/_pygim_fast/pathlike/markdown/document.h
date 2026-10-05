@@ -195,10 +195,34 @@ public:
         out += src.substr(end);
         return out;
     }
+    /// The front matter's marker ('-' YAML, '+' TOML), or '-' when there is
+    /// none: the format a new front matter takes unless told otherwise.
+    [[nodiscard]] constexpr char front_matter_marker() const noexcept {
+        const std::uint32_t fm = front_matter();
+        return fm == none ? '-' : at(fm).marker;
+    }
+    /// The front matter's body as a parser should read it: preceded by one
+    /// empty line per line above it, so the line numbers in an error are the file's.
+    [[nodiscard]] constexpr std::string front_matter_body() const {
+        const std::uint32_t fm = front_matter();
+        return fm == none ? std::string() : std::string(at(fm).first_line, '\n') + raw(fm);
+    }
+    /// The document's line ending: its first one, or "\n" when it has none.
+    [[nodiscard]] constexpr std::string_view line_ending() const noexcept {
+        const std::size_t e = m_source.find_first_of("\r\n");
+        if (e == std::string::npos) return "\n";
+        return m_source[e] == '\n' ? "\n" : e + 1 < m_source.size() && m_source[e + 1] == '\n' ? "\r\n" : "\r";
+    }
+
     /// The source with its front matter replaced by `text` (serialised, fences
     /// included), added after any byte-order mark when there is none, or
-    /// removed when `text` is empty. The body's bytes do not change.
+    /// removed when `text` is empty. The body's bytes do not change. A document
+    /// parsed without front matter has none to set (std::invalid_argument).
     [[nodiscard]] constexpr std::string with_front_matter(std::string_view text) const {
+        if (!m_front_matter) {
+            throw std::invalid_argument("with_front_matter: this document was parsed with front_matter=False, "
+                                        "so its first lines are body text, not front matter");
+        }
         const std::uint32_t fm = front_matter();
         if (fm != none) return splice(at(fm).begin, at(fm).end, text);
         const std::size_t after_bom = std::string_view(m_source).starts_with("\xEF\xBB\xBF") ? 3 : 0;

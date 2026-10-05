@@ -244,12 +244,36 @@ namespace pygim::pathlike::markdown::write {
 }
 
 /// Front matter around an already serialised body: `---` for YAML, `+++` for TOML.
-[[nodiscard]] constexpr std::string front_matter(std::string_view body, char marker) {
+///
+/// Every line ends with `eol` (the document's own line ending). A body line
+/// that reads as the closing fence — `---` or `...` for YAML, `+++` for TOML,
+/// at column 0 with only spaces or tabs after — would end the front matter
+/// early and turn the rest into body text, so it is refused
+/// (std::invalid_argument naming the line).
+[[nodiscard]] constexpr std::string front_matter(std::string_view body, char marker, std::string_view eol = "\n") {
     const std::string fence(3, marker == '+' ? '+' : '-');
-    std::string out = fence + "\n";
-    out += body;
-    if (!body.empty() && body.back() != '\n') out.push_back('\n');
-    out += fence + "\n";
+    std::string out = fence;
+    out += eol;
+    std::size_t number = 0;
+    for (std::size_t pos = 0; pos < body.size();) {
+        std::size_t end = body.find('\n', pos);
+        if (end == std::string_view::npos) end = body.size();
+        std::string_view line = body.substr(pos, end - pos);
+        if (line.ends_with('\r')) line.remove_suffix(1);
+        ++number;
+        std::string_view bare = line;
+        while (!bare.empty() && (bare.back() == ' ' || bare.back() == '\t')) bare.remove_suffix(1);
+        if (bare == fence || (marker != '+' && bare == "...")) {
+            throw std::invalid_argument("front matter: line " + decimal(number) + " of the written " +
+                                        (marker == '+' ? "TOML" : "YAML") + " is '" + std::string(bare) +
+                                        "', which would end the front matter early");
+        }
+        out += line;
+        out += eol;
+        pos = end + 1;
+    }
+    out += fence;
+    out += eol;
     return out;
 }
 

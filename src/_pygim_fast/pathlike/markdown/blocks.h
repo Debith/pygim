@@ -27,6 +27,7 @@
 #include <concepts>
 #include <cstddef>
 #include <cstdint>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -90,6 +91,17 @@ concept Dialect = requires {
     while (i < s.size() && s[i] == s[0]) ++i;
     while (i < s.size() && is_space_or_tab(s[i])) ++i;
     return i == s.size() ? (s[0] == '=' ? 1 : 2) : 0;
+}
+
+/// Where the line starting at `pos` ends, before its line ending, and where
+/// the next line starts. A line ends at LF, CRLF or a lone CR (CommonMark).
+[[nodiscard]] constexpr std::pair<std::size_t, std::size_t> line_from(std::string_view src, std::size_t pos) noexcept {
+    std::size_t e = src.find('\n', pos);   // two memchr-speed searches, not a byte loop: this runs per line
+    if (e == std::string_view::npos) e = src.size();
+    const std::size_t cr = src.substr(pos, e - pos).find('\r');
+    if (cr == std::string_view::npos) return {e, e < src.size() ? e + 1 : e};
+    e = pos + cr;   // a CR, alone or before the LF, ends the line
+    return {e, e + 1 < src.size() && src[e + 1] == '\n' ? e + 2 : e + 1};
 }
 
 /// Where checking `s` for a thematic break (three or more of one of `*`, `-`,
@@ -281,6 +293,9 @@ public:
     /// Parses `src` (UTF-8; a leading byte-order mark is skipped and belongs
     /// to no block). `front_matter` recognises a `---`/`+++` block at the start.
     [[nodiscard]] constexpr tree parse(std::string_view src, bool front_matter = true) {
+        if (src.size() > 0xFFFFFFFFu) {   // the tree holds 32-bit offsets
+            throw std::length_error("markdown: a document of 4 GiB or more is not supported (" + decimal(src.size()) + " bytes)");
+        }
         m_src = src;
         m_t = tree{};
         m_t.size = static_cast<std::uint32_t>(src.size());
@@ -292,14 +307,7 @@ public:
         std::size_t pos = src.starts_with("\xEF\xBB\xBF") ? 3 : 0;
         if (front_matter) pos = read_front_matter(pos);
         while (pos < src.size()) {
-            std::size_t e = src.find('\n', pos);
-            if (e == std::string_view::npos) e = src.size();
-            const std::size_t cr = src.substr(pos, e - pos).find('\r');
-            std::size_t next = e < src.size() ? e + 1 : e;
-            if (cr != std::string_view::npos) {   // a CR (alone, or before the LF) ends the line
-                e = pos + cr;
-                next = e + 1 < src.size() && src[e + 1] == '\n' ? e + 2 : e + 1;
-            }
+            const auto [e, next] = line_from(src, pos);
             m_ls = static_cast<std::uint32_t>(pos);
             m_next = static_cast<std::uint32_t>(next);
             m_line = src.substr(pos, e - pos);
@@ -989,26 +997,30 @@ private:
 
     /// `---` (YAML) or `+++` (TOML) on the first line, closed by the same
     /// line (or `...` for YAML): a front_matter block of the lines between.
+    /// A fence starts at column 0 — spaces or tabs may follow it, never
+    /// precede it — so an indented `---` inside a YAML block scalar is the
+    /// scalar's text. Lines end as the body's do: LF, CRLF or a lone CR.
     /// Returns where block parsing starts.
     constexpr std::size_t read_front_matter(std::size_t pos) {
         struct line {
             std::size_t begin, end, next;   // end before the line ending
         };
         const auto line_at = [&](std::size_t p) {
-            std::size_t e = m_src.find('\n', p);
-            if (e == std::string_view::npos) e = m_src.size();
-            const std::size_t next = e < m_src.size() ? e + 1 : e;
-            if (e > p && m_src[e - 1] == '\r') --e;
+            const auto [e, next] = line_from(m_src, p);
             return line{p, e, next};
         };
-        const auto trimmed = [&](const line& l) { return trim_space_tab(m_src.substr(l.begin, l.end - l.begin)); };
+        const auto fence = [&](const line& l) {   // the line without trailing spaces and tabs
+            std::string_view v = m_src.substr(l.begin, l.end - l.begin);
+            while (!v.empty() && is_space_or_tab(v.back())) v.remove_suffix(1);
+            return v;
+        };
         const line first = line_at(pos);
-        const std::string_view open = trimmed(first);
+        const std::string_view open = fence(first);
         if (open != "---" && open != "+++") return pos;
         std::vector<line> lines{first};
         for (std::size_t p = first.next; p < m_src.size();) {
             lines.push_back(line_at(p));
-            const std::string_view l = trimmed(lines.back());
+            const std::string_view l = fence(lines.back());
             if (l == open || (open[0] == '-' && l == "...")) {
                 block fm;
                 fm.type = kind::front_matter;

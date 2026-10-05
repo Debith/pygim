@@ -10,6 +10,7 @@ the YAML and TOML engines, and builders whose output parses back.
 
 import importlib.util
 import json
+import re
 import pathlib
 import time
 
@@ -305,6 +306,58 @@ def test_with_front_matter_replaces_adds_and_removes_it_and_keeps_the_body():
     assert doc.with_front_matter(None).text == body
     toml = md.Document(body).with_front_matter({"a": 1}, engine="toml")
     assert toml.text.startswith("+++\na = 1\n+++\n") and toml.front_matter == {"a": 1}
+
+
+def test_only_a_fence_at_column_0_opens_or_closes_front_matter():
+    # An indented `---` inside a YAML block scalar is the scalar's text, not the closing fence.
+    doc = md.Document("---\nnotes: |\n  first part\n  ---\n  second part\ntitle: x\n---\n# Body\n")
+    assert doc.front_matter == {"notes": "first part\n---\nsecond part\n", "title": "x"}
+    assert [type(b).__name__ for b in doc.blocks] == ["FrontMatter", "Heading"]
+    assert md.Document("  ---\na: 1\n---\n").front_matter is None   # an indented opening fence is body
+    assert md.Document("---  \na: 1\n---\t\n").front_matter == {"a": 1}   # trailing spaces are fine
+
+
+def test_front_matter_lines_end_as_the_bodys_do():
+    doc = md.Document("---\rtitle: x\r---\r# h\r")   # lone CR, as CommonMark allows
+    assert doc.front_matter == {"title": "x"}
+    assert doc.find(md.Heading)[0].lines == (4, 4)
+
+
+@pytest.mark.parametrize("data, engine", [
+    pytest.param({"a": "x\n---\ny", "b": "..."}, "yaml", id="yaml fence-like value"),
+    pytest.param({"a": "q\n+++\nz"}, "toml", id="toml fence-like value"),
+])
+def test_with_front_matter_reads_back_what_it_wrote(data, engine):
+    doc = md.Document("# Body\n").with_front_matter(data, engine=engine)
+    assert doc.front_matter == data
+    assert [type(b).__name__ for b in doc.blocks] == ["FrontMatter", "Heading"] and doc.text.endswith("# Body\n")
+
+
+def test_with_front_matter_writes_the_documents_line_ending():
+    assert md.Document("# H\r\n").with_front_matter({"b": 2}).text == "---\r\nb: 2\r\n---\r\n# H\r\n"
+
+
+def test_with_front_matter_needs_a_document_that_reads_front_matter():
+    with pytest.raises(ValueError, match="front_matter=False"):
+        md.Document("# H\n", front_matter=False).with_front_matter({"a": 1})
+
+
+def test_a_front_matter_error_gives_the_files_line(temp_dir):
+    body = "title: ok\nlist: [1, 2\nnext: x\n"
+    yaml = _write(temp_dir, "alone.yaml", body.rstrip("\n"))   # the engine gets the body's lines, not its last line ending
+    with pytest.raises(RuntimeError) as alone:
+        pygim.path(yaml).read()
+    md_file = _write(temp_dir, "in.md", "---\n" + body + "---\n# x\n")
+    with pytest.raises(RuntimeError) as embedded:
+        pygim.path(md_file).read().front_matter
+    line = int(re.search(r"line (\d+)", str(alone.value)).group(1))
+    assert f"line {line + 1}" in str(embedded.value) and "in.md" in str(embedded.value)   # one fence line above
+
+
+def test_an_unknown_yaml_alias_names_the_front_matter_and_the_file(temp_dir):
+    f = _write(temp_dir, "alias.md", "---\na: *nope\n---\n")
+    with pytest.raises(RuntimeError, match=r"front matter \(lines 1-3\) of .*alias\.md"):
+        pygim.path(f).read().front_matter
 
 
 # --------------------------------------------------------------------------- #

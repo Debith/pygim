@@ -189,7 +189,8 @@ inline void py_to_toml_value(py::handle obj, Insert&& ins) {
     return out;
 }
 
-[[nodiscard]] inline std::string dumps_toml(py::handle obj) {
+[[nodiscard]] inline std::string dumps_toml(py::handle obj,
+                                           toml::format_flags flags = toml::toml_formatter::default_flags) {
     if (!py::isinstance<py::dict>(obj)) {
         throw std::invalid_argument(
             "toml write: content must be a mapping (TOML documents are tables)");
@@ -197,7 +198,7 @@ inline void py_to_toml_value(py::handle obj, Insert&& ins) {
     toml::table root = py_to_toml_table(obj);
     py::gil_scoped_release nogil;
     std::stringstream ss;
-    ss << root << '\n';
+    ss << toml::toml_formatter(root, flags) << '\n';
     return ss.str();
 }
 
@@ -231,6 +232,11 @@ struct toml {
         return detail::loads_toml(text, origin, keys);
     }
     static std::string dumps(py::handle obj) { return detail::dumps_toml(obj); }
+    /// Text to embed in another document (markdown front matter): strings stay
+    /// on one line, escaped, so no line of a value can read as a `+++` fence.
+    static std::string dumps_embedded(py::handle obj) {
+        return detail::dumps_toml(obj, ::toml::toml_formatter::default_flags & ~::toml::format_flags::allow_multi_line_strings);
+    }
 };
 
 }  // namespace pygim::pathlike::engines

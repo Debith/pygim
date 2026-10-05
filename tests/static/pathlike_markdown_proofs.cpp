@@ -190,7 +190,9 @@ consteval bool writer() {
     const bool lists = write::items({"one", "two\nlines"}, false, 1) == "- one\n- two\n  lines\n" &&
                        write::items({"a", "b"}, true, 9) == "9. a\n10. b\n";
     const bool quotes = write::quote("a\n\nb") == "> a\n>\n> b\n" && write::join({"# T\n", "", "text\n\n"}) == "# T\n\ntext\n";
-    const bool matter = write::front_matter("a: 1", '-') == "---\na: 1\n---\n" && write::front_matter("a = 1\n", '+') == "+++\na = 1\n+++\n";
+    const bool matter = write::front_matter("a: 1", '-') == "---\na: 1\n---\n" && write::front_matter("a = 1\n", '+') == "+++\na = 1\n+++\n" &&
+                        write::front_matter("a: 1\nb: 2\n", '-', "\r\n") == "---\r\na: 1\r\nb: 2\r\n---\r\n" &&   // the document's line ending
+                        write::front_matter("a: |\n  ---\n", '-') == "---\na: |\n  ---\n---\n";                      // an indented fence is text
     return esc && fences && heads && grid && lists && quotes && matter;
 }
 static_assert(writer());

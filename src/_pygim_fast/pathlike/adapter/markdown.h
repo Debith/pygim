@@ -136,10 +136,17 @@ bool load_if(char marker, std::string_view body, std::string_view origin, py::ob
     out = F::engine::loads(body, origin, keys);
     return true;
 }
+/// The engine's text for embedding in a document, when it has a variant for
+/// that (TOML keeps strings on one line), else its ordinary text.
+template <class E>
+std::string embedded_text(py::handle data) {
+    if constexpr (requires { E::dumps_embedded(data); }) return E::dumps_embedded(data);
+    else return E::dumps(data);
+}
 template <class F>
-bool dump_if(std::string_view name, py::handle data, std::string& out) {
+bool dump_if(std::string_view name, py::handle data, std::string_view eol, std::string& out) {
     if (F::name != name) return false;
-    out = mk::write::front_matter(F::engine::dumps(data), F::marker);
+    out = mk::write::front_matter(embedded_text<typename F::engine>(data), F::marker, eol);
     return true;
 }
 template <class F>
@@ -155,10 +162,10 @@ py::object load_front_matter(type_list<Fs...>, char marker, std::string_view bod
     return out;
 }
 template <class... Fs>
-std::string dump_front_matter(type_list<Fs...> formats, py::handle data, std::string_view name) {
+std::string dump_front_matter(type_list<Fs...> formats, py::handle data, std::string_view name, std::string_view eol = "\n") {
     position(names_of(formats), name, "front matter engine");
     std::string out;
-    (dump_if<Fs>(name, data, out) || ...);
+    (dump_if<Fs>(name, data, eol, out) || ...);
     return out;
 }
 template <class... Fs>
@@ -597,11 +604,11 @@ inline void bind(py::module_& parent) {
             const std::uint32_t fm = d.doc->core().front_matter();
             if (fm == mk::none) return py::none();
             const mk::block& b = d.doc->at(fm);
-            return load_front_matter(front_matter_formats{}, b.marker, d.doc->core().raw(fm),
+            return load_front_matter(front_matter_formats{}, b.marker, d.doc->core().front_matter_body(),
                                      "front matter (lines " + std::to_string(b.first_line) + "-" + std::to_string(b.last_line) +
                                          ") of " + d.doc->origin);
         }, "The front matter as data (YAML for ---, TOML for +++, through pathlike's engines), or None. "
-           "A parse error names the lines and the file.")
+           "A parse error names the file and the line in it.")
         .def_property_readonly("blocks", [](const document_ref& d) { return wrapped(d.doc, d.doc->core().children(0)); },
                                "The top-level blocks, in order, each of its kind's class.")
         .def("walk", [](const document_ref& d) { return wrapped(d.doc, d.doc->core().walk()); },
@@ -643,15 +650,10 @@ inline void bind(py::module_& parent) {
            "A new Document with a top-level block or a section replaced by text; every other byte, and the "
            "blank lines that separated the target from what follows, unchanged. Empty text deletes it.")
         .def("with_front_matter", [](const document_ref& d, py::handle data, std::optional<std::string> engine) {
-            if (!d.doc->core().recognises_front_matter()) {
-                throw std::invalid_argument("with_front_matter: this document was parsed with front_matter=False");
-            }
-            const std::uint32_t fm = d.doc->core().front_matter();
-            const std::string name = engine ? *engine
-                                   : fm != mk::none ? std::string(format_named_by(front_matter_formats{}, d.doc->at(fm).marker))
-                                                    : std::string(names_of(front_matter_formats{})[0]);
-            const std::string text = data.is_none() ? std::string() : dump_front_matter(front_matter_formats{}, data, name);
-            return document_ref{reparse(*d.doc, d.doc->core().with_front_matter(text))};
+            const mk::document_core& core = d.doc->core();
+            const std::string name = engine.value_or(std::string(format_named_by(front_matter_formats{}, core.front_matter_marker())));
+            const std::string text = data.is_none() ? std::string() : dump_front_matter(front_matter_formats{}, data, name, core.line_ending());
+            return document_ref{reparse(*d.doc, core.with_front_matter(text))};
         }, py::arg("data"), py::kw_only(), py::arg("engine") = py::none(),
            "A new Document with its front matter set to data (None removes it), written by the YAML or TOML "
            "engine (engine= picks; default: the one already there, else yaml). The body is unchanged.")

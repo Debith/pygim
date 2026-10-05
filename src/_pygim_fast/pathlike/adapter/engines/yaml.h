@@ -92,10 +92,10 @@ inline py::object node_to_py(ryml::ConstNodeRef node, KeyCache& keys) {
     ryml::Tree tree;
     try {
         tree = ryml::parse_in_arena(ryml::csubstr(text.data(), text.size()));
+        tree.resolve();   // expand anchors / *aliases: an unknown alias is a parse error too
     } catch (const std::runtime_error& e) {
         throw std::runtime_error(std::string(e.what()) + " in " + std::string(origin));
     }
-    tree.resolve();                                 // expand anchors / *aliases
     return tree;
 }
 
