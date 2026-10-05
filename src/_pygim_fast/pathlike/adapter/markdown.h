@@ -212,92 +212,101 @@ namespace kinds {
 
 struct front_matter {
     static constexpr mk::kind tag = mk::kind::front_matter;
+    using self = typed_block<front_matter>;   // pybind refuses a block of another class
     static constexpr const char* doc = "Front matter: a ``---`` (YAML) or ``+++`` (TOML) block at the very start. "
                                        "Document.front_matter has its data.";
     template <class C>
     static void bind(C& c) {
-        c.def_property_readonly("raw", [](const block_ref& b) { return str_of(b.doc->core().raw(b.index)); }, "The text between the fences.")
-         .def_property_readonly("engine", [](const block_ref& b) { return str_of(format_named_by(front_matter_formats{}, b.at().marker)); },
+        c.def_property_readonly("raw", [](const self& b) { return str_of(b.doc->core().raw(b.index)); }, "The text between the fences.")
+         .def_property_readonly("engine", [](const self& b) { return str_of(format_named_by(front_matter_formats{}, b.at().marker)); },
                                 "The engine its fence names: 'yaml' (---) or 'toml' (+++).");
     }
 };
 struct heading {
     static constexpr mk::kind tag = mk::kind::heading;
+    using self = typed_block<heading>;   // pybind refuses a block of another class
     static constexpr const char* doc = "An ATX (``# Title``) or setext (underlined) heading.";
     template <class C>
     static void bind(C& c) {
-        c.def_property_readonly("level", [](const block_ref& b) { return b.at().level; }, "1-6.")
-         .def_property_readonly("title", [](const block_ref& b) { return str_of(b.doc->heading(b.index).title); },
+        c.def_property_readonly("level", [](const self& b) { return b.at().level; }, "1-6.")
+         .def_property_readonly("title", [](const self& b) { return str_of(b.doc->heading(b.index).title); },
                                 "Its text, inline markup resolved, line breaks as spaces.")
-         .def_property_readonly("slug", [](const block_ref& b) { return str_of(b.doc->heading(b.index).slug); },
+         .def_property_readonly("slug", [](const self& b) { return str_of(b.doc->heading(b.index).slug); },
                                 "Its anchor, unique in the document (the document's slug rule).")
-         .def_property_readonly("content", [](const block_ref& b) { return str_of(b.doc->core().inline_source(b.index)); },
+         .def_property_readonly("content", [](const self& b) { return str_of(b.doc->core().inline_source(b.index)); },
                                 "Its inline markdown, without the ``#`` marks or the underline.");
     }
 };
 struct paragraph {
     static constexpr mk::kind tag = mk::kind::paragraph;
+    using self = typed_block<paragraph>;   // pybind refuses a block of another class
     static constexpr const char* doc = "A paragraph.";
     template <class C>
     static void bind(C& c) {
-        c.def_property_readonly("content", [](const block_ref& b) { return str_of(b.doc->core().inline_source(b.index)); },
+        c.def_property_readonly("content", [](const self& b) { return str_of(b.doc->core().inline_source(b.index)); },
                                 "Its inline markdown, lines joined by newlines.");
     }
 };
 struct code {
     static constexpr mk::kind tag = mk::kind::code;
+    using self = typed_block<code>;   // pybind refuses a block of another class
     static constexpr const char* doc = "A fenced or indented code block.";
     template <class C>
     static void bind(C& c) {
-        c.def_property_readonly("fenced", [](const block_ref& b) { return b.at().fenced; })
-         .def_property_readonly("info", [](const block_ref& b) { return none_if_empty(b.doc->core().info(b.index)); },
+        c.def_property_readonly("fenced", [](const self& b) { return b.at().fenced; })
+         .def_property_readonly("info", [](const self& b) { return none_if_empty(b.doc->core().info(b.index)); },
                                 "A fenced block's info string ('py title=\"x\"'), unescaped; None when there is none.")
-         .def_property_readonly("lang", [](const block_ref& b) { return none_if_empty(first_word(b.doc->core().info(b.index))); },
+         .def_property_readonly("lang", [](const self& b) { return none_if_empty(first_word(b.doc->core().info(b.index))); },
                                 "The info string's first word, its language; None when there is none.")
-         .def_property_readonly("code", [](const block_ref& b) {
+         .def_property_readonly("code", [](const self& b) {
              return str_of(b.doc->core().code(b.index));
          }, "The code, each line ended by a newline.");
     }
 };
 struct html {
     static constexpr mk::kind tag = mk::kind::html;
+    using self = typed_block<html>;   // pybind refuses a block of another class
     static constexpr const char* doc = "An HTML block.";
     template <class C>
     static void bind(C& c) {
-        c.def_property_readonly("raw", [](const block_ref& b) { return str_of(b.doc->core().raw(b.index)); }, "Its HTML, as written.");
+        c.def_property_readonly("raw", [](const self& b) { return str_of(b.doc->core().raw(b.index)); }, "Its HTML, as written.");
     }
 };
 struct thematic_break {
     static constexpr mk::kind tag = mk::kind::thematic_break;
+    using self = typed_block<thematic_break>;   // pybind refuses a block of another class
     static constexpr const char* doc = "A thematic break (``---``, ``***``, ``___``).";
     template <class C>
     static void bind(C&) {}
 };
 struct quote {
     static constexpr mk::kind tag = mk::kind::quote;
+    using self = typed_block<quote>;   // pybind refuses a block of another class
     static constexpr const char* doc = "A block quote; its blocks are its children.";
     template <class C>
     static void bind(C&) {}
 };
 struct list {
     static constexpr mk::kind tag = mk::kind::list;
+    using self = typed_block<list>;   // pybind refuses a block of another class
     static constexpr const char* doc = "A bullet or ordered list; its items are its children.";
     template <class C>
     static void bind(C& c) {
-        c.def_property_readonly("ordered", [](const block_ref& b) { return b.at().ordered; })
-         .def_property_readonly("start", [](const block_ref& b) -> py::object {
+        c.def_property_readonly("ordered", [](const self& b) { return b.at().ordered; })
+         .def_property_readonly("start", [](const self& b) -> py::object {
              return b.at().ordered ? py::object(py::int_(b.at().start)) : py::object(py::none());
          }, "An ordered list's first number; None for a bullet list.")
-         .def_property_readonly("tight", [](const block_ref& b) { return b.at().tight; },
+         .def_property_readonly("tight", [](const self& b) { return b.at().tight; },
                                 "Whether no blank line separates its items or the blocks inside them.");
     }
 };
 struct item {
     static constexpr mk::kind tag = mk::kind::item;
+    using self = typed_block<item>;   // pybind refuses a block of another class
     static constexpr const char* doc = "A list item; its blocks are its children.";
     template <class C>
     static void bind(C& c) {
-        c.def_property_readonly("checked", [](const block_ref& b) -> py::object {
+        c.def_property_readonly("checked", [](const self& b) -> py::object {
             const std::int8_t t = b.at().task;
             return t < 0 ? py::object(py::none()) : py::object(py::bool_(t == 1));
         }, "A task item's state ([x] True, [ ] False); None when it is not a task.");
@@ -305,16 +314,17 @@ struct item {
 };
 struct table {
     static constexpr mk::kind tag = mk::kind::table;
+    using self = typed_block<table>;   // pybind refuses a block of another class
     static constexpr const char* doc = "A GFM table.";
     template <class C>
     static void bind(C& c) {
-        c.def_property_readonly("header", [](const block_ref& b) { return row(b, 0); }, "The header cells, as plain text.")
-         .def_property_readonly("rows", [](const block_ref& b) {
+        c.def_property_readonly("header", [](const self& b) { return row(b, 0); }, "The header cells, as plain text.")
+         .def_property_readonly("rows", [](const self& b) {
              py::list out;
              for (std::uint32_t r = 1; r < b.at().rows; ++r) out.append(row(b, r));
              return out;
          }, "The body rows, as plain text, each as wide as the header.")
-         .def_property_readonly("align", [](const block_ref& b) {
+         .def_property_readonly("align", [](const self& b) {
              py::list out;
              for (std::uint32_t c = 0; c < b.at().columns; ++c) {
                  out.append(none_if_empty(align_name(b.doc->core().structure().aligns[b.at().align + c])));
@@ -330,14 +340,15 @@ struct table {
 };
 struct definition {
     static constexpr mk::kind tag = mk::kind::definition;
+    using self = typed_block<definition>;   // pybind refuses a block of another class
     static constexpr const char* doc = "A link reference definition: ``[label]: /url \"title\"``.";
     template <class C>
     static void bind(C& c) {
-        c.def_property_readonly("label", [](const block_ref& b) { return str_of(def(b).label); }, "Case-folded, as references match it.")
-         .def_property_readonly("destination", [](const block_ref& b) { return str_of(def(b).destination); })
-         .def_property_readonly("title", [](const block_ref& b) { return str_of(def(b).title); });
+        c.def_property_readonly("label", [](const self& b) { return str_of(def(b).label); }, "Case-folded, as references match it.")
+         .def_property_readonly("destination", [](const self& b) { return str_of(def(b).destination); })
+         .def_property_readonly("title", [](const self& b) { return str_of(def(b).title); });
     }
-    static const mk::definition& def(const block_ref& b) { return b.doc->core().structure().definitions[b.at().def]; }
+    static const mk::definition& def(const block_ref& b) { return b.doc->core().definition_of(b.index); }
 };
 
 }  // namespace kinds

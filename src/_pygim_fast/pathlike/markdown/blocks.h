@@ -756,7 +756,10 @@ private:
 
     /// GFM: the current line is a delimiter row and the paragraph's last line
     /// a header row with as many cells -> the paragraph's last line becomes a table.
+    /// A paragraph whose lines were all link definitions has no last line
+    /// (`[x]: /u` then `-`: the setext check consumed them and left it open).
     constexpr bool open_table(std::uint32_t p) {
+        if (at(p).nseg == 0) return false;
         if (!table_delimiter_row(m_line.substr(m_nn), m_aligns)) return false;
         const segment head = m_t.segments[at(p).seg + at(p).nseg - 1];
         table_cells(text(head), m_cells);

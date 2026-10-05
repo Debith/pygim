@@ -100,6 +100,11 @@ public:
     /// The code of a code block, every line ended by '\n'; its info string, unescaped.
     [[nodiscard]] constexpr std::string code(std::uint32_t i) const { return literal_text(m_source, m_tree, at(i), true); }
     [[nodiscard]] constexpr std::string info(std::uint32_t i) const { return info_text(m_source, at(i)); }
+    /// What definition block `i` defines; std::invalid_argument for a block of another kind.
+    [[nodiscard]] constexpr const definition& definition_of(std::uint32_t i) const {
+        if (at(i).type != kind::definition) throw not_a(i, kind::definition);
+        return m_tree.definitions[at(i).def];
+    }
     /// The raw text of an HTML block; the body of the front matter.
     [[nodiscard]] constexpr std::string raw(std::uint32_t i) const { return literal_text(m_source, m_tree, at(i), false); }
 
@@ -226,6 +231,12 @@ protected:
         }
     }
 
+    /// The error for asking block `i` what only a block of kind `k` has.
+    [[nodiscard]] constexpr std::invalid_argument not_a(std::uint32_t i, kind k) const {
+        return std::invalid_argument("lines " + decimal(at(i).first_line) + "-" + decimal(at(i).last_line) + " are a " +
+                                     std::string(kind_name(at(i).type)) + ", not a " + std::string(kind_name(k)));
+    }
+
     [[nodiscard]] static constexpr std::string decimal(std::uint32_t n) {
         std::string s;
         do {
@@ -319,8 +330,12 @@ public:
         }
         return *m_headings;
     }
-    /// The heading_info of heading block `i`.
-    [[nodiscard]] constexpr const heading_info& heading(std::uint32_t i) const { return headings()[m_heading_of[i]]; }
+    /// The heading_info of heading block `i`; std::invalid_argument for a block of another kind.
+    [[nodiscard]] constexpr const heading_info& heading(std::uint32_t i) const {
+        const std::vector<heading_info>& hs = headings();
+        if (m_heading_of[i] == none) throw not_a(i, kind::heading);
+        return hs[m_heading_of[i]];
+    }
 
     /// The sections of the top-level headings, in document order.
     [[nodiscard]] constexpr const std::vector<section>& sections() const {
@@ -396,7 +411,12 @@ private:
         return out;
     }
 
-    constexpr void append_plain_block(std::uint32_t i, std::string& out) const {
+    [[nodiscard]] static constexpr bool holds_blocks(kind k) noexcept {
+        return k == kind::document || k == kind::quote || k == kind::list || k == kind::item;
+    }
+
+    /// A leaf block's plain text: inline markup resolved, a table's rows tab-separated.
+    constexpr void append_plain_leaf(std::uint32_t i, std::string& out) const {
         const block& b = at(i);
         switch (b.type) {
             case kind::paragraph:
@@ -415,23 +435,45 @@ private:
                     out.push_back('\n');
                 }
                 break;
-            case kind::document:
-            case kind::quote:
-            case kind::list:
-            case kind::item: {
-                bool first = true;
-                for (std::uint32_t c = b.first; c != none; c = at(c).next) {
-                    const std::size_t before = out.size();
-                    if (!first) out += "\n\n";
-                    const std::size_t mark = out.size();
-                    append_plain_block(c, out);
-                    if (out.size() == mark) out.resize(before);   // the child gave nothing: no separator either
-                    else first = false;
-                }
-                break;
-            }
             default:
                 break;
+        }
+    }
+
+    /// Block `i`'s plain text: its blocks' texts, a blank line between two that
+    /// give any. Iterative, like every walk here: a document nests as deep as
+    /// its input (a 5 KB line of `>` is 5,000 quotes), deeper than a thread's stack.
+    constexpr void append_plain_block(std::uint32_t i, std::string& out) const {
+        if (!holds_blocks(at(i).type)) {
+            append_plain_leaf(i, out);
+            return;
+        }
+        // An open container: its next child, whether it has given text yet, and
+        // where its own text began in its parent (`before`, then `mark` after the separator).
+        struct open { std::uint32_t child; bool first; std::size_t before, mark; };
+        std::vector<open> stack{{at(i).first, true, 0, 0}};
+        const auto ended = [&](std::size_t before, std::size_t mark) {   // a child of stack.back() is complete
+            if (out.size() == mark) out.resize(before);   // it gave nothing: no separator either
+            else stack.back().first = false;
+        };
+        while (!stack.empty()) {
+            const std::uint32_t c = stack.back().child;
+            if (c == none) {
+                const open done = stack.back();
+                stack.pop_back();
+                if (!stack.empty()) ended(done.before, done.mark);
+                continue;
+            }
+            stack.back().child = at(c).next;
+            const std::size_t before = out.size();
+            if (!stack.back().first) out += "\n\n";
+            const std::size_t mark = out.size();
+            if (holds_blocks(at(c).type)) {
+                stack.push_back({at(c).first, true, before, mark});
+            } else {
+                append_plain_leaf(c, out);
+                ended(before, mark);
+            }
         }
     }
 
