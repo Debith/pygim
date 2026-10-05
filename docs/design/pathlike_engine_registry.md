@@ -114,9 +114,13 @@ the `TextEngine` concept — and its file `load`/`write` are those plus the
 file I/O. `origin` names the text in a parse error the way a path does for a
 file ("front matter (lines 1-4) of notes.md"). It is optional: `yaml` and
 `toml` have it, because front matter needs them; `json` and `jsonl` do not
-yet. A format that borrows another names it directly (`engines::yaml::loads`
-in `engines/md.h`), so the borrowing is visible in its header rather than
-routed through the registry.
+yet. A format that borrows another names it directly — markdown's front
+matter formats are a pack over `engines::yaml` and `engines::toml`
+(`front_matter_formats` in `adapter/markdown.h`, each required to be a
+`TextEngine`) — so the borrowing is visible in its header rather than routed
+through the registry. An engine may also offer `dumps_embedded(obj)`, its
+text for embedding in another document; TOML's keeps strings on one line, so
+no line of a value can read as markdown's `+++` fence.
 
 **Documents, not only data.** The data engines read into dicts and lists.
 `md` reads into a `pathlike.markdown.Document` — the text with its block tree

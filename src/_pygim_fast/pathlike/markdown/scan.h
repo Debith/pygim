@@ -4,7 +4,7 @@
 // The inline parser reads text in runs: everything up to the next byte that
 // can start markup is plain text. Those bytes are the STOPS — newline,
 // backslash, backtick, `*`, `_`, `[`, `]`, `!`, `<`, `&` and `~` — and markdown
-// has one every 13–19 bytes (measured over pygim's own documents, ENACT #130).
+// has one every 26 bytes over pygim's own 442 documents (benchmarks/markdown_parse.py).
 // A stop index is built once per inline block, 64 bytes per word, and the
 // parser jumps from stop to stop with a count-trailing-zeros (simdjson's
 // stage 1, with markdown's stops):
@@ -22,11 +22,11 @@
 //                  (x86-64: SSE2 is in every x86-64 CPU)
 //     neon_scan    the same on AArch64 (NEON is in every AArch64 CPU)
 //
-// Measured by benchmarks/markdown_parse.py over 19.5 MB of markdown (437
-// files, a stop every 26 bytes; Ryzen 5800X, best of 5): scalar 14.2 ms
-// (1,376 MB/s), SSE2 6.4 ms (3,069 MB/s) — 2.2x. AVX2 is not used: a probe
-// (ENACT #130, not a recorded benchmark) found AVX2 at 32 bytes a word no
-// faster than SSE2 at 64, and it would need a run-time CPU check.
+// Measured by benchmarks/markdown_parse.py over 19.6 MB of markdown (442
+// files; Ryzen 7 5800X, best of 5, the 2026-10-05 record): scalar 13.96 ms
+// (1,404 MB/s), SSE2 6.36 ms (3,084 MB/s) — 2.2x. AVX2 is not used: it would
+// need a run-time CPU check, and an unrecorded probe (ENACT #130) found it no
+// faster at 32 bytes a word than SSE2 at 64.
 // Every policy must produce the same words. tests/unittests/test_pathlike_markdown.py
 // checks it through public behaviour — each stop byte at every offset across two
 // 64-byte words must change Document(...).plain as markup does — and a build with

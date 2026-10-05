@@ -8,15 +8,19 @@ lines and spans that slice the source, lossless edits, front matter through
 the YAML and TOML engines, and builders whose output parses back.
 """
 
+import ast
+import copy
+import datetime
+import hashlib
 import importlib.util
 import os
+import pickle
 import re
-import time
 
 import pytest
 
 import pygim
-from pygim import pathlike
+from pygim import _stubs, pathlike
 
 md = pathlike.markdown
 
@@ -284,7 +288,6 @@ def test_yaml_front_matter_reads_through_the_yaml_engine():
 
 def test_toml_front_matter_reads_through_the_toml_engine():
     doc = md.Document('+++\ntitle = "T"\ndate = 2026-10-02\n+++\n# T\n')
-    import datetime
 
     assert doc.front_matter == {"title": "T", "date": datetime.date(2026, 10, 2)}
 
@@ -599,8 +602,6 @@ def test_find_names_the_classes_it_takes():
 
 
 def test_a_document_copies_and_pickles_as_its_text_and_policies():
-    import copy
-    import pickle
 
     doc = md.Document("+++\na = 1\n+++\n# A\n", dialect="commonmark", slugs="toc")
     assert copy.copy(doc) is doc and copy.deepcopy(doc) is doc   # immutable: a copy is itself
@@ -632,10 +633,6 @@ def test_the_module_exports_its_api_and_no_test_hooks():
 
 def _stub_markdown():
     """The stub's `class markdown:` as {class: {name: kind}} and {function: [parameters]}."""
-    import ast
-
-    from pygim import _stubs
-
     tree = ast.parse(_stubs.stub_path().read_text(encoding="utf-8"))
     ns = next(n for n in tree.body if isinstance(n, ast.ClassDef) and n.name == "markdown")
 
@@ -707,7 +704,6 @@ def test_the_stop_scan_finds_every_stop_at_every_offset(stop):
 def test_generated_unicode_tables_are_current():
     """tables.h records the generator's digest and its own body's: a stale or
     hand-edited table fails here without regenerating 1.1 million code points."""
-    import hashlib
 
     root = pygim.path(__file__).parents[2]
     gen = root / "tests" / "static" / "gen_markdown_tables.py"

@@ -1,6 +1,6 @@
 # pathlike: markdown documents
 
-Status: built 2026-10-02 · Owner: Debith
+Status: built 2026-10-02, revised 2026-10-05 after the PR #37 review · Owner: Debith
 
 `pygim.path("notes.md").read()` returns a `pathlike.markdown.Document`. A Document holds the
 file's exact text and the block tree parsed from it. Every block knows the lines it covers, and
@@ -130,8 +130,11 @@ and lines 5–22 are unchanged. `None` removes the front matter.
 **Scenario: a table whose cells hold pipes and line breaks.**
 Given rows `[["a|b", 1], ["multi\nline", "`x|y`"]]`,
 when `markdown.table(["Key", "Value"], rows)` is called,
-then each `|` in a cell is escaped, a line break becomes `<br>`, and every column is padded to its
-widest cell. Parsing the output back gives the same cells.
+then each `|` in a cell is escaped, a line break (LF, CRLF or a lone CR) becomes `<br>`, a value
+becomes its `str()`, and every column is padded to its widest cell. Read back, the table has the
+same rows and columns, and each cell's plain text is what a reader sees: `a|b`, `1`, `multiline`
+(the `<br>` is HTML, which plain text leaves out) and `x|y` (the code span's text). A row wider
+than the header is refused, because a reader drops the cells past the header's.
 
 **Scenario: code that contains a fence.**
 Given code holding a line of four backticks,
@@ -140,8 +143,12 @@ then the fence is five backticks: one longer than any run in the code, so no lin
 close it.
 
 The builders share one rule: what they are given *is* markdown. A table cell may hold `**bold**`.
-`escape()` turns plain text into markdown that reads back as that text:
-`heading(2, escape("Totals for *all* | 2026"))` has the title `Totals for *all* | 2026`.
+`escape()` turns plain text into markdown that reads back as exactly that text:
+`heading(2, escape("Totals for *all* | 2026"))` has the title `Totals for *all* | 2026`. Besides
+backslash-escaping what could start markup, it writes the whitespace a paragraph would strip or
+read as indentation — spaces and tabs at a line's start or end — and carriage returns as character
+references, so `" > q"` stays text instead of becoming a quote and `"    code"` stays text instead
+of becoming code.
 
 ## How it is built
 
@@ -214,9 +221,9 @@ classDiagram
 | adapter | `adapter/markdown.h` | Python objects only: `Document`, `Section`, and one class per block kind from the kind pack; the front matter formats over the YAML and TOML engines; the builders. Probes for tests and benchmarks only in a `PYGIM_MARKDOWN_PROBES=1` build |
 | engine | `adapter/engines/md.h` | `.md`/`.markdown` → `mdpath`; `read()` builds a Document; `write()` writes its text; `bind` adds `pathlike.markdown` |
 | proofs | `tests/static/pathlike_markdown_proofs.cpp` | every line classifier, the link grammars, entities, both slug policies, the scalar scan, the writer, and whole parses under both dialects, evaluated at compile time in every build |
-| tables | `tests/static/gen_markdown_tables.py` | generates `tables.h` from Python: Unicode punctuation and whitespace, case folding, NFKD-to-ASCII folding, the 2,125 HTML5 entities |
+| tables | `tests/static/gen_markdown_tables.py` | generates `tables.h` from Python: Unicode punctuation and whitespace, case folding, lower-casing with the Cased and Case_Ignorable properties its final-sigma rule reads, NFKD-to-ASCII folding, the 2,125 HTML5 entities |
 
-One read, step by step:
+Reading a file:
 
 ```mermaid
 sequenceDiagram
@@ -229,38 +236,68 @@ sequenceDiagram
     E->>E: read the bytes and check they are UTF-8, GIL released
     E->>B: parse the lines, GIL released
     B-->>D: the tree, with every block's lines and segments
-    P->>D: section formats
-    D->>D: headings and slugs, computed once
-    P->>D: html
-    D->>D: each leaf's inlines parsed and rendered, GIL released
 ```
 
-| Step | What happens | Cost on the 19.5 MB corpus below |
+| Step | What happens | Cost on the corpus below |
 |---|---|---|
 | 1 | `mdpath.read()` dispatches to the md engine | — |
-| 2 | the file is read and checked as UTF-8 (simdjson's validator) without the GIL | 41 µs per file with step 3; `Path.read_text` takes 29 µs |
-| 3 | the block parser walks the lines once, with no inline parsing | 13.0 ms in all (1.5 GB/s) |
-| 4 | the Document owns the source and the tree, and Python holds it by a shared pointer | — |
-| 5 | `section()` and `find(Heading)` parse only the headings' inlines, once | — |
-| 6 | `html()` parses every leaf's inlines and renders them without the GIL | 104 ms in all |
+| 2 | the file is read and checked as UTF-8 (simdjson's validator) without the GIL | 41.9 µs per file with step 3; `Path.read_text` takes 39.1 µs |
+| 3 | the block parser walks the lines once, with no inline parsing | 11.1 ms for all 442 files |
+| 4 | the Document owns the source and the tree; Python holds it by a shared pointer | — |
+
+Asking it something:
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant P as Python
+    participant D as Document
+    participant I as inline parser
+    P->>D: section("formats")
+    D->>I: the headings' inlines, once
+    P->>D: html()
+    D->>I: every leaf's inlines, rendered, GIL released
+```
+
+| Step | What happens | Cost on the corpus below |
+|---|---|---|
+| 1 | `section()`, like `find(Heading)` and `sections`, needs the headings | — |
+| 2 | only the headings' inlines are parsed, and the slugs made unique, once per document | — |
+| 3 | `html()` renders the whole document | — |
+| 4 | every leaf's inlines are parsed and rendered without the GIL | 106.2 ms for all 442 files |
 
 ## Measured
 
-From `benchmarks/markdown_parse.py`, recorded in `benchmarks/results/markdown_parse.jsonl`. The
-corpus is the 437 markdown files of the pygim checkout (19.52 MB, a stop every 26 bytes), on a
-Ryzen 7 5800X, best of 5:
+From `benchmarks/markdown_parse.py`, recorded in `benchmarks/results/markdown_parse.jsonl` (the
+2026-10-05 run). The corpus is the 442 markdown files of the pygim checkout (19.60 MB, a stop
+every 26 bytes), read through pygim's PathSet as exact bytes, on a Ryzen 7 5800X, best of 5:
 
 | Work | Time | Throughput | Against Python-Markdown |
 |---|---|---|---|
-| `Document(text)`: the blocks | 13.0 ms | 1,506 MB/s | 600× |
-| `Document(text).plain`: every inline resolved | 77.4 ms | 252 MB/s | 100× |
-| `Document(text).html()` | 104.1 ms | 188 MB/s | 75× |
-| Python-Markdown with `fenced_code` and `tables` | 7,771 ms | 2.5 MB/s | 1× |
-| stop scan, scalar table | 14.18 ms | 1,376 MB/s | — |
-| stop scan, SSE2 (this build's policy) | 6.36 ms | 3,069 MB/s | 2.2× the scalar scan |
+| `Document(text)`: the blocks | 11.1 ms | 1,761 MB/s | 745× |
+| `Document(text).plain`: every inline resolved | 79.2 ms | 248 MB/s | 105× |
+| `Document(text).html()` | 106.2 ms | 185 MB/s | 78× |
+| Python-Markdown with `fenced_code` and `tables` | 8,289 ms | 2.4 MB/s | 1× |
+| stop scan, scalar table | 13.96 ms | 1,404 MB/s | — |
+| stop scan, SSE2 (this build's policy) | 6.36 ms | 3,084 MB/s | 2.2× the scalar scan |
 
 Python-Markdown is not a CommonMark implementation, so this row compares cost, not output.
 The parser's output is checked against the spec's own examples instead (next section).
+
+The same run times the hostile shapes, each at one size:
+
+| Shape | Input | Time |
+|---|---|---|
+| 30,000 link definitions, then `html()` | 518 KB | 11.4 ms |
+| 4,000 duplicate headings, then `sections` | 40 KB | 2.4 ms |
+| one 80 KB line of nested list markers | 80 KB | 2.4 ms |
+| 500 unmatched backtick runs of 64 or more | 157 KB | 0.2 ms |
+| 50,000 nested quotes, then `plain` | 50 KB | 1.7 ms |
+| 20,000 nested emphasis pairs, then `html()` | 260 KB | 10.9 ms |
+
+Past a few hundred kilobytes in one paragraph, inline parsing slows about 2.5× per doubling for
+every shape, nested or flat: an inline node is about 120 bytes, so the tree outgrows the CPU
+caches before the input does. That is memory, not the algorithm (Open, below).
 
 ## Conformance
 
@@ -270,13 +307,21 @@ examples (12) under `gfm`. It compares each with the spec's expected HTML throug
 normaliser (vendored in `tests/unittests/data/markdown/`). It also renders all 652 CommonMark
 examples under `gfm`, to show the extensions break nothing. All pass.
 
-CommonMark's pathological inputs run in linear time: 20,000 levels of nested emphasis, unclosed
-links, comments and brackets, and `![[]()` repeated. Four rules keep them linear:
+CommonMark's pathological inputs, and the shapes the PR #37 review found, run in linear time.
+`tests/unittests/test_pathlike_markdown_hostile.py` times each at two sizes about 16× apart and
+fails when time grows more than 3× faster than the input; it also runs every public operation over
+inputs that once crashed the process, in a child process on a 1 MB thread stack. These rules keep
+them linear:
 
 - every tree walk is iterative, so nesting depth cannot overflow the stack;
 - a bare link destination nests at most 32 parentheses, a limit the spec allows;
 - a search for the end of raw HTML that failed is remembered for the rest of the paragraph;
-- an opener deactivated by one link is not visited again by the next.
+- an opener deactivated by one link is not visited again by the next;
+- a thematic-break check that failed on a line records where it was decided, and no check
+  starting before that point runs again (cmark's `thematic_break_kill_pos`);
+- every backtick run of a paragraph is indexed once by (length, start), so a code span's closer
+  is one binary search, for runs of any length;
+- unique slugs are handed out through a hashed table, not a search of the slugs so far.
 
 ## Decisions
 
@@ -308,19 +353,18 @@ scan is chosen per platform at compile time. A caller names the other two, so th
 over their product, built through a table of constructors at that position. Adding a dialect is
 adding a type to its pack: there is no if-chain to grow. What does not depend on the policies —
 the source, the tree, lines, finding, the edits — is `document_core`, a non-template base, so it
-is compiled once rather than four times, and reached without a visit. A first version
-type-erased the four instantiations behind a virtual interface in the adapter: 32 lines of
-forwarding, and two if-chains on the names. Debith's review asked for less of the adapter and
-none of the chains.
+is compiled once rather than four times, and reached without a visit.
 
 **A block's class is its kind.** A Block is an instance of its kind's class — `Heading`, `Code`,
 `Table`, ... — and each class holds only its kind's properties, so no property tests which kind
-it is on (a first version had one `Block` class whose 17 kind-specific properties each began by
-testing the kind and returning None otherwise: 23 such gates). The classes are a pack of
+it is on. A property receives a block of its own class (pybind refuses another), and the core's
+kind-specific lookups refuse a block of another kind, so not even `__class__` reassignment reads
+past a table. The classes are a pack of
 descriptors folded into bindings, the idiom of [the engine registry](pathlike_engine_registry.md):
 a descriptor is its kind's tag, docstring and properties; its class name comes from the kind's
 name; a table indexed by the kind wraps a block in its class. Every build proves the pack covers
-every kind exactly once; with C++26 reflection (GCC 16) it also proves the kind names spell the
+every kind exactly once (`covers_every_kind`, which tests/static proves refuses a gap, a repeat
+and the document); with C++26 reflection (GCC 16) it also proves the kind names spell the
 enumerators of `kind`, in order. `Document.find` takes the class.
 
 **No test hooks in a release.** The SIMD scan is checked through public behaviour: every stop
@@ -334,25 +378,50 @@ every AArch64 CPU, so no wheel needs a run-time CPU check. AVX2 was rejected: it
 check, and a probe found it no faster at 32 bytes a word than SSE2 at 64 (ENACT #130). C++26
 `std::simd` was rejected for now: only GCC 16 ships `<simd>`, and CI's GCC 13, Apple clang and
 MSVC would all fall back to scalar. The scan is a policy, so either can replace a kernel later
-without touching the parser.
+without touching the parser. The `#if` that picks the kernel chooses by architecture, not by
+availability (which the definition of done forbids): no x86-64 or AArch64 build can lack its
+baseline, and every other architecture runs `scalar_scan`, the specification itself.
 
 **Front matter through the YAML and TOML engines.** Their text half (`loads`/`dumps`, the
 `TextEngine` concept, [the engine registry](pathlike_engine_registry.md)) parses and writes it, so
-markdown front matter follows exactly the same YAML rules as a `.yaml` file. A parse error names
-the front matter's lines and the file.
+markdown front matter follows exactly the same YAML rules as a `.yaml` file. A fence starts at
+column 0 (spaces may follow it, never precede it), so an indented `---` inside a YAML block scalar
+is the scalar's text. Writing must read back: TOML embeds strings on one escaped line
+(`dumps_embedded`), and the writer refuses a body line that would read as the closing fence.
+New fences use the document's own line ending. A parse error names the file and the file's line.
 
 **Keyed stores are registries.** Link definitions are looked up by label in a
 `StaticRegistryCore` (the flat engine). It is filled once, at the end of the parse, in label
-order, so every insert appends and the build stays O(n log n): 30,000 definitions parse in 17 ms.
-`register_value` keeps the entry already there, which is CommonMark's rule that the first
-definition of a label wins. The Python class of each block kind maps to its kind through a
-`DynamicRegistryCore` (what `find` looks up). Three tables are not registries, for reasons
-ENACT #131 records:
+order, so every insert appends and the build stays O(n log n): the benchmark's 30,000 definitions
+parse and render in 11.4 ms. `register_value` keeps the entry already there, which is
+CommonMark's rule that the first definition of a label wins. The Python class of each block kind
+maps to its kind through a `DynamicRegistryCore` (what `find` looks up). A document's slugs are
+made unique through a RegistryCore over `mapping/open_storage.h`, the open-addressing engine this
+work added: hashed, so N headings cost N lookups, and constexpr, so the proofs run it — the flat
+engine shifts its array on every out-of-order insert, and the hashed one is not constexpr. Three
+tables are not registries, for reasons ENACT #131 records:
 - the dialect, slug rule, alignment and front matter engine names are a handful of entries each,
   which #131 exempts;
 - a heading's index by block id is a dense array indexed by the id (constexpr, O(1));
 - the generated Unicode and entity tables are sorted constexpr arrays: a registry that outlives
   constant evaluation (#131's missing static engine) is what they need, and they move when it exists.
+
+**Each slug rule de-duplicates as its reference does.** A repeated slug is not merely given a
+suffix: github-slugger keeps a counter per original slug (`a`, `a-1`, `a-2`, and an explicit
+`a-1` is skipped over), and Python-Markdown's `unique()` turns `x_N` into `x_(N+1)` and an empty
+id into `_1`. Each policy owns an `anchors` type that hands out ids exactly so; the toc rule's
+walk records where it ended, so N repeats cost N steps where Python-Markdown's own loop costs N².
+`tests/static` proves both against sequences checked with the real Python-Markdown.
+
+**GitHub slugs lower-case as JavaScript does.** github-slugger calls `toLowerCase`: the full
+Unicode lower-case mapping, with a word-final `Σ` as `ς` — not case folding, which would turn
+`µ` into `μ` and `ſ` into `s`. The generator reads the mapping, and the Cased and Case_Ignorable
+properties the final-sigma rule needs, off Python's `str.lower`, which applies the same rule.
+
+**A wrong kind is a TypeError naming the engine.** Writing a set, a non-str key, or a list as a
+TOML document raises `TypeError` (`yaml write: cannot write a value of type set`), and a str that
+UTF-8 cannot hold raises `ValueError` naming the call — the definition of done's split between
+a wrong kind and a bad value, applied to the engines this work extended.
 
 **Spans in characters.** The core counts bytes. Python slices `Document.text` by characters, so
 the core also answers in code points (`document_core::code_points`), through a per-line table
@@ -362,15 +431,19 @@ holds for every block, and the tests check it with non-ASCII text before the blo
 ## Rules to keep
 
 - A block's span is whole physical lines. Blank lines between blocks belong to no block, so a
-  splice keeps them.
+  splice keeps them — and a list's looseness is read from those gaps.
 - Every walk over blocks or inlines is iterative.
+- No input crashes the process or runs away: a new shape that does goes into the hostile tests
+  first.
 - Every scan policy finds every stop: `test_the_stop_scan_finds_every_stop_at_every_offset` checks
   it through public behaviour on every platform CI runs (its macOS runners are the only machines
   that run the NEON policy); a `PYGIM_MARKDOWN_PROBES=1` build compares the policies bit for bit.
 - A property belongs to its kind's class; a new kind is a descriptor in `block_kinds`, and the
   build refuses a kind without one.
 - No test or benchmark hook in a release: probes only behind `PYGIM_MARKDOWN_PROBES=1`.
-- Builders take markdown; `escape()` makes plain text safe.
+- Builders take markdown; `escape()` makes plain text safe, and what it writes reads back exactly.
+- The stub and the module agree: `test_the_stub_matches_the_module` compares every name, kind and
+  parameter.
 - A change to the parser keeps every spec example passing; the test names any that fail.
 - `tables.h` is generated; regenerate it with `tests/static/gen_markdown_tables.py` when Python's
   Unicode version changes. It records the generator's sha256 and its own body's, so a test knows
@@ -396,3 +469,9 @@ holds for every block, and the tests check it with non-ASCII text before the blo
 - **Nested edits.** Replacing a block inside a quote or a list needs its container's prefixes
   re-applied to the new text.
 - **Table width.** Columns are padded by code points, so wide East Asian characters misalign.
+- **The inline node's size.** About 120 bytes, with two strings only links use; moving those to a
+  side table and literals to offsets into the subject would keep large paragraphs in the CPU caches.
+- **An instance whose `__init__` never ran.** `Document.__new__(Document)` then any method crashes:
+  pybind11 hands it uninitialised memory, and `py::smart_holder` does not catch that case. Every
+  pygim class behaves so (`pathlike.path` too), so the fix belongs to the adapter layer as a whole;
+  a strict xfail in the hostile tests records it.
