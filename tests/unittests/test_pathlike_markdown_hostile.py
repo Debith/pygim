@@ -10,6 +10,7 @@ import json
 import os
 import subprocess
 import sys
+import time
 
 import pytest
 
@@ -106,3 +107,70 @@ def test_a_kind_property_asked_of_another_kind_is_a_type_error():
     paragraph = md.Document("# h\n\npara\n").blocks[1]
     with pytest.raises(TypeError):
         md.Heading.title.fget(paragraph)
+
+
+# --------------------------------------------------------------------------- #
+# Nothing runs away: time grows with the input, not faster
+# --------------------------------------------------------------------------- #
+def _seconds(run, text, reps=3):
+    best = float("inf")
+    for _ in range(reps):
+        t = time.perf_counter()
+        run(text)
+        best = min(best, time.perf_counter() - t)
+    return best
+
+
+def _sections(**kw):
+    return lambda t: md.Document(t, **kw).sections
+
+
+def _subsections(t):
+    return [s.subsections for s in md.Document(t).sections]
+
+
+# shape: (input at n, what to time, small n, big n). The two sizes are ~16x apart,
+# so linear work grows ~16x and quadratic ~256x; allowing 3x the size ratio
+# absorbs timing noise in a shared process without letting a quadratic through.
+# An inline-heavy shape is measured against a baseline of the same lengths: its
+# inline tree outgrows the CPU caches well before the input does (an inline node
+# is ~120 bytes), so per-byte cost rises with size for nested and flat input alike,
+# and only growth beyond the baseline's is the shape's own.
+FLAT_EMPHASIS = lambda length: ("*a* " * (length // 4 + 1))[:length]
+GROWTH = {
+    "duplicate headings, github slugs": (lambda n: "## Usage\n\n" * n, _sections(), 100, 1600),
+    "duplicate headings, toc slugs": (lambda n: "## Usage\n\n" * n, _sections(slugs="toc"), 100, 1600),
+    "distinct headings": (lambda n: "".join(f"## h{i}\n\n" for i in range(n)), _sections(), 100, 1600),
+    "explicit numbered toc headings": (lambda n: "".join(f"## a_{i % 7}\n\n" for i in range(n)), _sections(slugs="toc"), 100, 1600),
+    "subsections of many sections": (lambda n: "# a\n\n" + "## b\n\n" * n, _subsections, 100, 1600),
+    "one line of nested bullets": (lambda n: "- " * n + "a\n", md.Document, 1000, 16000),
+    "one line of nested stars": (lambda n: "* " * n + "a\n", md.Document, 1000, 16000),
+    "unmatched long backtick runs": (lambda n: "".join("`" * (64 + i) + "!" for i in range(n)), lambda t: md.Document(t).plain, 20, 160),
+    "backtick runs of every length": (lambda n: "".join("e" + "`" * i for i in range(1, n)), lambda t: md.Document(t).html(), 50, 200),
+    "nested emphasis": (lambda n: "*a **a " * n + "b** b*" * n, lambda t: md.Document(t).html(), 250, 4000, FLAT_EMPHASIS),
+    "nested quotes": (lambda n: "> " * n + "a", lambda t: md.Document(t).html(), 500, 8000),
+    "unclosed links": (lambda n: "[a](b" * n, lambda t: md.Document(t).html(), 500, 8000),
+    "unclosed comments": (lambda n: "</" + "<!--" * n, lambda t: md.Document(t).html(), 500, 8000),
+    "image link openers": (lambda n: "![[]()" * n, lambda t: md.Document(t).html(), 500, 8000),
+    "nested brackets": (lambda n: "[" * n + "a" + "]" * n, lambda t: md.Document(t).html(), 500, 8000),
+}
+
+
+@pytest.mark.parametrize("shape", sorted(GROWTH))
+def test_time_grows_no_faster_than_the_input(shape):
+    make, run, n_small, n_big, *baseline = GROWTH[shape]
+    small, big = make(n_small), make(n_big)
+    run(small)   # warm: first-use caches and allocations
+    t_small, t_big = _seconds(run, small), _seconds(run, big)
+    ratio = len(big) / len(small)
+    if baseline:   # what linear work of this kind costs here at these sizes
+        b_small, b_big = baseline[0](len(small)), baseline[0](len(big))
+        ratio = max(ratio, _seconds(run, b_big) / _seconds(run, b_small))
+    assert t_big <= 3 * ratio * t_small + 0.001, (
+        f"{shape}: {len(small)} -> {len(big)} chars took {t_small * 1e3:.2f} -> {t_big * 1e3:.2f} ms "
+        f"({t_big / t_small:.0f}x where linear work grows {ratio:.0f}x)")
+
+
+def test_document_text_is_built_once():
+    d = md.Document("# a\n" * 1000)
+    assert d.text is d.text   # a span slices it: rebuilding it per access made each slice O(n)

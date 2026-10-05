@@ -71,6 +71,7 @@ struct section {
     std::uint32_t begin = 0, end = 0;
     std::uint32_t first_line = 0, last_line = 0;
     std::uint32_t parent = none;    // index into sections(), or none at the top
+    std::uint32_t first_child = none, next_sibling = none;   // its subsections, as a chain of indices
     std::uint32_t slug_index = 0;   // index into headings()
 };
 
@@ -237,15 +238,6 @@ protected:
                                      std::string(kind_name(at(i).type)) + ", not a " + std::string(kind_name(k)));
     }
 
-    [[nodiscard]] static constexpr std::string decimal(std::uint32_t n) {
-        std::string s;
-        do {
-            s.insert(s.begin(), static_cast<char>('0' + n % 10));
-            n /= 10;
-        } while (n);
-        return s;
-    }
-
 private:
     std::string m_source;
     bool m_front_matter = true;
@@ -304,6 +296,26 @@ public:
     [[nodiscard]] constexpr std::string cell_plain(std::uint32_t table, std::uint32_t row, std::uint32_t col) const {
         return inline_plain(cell_source(table, row, col));
     }
+    /// The first line of plain(i) — what a reader sees first — from the first
+    /// block below `i` that gives any text, without building the rest: a
+    /// preview of a 2 MB list costs its first item.
+    [[nodiscard]] constexpr std::string first_line(std::uint32_t i) const {
+        std::vector<std::uint32_t> todo{i};   // pre-order, children pushed in reverse
+        while (!todo.empty()) {
+            const std::uint32_t b = todo.back();
+            todo.pop_back();
+            if (holds_blocks(at(b).type)) {
+                const std::size_t mark = todo.size();
+                for (std::uint32_t c = at(b).first; c != none; c = at(c).next) todo.push_back(c);
+                std::reverse(todo.begin() + static_cast<std::ptrdiff_t>(mark), todo.end());
+                continue;
+            }
+            std::string text;
+            append_plain_leaf(b, text);
+            if (!text.empty()) return text.substr(0, text.find('\n'));
+        }
+        return {};
+    }
 
     /// HTML for the whole document, or for block `i`, as CommonMark's reference renderer writes it.
     [[nodiscard]] constexpr std::string html(std::uint32_t i = 0) const {
@@ -314,14 +326,14 @@ public:
     [[nodiscard]] constexpr const std::vector<heading_info>& headings() const {
         if (!m_headings) {
             std::vector<heading_info> out;
-            std::vector<std::string> taken;
+            typename Slug::anchors anchors;   // unique by the slug rule's own reference
             walk([&](std::uint32_t i) {
                 if (at(i).type != kind::heading) return;
                 heading_info h;
                 h.block = i;
                 h.title = plain(i);
                 std::replace(h.title.begin(), h.title.end(), '\n', ' ');
-                h.slug = unique(slug<Slug>(h.title), taken);
+                h.slug = anchors.next(slug<Slug>(h.title));
                 out.push_back(std::move(h));
             });
             m_heading_of.assign(structure().blocks.size(), none);   // block -> its index in headings()
@@ -342,7 +354,8 @@ public:
         if (!m_sections) {
             const std::vector<heading_info>& hs = headings();
             std::vector<section> out;
-            std::vector<std::uint32_t> open;   // indices of sections still open, deepest last
+            std::vector<std::uint32_t> open;         // indices of sections still open, deepest last
+            std::vector<std::uint32_t> last_child;   // per section: its last subsection so far
             for (std::uint32_t k = 0; k < hs.size(); ++k) {
                 const block& h = at(hs[k].block);
                 if (h.parent != 0) continue;   // only top-level headings divide the document
@@ -357,8 +370,16 @@ public:
                 s.first_line = h.first_line;
                 s.parent = open.empty() ? none : open.back();
                 s.slug_index = k;
-                open.push_back(static_cast<std::uint32_t>(out.size()));
+                const auto at_index = static_cast<std::uint32_t>(out.size());
+                if (s.parent != none) {   // append to the parent's chain of subsections
+                    std::uint32_t& link = last_child[s.parent] == none ? out[s.parent].first_child
+                                                                       : out[last_child[s.parent]].next_sibling;
+                    link = at_index;
+                    last_child[s.parent] = at_index;
+                }
+                open.push_back(at_index);
                 out.push_back(s);
+                last_child.push_back(none);
             }
             for (std::uint32_t o : open) close(out[o], static_cast<std::uint32_t>(source().size()));
             m_sections = std::move(out);
@@ -375,6 +396,19 @@ public:
         };
         const std::uint32_t by_slug = by(&heading_info::slug);
         return by_slug != none ? by_slug : by(&heading_info::title);
+    }
+    /// The subsections of section `s`, in order.
+    [[nodiscard]] constexpr std::vector<std::uint32_t> subsections(std::uint32_t s) const {
+        std::vector<std::uint32_t> out;
+        for (std::uint32_t c = sections()[s].first_child; c != none; c = sections()[c].next_sibling) out.push_back(c);
+        return out;
+    }
+    /// The top-level blocks of section `s` after its heading, up to its end (subsection headings included).
+    [[nodiscard]] constexpr std::vector<std::uint32_t> section_blocks(std::uint32_t s) const {
+        const section& x = sections()[s];
+        std::vector<std::uint32_t> out;
+        for (std::uint32_t c = at(x.heading).next; c != none && at(c).begin < x.end; c = at(c).next) out.push_back(c);
+        return out;
     }
     /// The bytes an edit of section `s` replaces: its heading up to the next section's heading.
     [[nodiscard]] constexpr std::pair<std::uint32_t, std::uint32_t> section_region(std::uint32_t s) const {
@@ -475,15 +509,6 @@ private:
                 ended(before, mark);
             }
         }
-    }
-
-    [[nodiscard]] static constexpr std::string unique(std::string base, std::vector<std::string>& taken) {
-        std::string s = base;
-        for (std::uint32_t n = 1; std::find(taken.begin(), taken.end(), s) != taken.end(); ++n) {
-            s = base + std::string(Slug::separator) + decimal(n);
-        }
-        taken.push_back(s);
-        return s;
     }
 
     constexpr void close(section& s, std::uint32_t end) const {

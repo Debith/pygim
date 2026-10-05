@@ -381,21 +381,6 @@ def test_block_html_renders_one_block():
     assert doc.blocks[1].html() == "<blockquote>\n<p><em>q</em></p>\n</blockquote>\n"
 
 
-@pytest.mark.parametrize("src", [
-    pytest.param("*a **a " * 20000 + "b** b*" * 20000, id="nested emphasis"),
-    pytest.param("> " * 20000 + "a", id="nested quotes"),
-    pytest.param("[a](b" * 20000, id="unclosed links"),
-    pytest.param("</" + "<!--" * 20000, id="unclosed comments"),
-    pytest.param("![[]()" * 20000, id="image link openers"),
-    pytest.param("[" * 20000 + "a" + "]" * 20000, id="nested brackets"),
-    pytest.param("".join("e" + "`" * i for i in range(1, 400)), id="backtick runs"),
-])
-def test_pathological_input_is_linear(src):
-    t = time.perf_counter()   # each runs in 1-35 ms here: a quadratic case would take seconds
-    md.Document(src).html()
-    assert time.perf_counter() - t < 0.5
-
-
 # --------------------------------------------------------------------------- #
 # Writing markdown: builders whose output parses back
 # --------------------------------------------------------------------------- #

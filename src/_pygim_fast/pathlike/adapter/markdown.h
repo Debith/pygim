@@ -81,6 +81,7 @@ struct document {
         return doc.visit(std::forward<F>(f));
     }
     [[nodiscard]] std::string plain(std::uint32_t i) const { return visit([&](const auto& d) { return d.plain(i); }); }
+    [[nodiscard]] std::string first_line(std::uint32_t i) const { return visit([&](const auto& d) { return d.first_line(i); }); }
     [[nodiscard]] const std::vector<mk::heading_info>& headings() const {
         return visit([](const auto& d) -> const std::vector<mk::heading_info>& { return d.headings(); });
     }
@@ -171,7 +172,12 @@ std::string_view format_named_by(type_list<Fs...>, char marker) {
 
 struct document_ref {
     doc_ptr doc;
+    py::object text;   // Document.text, built on first use and kept: spans slice it, so it must not cost O(n) per access
 };
+[[nodiscard]] inline py::object text_of(document_ref& d) {
+    if (!d.text) d.text = str_of(d.doc->core().source());
+    return d.text;
+}
 /// A block: a view (the document and an index), never a copy.
 struct block_ref {
     doc_ptr doc;
@@ -516,12 +522,15 @@ inline void bind(py::module_& parent) {
              "This block as HTML.")
         .def("__repr__", [](py::handle self) {
             const auto& b = self.cast<const block_ref&>();
-            std::string preview = b.doc->plain(b.index);
-            preview = preview.substr(0, preview.find('\n'));
-            if (mk::write::width(preview) > 40) {
+            std::string preview = b.doc->first_line(b.index);
+            if (mk::write::width(preview) > 40) {   // cut to 39 columns, at a code point, then …
                 std::size_t i = 0;
-                for (int n = 0; n < 39 && i < preview.size(); ++n) i += mk::decode(preview, i).len;
-                preview = preview.substr(0, i) + "\xE2\x80\xA6";   // …
+                while (i < preview.size()) {
+                    const std::size_t len = mk::decode(preview, i).len;
+                    if (mk::write::width(std::string_view(preview).substr(0, i + len)) > 39) break;
+                    i += len;
+                }
+                preview = preview.substr(0, i) + "\xE2\x80\xA6";
             }
             return py::str(self.get_type().attr("__name__")).cast<std::string>() + "(lines " + std::to_string(b.at().first_line) +
                    "-" + std::to_string(b.at().last_line) + ", " + py::repr(str_of(preview)).cast<std::string>() + ")";
@@ -543,20 +552,13 @@ inline void bind(py::module_& parent) {
                                "(start, end) character offsets into Document.text; the end is where the next section begins.")
         .def_property_readonly("text", [](const section_ref& s) { return text(*s.doc, s.at().begin, s.at().end); })
         .def_property_readonly("blocks", [](const section_ref& s) {
-            std::vector<std::uint32_t> out;
-            for (std::uint32_t c = s.doc->at(s.at().heading).next; c != mk::none && s.doc->at(c).begin < s.at().end; c = s.doc->at(c).next) {
-                out.push_back(c);
-            }
-            return wrapped(s.doc, out);
+            return wrapped(s.doc, s.doc->visit([&](const auto& d) { return d.section_blocks(s.index); }));
         }, "The top-level blocks after the heading, up to the section's end (subsection headings included).")
         .def_property_readonly("subsections", [](const section_ref& s) {
             py::list out;
-            const auto& ss = s.doc->sections();
-            for (std::uint32_t i = 0; i < ss.size(); ++i) {
-                if (ss[i].parent == s.index) out.append(section_ref{s.doc, i});
-            }
+            for (std::uint32_t i : s.doc->visit([&](const auto& d) { return d.subsections(s.index); })) out.append(section_ref{s.doc, i});
             return out;
-        })
+        }, "The sections directly below this one, in order.")
         .def_property_readonly("parent", [](const section_ref& s) -> py::object {
             return s.at().parent == mk::none ? py::object(py::none()) : py::cast(section_ref{s.doc, s.at().parent});
         })
@@ -574,15 +576,15 @@ inline void bind(py::module_& parent) {
 
     doc_cls
         .def(py::init([](const std::string& text, const std::string& dialect, const std::string& slugs, bool front_matter) {
-                 return document_ref{parse(text, dialect, slugs, front_matter, "<string>")};
+                 return document_ref{parse(text, dialect, slugs, front_matter, "<string>"), py::object()};
              }),
              py::arg("text"), py::kw_only(), py::arg("dialect") = "gfm", py::arg("slugs") = "github",
              py::arg("front_matter") = true,
              "Parse markdown text (with the GIL released). dialect: 'gfm' (CommonMark plus tables, "
              "strikethrough, task items) or 'commonmark'; slugs: 'github' or 'toc' (Python-Markdown's "
              "anchors); front_matter: read a leading ---/+++ block as YAML/TOML front matter.")
-        .def_property_readonly("text", [](const document_ref& d) { return str_of(d.doc->core().source()); }, "The source text, exactly.")
-        .def("__str__", [](const document_ref& d) { return str_of(d.doc->core().source()); })
+        .def_property_readonly("text", &text_of, "The source text, exactly.")
+        .def("__str__", &text_of)
         .def("__repr__", [](const document_ref& d) {
             std::string r = "Document(" + std::string(d.doc->doc.dialect()) + ", " + std::to_string(d.doc->core().children(0).size()) +
                             " blocks, " + std::to_string(d.doc->core().structure().line_starts.size()) + " lines";

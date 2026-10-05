@@ -17,6 +17,7 @@
 #include "../../src/_pygim_fast/pathlike/markdown/writer.h"
 
 #include <string>
+#include <initializer_list>
 #include <string_view>
 #include <vector>
 
@@ -147,7 +148,27 @@ static_assert(slug_is<github_slug>("C++ & C#", "c--c") && slug_is<toc_slug>("C++
 static_assert(slug_is<github_slug>("2.1 snake_case", "21-snake_case") && slug_is<toc_slug>("2.1 snake_case", "21-snake_case"));
 static_assert(slug_is<github_slug>("Stra\xC3\x9F" "e", "stra\xC3\x9F" "e") && slug_is<toc_slug>("\xEF\xAC\x81le", "file"));   // ß stays; ﬁ folds
 
-// ── the scalar stop scan (the SIMD policies are fuzzed against it at run time) ──
+// Repeats, as slug.h's table states them: each rule de-duplicates as its reference does.
+template <SlugPolicy S>
+consteval bool anchors_are(std::initializer_list<std::string_view> slugs, std::initializer_list<std::string_view> expected) {
+    typename S::anchors a;
+    auto e = expected.begin();
+    for (std::string_view s : slugs) {
+        if (a.next(std::string(s)) != *e++) return false;
+    }
+    return true;
+}
+static_assert(anchors_are<github_slug>({"a", "a", "a"}, {"a", "a-1", "a-2"}) && anchors_are<toc_slug>({"a", "a", "a"}, {"a", "a_1", "a_2"}));
+static_assert(anchors_are<github_slug>({"a_1", "a_1"}, {"a_1", "a_1-1"}) && anchors_are<toc_slug>({"a_1", "a_1"}, {"a_1", "a_2"}));
+static_assert(anchors_are<github_slug>({"", ""}, {"", "-1"}) && anchors_are<toc_slug>({"", ""}, {"_1", "_2"}));
+// github-slugger keeps counting from the original; an explicit "a-1" is skipped over.
+static_assert(anchors_are<github_slug>({"a-1", "a", "a", "a"}, {"a-1", "a", "a-2", "a-3"}));
+// Python-Markdown takes the trailing number as an integer, and a jump never skips a free id.
+static_assert(anchors_are<toc_slug>({"x_007", "x_007", "x_9", "x_9", "x", "x"}, {"x_007", "x_8", "x_9", "x_10", "x", "x_1"}));
+static_assert(anchors_are<toc_slug>({"a", "a", "a", "a_1", "a"}, {"a", "a_1", "a_2", "a_3", "a_4"}));
+
+// ── the scalar stop scan (the SIMD policies are checked at run time through public
+// behaviour: every stop byte at every offset must change the parse) ──
 consteval bool stops() {
     const basic_stop_index<scalar_scan> ix("a *b* `c`");
     const basic_stop_index<scalar_scan> empty("");

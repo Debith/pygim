@@ -164,7 +164,7 @@ private:
             case kind::list:
                 cr();
                 if (!b.ordered) tag("ul");
-                else if (b.start != 1) tag("ol start=\"" + to_decimal(b.start) + "\"");
+                else if (b.start != 1) tag("ol start=\"" + decimal(b.start) + "\"");
                 else tag("ol");
                 cr();
                 break;
@@ -216,7 +216,7 @@ private:
                 break;
             }
             case kind::heading: {
-                const std::string h = "h" + to_decimal(b.level);
+                const std::string h = "h" + decimal(b.level);
                 cr();
                 tag(h);
                 inlines(leaf_text(m_src, *m_t, b));
@@ -368,14 +368,6 @@ private:
         }
     }
 
-    [[nodiscard]] static constexpr std::string to_decimal(std::uint32_t v) {
-        std::string s;
-        do {
-            s.insert(s.begin(), static_cast<char>('0' + v % 10));
-            v /= 10;
-        } while (v);
-        return s;
-    }
 };
 
 using html_renderer = basic_html_renderer<>;

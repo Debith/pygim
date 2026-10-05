@@ -19,8 +19,10 @@
 // when its inlines are first needed (document.h); link references resolve
 // against the tree's definitions.
 
+#include <algorithm>
 #include <array>
 #include <cstddef>
+#include <utility>
 #include <cstdint>
 #include <string>
 #include <string_view>
@@ -93,7 +95,7 @@ private:
     std::uint32_t m_delim_top = none, m_bracket_top = none;
     std::uint32_t m_deactivated_to = none;   // every link opener at or below this index is already inactive
     bool m_backticks_scanned = false;
-    std::array<std::size_t, 64> m_last_ticks{};   // the last run of each length (cache for unmatched code spans)
+    std::vector<std::pair<std::size_t, std::size_t>> m_tick_runs;   // every backtick run as (length, start), sorted
     html_misses m_html_misses;                    // where searches for the end of raw HTML already failed
 
     [[nodiscard]] constexpr inline_node& node(std::uint32_t i) { return m_out.nodes[i]; }
@@ -229,40 +231,36 @@ private:
         const std::size_t start = m_pos;
         const std::size_t n = run_length(start, '`');
         const std::size_t after = start + n;
-        if (!m_backticks_scanned) {   // the last run of each length, once per subject
+        if (!m_backticks_scanned) {   // every run, once per subject: then a closer is one binary search
             m_backticks_scanned = true;
-            m_last_ticks.fill(0);
+            m_tick_runs.clear();
             for (std::size_t j = m_stops.next(0); j != basic_stop_index<Scan>::npos;) {
                 if (m_s[j] != '`') {
                     j = m_stops.next(j + 1);
                     continue;
                 }
                 const std::size_t len = run_length(j, '`');
-                if (len < m_last_ticks.size()) m_last_ticks[len] = j + 1;   // +1: 0 means "never"
+                m_tick_runs.emplace_back(len, j);
                 j = m_stops.next(j + len);
             }
+            std::sort(m_tick_runs.begin(), m_tick_runs.end());
         }
-        const bool may_close = n >= m_last_ticks.size() || m_last_ticks[n] > after;
-        for (std::size_t j = may_close ? m_stops.next(after) : basic_stop_index<Scan>::npos; j != basic_stop_index<Scan>::npos;) {
-            if (m_s[j] != '`') {
-                j = m_stops.next(j + 1);
-                continue;
+        // The closer is the first run of exactly n backticks after the opener (runs
+        // are maximal, so the opener's own run ends at `after` and no run straddles it).
+        const auto closer = std::lower_bound(m_tick_runs.begin(), m_tick_runs.end(), std::pair{n, after});
+        if (closer != m_tick_runs.end() && closer->first == n) {
+            const std::size_t j = closer->second;
+            std::string content(m_s.substr(after, j - after));
+            for (char& c : content) {
+                if (c == '\n') c = ' ';
             }
-            const std::size_t len = run_length(j, '`');
-            if (len == n) {
-                std::string content(m_s.substr(after, j - after));
-                for (char& c : content) {
-                    if (c == '\n') c = ' ';
-                }
-                if (content.size() >= 2 && content.front() == ' ' && content.back() == ' ' &&
-                    content.find_first_not_of(' ') != std::string::npos) {
-                    content = content.substr(1, content.size() - 2);
-                }
-                append(inline_kind::code, std::move(content));
-                m_pos = j + n;
-                return true;
+            if (content.size() >= 2 && content.front() == ' ' && content.back() == ' ' &&
+                content.find_first_not_of(' ') != std::string::npos) {
+                content = content.substr(1, content.size() - 2);
             }
-            j = m_stops.next(j + len);
+            append(inline_kind::code, std::move(content));
+            m_pos = j + n;
+            return true;
         }
         m_pos = after;
         text(m_s.substr(start, n));

@@ -34,16 +34,6 @@
 
 namespace pygim::pathlike::markdown::write {
 
-/// `n` in decimal (std::to_string is not constexpr before C++26).
-[[nodiscard]] constexpr std::string decimal(std::uint64_t n) {
-    std::string s;
-    do {
-        s.insert(s.begin(), static_cast<char>('0' + n % 10));
-        n /= 10;
-    } while (n);
-    return s;
-}
-
 /// Plain text made safe as markdown inline content: the characters that can
 /// start inline markup are backslash-escaped everywhere (`\ ` * _ [ ] < | ~ #`),
 /// the ones that only start a block at the beginning of a line are escaped

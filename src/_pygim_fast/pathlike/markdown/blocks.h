@@ -92,15 +92,24 @@ concept Dialect = requires {
     return i == s.size() ? (s[0] == '=' ? 1 : 2) : 0;
 }
 
-/// Three or more of one of `*`, `-`, `_`, with spaces and tabs between and after.
-[[nodiscard]] constexpr bool is_thematic_break(std::string_view s) noexcept {
-    if (s.empty() || (s[0] != '*' && s[0] != '-' && s[0] != '_')) return false;
+/// Where checking `s` for a thematic break (three or more of one of `*`, `-`,
+/// `_`, with spaces and tabs between and after) is decided: s.size() + 1 when
+/// it is one, otherwise the offset of the byte that rules it out (s.size() when
+/// the marks run out first). Every byte before that offset is the first byte's
+/// mark or a space, so a check that starts at any of them fails there too —
+/// which lets a line of nested list markers be checked once, not once per
+/// marker (cmark's thematic_break_kill_pos).
+[[nodiscard]] constexpr std::size_t thematic_break_decided(std::string_view s) noexcept {
+    if (s.empty() || (s[0] != '*' && s[0] != '-' && s[0] != '_')) return 0;
     std::size_t count = 0;
-    for (char c : s) {
-        if (c == s[0]) ++count;
-        else if (!is_space_or_tab(c)) return false;
+    for (std::size_t i = 0; i < s.size(); ++i) {
+        if (s[i] == s[0]) ++count;
+        else if (!is_space_or_tab(s[i])) return i;
     }
-    return count >= 3;
+    return count >= 3 ? s.size() + 1 : s.size();
+}
+[[nodiscard]] constexpr bool is_thematic_break(std::string_view s) noexcept {
+    return thematic_break_decided(s) == s.size() + 1;
 }
 
 /// An opening code fence: three or more backticks (with no backtick in the
@@ -317,6 +326,7 @@ private:
     std::size_t m_offset = 0, m_column = 0, m_nn = 0, m_nn_column = 0, m_indent = 0;
     bool m_indented = false, m_blank = false, m_partial = false, m_all_closed = true;
     bool m_table_opened = false;   // this line was a table's delimiter row: it is not a body row
+    std::size_t m_no_break_before = 0;   // no thematic break starts on this line before this offset
     std::uint32_t m_tip = 0, m_oldtip = 0, m_matched = 0;
     tree m_t;
     std::vector<std::pair<std::size_t, std::size_t>> m_cells;
@@ -463,6 +473,7 @@ private:
         m_oldtip = m_tip;
         m_offset = m_column = 0;
         m_blank = m_partial = m_table_opened = false;
+        m_no_break_before = 0;
         ++m_line_no;
 
         for (;;) {   // let each open block claim its prefix
@@ -653,11 +664,15 @@ private:
                     }
                 }
             }
-            if (is_thematic_break(rest)) {
-                close_unmatched();
-                add_child(kind::thematic_break);
-                advance_offset(m_line.size() - m_offset, false);
-                return 2;
+            if (m_nn >= m_no_break_before) {
+                const std::size_t decided = thematic_break_decided(rest);
+                if (decided == rest.size() + 1) {
+                    close_unmatched();
+                    add_child(kind::thematic_break);
+                    advance_offset(m_line.size() - m_offset, false);
+                    return 2;
+                }
+                m_no_break_before = m_nn + decided;
             }
         }
         if (!m_indented || ctype == kind::list) {   // list item

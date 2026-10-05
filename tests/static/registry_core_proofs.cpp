@@ -1,5 +1,5 @@
-// Compile-time proofs for mapping/storage.h, mapping/hash_storage.h and
-// wiring/registry/core.h — the storage laws and the registry laws.
+// Compile-time proofs for mapping/storage.h, mapping/hash_storage.h,
+// mapping/open_storage.h and wiring/registry/core.h — the storage laws and the registry laws.
 //
 // This TU is part of the pygim.registry extension's SOURCES (ext.registry.toml):
 // it is compiled by every build, so a violated invariant cannot produce a
@@ -12,9 +12,11 @@
 // over hash_storage it is the same code at run time.
 
 #include "../../src/_pygim_fast/mapping/hash_storage.h"
+#include "../../src/_pygim_fast/mapping/open_storage.h"
 #include "../../src/_pygim_fast/mapping/storage.h"
 #include "../../src/_pygim_fast/wiring/registry/core.h"
 
+#include <string>
 #include <string_view>
 #include <type_traits>
 
@@ -22,6 +24,7 @@ namespace {
 
 using pygim::mapping::flat_storage;
 using pygim::mapping::hash_storage;
+using pygim::mapping::open_storage;
 using pygim::mapping::storage;
 using pygim::core::DynamicRegistryCore;
 using pygim::core::NoHooks;
@@ -92,6 +95,91 @@ static_assert(bulk_assign_keeps_last_write());
 static_assert(storage<hash_storage<int, int>>);
 static_assert(!hash_storage<int, int>::ordered);
 static_assert(storage<hash_storage<std::string_view, const int*>>);
+
+// ── the open engine: the same laws, hashed, in constant evaluation ─────────
+using OS = open_storage<int, int>;
+static_assert(storage<OS>);
+static_assert(OS::ordered);
+static_assert(storage<open_storage<std::string, unsigned>>);
+
+consteval bool open_find_hits_and_misses() {
+    OS s;
+    s.insert(2, 20);
+    s.insert(1, 10);
+    return s.find(1) != nullptr && *s.find(1) == 10 && s.find(2) != nullptr && *s.find(2) == 20 && s.find(3) == nullptr &&
+           OS{}.find(1) == nullptr;   // an empty table has no slots yet
+}
+static_assert(open_find_hits_and_misses());
+
+consteval bool open_insert_is_insert_or_assign() {
+    OS s;
+    s.insert(1, 10);
+    s.insert(1, 11);
+    return s.size() == 1 && *s.find(1) == 11;
+}
+static_assert(open_insert_is_insert_or_assign());
+
+// Many keys force several rehashes and long probe runs; every key is still found.
+consteval bool open_grows_and_keeps_every_key() {
+    OS s;
+    for (int k = 0; k < 2000; ++k) s.insert(k * 7919, k);
+    for (int k = 0; k < 2000; ++k) {
+        if (s.find(k * 7919) == nullptr || *s.find(k * 7919) != k) return false;
+    }
+    return s.size() == 2000 && s.find(1) == nullptr;
+}
+static_assert(open_grows_and_keeps_every_key());
+
+consteval bool open_items_are_insertion_order() {
+    OS s;
+    for (int key : {5, 1, 4, 2, 3}) s.insert(key, key * 10);
+    const int expected[] = {5, 1, 4, 2, 3};
+    for (std::size_t i = 0; i < 5; ++i) {
+        if (s.items()[i].first != expected[i] || s.items()[i].second != expected[i] * 10) return false;
+    }
+    return true;
+}
+static_assert(open_items_are_insertion_order());
+
+// Erasing inside probe runs (backward shift) and from the middle of the dense
+// vector (the last item moves in) loses no other key.
+consteval bool open_erase_keeps_the_rest_findable() {
+    OS s;
+    for (int k = 0; k < 500; ++k) s.insert(k, k);
+    for (int k = 0; k < 500; k += 3) {
+        if (!s.erase(k)) return false;
+    }
+    if (s.erase(0) || s.erase(9999)) return false;   // already gone; never there
+    for (int k = 0; k < 500; ++k) {
+        const bool kept = k % 3 != 0;
+        if ((s.find(k) != nullptr) != kept || (kept && *s.find(k) != k)) return false;
+    }
+    return s.size() == 500 - 167;
+}
+static_assert(open_erase_keeps_the_rest_findable());
+
+consteval bool open_clear_empties() {
+    OS s;
+    s.insert(1, 10);
+    s.clear();
+    s.insert(2, 20);   // usable again after a clear
+    return s.size() == 1 && s.find(1) == nullptr && *s.find(2) == 20;
+}
+static_assert(open_clear_empties());
+
+// stable_hash is a constant: FNV-1a's published value for "a".
+static_assert(pygim::mapping::stable_hash<std::string_view>{}("a") == 0xaf63dc4c8601ec8cull);
+
+// A registry over the open engine is built and queried at compile time with string keys.
+consteval bool open_registry_counts_at_compile_time() {
+    RegistryCore<std::string, unsigned, open_storage<std::string, unsigned>, NoHooks<std::string, unsigned, unsigned>, unsigned> r;
+    for (std::string_view w : {"usage", "notes", "usage", "usage"}) {
+        if (unsigned* n = r.try_get(std::string(w))) ++*n;
+        else r.register_value(std::string(w), 1);
+    }
+    return r.size() == 2 && *r.try_get_const("usage") == 3 && *r.try_get_const("notes") == 1;
+}
+static_assert(open_registry_counts_at_compile_time());
 
 // ── registry laws, both phases ─────────────────────────────────────────────
 using Static = StaticRegistryCore<std::string_view, int>;

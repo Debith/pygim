@@ -23,6 +23,16 @@
 
 namespace pygim::pathlike::markdown {
 
+/// `n` in decimal (std::to_string is not constexpr before C++26).
+[[nodiscard]] constexpr std::string decimal(std::uint64_t n) {
+    std::string s;
+    do {
+        s.insert(s.begin(), static_cast<char>('0' + n % 10));
+        n /= 10;
+    } while (n);
+    return s;
+}
+
 [[nodiscard]] constexpr bool is_space_or_tab(char c) noexcept { return c == ' ' || c == '\t'; }
 [[nodiscard]] constexpr bool is_line_end(char c) noexcept { return c == '\n' || c == '\r'; }
 /// ASCII whitespace as CommonMark's grammars use it: space, tab, line feed, line tabulation, form feed, carriage return.
