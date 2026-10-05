@@ -148,6 +148,7 @@ static_assert(slug_is<github_slug>("\xC3\x9Cn\xC3\xAF  caf\xC3\xA9", "\xC3\xBCn\
 static_assert(slug_is<github_slug>("C++ & C#", "c--c") && slug_is<toc_slug>("C++ & C#", "c-c"));
 static_assert(slug_is<github_slug>("2.1 snake_case", "21-snake_case") && slug_is<toc_slug>("2.1 snake_case", "21-snake_case"));
 static_assert(slug_is<github_slug>("Stra\xC3\x9F" "e", "stra\xC3\x9F" "e") && slug_is<toc_slug>("\xEF\xAC\x81le", "file"));   // ß stays; ﬁ folds
+static_assert(slug_is<toc_slug>("-dash-", "-dash-") && slug_is<toc_slug>("a\x1c" "b", "a-b"));   // Python's runs and its \s
 
 // GitHub lower-cases as JavaScript's toLowerCase: the full mapping, a word-final Σ as ς,
 // case-ignorables (the apostrophe) skipped; not case folding, so µ and ſ stay.

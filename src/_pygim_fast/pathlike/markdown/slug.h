@@ -99,14 +99,18 @@ struct toc_slug {
             if (c.cp < 0x80) ascii.push_back(static_cast<char>(c.cp));
             else ascii += ascii_fold(c.cp);
         }
+        // Python's \s and str.strip(): ASCII whitespace plus the separators \x1c-\x1f.
+        const auto space = [](char c) { return is_ascii_whitespace(c) || (c >= '\x1c' && c <= '\x1f'); };
         std::string kept;   // [^\w\s-] removed, lower-cased
         for (char c : ascii) {
-            if (is_ascii_alnum(c) || c == '_' || c == '-' || is_ascii_whitespace(c)) kept.push_back(ascii_lower(c));
+            if (is_ascii_alnum(c) || c == '_' || c == '-' || space(c)) kept.push_back(ascii_lower(c));
         }
-        const std::string_view s = trim_whitespace(kept);
+        std::string_view s = kept;
+        while (!s.empty() && space(s.front())) s.remove_prefix(1);
+        while (!s.empty() && space(s.back())) s.remove_suffix(1);
         bool run = false;   // [-\s]+ -> "-"
         for (char c : s) {
-            if (c == '-' || is_ascii_whitespace(c)) {
+            if (c == '-' || space(c)) {
                 run = true;
                 continue;
             }
@@ -114,6 +118,7 @@ struct toc_slug {
             run = false;
             out.push_back(c);
         }
+        if (run) out.push_back('-');   // a trailing run is kept too: "-dash-" stays "-dash-"
     }
 
     /// Python-Markdown's `unique(id, ids)`: while the id is taken or empty,

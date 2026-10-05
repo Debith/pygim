@@ -157,7 +157,7 @@ def test_every_block_slices_the_source_by_span_and_lines():
         start, end = b.span
         assert doc.text[start:end] == b.text
         first, last = b.lines
-        assert b.text == "".join(lines[first - 1:last]) or b.parent is not None
+        assert b.text == "".join(lines[first - 1:last])   # nested blocks too: a span is whole lines
 
 
 def test_walk_is_depth_first_and_children_know_their_parent():
@@ -174,9 +174,22 @@ def test_headings_have_level_title_and_unique_github_slugs():
     assert [(h.level, h.title, h.slug) for h in hs] == [(1, "Notes", "notes"), (2, "Usage", "usage"), (2, "Usage", "usage-1")]
 
 
-def test_toc_slugs_match_python_markdowns_anchors():
-    doc = md.Document("# Ünïcode  café\n\n# Ünïcode  café\n\n# C++ & C#\n", slugs="toc")
-    assert [h.slug for h in doc.find(md.Heading)] == ["unicode-cafe", "unicode-cafe_1", "c-c"]
+# Titles chosen to disagree with a careless port: non-ASCII, punctuation runs, repeats, explicit
+# `_N` suffixes, numbers with leading zeros, titles that slug to nothing, Python's extra whitespace.
+TOC_TITLES = ["Ünïcode  café", "Ünïcode  café", "C++ & C#", "a_1", "a", "a", "a_1", "x_007", "x_007", "x_9",
+              "!!!", "!!!", "", "  spaced   out  ", "a\x1cb", "tab\tsep", "ﬁle ﬂow", "Straße", "日本語", "日本語",
+              "emoji 🚀 here", "-dash-", "under_score", "MiXeD CaSe", "1. numbered", "a-b-c", "a - b - c"]
+
+
+def test_toc_slugs_are_python_markdowns():
+    toc = pytest.importorskip("markdown.extensions.toc")
+    ids = set()
+    expected = [toc.unique(toc.slugify(t, "-"), ids) for t in TOC_TITLES]
+    doc = md.Document("".join(f"# {t}\n\n" for t in TOC_TITLES), slugs="toc")
+    assert [h.slug for h in doc.find(md.Heading)] == expected
+
+
+def test_github_slugs_keep_letters_and_drop_punctuation():
     github = md.Document("# Ünïcode  café\n\n# C++ & C#\n")
     assert [h.slug for h in github.find(md.Heading)] == ["ünïcode--café", "c--c"]
 
@@ -499,6 +512,47 @@ def test_front_matter_builder_uses_the_engines():
     assert md.front_matter({"a": 1}, engine="toml") == "+++\na = 1\n+++\n"
     with pytest.raises(ValueError, match="yaml, toml"):
         md.front_matter({"a": 1}, engine="json")
+
+
+# --------------------------------------------------------------------------- #
+# What the review found no test for
+# --------------------------------------------------------------------------- #
+def test_every_kind_property_reads():
+    doc = md.Document("+++\na = 1\n+++\n# Title *x*\n\n<div>\nraw\n</div>\n\n"
+                      "| l | c | r | n |\n|:--|:-:|--:|---|\n| 1 | 2 | 3 | 4 |\n")
+    assert doc.blocks[0].engine == "toml" and doc.blocks[0].raw == "a = 1"
+    heading = doc.find(md.Heading)[0]
+    assert heading.content == "Title *x*" and heading.title == "Title x"
+    assert doc.find(md.Html)[0].raw == "<div>\nraw\n</div>"
+    assert doc.find(md.Table)[0].align == ["left", "center", "right", None]
+    assert doc.sections[0].heading == heading
+    assert md.Document("---\na: 1\n---\n").blocks[0].engine == "yaml"
+
+
+def test_a_toml_front_matter_error_names_the_file_and_its_line(temp_dir):
+    f = _write(temp_dir, "bad.md", "+++\nok = 1\nbad = = 2\n+++\n# x\n")
+    with pytest.raises(RuntimeError, match=r"TOML parse error \(front matter \(lines 1-4\) of .*bad\.md, line 3\)"):
+        pygim.path(f).read().front_matter
+
+
+def test_with_front_matter_keeps_the_format_already_there():
+    doc = md.Document("+++\na = 1\n+++\n# x\n").with_front_matter({"a": 2})
+    assert doc.text.startswith("+++\na = 2\n+++\n") and doc.front_matter == {"a": 2}
+
+
+@pytest.mark.parametrize("kw, choices", [
+    ({"dialect": "rst"}, "markdown dialect must be one of gfm, commonmark, got 'rst'"),
+    ({"slugs": "pandoc"}, "markdown slugs must be one of github, toc, got 'pandoc'"),
+])
+def test_a_policy_that_does_not_exist_names_the_ones_that_do(kw, choices):
+    with pytest.raises(ValueError, match=re.escape(choices)):
+        md.Document("# x\n", **kw)
+
+
+def test_a_pinned_md_engine_reads_any_extension(temp_dir):
+    f = _write(temp_dir, "notes.txt", NOTES)
+    doc = pathlike.mdpath(f).read()
+    assert isinstance(doc, md.Document) and doc.text == NOTES
 
 
 # --------------------------------------------------------------------------- #
