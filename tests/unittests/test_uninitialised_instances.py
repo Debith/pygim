@@ -9,6 +9,7 @@ The check runs in a child process, which names each class before trying it, so a
 crash reports the class that caused it.
 """
 
+import importlib.machinery
 import json
 import os
 import subprocess
@@ -16,10 +17,15 @@ import sys
 
 import pytest
 
+import pygim
 from pygim import pathlike
 
-EXTENSIONS = ["pygim.pathlike", "pygim.registry", "pygim.factory", "pygim.ioc", "pygim.each", "pygim.utils",
-              "pygim.datagen", "pygim._persistence", "pygim._persistence_test", "pygim._fetch_benchmark"]
+# Every compiled module the installed package ships, found rather than listed: an extension
+# added later is covered the day it is built, and one that forgets the call fails here.
+EXTENSIONS = sorted(
+    f"pygim.{p.name.split('.')[0]}" for p in pygim.path(pygim.__file__).parent.pathset()
+    if any(p.name.endswith(suffix) for suffix in importlib.machinery.EXTENSION_SUFFIXES)
+)
 
 CHILD = r"""
 import importlib, json, sys, types
@@ -85,7 +91,7 @@ def test_every_class_refuses_use_before_its_init_ran():
     assert proc.returncode == 0, f"the process died (rc={proc.returncode}) using an uninitialised {last}\n{proc.stderr[-1500:]}"
     report = next(e[1] for e in events if e[0] == "report")
     tried = {cls for cls, _, _ in report}
-    assert len(tried) > 20, tried   # the walk found the classes
+    assert len(EXTENSIONS) >= 10 and len(tried) > 20, (EXTENSIONS, tried)   # the walks found the modules and classes
     wrong = [r for r in report if r[2] != "refused" and not (r[2] == "answered" and (r[0], r[1]) in NEEDS_NO_VALUE)]
     assert not wrong, wrong[:10]
 
