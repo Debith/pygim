@@ -19,6 +19,7 @@ using pygim::python_names::is_private_name;
 using pygim::python_names::mangled;
 using pygim::python_names::owner_of;
 using pygim::python_names::reowned;
+using pygim::python_names::respelt;
 using pygim::python_names::requalified;
 using pygim::python_names::unmangled;
 
@@ -99,6 +100,25 @@ static_assert(same(reowned("Trait", "Target", "__init__"), "__init__"));
 static_assert(same(reowned("Trait", "Target", "_Other__secret"), "_Other__secret"));
 static_assert(same(reowned("_", "Target", "__secret"), "_Target__secret"));  // from a class that mangles nothing
 static_assert(same(reowned("Trait", "_", "_Trait__secret"), "__secret"));    // to one
+
+// ── respelt: the new spelling, or nothing when the name does not move ─────────────────────────────
+static_assert(!respelt("Trait", "Target", "value").has_value());       // public: stays
+static_assert(!respelt("Trait", "Target", "__init__").has_value());    // a dunder: stays
+static_assert(!respelt("Trait", "Target", "_Other__x").has_value());   // another class's: stays
+static_assert(same(*respelt("Trait", "Target", "_Trait__secret"), "_Target__secret"));
+static_assert(same(*respelt("_", "Target", "__secret"), "_Target__secret"));
+static_assert(same(*respelt("Trait", "_", "_Trait__secret"), "__secret"));
+
+// ── the law: reowned is respelt's new spelling, or the name itself ─────────────────────────────────
+consteval bool reowned_is_respelt_or_the_name() {
+    constexpr std::array<std::string_view, 6> names{"_A__secret", "value", "__init__", "_Other__x", "_A", "__x"};
+    for (auto n : names) {
+        const auto moved = respelt("A", "B", n);
+        if (reowned("A", "B", n) != (moved ? *moved : std::string{n})) return false;
+    }
+    return true;
+}
+static_assert(reowned_is_respelt_or_the_name());
 
 // ── the law: moving A -> B -> C is moving A -> C, for every name that is not B's own ───────────
 consteval bool moves_compose() {

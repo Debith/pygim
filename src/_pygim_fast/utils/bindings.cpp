@@ -5,6 +5,7 @@
 #include <optional>
 #include <string>
 #include <unordered_map>
+#include <format>
 #include <string_view>
 #include "core_utils.h"
 #include "adapter_utils.h"
@@ -23,7 +24,7 @@ MergeStrategy parse_merge_strategy(const std::string& value) {
       if (value == "max") return MergeStrategy::Max;
       if (value == "min") return MergeStrategy::Min;
       if (value == "replace") return MergeStrategy::Replace;
-      throw py::value_error("invalid merge strategy: " + value);
+      throw py::value_error(std::format("invalid merge strategy: {}", value));
 }
 
 std::string merge_strategy_name(MergeStrategy strategy) {

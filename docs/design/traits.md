@@ -116,7 +116,7 @@ code = CodeBuilder(Trait.nested.__code__).reown(Trait, Target).build()
 |---|---|---|
 | `CodeBuilder(code)` | starts from a code object, which is never changed; anything else is a `TypeError` naming its type | one type check |
 | `.reown(source, target)` | records a move from class `source` to class `target`; returns the builder, so steps chain | two strings per class |
-| `.build()` | a new code object with every step applied in order: `co_names` by `core.h`'s `reowned()`, `co_qualname` (Python 3.11 and later) by `requalified()`, in the code and every code object nested in its constants | one `code.replace()` per code object |
+| `.build()` | a new code object with every step applied in order: `co_names` by `python_names.h`'s `respelt()` — a name no step moves is passed on as the same object — and `co_qualname` (Python 3.11 and later) by `requalified()`, in the code and every code object nested in its constants | one `code.replace()` per code object, by vectorcall; per name a comparison, and an allocation only for a re-spelt name. Measured (`benchmarks/traits_code_builder.py`): 1.69 µs for a method naming 40 attributes, against 1.19 µs for Python's own `code.replace()` walking the same code objects |
 
 Steps apply to each name in turn, so `reown(A, B).reown(B, C)` moves A's private names to C. The
 one exception is a name A's code already spelt as B's own: after the first step it reads as B's,

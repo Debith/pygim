@@ -1,5 +1,6 @@
 // traits/bindings.cpp — registers pygim.traits. The work lives in adapter.h and compose.h; the naming rules in utils/python_names.h.
 
+#include <format>
 #include <string>
 
 #include <pybind11/pybind11.h>
@@ -41,9 +42,9 @@ it. The original code object is never changed.
         .def_readonly("defined", &Provenance::defined, "``file:line`` where the trait defined the member.")
         .def_readonly("composed", &Provenance::composed, "``file:line`` of the ``compose()`` call.")
         .def("__repr__", [](const Provenance& p) {
-            return "Provenance(trait=" + py::repr(py::str(p.trait)).cast<std::string>() +
-                   ", defined=" + py::repr(py::str(p.defined)).cast<std::string>() +
-                   ", composed=" + py::repr(py::str(p.composed)).cast<std::string>() + ")";
+            const auto quoted = [](const std::string& text) { return py::repr(py::str(text)).cast<std::string>(); };
+            return std::format("Provenance(trait={}, defined={}, composed={})",
+                               quoted(p.trait), quoted(p.defined), quoted(p.composed));
         });
 
     py::class_<TraitRecord>(m, "TraitRecord", "The members composed into one class, by name, in name order.")
@@ -53,7 +54,7 @@ it. The original code object is never changed.
         .def("__iter__", [](const TraitRecord& r) { return py::iter(py::cast(r.names())); })
         .def("keys", &TraitRecord::names, "The composed members' names, in name order.")
         .def("__repr__", [](const TraitRecord& r) {
-            return "TraitRecord(" + py::repr(py::cast(r.names())).cast<std::string>() + ")";
+            return std::format("TraitRecord({})", py::repr(py::cast(r.names())).cast<std::string>());
         });
 
     m.def("compose", &pygim::traits::compose, py::arg("target"), py::kw_only(), py::arg("override") = false,

@@ -32,6 +32,7 @@
 
 #include <algorithm>
 #include <cstddef>
+#include <format>
 #include <optional>
 #include <string>
 #include <tuple>
@@ -86,13 +87,13 @@ inline std::string type_name(const py::handle& value) { return text(py::type::of
 /// "file:line" of a code object; "" for None.
 inline std::string where(const py::handle& code) {
     if (code.is_none()) return {};
-    return text(code.attr("co_filename")) + ":" + text(code.attr("co_firstlineno"));
+    return std::format("{}:{}", text(code.attr("co_filename")), text(code.attr("co_firstlineno")));
 }
 
 /// "file:line" of the Python code that called into C++: sys._getframe(0) is that caller's frame.
 inline std::string caller() {
     const py::object frame = py::module_::import("sys").attr("_getframe")(0);
-    return text(frame.attr("f_code").attr("co_filename")) + ":" + text(frame.attr("f_lineno"));
+    return std::format("{}:{}", text(frame.attr("f_code").attr("co_filename")), text(frame.attr("f_lineno")));
 }
 
 /// One composition: the trait a member comes from and the class it goes to.
@@ -239,10 +240,10 @@ inline py::type compose(const py::type& target, const py::args& traits, bool ove
 
     for (const auto& candidate : traits) {
         if (!PyType_Check(candidate.ptr()))
-            throw py::type_error("compose takes classes as traits, not " + detail::type_name(candidate));
+            throw py::type_error(std::format("compose takes classes as traits, not {}", detail::type_name(candidate)));
         const auto trait = py::reinterpret_borrow<py::type>(candidate);
         const auto trait_qualname = detail::text(trait.attr("__qualname__"));
-        const auto trait_name = detail::text(trait.attr("__module__")) + "." + trait_qualname;
+        const auto trait_name = std::format("{}.{}", detail::text(trait.attr("__module__")), trait_qualname);
         const detail::Move move{trait, target};
 
         for (const auto& [key, member] : py::dict(trait.attr("__dict__"))) {
@@ -250,18 +251,19 @@ inline py::type compose(const py::type& target, const py::args& traits, bool ove
             auto done = detail::rewritten(static_cast<detail::member_kinds*>(nullptr), member, move);
             if (!done) {
                 if (python_names::is_dunder(name)) continue;  // the trait class's own machinery
-                throw py::type_error(trait_qualname + "." + name + " is " + detail::type_name(member) +
-                                     "; a trait composes functions, properties, classmethods and staticmethods");
+                throw py::type_error(std::format(
+                    "{}.{} is {}; a trait composes functions, properties, classmethods and staticmethods",
+                    trait_qualname, name, detail::type_name(member)));
             }
             const auto earlier = std::find_if(plan.begin(), plan.end(), [&](const Planned& p) { return p.name == name; });
             if (earlier != plan.end()) {
                 if (!override_existing)
-                    throw py::value_error(earlier->trait + " and " + trait_name + " both define " + name +
-                                          " (pass override=True to let the later win)");
+                    throw py::value_error(std::format("{} and {} both define {} (pass override=True to let the later win)",
+                                                      earlier->trait, trait_name, name));
                 plan.erase(earlier);
             } else if (own.contains(name) && !override_existing) {
-                throw py::value_error(target_name + " already has " + name + "; " + trait_name +
-                                      " would replace it (pass override=True)");
+                throw py::value_error(std::format("{} already has {}; {} would replace it (pass override=True)",
+                                                  target_name, name, trait_name));
             }
             plan.push_back({name, std::move(done->member), trait_name, detail::where(done->code)});
         }

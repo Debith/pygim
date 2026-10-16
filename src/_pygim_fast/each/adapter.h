@@ -27,6 +27,7 @@
 // ---------------------------------------------------------------------------
 #pragma once
 
+#include <format>
 #include <optional>
 #include <string>
 #include <memory>
@@ -110,7 +111,7 @@ public:
     }
 
     std::string representation() const {
-        return "<Each-proxy bound to " + py::repr(m_iterable).cast<std::string>() + ">";
+        return std::format("<Each-proxy bound to {}>", py::repr(m_iterable).cast<std::string>());
     }
 
 private:
@@ -220,7 +221,7 @@ public:
     }
 
     std::string representation() const {
-        return "<Each bound to " + py::repr(m_iterable).cast<std::string>() + ">";
+        return std::format("<Each bound to {}>", py::repr(m_iterable).cast<std::string>());
     }
 private:
     py::object m_iterable;     //!< Iterable for factory mode; None in descriptor mode

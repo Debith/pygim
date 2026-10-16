@@ -5,8 +5,8 @@
 //   is_dunder        enum._is_dunder — the rule Python's enum machinery uses
 //   is_private_name  the compiler's _Py_Mangle: which names it mangles inside a class body
 //   mangled          _Py_Mangle: `__secret` inside `class Trait:` is `_Trait__secret`
-// and the moves built on them: unmangled (back), reowned (to another class), requalified (a
-// qualified name to another owner). Users: utils (pygim.utils.is_dunder), each (its dunder guard),
+// and the moves built on them: unmangled (back), respelt and reowned (to another class), requalified
+// (a qualified name to another owner). Users: utils (pygim.utils.is_dunder), each (its dunder guard),
 // traits (CodeBuilder and compose()). tests/static/python_names_proofs.cpp proves the rules.
 //
 // Worked example — the names a CodeBuilder.reown(Trait, Target) meets:
@@ -20,16 +20,20 @@
 //   mangled("__", "__secret")                          -> "__secret"        an all-underscore class mangles nothing
 //   unmangled("Trait", "_Trait__secret")               -> "__secret"
 //   unmangled("Trait", "_Other__secret")               -> ""                not this owner's private name
+//   respelt("Trait", "Target", "_Trait__secret")       -> "_Target__secret"
+//   respelt("Trait", "Target", "value")                -> nothing           a public name does not move
 //   reowned("Trait", "Target", "_Trait__secret")       -> "_Target__secret"
-//   reowned("Trait", "Target", "value")                -> "value"           a public name stays
+//   reowned("Trait", "Target", "value")                -> "value"           respelt's spelling, or the name
 //   requalified("Trait", "Target", "Trait.f.<locals>.<lambda>") -> "Target.f.<locals>.<lambda>"
 //
 // Lifetime and threading: free functions over string_views; nothing is stored, nothing is shared.
 
 #pragma once
 
+#include <optional>
 #include <string>
 #include <string_view>
+#include <utility>
 
 namespace pygim::python_names {
 
@@ -85,13 +89,26 @@ constexpr std::string_view unmangled(std::string_view class_name, std::string_vi
     return is_private_name(rest) ? rest : std::string_view{};
 }
 
-/// `name`, taken from code compiled in class `from` into code that belongs to class `to`: a private
-/// name of `from` becomes the same private name of `to`; every other name is unchanged.
-/// Cost: one unmangle; one allocation of the result.
-/// Example: reowned("Trait", "Target", "_Trait__secret") is "_Target__secret".
-constexpr std::string reowned(std::string_view from, std::string_view to, std::string_view name) {
+/// The new spelling of `name` when code compiled in class `from` moves into class `to`: a private
+/// name of `from` becomes the same private name of `to`. Nothing for every other name, which does
+/// not move — so a caller keeps what it already holds and allocates only for a name that changes.
+/// Cost: one unmangle, no allocation for a name that does not move; one allocation for one that does.
+/// Example: respelt("Trait", "Target", "_Trait__secret") is "_Target__secret"; respelt("Trait",
+/// "Target", "value") is nothing.
+constexpr std::optional<std::string> respelt(std::string_view from, std::string_view to, std::string_view name) {
     const auto private_name = unmangled(from, name);
-    return private_name.empty() ? std::string{name} : mangled(to, private_name);
+    if (private_name.empty()) return std::nullopt;
+    return mangled(to, private_name);
+}
+
+/// `name`, taken from code compiled in class `from` into code that belongs to class `to`: respelt()'s
+/// new spelling, or `name` itself when it does not move.
+/// Cost: as respelt(), plus one allocation for a name that does not move.
+/// Example: reowned("Trait", "Target", "_Trait__secret") is "_Target__secret"; reowned("Trait",
+/// "Target", "value") is "value".
+constexpr std::string reowned(std::string_view from, std::string_view to, std::string_view name) {
+    auto moved = respelt(from, to, name);
+    return moved ? std::move(*moved) : std::string{name};
 }
 
 /// `qualname` with the qualified name of its owner, `from`, replaced by `to`. A qualified name that
