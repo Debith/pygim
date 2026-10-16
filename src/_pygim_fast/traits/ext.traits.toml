@@ -1,0 +1,8 @@
+[extension]
+module = "traits"
+# tests/static/traits_proofs.cpp proves core.h's private-name rule at compile time (wired into the
+# sources so every build proves it; it contributes no runtime code).
+sources = [
+  "bindings.cpp",
+  "../../../tests/static/traits_proofs.cpp",
+]
