@@ -42,7 +42,7 @@
 
 #include "../wiring/registry/core.h"
 #include "adapter.h"
-#include "core.h"
+#include "../utils/python_names.h"
 
 namespace pygim::traits {
 
@@ -134,7 +134,7 @@ struct Move {
             out.attr("__annotations__") = py::dict(function.attr("__annotations__"));
         if (py::hasattr(function, "__type_params__"))  // Python 3.12 and later
             out.attr("__type_params__") = function.attr("__type_params__");
-        out.attr("__qualname__") = py::str(requalified(text(trait.attr("__qualname__")),
+        out.attr("__qualname__") = py::str(python_names::requalified(text(trait.attr("__qualname__")),
                                                        text(target.attr("__qualname__")),
                                                        text(function.attr("__qualname__"))));
         return out;
@@ -249,7 +249,7 @@ inline py::type compose(const py::type& target, const py::args& traits, bool ove
             const auto name = detail::text(key);
             auto done = detail::rewritten(static_cast<detail::member_kinds*>(nullptr), member, move);
             if (!done) {
-                if (is_dunder_name(name)) continue;  // the trait class's own machinery
+                if (python_names::is_dunder(name)) continue;  // the trait class's own machinery
                 throw py::type_error(trait_qualname + "." + name + " is " + detail::type_name(member) +
                                      "; a trait composes functions, properties, classmethods and staticmethods");
             }

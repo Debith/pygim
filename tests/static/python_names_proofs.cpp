@@ -1,10 +1,12 @@
-// Compile-time proofs for traits/core.h — Python's private-name rule (CPython's _Py_Mangle) and
+// Compile-time proofs for utils/python_names.h — Python's naming conventions: the dunder rule of
+// Python's enum machinery (enum._is_dunder), the private-name rule of its compiler (_Py_Mangle), and
 // the move of a name and a qualified name from one owner class to another.
 //
-// This TU is part of the pygim.traits extension's sources (ext.traits.toml): every build compiles
-// it, so a violated law cannot produce a binary. It contributes no runtime code.
+// This TU is part of the pygim.utils extension's sources (ext.utils.toml): every build compiles it,
+// so a violated law cannot produce a binary. It contributes no runtime code. The Python side of the
+// dunder rule is proven against enum._is_dunder itself in tests/unittests/test_utils.py.
 
-#include "../../src/_pygim_fast/traits/core.h"
+#include "../../src/_pygim_fast/utils/python_names.h"
 
 #include <array>
 #include <string>
@@ -12,13 +14,13 @@
 
 namespace {
 
-using pygim::traits::is_dunder_name;
-using pygim::traits::is_private_name;
-using pygim::traits::mangled;
-using pygim::traits::owner_of;
-using pygim::traits::reowned;
-using pygim::traits::requalified;
-using pygim::traits::unmangled;
+using pygim::python_names::is_dunder;
+using pygim::python_names::is_private_name;
+using pygim::python_names::mangled;
+using pygim::python_names::owner_of;
+using pygim::python_names::reowned;
+using pygim::python_names::requalified;
+using pygim::python_names::unmangled;
 
 consteval bool same(const std::string& made, std::string_view expected) { return made == expected; }
 
@@ -39,16 +41,25 @@ static_assert(!is_private_name("_secret"));
 static_assert(!is_private_name("secret"));
 static_assert(!is_private_name("__pkg.mod"));  // a dotted name: an import of a package
 
-// ── dunders: a class's machinery and its protocol methods ────────────────────────────────────
-static_assert(is_dunder_name("__lt__"));
-static_assert(is_dunder_name("__module__"));
-static_assert(!is_dunder_name("____"));       // nothing between the underscores
-static_assert(!is_dunder_name("__"));
-static_assert(!is_dunder_name("__x"));        // a private name
-static_assert(!is_dunder_name("_x_"));
-// A dunder is never mangled, and a mangled name is never a dunder of its owner.
-static_assert(!is_private_name("__lt__") && is_dunder_name("__lt__"));
-static_assert(!is_dunder_name("_Trait__x"));
+// ── dunders, by enum._is_dunder ───────────────────────────────────────────────────────────────
+static_assert(is_dunder("__lt__"));
+static_assert(is_dunder("__module__"));
+static_assert(is_dunder("__ab__"));
+static_assert(is_dunder("__a_b__"));
+static_assert(is_dunder("__a__b__"));         // a double underscore inside is still a dunder
+static_assert(!is_dunder("____"));            // nothing between the underscores
+static_assert(!is_dunder("_____"));
+static_assert(!is_dunder("___x__"));          // the leading pair is part of a longer run
+static_assert(!is_dunder("__x___"));          // so is the trailing pair
+static_assert(!is_dunder("__"));
+static_assert(!is_dunder("___"));
+static_assert(!is_dunder("__x"));             // a private name
+static_assert(!is_dunder("x__"));
+static_assert(!is_dunder("_x_"));
+static_assert(!is_dunder(""));
+// A dunder is never mangled, and a mangled name is never a dunder.
+static_assert(!is_private_name("__lt__") && is_dunder("__lt__"));
+static_assert(!is_dunder("_Trait__x"));
 
 // ── mangling ─────────────────────────────────────────────────────────────────────────────────
 static_assert(same(mangled("Trait", "__secret"), "_Trait__secret"));

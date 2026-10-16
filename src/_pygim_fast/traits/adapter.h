@@ -13,15 +13,15 @@
 //   Trait.nested.__code__           -> unchanged: a code object never changes; build() makes a new one
 //
 // What is rewritten, in the code and in every code object nested in its constants:
-//   co_names     — the attribute and global names, each moved by core.h's reowned()
-//   co_qualname  — moved by core.h's requalified(), where the Python has it (3.11 and later)
-// The rule is core.h's; this header only walks Python's code objects and calls code.replace(), the
+//   co_names     — the attribute and global names, each moved by python_names.h's reowned()
+//   co_qualname  — moved by python_names.h's requalified(), where the Python has it (3.11 and later)
+// The rule is utils/python_names.h's; this header only walks Python's code objects and calls code.replace(), the
 // language's own way to derive a code object, so no table of CodeType's constructor arguments per
 // Python version is kept here.
 //
 // Steps apply in the order given, to each name in turn: reown(A, B).reown(B, C) moves A's private
 // names to C. A name that A's code spells as B's own is moved on by the second step too — the
-// exception traits_proofs.cpp states beside the law.
+// exception python_names_proofs.cpp states beside the law.
 //
 // Lifetime and threading: a builder holds a reference to the original code object and the steps as
 // plain strings; build() allocates new code objects and holds the GIL throughout, as every pybind11
@@ -35,7 +35,7 @@
 
 #include <pybind11/pybind11.h>
 
-#include "core.h"
+#include "../utils/python_names.h"
 
 namespace pygim::traits {
 
@@ -80,7 +80,7 @@ private:
         py::list names;
         for (const auto& name : code.attr("co_names")) {
             auto moved = name.cast<std::string>();
-            for (const auto& step : m_steps) moved = reowned(step.from_name, step.to_name, moved);
+            for (const auto& step : m_steps) moved = python_names::reowned(step.from_name, step.to_name, moved);
             names.append(py::str(moved));
         }
         py::list constants;
@@ -92,7 +92,7 @@ private:
         changes["co_consts"] = py::tuple(constants);
         if (py::hasattr(code, "co_qualname")) {  // Python 3.11 and later
             auto qualname = code.attr("co_qualname").cast<std::string>();
-            for (const auto& step : m_steps) qualname = requalified(step.from_qual, step.to_qual, qualname);
+            for (const auto& step : m_steps) qualname = python_names::requalified(step.from_qual, step.to_qual, qualname);
             changes["co_qualname"] = py::str(qualname);
         }
         return code.attr("replace")(**changes);

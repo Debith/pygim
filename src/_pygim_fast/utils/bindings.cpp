@@ -5,8 +5,10 @@
 #include <optional>
 #include <string>
 #include <unordered_map>
+#include <string_view>
 #include "core_utils.h"
 #include "adapter_utils.h"
+#include "python_names.h"
 #include "memory.h"
 #include "../mapping/dynamic_merge_map.h"
 
@@ -231,11 +233,10 @@ private:
 PYBIND11_MODULE(utils, m) {
     m.doc() = "Utilities for Python.";
     m.def("is_dunder",
-          py::overload_cast<const std::string &>(&is_dunder),
-          "Check if a std::string is a Python dunder name");
-    m.def("is_dunder",
-          py::overload_cast<const py::str &>(&is_dunder),
-          "Check if a py::str is a Python dunder name");
+          [](std::string_view name) { return pygim::python_names::is_dunder(name); },
+          py::arg("name"),
+          "Whether ``name`` is a dunder, by Python's own rule (enum._is_dunder): longer than four "
+          "characters, two underscores at each end, and neither pair part of a longer run of underscores.");
 
     m.def("to_csv",
           py::overload_cast<std::vector<std::string>, bool>(&to_csv),

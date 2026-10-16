@@ -2,8 +2,9 @@
 
 Status: `CodeBuilder`, `compose()` and `traits_of()` built 2026-10-16; `gim_type`, `gimmick` and
 the quantity traits not yet; D3 open (below) · Owner: Debith · Branch: `core/traits`
-Where: `src/_pygim_fast/traits/` (core, adapter, bindings), public as `pygim.traits`; proofs in
-`tests/static/traits_proofs.cpp`
+Where: `src/_pygim_fast/traits/` (adapter, bindings), public as `pygim.traits`; the naming rules it
+relies on in the base header `src/_pygim_fast/utils/python_names.h`, proven in
+`tests/static/python_names_proofs.cpp`
 
 Three words this document assumes:
 
@@ -120,7 +121,7 @@ code = CodeBuilder(Trait.nested.__code__).reown(Trait, Target).build()
 Steps apply to each name in turn, so `reown(A, B).reown(B, C)` moves A's private names to C. The
 one exception is a name A's code already spelt as B's own: after the first step it reads as B's,
 so the second moves it on, where a direct `reown(A, C)` leaves it as B's.
-`traits_proofs.cpp` states the law with that exception.
+`python_names_proofs.cpp` states the law with that exception.
 
 What the builder leaves as it is, and why:
 
@@ -146,12 +147,14 @@ adapter (pybind11)           CodeBuilder: the rewrite through code.replace(); co
                              type, built the way pybind11 builds its own metaclass;
                              provenance in a RegistryCore
         │
-core (pybind-free,           Python's name-mangling rule, both ways; the override policy;
-  constexpr, proven)         a trait's requirements (Additive needs a magnitude and a unit)
+core (pybind-free,           utils/python_names.h, a base header: Python's naming rules —
+  constexpr, proven)         the dunder rule (enum._is_dunder) and the private-name rule
+                             (_Py_Mangle), both ways; the override policy and a trait's
+                             requirements (Additive needs a magnitude and a unit), still to come
 ```
 
 The core holds every rule that is not Python's object model, so it can be proven by
-`static_assert`. The laws, for `tests/static/traits_proofs.cpp`:
+`static_assert`. The laws, in `tests/static/python_names_proofs.cpp`:
 
 - mangling follows CPython's `_Py_Mangle`: only names that start with two underscores and do not
   end with two are mangled; the class name loses its leading underscores; a class name of only
@@ -169,6 +172,13 @@ The core holds every rule that is not Python's object model, so it can be proven
 | D2 | the quantity traits are C++ callables, composed as methods | Python trait classes: pygim's behaviour lives in C++ (the definition of done) |
 | D4 | a name the target's own namespace holds, or two traits of one call both define, is refused; `override=True` replaces, the later trait winning — the registry's rule for a duplicate key | replacing silently: a composed member would hide the class's own without a word |
 | D5 | the `__class__` cell is rebound to the target, so a zero-argument `super()` resolves there | refusing traits that use `super()`: rebinding works (measured: `"trait+base"` after, `TypeError` before) and keeps a trait ordinary code |
+
+Python's naming rules are not trait-specific, so they are not traits' (decided the same day): the
+dunder rule and the private-name rule live in `utils/python_names.h`, a dependency-free base header,
+each matched to where Python applies it — `enum._is_dunder`, the compiler's `_Py_Mangle` (global
+#113). Rejected: keeping them in a traits core (the rules belong to one family that `each`,
+`pygim.utils` and four hand-written Python call sites on `core/memory` already use), and folding them
+into `core_utils.h` (one more subject in a header of joining, units and rates).
 
 Still to show, before the quantity traits are built: that a composed C++ `+` is fast enough — an
 A/B in one process against the hand-written one (`benchmarks/`) — and that a pybind11 function can
@@ -212,6 +222,10 @@ What changes, each from a measurement or a rule:
 
 ## Open
 
+- **The Python call sites of the naming rules,** on `core/memory`: `_interface.py` (a public method;
+  a trailing underscore escaping a name), `_inventory.py` (a public module) and `test_layering.py`
+  (an internal name) each write a rule by hand. Once this branch is in, they use `pygim.utils`, with
+  the internal and the escaped name added to `python_names.h` beside the dunder and the private name.
 - **The uninitialised-instance guard.** `pygim::adapter::refuse_uninitialised(m)` (`utils/initialised.h`,
   pygim #150) turns a method called on an instance made by `Cls.__new__(Cls)` into a `TypeError`
   instead of a crash. It is on `core/pathlike-markdown` (PR #37), not on `main`; whichever of that PR

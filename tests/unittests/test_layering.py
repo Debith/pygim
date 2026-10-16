@@ -17,11 +17,12 @@ pytestmark = pytest.mark.skipif(not ROOT.is_dir(), reason="source tree not prese
 CORE = sorted(ROOT.glob("mapping/*.h")) + [
     ROOT / "utils" / "hash.h",
     ROOT / "utils" / "memory.h",
+    ROOT / "utils" / "core_utils.h",
+    ROOT / "utils" / "python_names.h",
     ROOT / "pathlike" / "core.h",
     ROOT / "pathlike" / "uri.h",
     ROOT / "pathlike" / "path_table.h",
     ROOT / "pathlike" / "engine_list.h",
-    ROOT / "traits" / "core.h",
 ]
 PYBIND = re.compile(r'#\s*include\s*[<"]pybind11/')
 

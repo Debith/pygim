@@ -1,22 +1,27 @@
-// traits/core.h — Python's private-name rule, both ways: pybind-free and constexpr.
+// utils/python_names.h — Python's naming conventions: what kind of name a name is, and how Python
+// spells a private name inside a class. Dependency-free, pybind-free and constexpr: a base header.
 //
-// Inside `class Trait:`, Python compiles `self.__secret` as `self._Trait__secret` — name mangling,
-// CPython's _Py_Mangle. A method's code moved into `class Target:` must read `_Target__secret`
-// instead, and its qualified name must read `Target.method`. Moving one name from its first owner
-// to its new one is what this header computes; adapter.h walks a code object and calls it for
-// every name. tests/static/traits_proofs.cpp asserts the rule over every case CPython tells apart.
+// One family of rules, each matched to the place Python itself applies it (global #113):
+//   is_dunder        enum._is_dunder — the rule Python's enum machinery uses
+//   is_private_name  the compiler's _Py_Mangle: which names it mangles inside a class body
+//   mangled          _Py_Mangle: `__secret` inside `class Trait:` is `_Trait__secret`
+// and the moves built on them: unmangled (back), reowned (to another class), requalified (a
+// qualified name to another owner). Users: utils (pygim.utils.is_dunder), each (its dunder guard),
+// traits (CodeBuilder and compose()). tests/static/python_names_proofs.cpp proves the rules.
 //
 // Worked example — the names a CodeBuilder.reown(Trait, Target) meets:
 //
-//   owner_of("_Trait")                                 -> "Trait"            leading underscores dropped
+//   is_dunder("__lt__")                                -> true
+//   is_dunder("___x__")                                -> false             a longer run of underscores, as enum says
+//   owner_of("_Trait")                                 -> "Trait"           leading underscores dropped
 //   is_private_name("__secret")                        -> true
-//   is_private_name("__init__")                        -> false              ends with two underscores
+//   is_private_name("__init__")                        -> false             ends with two underscores
 //   mangled("Trait", "__secret")                       -> "_Trait__secret"
-//   mangled("__", "__secret")                          -> "__secret"         an all-underscore class mangles nothing
+//   mangled("__", "__secret")                          -> "__secret"        an all-underscore class mangles nothing
 //   unmangled("Trait", "_Trait__secret")               -> "__secret"
-//   unmangled("Trait", "_Other__secret")               -> ""                 not this owner's private name
+//   unmangled("Trait", "_Other__secret")               -> ""                not this owner's private name
 //   reowned("Trait", "Target", "_Trait__secret")       -> "_Target__secret"
-//   reowned("Trait", "Target", "value")                -> "value"            a public name stays
+//   reowned("Trait", "Target", "value")                -> "value"           a public name stays
 //   requalified("Trait", "Target", "Trait.f.<locals>.<lambda>") -> "Target.f.<locals>.<lambda>"
 //
 // Lifetime and threading: free functions over string_views; nothing is stored, nothing is shared.
@@ -26,7 +31,16 @@
 #include <string>
 #include <string_view>
 
-namespace pygim::traits {
+namespace pygim::python_names {
+
+/// Whether `name` is a dunder, by Python's own rule (enum._is_dunder): longer than four characters,
+/// two underscores at each end, and neither pair part of a longer run of underscores.
+/// Cost: four comparisons. Example: "__lt__" and "__module__" are dunders; "____", "___x__",
+/// "__x___", "__" and "__x" are not.
+constexpr bool is_dunder(std::string_view name) noexcept {
+    return name.size() > 4 && name.starts_with("__") && name.ends_with("__") && name[2] != '_' &&
+           name[name.size() - 3] != '_';
+}
 
 /// The part of a class name that mangling uses: the name without its leading underscores.
 /// Cost: one scan over the leading underscores.
@@ -36,19 +50,12 @@ constexpr std::string_view owner_of(std::string_view class_name) noexcept {
     return first == std::string_view::npos ? std::string_view{} : class_name.substr(first);
 }
 
-/// Whether Python mangles `name` inside a class body: it starts with two underscores, does not end
-/// with two, and has no dot (a dotted name only occurs in an import of a package).
+/// Whether Python mangles `name` inside a class body (_Py_Mangle): it starts with two underscores,
+/// does not end with two, and has no dot (a dotted name only occurs in an import of a package).
 /// Cost: three comparisons and one scan for a dot.
 /// Example: "__secret" and "__x_" are private; "__init__", "__", "_secret" and "__pkg.mod" are not.
 constexpr bool is_private_name(std::string_view name) noexcept {
     return name.starts_with("__") && !name.ends_with("__") && name.find('.') == std::string_view::npos;
-}
-
-/// Whether `name` is a dunder: two underscores, something, two underscores. A class's own machinery
-/// (__module__, __doc__, __dict__) is named so, and so are the protocol methods (__lt__, __add__).
-/// Cost: two comparisons. Example: "__lt__" and "__module__" are dunders; "__" , "____" and "__x" are not.
-constexpr bool is_dunder_name(std::string_view name) noexcept {
-    return name.size() > 4 && name.starts_with("__") && name.ends_with("__");
 }
 
 /// `name` as Python spells it inside class `class_name`.
@@ -101,4 +108,4 @@ constexpr std::string requalified(std::string_view from, std::string_view to, st
     return out;
 }
 
-}  // namespace pygim::traits
+}  // namespace pygim::python_names

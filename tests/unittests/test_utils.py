@@ -1,10 +1,25 @@
 from __future__ import annotations
 
+import enum
 import itertools
 
 import pytest
 
 from pygim import utils
+
+
+# Python's own rule for a dunder name is the one its enum machinery applies, enum._is_dunder: the
+# reference pygim matches (global #113). The edges are where hand-written rules have differed.
+DUNDER_EDGES = [
+    "__lt__", "__init__", "__module__", "__ab__", "__a_b__", "__a__b__",
+    "____", "_____", "___x__", "__x___", "___", "__", "_", "",
+    "__x", "x__", "__x_", "_x_", "x",
+]
+
+
+@pytest.mark.parametrize("name", DUNDER_EDGES)
+def test_is_dunder_matches_pythons_own_rule(name):
+    assert utils.is_dunder(name) == enum._is_dunder(name)
 
 
 DATA_UNIT_FACTORS = {

@@ -1,4 +1,4 @@
-// traits/bindings.cpp — registers pygim.traits. The work lives in adapter.h, compose.h and core.h.
+// traits/bindings.cpp — registers pygim.traits. The work lives in adapter.h and compose.h; the naming rules in utils/python_names.h.
 
 #include <string>
 
