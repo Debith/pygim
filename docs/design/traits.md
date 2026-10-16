@@ -1,7 +1,7 @@
 # Traits: behaviour composed into classes
 
-Status: proposed 2026-10-16 — the code builder is built, composition is not; decisions open
-(below) · Owner: Debith · Branch: `core/traits`
+Status: `CodeBuilder`, `compose()` and `traits_of()` built 2026-10-16; `gim_type`, `gimmick` and
+the quantity traits not yet; D3 open (below) · Owner: Debith · Branch: `core/traits`
 Where: `src/_pygim_fast/traits/` (core, adapter, bindings), public as `pygim.traits`; proofs in
 `tests/static/traits_proofs.cpp`
 
@@ -70,7 +70,7 @@ nothing is copied — not even the members checked before the conflict was found
 `traits_of(Money)` answers, for each composed member, the trait it came from, the file and line
 where the trait defined it, and where it was composed.
 
-## What composing does
+## What composing does (built)
 
 ```
 compose(target, trait, override = false):
@@ -141,7 +141,7 @@ pygim.traits                 compose, gim_type, gimmick, traits_of,
         │
 bindings.cpp                 registers, nothing else
         │
-adapter (pybind11)           CodeBuilder: the rewrite through code.replace(); the member-kind pack;
+adapter (pybind11)           CodeBuilder: the rewrite through code.replace(); compose(): the member-kind pack;
                              the __class__ cell; gim_type as a heap type whose base is
                              type, built the way pybind11 builds its own metaclass;
                              provenance in a RegistryCore
@@ -161,40 +161,39 @@ The core holds every rule that is not Python's object model, so it can be proven
 - the override policy refuses a present name without `override` and replaces it with it;
 - a trait's requirements are met or the composition is refused, naming the missing role.
 
-## Decisions to make
+## Decided (2026-10-16)
 
-### D1 — the metaclass, or composing into any class
-
-| Option | What it is | Trade-off |
+| | Decision | Rejected, and why |
 |---|---|---|
-| A. Only `gim_type` | as the archive: a class must be made by the metaclass to take traits, `cls << trait` | a class cannot have two metaclasses, so an `Enum`, an ABC or a pybind11 class cannot take traits; and `dataclass(slots=True)` re-creates the class, running the metaclass's `__new__` a second time (measured: 2 calls for one class) |
-| **B. `compose()` on any class, `gim_type` as the opt-in syntax** (recommended) | the core operation takes any class; `gim_type` and `gimmick`, in C++, give `<<` to classes that choose them | two entries to one operation, but one is the operation and the other its syntax, as `+` is for `__add__`; `quantified_value_object` composes into a dataclass with no metaclass |
+| D1 | Any class takes a trait: `compose()` is the operation. `gim_type` and `gimmick`, in C++, give the classes that choose them built-in support: `<<`, ownership transfer when a function is assigned to the class, a record from the moment the class is made | only `gim_type` classes taking traits: a class has one metaclass, so an `Enum`, an ABC or a pybind11 class could never take one (measured: "metaclass conflict" for `Enum` and for `ABC`), and `dataclass(slots=True)` runs a metaclass's `__new__` twice (measured) |
+| D2 | the quantity traits are C++ callables, composed as methods | Python trait classes: pygim's behaviour lives in C++ (the definition of done) |
+| D4 | a name the target's own namespace holds, or two traits of one call both define, is refused; `override=True` replaces, the later trait winning — the registry's rule for a duplicate key | replacing silently: a composed member would hide the class's own without a word |
+| D5 | the `__class__` cell is rebound to the target, so a zero-argument `super()` resolves there | refusing traits that use `super()`: rebinding works (measured: `"trait+base"` after, `TypeError` before) and keeps a trait ordinary code |
 
-### D2 — what the quantity traits are written in
+Still to show, before the quantity traits are built: that a composed C++ `+` is fast enough — an
+A/B in one process against the hand-written one (`benchmarks/`) — and that a pybind11 function can
+be composed as a method at all (it is not a descriptor, so it needs a wrapper that binds it).
 
-| Option | What it is | Trade-off |
+## Open — D3: is a decorator enough for a quantity?
+
+For behaviour, yes, and it is the safest hook: it runs once, on the finished class. The
+alternative — a base class taking class keywords, `class Money(Quantity, magnitude="amount",
+unit="currency")` — meets `dataclass(slots=True)`, which rebuilds the class and runs the base's
+`__init_subclass__` again *without* the keywords (measured: the final class saw
+`magnitude=None, unit=None`).
+
+For static types, no — nothing that adds methods at run time is: Pyright and mypy would still
+reject `price + tax`.
+
+| Option | You write | Trade-off |
 |---|---|---|
-| **A. C++** (recommended) | `Additive`, `Scalable`, `Ordered` as C++ callables, composed as methods | behaviour lives in C++ (definition of done); needs the wrapper that makes a C++ callable bind as a method, unverified for pybind11 functions |
-| B. Python trait classes | written as `Report` above | proves the copy path end to end; the arithmetic would be pygim behaviour in Python, which the definition of done rules out |
+| A. the decorator alone, applying `dataclass` itself | `@quantified_value_object(magnitude="amount", unit="currency")` | one declaration; the operators invisible to type checkers |
+| B. the decorator and a declaration-only base | the same, plus `class Money(Quantity)`, where `Quantity` exists only in pygim's stub and declares the operators | typed; two things to write, so the decorator refuses a class without the base |
+| C. a base with class keywords, no decorator | `class Money(Quantity, magnitude=…, unit=…)` | typed; caught by the rebuild above |
 
-Either way, the claim that it is fast enough is a measurement: an A/B in one process of a
-composed `+` against the hand-written one (`benchmarks/`).
-
-### D3 — names
-
-The module `pygim.traits`. For the decorator, `quantified_value_object` (the owner's name) or
-`quantity` (Fowler's, *Analysis Patterns*: a magnitude with a unit) — global #105 asks for the
-domain's word.
-
-### D4 — a conflict
-
-Refuse by default, replace with `override=True`: the registry's rule for a duplicate key, so a
-user meets one rule in both places.
-
-### D5 — zero-argument `super()` inside a trait
-
-Rebind the `__class__` cell to the target (recommended; measured: `super().hello()` in a copied
-trait method returned `"trait+base"` after rebinding, `TypeError` before), or refuse such a trait.
+With it, the names: the module is `pygim.traits`; the decorator `quantified_value_object` (the
+owner's name) or `quantity` (Fowler's, *Analysis Patterns*) — global #105 asks for the domain's
+word.
 
 ## Decided by the evidence
 
@@ -208,11 +207,16 @@ What changes, each from a measurement or a rule:
 | rewrote the names of the top-level code only | every nested code object as well | measured: a lambda inside a trait method still read `_Trait__secret` and raised `AttributeError` |
 | copied the closure as it was | the `__class__` cell rebound to the target | measured: `super()` raised `TypeError` |
 | functions only | a pack of member kinds | properties and class methods are members a trait needs |
-| provenance recorded only under `__debug__` | always, in a `RegistryCore` | `python -O` silently dropped it; every keyed store is a `RegistryCore` (#131) |
+| provenance recorded only under `__debug__` | always, in a `TraitRecord` kept on the class: a `RegistryCore` over the flat engine | `python -O` silently dropped it; every keyed store is a `RegistryCore` (#131); kept on the class it dies with the class, where one registry keyed by class would outlive classes that are collected |
 | Python | C++ core and adapter | the definition of done: behaviour lives in C++ |
 
 ## Open
 
+- **The uninitialised-instance guard.** `pygim::adapter::refuse_uninitialised(m)` (`utils/initialised.h`,
+  pygim #150) turns a method called on an instance made by `Cls.__new__(Cls)` into a `TypeError`
+  instead of a crash. It is on `core/pathlike-markdown` (PR #37), not on `main`; whichever of that PR
+  and this one lands second adds it as the last statement of `traits/bindings.cpp`, and #37's
+  `test_uninitialised_instances.py` enforces it.
 - **Static types.** Composed methods are invisible to type checkers, as anything added at run time
   is. `pygim stubs` writes pygim's own stubs; whether it should also write stubs for a user's
   composed classes, or a typing construct should declare them, is open.
@@ -226,8 +230,8 @@ What changes, each from a measurement or a rule:
 ## Sequence of work
 
 1. core: mangling (built, proven), the override policy and requirements, with their proofs.
-2. adapter: `CodeBuilder` (built); then `compose()` for functions — the `__class__` cell, refusal
-   before any write, provenance — and the other member kinds.
+2. adapter: `CodeBuilder` (built); `compose()` and `traits_of()` (built): functions, properties,
+   classmethods and staticmethods, the `__class__` cell, refusal before any write, the record.
 3. `gim_type` and `gimmick` in C++, with `<<`.
 4. The quantity traits and `quantified_value_object`; the notes' `Money` rewritten on them as the
    first user, and an example under `docs/examples/traits/`.

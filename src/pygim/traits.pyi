@@ -2,7 +2,48 @@
 
 The design is docs/design/traits.md.
 """
+from collections.abc import Iterator
 from types import CodeType
+from typing import TypeVar
+
+_T = TypeVar("_T", bound=type)
+
+def compose(target: _T, *traits: type, override: bool = False) -> _T:
+    """Copy every member of every trait into ``target``, rewritten to belong there, and return it.
+
+    A trait is a class whose functions, properties, classmethods and staticmethods are written to
+    be copied; nothing inherits from it. Each copy reads ``target``'s private names, carries
+    ``target``'s qualified name, and its zero-argument ``super()`` resolves in ``target``. Refused,
+    writing nothing: a trait that is not a class or holds any other member (``TypeError``); a name
+    ``target`` already defines, or two traits both define (``ValueError``). ``override=True``
+    replaces instead, the later trait winning.
+    """
+
+def traits_of(cls: type) -> TraitRecord:
+    """The record of what was composed into ``cls`` itself; empty when nothing was."""
+
+class Provenance:
+    """Where a composed member came from."""
+
+    @property
+    def trait(self) -> str:
+        """The trait's module and qualified name."""
+    @property
+    def defined(self) -> str:
+        """``file:line`` where the trait defined the member."""
+    @property
+    def composed(self) -> str:
+        """``file:line`` of the ``compose()`` call."""
+
+class TraitRecord:
+    """The members composed into one class, by name, in name order."""
+
+    def __getitem__(self, name: str) -> Provenance: ...
+    def __contains__(self, name: object) -> bool: ...
+    def __len__(self) -> int: ...
+    def __iter__(self) -> Iterator[str]: ...
+    def keys(self) -> list[str]:
+        """The composed members' names, in name order."""
 
 class CodeBuilder:
     """A code object rebuilt so that it belongs to another class.

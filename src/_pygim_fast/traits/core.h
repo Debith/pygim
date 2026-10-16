@@ -44,6 +44,13 @@ constexpr bool is_private_name(std::string_view name) noexcept {
     return name.starts_with("__") && !name.ends_with("__") && name.find('.') == std::string_view::npos;
 }
 
+/// Whether `name` is a dunder: two underscores, something, two underscores. A class's own machinery
+/// (__module__, __doc__, __dict__) is named so, and so are the protocol methods (__lt__, __add__).
+/// Cost: two comparisons. Example: "__lt__" and "__module__" are dunders; "__" , "____" and "__x" are not.
+constexpr bool is_dunder_name(std::string_view name) noexcept {
+    return name.size() > 4 && name.starts_with("__") && name.ends_with("__");
+}
+
 /// `name` as Python spells it inside class `class_name`.
 /// Cost: one allocation of the result.
 /// Example: mangled("Trait", "__secret") is "_Trait__secret"; mangled("Trait", "value") is "value".

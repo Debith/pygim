@@ -12,6 +12,7 @@
 
 namespace {
 
+using pygim::traits::is_dunder_name;
 using pygim::traits::is_private_name;
 using pygim::traits::mangled;
 using pygim::traits::owner_of;
@@ -37,6 +38,17 @@ static_assert(!is_private_name("___"));
 static_assert(!is_private_name("_secret"));
 static_assert(!is_private_name("secret"));
 static_assert(!is_private_name("__pkg.mod"));  // a dotted name: an import of a package
+
+// ── dunders: a class's machinery and its protocol methods ────────────────────────────────────
+static_assert(is_dunder_name("__lt__"));
+static_assert(is_dunder_name("__module__"));
+static_assert(!is_dunder_name("____"));       // nothing between the underscores
+static_assert(!is_dunder_name("__"));
+static_assert(!is_dunder_name("__x"));        // a private name
+static_assert(!is_dunder_name("_x_"));
+// A dunder is never mangled, and a mangled name is never a dunder of its owner.
+static_assert(!is_private_name("__lt__") && is_dunder_name("__lt__"));
+static_assert(!is_dunder_name("_Trait__x"));
 
 // ── mangling ─────────────────────────────────────────────────────────────────────────────────
 static_assert(same(mangled("Trait", "__secret"), "_Trait__secret"));
