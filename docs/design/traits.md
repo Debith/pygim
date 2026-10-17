@@ -164,6 +164,13 @@ The core holds every rule that is not Python's object model, so it can be proven
 - the override policy refuses a present name without `override` and replaces it with it;
 - a trait's requirements are met or the composition is refused, naming the missing role.
 
+Every call the tests make is a row of a case table: argument columns, then the expected result
+and, apart, the expected effects. The naming rules' tables are in
+`tests/static/python_names_proofs.cpp`, checked by `static_assert` in every build;
+`CodeBuilder`'s, `compose()`'s and `traits_of()`'s are in `tests/unittests/traits_cases.py`, which
+renders [the cases page](traits_cases.md) — each input varied alone from a baseline, every row,
+and what the cases do not cover. The suite fails when the page is stale.
+
 ## Decided (2026-10-16)
 
 | | Decision | Rejected, and why |

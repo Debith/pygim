@@ -6,20 +6,21 @@ import itertools
 import pytest
 
 from pygim import utils
+from traits_cases import IS_DUNDER, Raises
 
 
-# Python's own rule for a dunder name is the one its enum machinery applies, enum._is_dunder: the
-# reference pygim matches (global #113). The edges are where hand-written rules have differed.
-DUNDER_EDGES = [
-    "__lt__", "__init__", "__module__", "__ab__", "__a_b__", "__a__b__",
-    "____", "_____", "___x__", "__x___", "___", "__", "_", "",
-    "__x", "x__", "__x_", "_x_", "x",
-]
-
-
-@pytest.mark.parametrize("name", DUNDER_EDGES)
-def test_is_dunder_matches_pythons_own_rule(name):
-    assert utils.is_dunder(name) == enum._is_dunder(name)
+# The cases are traits_cases.IS_DUNDER, one row per call (global #118). Python's own rule for a
+# dunder name is the one its enum machinery applies, enum._is_dunder (global #113): every row's
+# expected result is checked against it as well as against pygim's answer.
+@pytest.mark.parametrize("case", IS_DUNDER.cases())
+def test_is_dunder(case):
+    expected = case["expected_result"]
+    if isinstance(expected, Raises):
+        with pytest.raises(expected.type):
+            utils.is_dunder(case["name"])
+        return
+    assert enum._is_dunder(case["name"]) == expected  # the table states Python's own rule
+    assert utils.is_dunder(case["name"]) == expected
 
 
 DATA_UNIT_FACTORS = {
