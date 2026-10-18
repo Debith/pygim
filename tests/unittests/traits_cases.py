@@ -1,16 +1,18 @@
 # -*- coding: utf-8 -*-
-"""The cases pygim.traits and pygim.utils.is_dunder are tested with, as argument tables.
+"""The cases pygim.traits and Python's naming rules are tested with, and the page that shows them.
 
-A table's rows are calls: its argument columns first, then what the call is expected to give and
-any separately observable effect, then the case's id (global #118). A baseline row comes first in
-each table, and groups of rows below it change one input while the others stay as they were;
-interaction rows change several. The expected values come from the contracts — Python's own rules
-(the compiler's private-name mangling, enum._is_dunder) and the refusals docs/design/traits.md
-documents — written out by hand, never copied from what the code returns.
+Two kinds of case, kept apart:
 
-The same rows feed the tests (test_traits.py, test_traits_compose.py, test_utils.py) and the page
-docs/design/traits_cases.md, which ``python tests/unittests/traits_cases.py`` regenerates and
-test_traits_cases_page.py keeps current.
+- **generated** — each function's call space described as data and expanded into every call
+  (``callspace.py``; the models in ``python_names_callspace.py`` and ``traits_callspace.py``), with
+  expectations from Python itself. This is the coverage.
+- **authored** — the tables below: hand-picked seed and edge rows, one per behaviour a reader asks
+  about, with expectations written out by hand from the contracts (global #118). They stay as
+  regression rows and as the page's worked examples; they are not the coverage.
+
+The page docs/design/traits_cases.md is rendered from both — the generated cases' one-input
+comparisons and counts, then the authored rows — by ``python tests/unittests/traits_cases.py``;
+test_traits_cases_page.py keeps it current.
 """
 
 from __future__ import annotations
@@ -23,8 +25,13 @@ from pathlib import Path
 
 import pytest
 
+import callspace
+import python_names_callspace
+import traits_callspace
+
 M = __name__  # the module the traits below live in, as compose()'s messages name it
 PAGE = Path(__file__).resolve().parents[2] / "docs" / "design" / "traits_cases.md"
+RENDERED_ON = (3, 12)  # the expected values depend on the Python (co_qualname is 3.11's): the page is rendered on this one
 
 
 # ── what a cell can hold, besides a plain value ─────────────────────────────────────────────────
@@ -516,23 +523,27 @@ TRAITS_OF = Table(
 TABLES = (IS_DUNDER, CODE_BUILDER, COMPOSE, COMPOSED_MEMBERS, TRAITS_OF)
 
 LIMITS = (
-    "Members a trait may hold are functions, properties, classmethods and staticmethods; a trait "
-    "member written in C++ (the quantity traits to come) has no case yet.",
-    "Zero-argument super() is covered for a function member; not inside a property or a classmethod.",
-    "A keyword argument named with two leading underscores in a call is not mangled by Python, so "
-    "CodeBuilder has nothing to do for it; no row shows that.",
-    "Composing into a class with a custom metaclass other than Enum's, into a pybind11 class, and from "
-    "several threads at once is not covered.",
-    "On Python 3.9 the rows whose target is Point, a frozen slots dataclass, are skipped: "
-    "dataclass(slots=True) is Python 3.10's.",
-    "One-input groups explain one input's effect; they do not replace the interaction rows, and no "
-    "table is the full product of its columns.",
-    "The C++ core (utils/python_names.h, utils/core_utils.h) is proven by its own case tables in "
-    "tests/static; their rows are not on this page. Branch coverage of the C++ adapters is not measured.",
+    "The domains are finite and chosen: every class name, name and qualified name is one of the atoms or "
+    "generated shapes listed above; no claim is made for strings outside them, nor for classes, code objects or "
+    "traits beyond what the factories make.",
+    "Expectations for the inputs Python's compiler cannot take (a name or class name that is not an identifier, "
+    "a qualified name its class does not own) come from the written contract, and the cases say so.",
+    "Two models are reductions, said in their notes: CodeBuilder's two-step chains (one template, the names a step "
+    "can move) and compose()'s two traits (three member kinds); the one-step and one-trait models cover the rest.",
+    "A trait member written in C++ (the quantity traits to come), composing into a pybind11 class or a class with a "
+    "metaclass other than Enum's, and composing from several threads have no model.",
+    "On Python 3.9 the frozen slots dataclass target is excluded (dataclass(slots=True) is 3.10's); before 3.11 a "
+    "code object has no co_qualname, so qualified names are not compared there.",
+    "One-input comparisons explain one input's effect from a baseline; the counts above them are the coverage, "
+    "interactions included.",
+    "The native product of utils/python_names.h is called and branch-measured only by "
+    "tests/static/run_python_names_callspace.py, which needs GCC 16 (-freflection); every build proves the same "
+    "product at compile time. Branch coverage of the pybind11 adapters (traits/compose.h, traits/adapter.h) is not "
+    "measured. utils/core_utils.h keeps authored tables only.",
 )
 
 
-# ── the page, rendered from the tables ───────────────────────────────────────────────────────────
+# ── the page: the generated cases first, then the authored rows ─────────────────────────────────
 
 
 def _cell(value):
@@ -548,8 +559,106 @@ def _markdown_table(headers, rows):
     return lines + [""]
 
 
+def _code(text):
+    return "`" + str(text).replace("`", "&#96;").replace("|", "&#124;") + "`"
+
+
+# Where each model's one-input comparisons start: a call every reader can predict.
+BASELINES = {
+    "pygim::python_names::is_dunder": {"name": "__x__"},
+    "pygim::python_names::owner_of": {"class_name": "_Trait"},
+    "pygim::python_names::is_private_name": {"name": "__x"},
+    "pygim::python_names::mangled": {"class_name": "Trait", "name": "__x"},
+    "pygim::python_names::unmangled": {"class_name": "Trait", "name": "_Trait__x"},
+    "pygim::python_names::respelt": {"from": "Trait", "to": "Target", "name": "_Trait__x"},
+    "pygim::python_names::reowned": {"from": "Trait", "to": "Target", "name": "_Trait__x"},
+    "pygim::python_names::requalified": {"from": "Trait", "to": "Target", "qualname": "Trait.f"},
+    "pygim.traits.CodeBuilder: one step": {"template": "attribute", "name": "__x", "owner": "Trait",
+                                           "step": ("Trait", "Target")},
+    "pygim.traits.CodeBuilder: two steps": {"name": "__x", "owner": "Trait", "steps[0]": ("Trait", "Target"),
+                                            "steps[1]": ("Target", "Outer.Target")},
+    "pygim.traits.CodeBuilder: refusals": {"position": "code", "wrong": "text"},
+    "pygim.traits.compose: one trait": {"target": "plain", "traits[0]": ("function", "private", "greet"),
+                                        "override": False},
+    "pygim.traits.compose: two traits": {"target": "plain", "traits[0]": ("function", "private", "greet"),
+                                         "traits[1]": ("function", "private", "hello"), "override": False},
+    "pygim.utils.is_dunder": {"name": "__x__"},
+}
+
+
+def _shown(model, value):
+    """An expected outcome as a page cell."""
+    if not isinstance(value, dict):
+        return _cell(value)
+    if "raises" in value:
+        message = value.get("message")
+        return _code(f"raises {value['raises']}" + (f": {message}" if message else ""))
+    if "tree" in value:
+        tree = value["tree"]
+        qualnames = tree["co_qualname"] or [None] * len(tree["co_names"])
+        return " · ".join(_code(f"{tuple(names)} {qualname or ''}".strip())
+                          for names, qualname in zip(tree["co_names"], qualnames))
+    if "written" in value:
+        members = "; ".join(f"{name} → {outcome[1]!r} ({qualname})" if outcome[0] == "value"
+                            else f"{name} → raises {outcome[1]} ({qualname})"
+                            for name, (outcome, qualname) in value.get("members", {}).items())
+        record = ", ".join(f"{name} ← {trait.rsplit('.', 1)[-1]}" for name, trait in value["record"].items())
+        return _code(f"writes {', '.join(value['written']) or 'nothing'}" + (f"; record {record}" if record else "")
+                     + (f"; {members}" if members else ""))
+    if "returns" in value:
+        return _cell(value["returns"])
+    return _code(value)
+
+
+def _model_section(model, records, called_by):
+    lines = [f"### {model.name}", "", f"`{model.call}` — called by {called_by}.", ""]
+    for note in model.notes:
+        lines += [note, ""]
+    lines += _markdown_table(["parameter", "domain", "how it is made", "values"], [
+        [_code(p.name), p.domain.name, _made(p.domain), str(len(p.domain.expand()))] for p in model.parameters])
+    calls, excluded = callspace.required(model)
+    product = 1
+    for p in model.parameters:
+        product *= len(callspace.rebuild(p.domain))
+    oracles = {}
+    for record in records:
+        oracles[record["oracle"]] = oracles.get(record["oracle"], 0) + 1
+    reasons = "; ".join(f"{reason} ({count})" for reason, count in excluded.items())
+    lines += [f"Product {product}, excluded {sum(excluded.values())}" + (f" — {reasons}" if reasons else "")
+              + f"; required {len(calls)}. Expected by: "
+              + ", ".join(f"{oracle} {count}" for oracle, count in sorted(oracles.items())) + ".", ""]
+    baseline = BASELINES[model.name]
+    assert any(callspace.key(r["arguments"]) == callspace.key(baseline) for r in records), model.name
+    lines += ["Baseline: " + "; ".join(f"`{k}` = {_cell(v)}" for k, v in baseline.items()) + ".", ""]
+    for group in callspace.one_input_comparisons(model, records, baseline):
+        varied = group["varied"]
+        lines += [f"#### Vary `{varied}`", ""]
+        lines += _markdown_table([varied, "expected", "by"], [
+            [_cell(r["arguments"][varied]), _shown(model, r["expected"])
+             + (" ⚠ divergence" if r.get("divergence") else ""), r["oracle"]] for r in group["rows"]])
+    return lines
+
+
+def _made(domain):
+    if domain.provenance == "manual":
+        return f"manual: {domain.why}"
+    parts = getattr(domain, "parts", None)
+    if parts:
+        return "generated from " + " and ".join(_made_part(p) for p in parts)
+    return "generated: " + _made_part(domain)
+
+
+def _made_part(domain):
+    if getattr(domain, "factors", None):
+        factors = " × ".join(f"{name} ({len(d.expand())}, {d.provenance})" for name, d in domain.factors)
+        return f"{domain.name} = {factors}" + (f", less {domain.dropped}" if getattr(domain, "keep", None) else "")
+    if getattr(domain, "element", None) is not None:
+        return f"{domain.name}: sequences of {domain.element.name} up to {domain.max_length}"
+    return f"{domain.name} ({len(domain.expand())}, {domain.provenance})"
+
+
 def one_input_groups(table):
-    """Groups of rows whose arguments differ in exactly one column, the others fixed and equal."""
+    """Groups of authored rows whose arguments differ in exactly one column, the others fixed and equal."""
     groups = {}
     for row in table.rows:
         arguments = row[: table.arguments]
@@ -561,21 +670,10 @@ def one_input_groups(table):
 
 
 def render_table(table):
-    expected = table.columns[table.arguments:]
-    lines = [f"## {table.title}", "", f"`{table.call}`", ""]
+    """An authored table: every row, as written."""
+    lines = [f"### {table.title}", "", f"`{table.call}`", ""]
     for note in table.notes:
         lines += [note, ""]
-    groups = one_input_groups(table)
-    if groups:
-        lines += ["### Change one input", ""]
-        for group in groups:
-            varied = table.columns[group["varied"]]
-            fixed = "; ".join(f"`{name}` = {_cell_text(text)}" for name, text in group["fixed"])
-            lines += [f"#### Vary `{varied}`", "", f"Fixed: {fixed}.", ""]
-            lines += _markdown_table([varied, *expected, "case"], [
-                [_cell(row[group["varied"]]), *(_cell(v) for v in row[table.arguments:-1]), row[-1]]
-                for row in group["rows"]])
-    lines += ["### Every case", ""]
     lines += _markdown_table([*table.columns, "case"], [[*(_cell(v) for v in row[:-1]), row[-1]] for row in table.rows])
     return lines
 
@@ -585,22 +683,62 @@ def _cell_text(text):
 
 
 def render_page():
+    python_names = python_names_callspace.cases()
+    traits = traits_callspace.runs()
     lines = [
-        "<!-- Generated from tests/unittests/traits_cases.py by `python tests/unittests/traits_cases.py`;",
-        "     tests/unittests/test_traits_cases_page.py fails when it is not current. Edit the cases, not this page. -->",
+        "<!-- Generated from tests/unittests/traits_cases.py by `python tests/unittests/traits_cases.py`, on Python "
+        f"{RENDERED_ON[0]}.{RENDERED_ON[1]};",
+        "     tests/unittests/test_traits_cases_page.py fails when it is not current. Edit the models and cases, not "
+        "this page. -->",
         "",
         "# pygim.traits and Python's naming rules: the test cases",
         "",
-        "Each row is one call: its arguments, then what it is expected to give, then the case's id. "
-        "`—` is an argument not passed or a result a refused call does not have; `raises T: text` is the "
-        "exception expected, with a fragment of its message. Expected values come from the contracts — "
-        "Python's own rules and the refusals [traits.md](traits.md) documents — never from what the code "
-        "returned (global #118).",
+        "Two kinds of case. **Generated** cases are the coverage: each function's call space is described as data — "
+        "domains of argument values, some chosen by hand (*manual*), most expanded from declared factors and bounds "
+        "(*generated*) — and expanded into every call; a checker rebuilds the space from the declaration and fails a "
+        "run that misses, duplicates or adds a call, or whose domain shrank. **Authored** rows, further down, are "
+        "hand-picked seed and edge cases kept as regression rows and worked examples.",
         "",
-        "\"Change one input\" shows the rows that differ from each other in one argument only, the others "
-        "fixed as stated above each table; \"Every case\" shows them all, interactions included.",
+        "Every expected result comes from Python, never from pygim: `enum._is_dunder`; Python's compiler — a name "
+        "compiled inside `class <C>:`, a template's qualified name, a trait's members written into the target's own "
+        "source — or, where the compiler cannot be asked, the written contract. The `by` column says which.",
+        "",
+        "## The models",
         "",
     ]
+    rows = []
+    for function, model in python_names_callspace.MODELS.items():
+        records = python_names[function]
+        rows.append([_code(model.name), str(len(records)), "every build (static_assert); GCC 16 probe"])
+    for name, (model, _) in traits_callspace.MODELS.items():
+        rows.append([_code(model.name), str(len(traits[name].records)), "pytest"])
+    lines += _markdown_table(["model", "calls", "called by"], rows)
+    lines += [f"{sum(len(r) for r in python_names.values())} calls of utils/python_names.h and "
+              f"{sum(len(r.records) for r in traits.values())} of the Python API.", ""]
+    lines += ["## utils/python_names.h", "",
+              "Every function the namespace declares, found by GCC 16 reflection "
+              "(tests/static/run_python_names_callspace.py); a function or parameter without a model fails to "
+              "compile there. Each parameter's domain is chosen by its role — its name in the declaration — as every "
+              "parameter is a `std::string_view`.", ""]
+    for function, model in python_names_callspace.MODELS.items():
+        lines += _model_section(model, python_names[function], "every build and the GCC 16 probe")
+    lines += ["## The Python API", "",
+              "Classes and code objects are made by factories from the data in each cell: a code template compiled "
+              "inside the owner class, a class from its qualified name, a target from its source. Targets and traits "
+              "are made fresh for every case. Besides the cells shown, every CodeBuilder case expects the rest of "
+              "each code object unchanged, the code passed in unchanged and two builds equal; every compose() case "
+              "that writes expects the traits untouched and the record's `defined` and `composed` locations.", ""]
+    for name, (model, _) in traits_callspace.MODELS.items():
+        lines += _model_section(model, traits[name].records, "pytest")
+    lines += ["## Found by the generated cases", "",
+              "Calls whose outcome differs from the expectation, kept visible and not yet decided: each case named "
+              "must keep failing and no other may (the checker reports either).", ""]
+    for divergence in traits_callspace.DIVERGENCES:
+        count = sum(1 for r in traits[divergence.model].records if r.get("divergence") == divergence.finding)
+        lines += [f"- `{divergence.model}`, {count} case{'' if count == 1 else 's'}: {divergence.finding}"]
+    lines += ["", "## Authored seed and edge rows", "",
+              "Written by hand, one row per behaviour a reader asks about; tested by test_traits.py, "
+              "test_traits_compose.py and test_utils.py.", ""]
     for table in TABLES:
         lines += render_table(table)
     lines += ["## What these cases do not cover", ""]

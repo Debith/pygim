@@ -1,6 +1,9 @@
 # -*- coding: utf-8 -*-
-"""The case tables in traits_cases.py are well formed, and docs/design/traits_cases.md — rendered
-from them — is current, so the page and the tests can never show different cases."""
+"""The authored tables in traits_cases.py are well formed, and docs/design/traits_cases.md — rendered
+from the generated cases and the authored rows — is current, so the page and the tests can never show
+different cases."""
+
+import sys
 
 import pytest
 
@@ -26,6 +29,8 @@ def test_every_one_input_group_changes_its_column_only(table):
         assert len({repr(row[group["varied"]]) for row in group["rows"]}) > 1
 
 
+@pytest.mark.skipif(sys.version_info[:2] != traits_cases.RENDERED_ON,
+                    reason="the expected values depend on the Python; the page is rendered on traits_cases.RENDERED_ON")
 def test_the_page_is_current():
     if not traits_cases.PAGE.exists():
         pytest.skip("docs/ not present")

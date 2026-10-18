@@ -164,12 +164,30 @@ The core holds every rule that is not Python's object model, so it can be proven
 - the override policy refuses a present name without `override` and replaces it with it;
 - a trait's requirements are met or the composition is refused, naming the missing role.
 
-Every call the tests make is a row of a case table: argument columns, then the expected result
-and, apart, the expected effects. The naming rules' tables are in
-`tests/static/python_names_proofs.cpp`, checked by `static_assert` in every build;
-`CodeBuilder`'s, `compose()`'s and `traits_of()`'s are in `tests/unittests/traits_cases.py`, which
-renders [the cases page](traits_cases.md) — each input varied alone from a baseline, every row,
-and what the cases do not cover. The suite fails when the page is stale.
+The coverage is generated, not listed. Each function's call space is described as data — domains
+of argument values, a few atoms chosen by hand and the rest expanded from declared factors and
+bounds, plus the exclusions with their reasons (`tests/unittests/callspace.py`) — and expanded
+into every call; a checker rebuilds the space from the declaration and fails a run that misses,
+duplicates or adds a call, or whose domain shrank. The expectations come from Python, never from
+pygim: `enum._is_dunder`, Python's compiler, or the written contract where the compiler cannot be
+asked.
+
+- `utils/python_names.h`: the model is `tests/unittests/python_names_callspace.py` — every function,
+  each parameter's domain chosen by its role, 8,806 calls. Every build proves the whole product at
+  compile time (`tests/static/python_names_callspace_proofs.cpp`, generated from the model).
+  `tests/static/run_python_names_callspace.py` (GCC 16, `-freflection`) finds the functions and
+  their parameters by reflection — one without a model does not compile — calls the product
+  natively, measures gcov's branches and conditions, and runs the negative controls: a deleted
+  case, a shrunken domain, five behavioural mutants of the header (caught natively and by the
+  every-build proof), an added function.
+- `CodeBuilder`, `compose()` and `traits_of()`, `is_dunder`: the models are
+  `tests/unittests/traits_callspace.py`, 11,260 calls run by `test_traits_callspace.py`, with code
+  objects and classes made by factories and fresh targets per case, and defects put in place of
+  the implementation as negative controls.
+
+[The cases page](traits_cases.md) is rendered from the same cases — the models, one-input
+comparisons from a baseline, what the cases found, the authored seed rows of
+`tests/unittests/traits_cases.py`, and what is not covered; the suite fails when it is stale.
 
 ## Decided (2026-10-16)
 
