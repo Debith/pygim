@@ -27,6 +27,7 @@ import pytest
 
 import callspace
 import python_names_callspace
+import traits_adversarial
 import traits_callspace
 
 M = __name__  # the module the traits below live in, as compose()'s messages name it
@@ -727,6 +728,44 @@ def _cell_text(text):
     return "—" if text == "—" else "`" + text.replace("`", "&#96;").replace("|", "&#124;") + "`"
 
 
+def _adversarial_section():
+    """The adversarial model: its domains, counts, and a compact name → outcome table."""
+    model = traits_adversarial.ADVERSARIAL
+    run = traits_adversarial.runs()[model.name]
+    lines = [f"`{model.call}`", ""]
+    for note in model.notes:
+        lines += [note, ""]
+    lines += _markdown_table(["parameter", "domain", "how it is made", "values"], [
+        [_code(p.name), p.domain.name, _made(p.domain), str(len(p.domain.expand()))] for p in model.parameters])
+    calls, excluded = callspace.required(model)
+    product = 1
+    for parameter in model.parameters:
+        product *= len(callspace.rebuild(parameter.domain))
+    reasons = "; ".join(f"{reason} ({count})" for reason, count in excluded.items())
+    lines += [f"Product {product}, excluded {sum(excluded.values())}" + (f" — {reasons}" if reasons else "")
+              + f"; required {len(calls)}. Every expected outcome is from the contract and Python's own setattr.", ""]
+    # One row per name: the outcome is the same across targets/kinds except the documented conflicts,
+    # so show, for the plain target with override off, what each name does.
+    by_name = {}
+    for record in run.records:
+        a = record["arguments"]
+        if a["target"] == "empty" and a["kind"] == "function" and not a["override"]:
+            by_name[a["name"]] = record
+    rows = []
+    for name in traits_adversarial.NAMES.values:
+        record = by_name.get(name)
+        if record is None:
+            rows.append([_cell(name), "— excluded —", "not expressible as a class member"])
+            continue
+        want = record["expected"]
+        outcome = "composed" if want["raised"] is None else f"raises {want['raised']}"
+        rows.append([_cell(name), outcome,
+                     "written whole; only this name and the record change" if want["raised"] is None
+                     else "nothing written; a later composition still works"])
+    lines += _markdown_table(["name", "outcome", "effect on state"], rows)
+    return lines + [""]
+
+
 def render_page():
     python_names = python_names_callspace.cases()
     traits = traits_callspace.runs()
@@ -783,9 +822,23 @@ def render_page():
     for divergence in traits_callspace.DIVERGENCES:
         count = sum(1 for r in traits[divergence.model].records if r.get("divergence") == divergence.finding)
         lines += [f"- `{divergence.model}`, {count} case{'' if count == 1 else 's'}: {divergence.finding}"]
+    lines += ["", "## Adversarial cases and state preservation", "",
+              "Hostile and unusual inputs, generated from declared domains (traits_adversarial.py) and run by "
+              "test_traits_adversarial.py. These APIs manipulate executable Python objects and are not a sandbox "
+              "for arbitrary Python; the guarantees checked are native safety, only the documented state changing "
+              "on success, nothing changing on a documented refusal, and no stale bookkeeping after either. A "
+              "legitimate name is never refused for looking unusual. State is read by trusted projections — names "
+              "and object identity, never a value's `__eq__`, `__repr__` or `__hash__` — with sentinels on "
+              "unrelated classes.", ""]
+    lines += _adversarial_section()
+    lines += ["### Case families", "",
+              "Every adversarial family and how it is covered: *generated* (a model), *seeded* (authored cases), "
+              "*subprocess* (a bounded child), *sanitizer* (ASan/UBSan), each with its reason.", ""]
+    lines += _markdown_table(["family", "covered by", "how"],
+                             [[fam, how, detail] for fam, how, detail in traits_adversarial.FAMILIES])
     lines += ["", "## Authored seed and edge rows", "",
               "Written by hand, one row per behaviour a reader asks about; tested by test_traits.py, "
-              "test_traits_compose.py and test_utils.py.", ""]
+              "test_traits_compose.py, test_utils.py and test_traits_regressions.py (the fixed-defect seeds).", ""]
     for table in TABLES:
         lines += render_table(table)
     lines += ["## What these cases do not cover", ""]

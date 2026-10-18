@@ -132,7 +132,20 @@ private:
         return out;
     }
 
+    // Guards the native recursion over nested code objects: a code object nested past CPython's
+    // recursion limit raises RecursionError, as deeply nested Python does, instead of overrunning
+    // the C stack. One level per nesting depth; the limit is the test budget's, not an input bound.
+    struct RecursionGuard {
+        RecursionGuard() {
+            if (Py_EnterRecursiveCall(" in CodeBuilder.build")) throw py::error_already_set();
+        }
+        ~RecursionGuard() { Py_LeaveRecursiveCall(); }
+        RecursionGuard(const RecursionGuard&) = delete;
+        RecursionGuard& operator=(const RecursionGuard&) = delete;
+    };
+
     py::object rebuilt(const py::handle& code) const {
+        const RecursionGuard guard;  // left on every exit, including an exception thrown below
         static PyObject* const co_names = interned("co_names");
         static PyObject* const co_consts = interned("co_consts");
         static PyObject* const co_qualname = interned("co_qualname");

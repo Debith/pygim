@@ -194,6 +194,41 @@ Every argument stays visible; each shared baseline appears once and changed cell
 Expectation-source counts remain per function outside the table. Models with different call
 spaces stay separate, and this presentation does not change the generated coverage.
 
+### Adversarial testing and the threat boundary (2026-10-18)
+
+`compose()` and `CodeBuilder` manipulate executable Python objects; they are not a sandbox for
+arbitrary Python. What is guaranteed, and tested adversarially: the interpreter is never crashed by
+any input; on success only the documented target attributes and the provenance record change; on a
+documented refusal the target is left exactly as it was; and neither a refusal nor a hostile hook
+leaves stale bookkeeping a later composition would trip over. A legitimate name is never refused for
+looking unusual. The hostile inputs are generated from declared domains
+(`tests/unittests/traits_adversarial.py`, run by `test_traits_adversarial.py`), state is read only
+through trusted projections (names and object identity, never a value's `__eq__`/`__repr__`/`__hash__`),
+and unrelated classes carry sentinels so a stray write is seen. The C++ naming rules are driven under
+AddressSanitizer and UBSan over a seed corpus with bounded mutations
+(`tests/static/run_python_names_sanitizer.py`); no coverage-guided fuzzer is installed, which that
+runner reports rather than feigns. The case-family inventory, with what is generated, seeded, run in
+a subprocess or sanitized, is on [the cases page](traits_cases.md).
+
+Six defects the adversarial work found were fixed test-first (seeds in
+`tests/unittests/test_traits_regressions.py`, each failing before its fix):
+a member name with an embedded NUL was written truncated (now the whole name is written, from the
+key's real characters, so the conflict check and the write agree); a `str`-subclass key was composed
+under its `__str__` result (now under its own characters); a trait member named `__pygim_traits__`
+and a hook deleting the record mid-write crashed the interpreter (the record name is now refused to a
+trait, and `compose()` writes members first and attaches the record last, holding it alive so no hook
+can leave a dangling handle); a code object nested past the recursion limit crashed `build()` (now a
+`RecursionError`, via a recursion guard); `compose()` with nothing to compose wrote an empty record
+(now it is a true no-op); and an existing non-record `__pygim_traits__` gave a cast error (now a clear
+`TypeError`, and `traits_of` ignores a foreign attribute of that name). A non-str member name and a
+lone-surrogate name are now refused with a clear error.
+
+Open policy questions, surfaced not silently decided: whether a failure partway through a multi-member
+composition should roll back the members already written (today it does not — the record is still only
+attached at the end, so a hostile `__setattr__` that raises on a later member can leave earlier ones
+written); and whether a class that misreports its own `__name__`/`__qualname__` through a metaclass
+should be believed (today it is, as that is the class's declared identity).
+
 ## Decided (2026-10-16)
 
 | | Decision | Rejected, and why |

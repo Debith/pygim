@@ -707,9 +707,57 @@ Calls whose outcome differs from the expectation, kept visible and not yet decid
 - `pygim.traits.CodeBuilder: one step`, 18 cases: CodeBuilder respells co_names and qualified names but not a private LOCAL name: co_varnames, co_cellvars and co_freevars keep the old class's spelling (`_Trait__x`), where the method compiled in the target has `_Target__x`. Behaviour is unchanged — locals are found by position, and a cell and its free variable keep matching names — but locals() shows the old spelling, against the docstring's 'respells every private name'.
 - `pygim.utils.is_dunder`, 1 case: pygim.utils.is_dunder accepts bytes — pybind11's string caster converts them — though its signature says `name: str`; is_dunder(b'__x__') is True.
 
+## Adversarial cases and state preservation
+
+Hostile and unusual inputs, generated from declared domains (traits_adversarial.py) and run by test_traits_adversarial.py. These APIs manipulate executable Python objects and are not a sandbox for arbitrary Python; the guarantees checked are native safety, only the documented state changing on success, nothing changing on a documented refusal, and no stale bookkeeping after either. A legitimate name is never refused for looking unusual. State is read by trusted projections — names and object identity, never a value's `__eq__`, `__repr__` or `__hash__` — with sentinels on unrelated classes.
+
+`compose(target, Trait{name: member}, override=override); traits_of(target)`
+
+Each call composes one member of the given name and kind. The expected outcome is from the documented refusals and Python's own setattr, never from compose(). State is checked by trusted projections (names and identity) with sentinels on unrelated classes.
+
+| parameter | domain | how it is made | values |
+| --- | --- | --- | --- |
+| `target` | targets | manual: a bare class; one that already defines the baseline name; one with a base, so an inherited name is not mistaken for an owned one | 3 |
+| `name` | adversarial names | manual: one of each name a caller might pass that could confuse the write, the conflict check or the record: a NUL that truncates, the record's own name, reserved type slots, over-long and non-ASCII names, and two legitimate names that must pass | 12 |
+| `kind` | member kinds | manual: the two kinds whose write path differs; the others reduce to a function inside | 2 |
+| `override` | override | manual: both | 2 |
+
+Product 144, excluded 24 — not expressible as a class member (Python forbids the slot) (24); required 120. Every expected outcome is from the contract and Python's own setattr.
+
+| name | outcome | effect on state |
+| --- | --- | --- |
+| `'greet'` | composed | written whole; only this name and the record change |
+| `'__init__'` | composed | written whole; only this name and the record change |
+| `'greet\x00x'` | composed | written whole; only this name and the record change |
+| `'__pygim_traits__'` | raises ValueError | nothing written; a later composition still works |
+| `'__dict__'` | — excluded — | not expressible as a class member |
+| `'__class__'` | — excluded — | not expressible as a class member |
+| `'__slots__'` | composed | written whole; only this name and the record change |
+| `'________________________________________'` | composed | written whole; only this name and the record change |
+| `'xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx'` | composed | written whole; only this name and the record change |
+| `'ɡreet'` | composed | written whole; only this name and the record change |
+| `'café'` | composed | written whole; only this name and the record change |
+| `'é'` | composed | written whole; only this name and the record change |
+
+
+### Case families
+
+Every adversarial family and how it is covered: *generated* (a model), *seeded* (authored cases), *subprocess* (a bounded child), *sanitizer* (ASan/UBSan), each with its reason.
+
+| family | covered by | how |
+| --- | --- | --- |
+| Names: NUL, confusables, combining marks, long underscore runs and names, non-ASCII, reserved type slots, collision with the record name | generated | traits_adversarial.ADVERSARIAL — the name domain; reserved slots Python forbids as members are excluded with that reason, and the record name and owned slots are refusals. |
+| Names: non-str keys and lone surrogates | generated+seeded | A non-str key and a surrogate name are refused by compose() (TypeError / UnicodeEncodeError); the surrogate is in the name domain, the non-str key is an authored seed. |
+| Identity and aliasing: distinct classes with identical names, repeated traits, an aliased function, inherited conflicts, independent copies per target | seeded | test_traits_adversarial.TestIdentityAndAliasing — these are relationships between whole classes, not one member's name, so they are authored, not generated. |
+| Hostile protocol objects: a metaclass __setattr__ that raises or deletes the record mid-write | seeded+subprocess | test_traits_regressions (the record-deleting hook, in a bounded child) and the state model's cleanup obligation. A hook that raises mid-write is the open rollback policy question (docs/design/traits.md), so its partial-write outcome is surfaced, not asserted as a contract. |
+| Code objects: nested functions, lambdas, closures, __class__/super cells, private locals vs attributes, reown chains | generated | traits_callspace.py — the CodeBuilder one-step and two-step models and the compose member bodies; a private local name is the known divergence recorded in traits.md. |
+| Resource abuse: code nested past the recursion limit, and (bounded) large inputs | subprocess | test_traits_regressions runs the deep-nesting case in a bounded child; it now raises RecursionError instead of crashing. Wide trait sets and many compositions are not yet modelled. |
+| Native memory safety of the C++ naming rules | sanitizer | tests/static/run_python_names_sanitizer.py drives utils/python_names.h over a seed corpus with bounded mutations under ASan+UBSan, with a planted-OOB negative control. No coverage-guided fuzzer is installed (no libFuzzer/AFL), so there is no feedback-driven search; this is reported, not faked. |
+
+
 ## Authored seed and edge rows
 
-Written by hand, one row per behaviour a reader asks about; tested by test_traits.py, test_traits_compose.py and test_utils.py.
+Written by hand, one row per behaviour a reader asks about; tested by test_traits.py, test_traits_compose.py, test_utils.py and test_traits_regressions.py (the fixed-defect seeds).
 
 ### pygim.utils.is_dunder
 
