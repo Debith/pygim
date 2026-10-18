@@ -125,4 +125,65 @@ constexpr std::string requalified(std::string_view from, std::string_view to, st
     return out;
 }
 
+/// The naming rules gathered for one class. Constructed with the class's name — and, where a
+/// qualified name or module is in play, those too — it answers the forms that depend on a class:
+/// mangling a private attribute, recognising one, and moving a name or a qualified name to another
+/// class. The class-independent rules (``is_dunder``, ``is_private_name``) stay free functions,
+/// because they ask about a name's shape, not about any class.
+///
+/// It is a thin value over the free functions above (the ones the compile-time proofs check), so it
+/// adds cohesion, not logic: a class's identity travels as one object instead of parallel strings,
+/// and a move reads as ``source.reowned(target, name)``. It holds ``string_view``s and owns nothing,
+/// so the text it is built from must outlive it.
+///
+/// Example: ``NamePolicy("daa").mangled("__attr")`` is ``"_daa__attr"``;
+/// ``NamePolicy("Inner", "Outer.Inner", "pkg.mod").qualified_name()`` is ``"pkg.mod.Outer.Inner"``.
+class NamePolicy {
+public:
+    constexpr explicit NamePolicy(std::string_view class_name, std::string_view qualname = {},
+                                  std::string_view module = {}) noexcept
+        : m_class(class_name), m_qualname(qualname.empty() ? class_name : qualname), m_module(module) {}
+
+    constexpr std::string_view class_name() const noexcept { return m_class; }
+    constexpr std::string_view qualname() const noexcept { return m_qualname; }
+    constexpr std::string_view owner() const noexcept { return owner_of(m_class); }
+
+    /// `attr` as Python spells it inside this class: ``mangled("__x")`` is ``_Class__x``.
+    [[nodiscard]] constexpr std::string mangled(std::string_view attr) const {
+        return python_names::mangled(m_class, attr);
+    }
+    /// The private name whose spelling in this class is `name`, or "" when `name` is not one of this
+    /// class's private names.
+    [[nodiscard]] constexpr std::string_view unmangled(std::string_view name) const noexcept {
+        return python_names::unmangled(m_class, name);
+    }
+    /// `name` moved from this class into `into`: its new spelling, or nothing when it does not move.
+    [[nodiscard]] constexpr std::optional<std::string> respelt(const NamePolicy& into, std::string_view name) const {
+        return python_names::respelt(m_class, into.m_class, name);
+    }
+    /// `name` moved from this class into `into`: the new spelling, or `name` itself when it does not move.
+    [[nodiscard]] constexpr std::string reowned(const NamePolicy& into, std::string_view name) const {
+        return python_names::reowned(m_class, into.m_class, name);
+    }
+    /// `qualname` re-rooted from this class's qualified name onto `into`'s.
+    [[nodiscard]] constexpr std::string requalified(const NamePolicy& into, std::string_view qualname) const {
+        return python_names::requalified(m_qualname, into.m_qualname, qualname);
+    }
+    /// This class's fully-qualified name, ``module.qualname`` (empty module: just the qualified name).
+    [[nodiscard]] constexpr std::string qualified_name() const {
+        if (m_module.empty()) return std::string{m_qualname};
+        std::string out;
+        out.reserve(m_module.size() + 1 + m_qualname.size());
+        out += m_module;
+        out += '.';
+        out += m_qualname;
+        return out;
+    }
+
+private:
+    std::string_view m_class;
+    std::string_view m_qualname;
+    std::string_view m_module;
+};
+
 }  // namespace pygim::python_names

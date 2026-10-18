@@ -82,6 +82,12 @@ private:
     struct Step {
         std::string from_name, to_name;  // what mangling uses
         std::string from_qual, to_qual;  // what qualified names start with
+
+        // The two classes as NamePolicy values, so a move reads as from().reowned(to(), name). The
+        // policies view this Step's own strings, so they are made on demand and used at once, never
+        // stored (a stored view would dangle when the step vector reallocates).
+        python_names::NamePolicy from() const { return python_names::NamePolicy{from_name, from_qual}; }
+        python_names::NamePolicy to() const { return python_names::NamePolicy{to_name, to_qual}; }
     };
 
     static std::string text(const py::handle& owner, const char* attribute) {
@@ -103,7 +109,7 @@ private:
         std::optional<std::string> spelling;  // set once a step re-spells the name
         for (const auto& step : m_steps) {
             const std::string_view current = spelling ? std::string_view{*spelling} : original;
-            if (auto next = python_names::respelt(step.from_name, step.to_name, current)) spelling = std::move(next);
+            if (auto next = step.from().respelt(step.to(), current)) spelling = std::move(next);
         }
         return spelling ? py::object(py::str(*spelling)) : py::reinterpret_borrow<py::object>(name);
     }
@@ -170,7 +176,7 @@ private:
             qualname = attribute(code, co_qualname);
             std::string requalified{utf8(qualname)};
             for (const auto& step : m_steps)
-                requalified = python_names::requalified(step.from_qual, step.to_qual, requalified);
+                requalified = step.from().requalified(step.to(), requalified);
             if (requalified != utf8(qualname)) qualname = py::str(requalified);
         }
         // code.replace(co_names=..., co_consts=..., co_qualname=...) by vectorcall: no dict is built.

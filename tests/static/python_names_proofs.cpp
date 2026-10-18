@@ -28,6 +28,7 @@ using pygim::proofs::first_failing_row;
 using pygim::python_names::is_dunder;
 using pygim::python_names::is_private_name;
 using pygim::python_names::mangled;
+using pygim::python_names::NamePolicy;
 using pygim::python_names::owner_of;
 using pygim::python_names::reowned;
 using pygim::python_names::requalified;
@@ -247,5 +248,25 @@ static_assert(moves_compose());
 // because after the first step it reads as B's own; the direct move leaves it as B's.
 static_assert(reowned("B", "C", reowned("A", "B", "_B__x")) == "_C__x");
 static_assert(reowned("A", "C", "_B__x") == "_B__x");
+
+// NamePolicy gathers the rules for one class; it is a thin value over the free functions above, so it
+// must agree with them. (The traits adapters use it, so the whole traits suite exercises it too.)
+consteval bool name_policy_agrees_with_the_free_functions() {
+    const NamePolicy daa{"daa"};
+    if (daa.mangled("__attr") != "_daa__attr" || daa.mangled("plain") != "plain") return false;
+    if (daa.unmangled("_daa__attr") != "__attr") return false;
+    const NamePolicy a{"A"};
+    const NamePolicy b{"B"};
+    if (const auto moved = a.respelt(b, "_A__x"); !moved || *moved != "_B__x") return false;
+    if (a.respelt(b, "value")) return false;                 // a public name does not move: nothing
+    if (a.reowned(b, "_A__x") != "_B__x" || a.reowned(b, "value") != "value") return false;
+    const NamePolicy from{"A", "A.f"};
+    const NamePolicy to{"B", "B.f"};
+    if (from.requalified(to, "A.f.<locals>.g") != "B.f.<locals>.g") return false;
+    if (NamePolicy{"Inner", "Outer.Inner", "pkg.mod"}.qualified_name() != "pkg.mod.Outer.Inner") return false;
+    if (NamePolicy{"Inner", "Outer.Inner"}.qualified_name() != "Outer.Inner") return false;  // no module
+    return true;
+}
+static_assert(name_policy_agrees_with_the_free_functions());
 
 }  // namespace

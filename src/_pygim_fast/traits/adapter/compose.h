@@ -135,9 +135,11 @@ struct Move {
             out.attr("__annotations__") = py::dict(function.attr("__annotations__"));
         if (py::hasattr(function, "__type_params__"))  // Python 3.12 and later
             out.attr("__type_params__") = function.attr("__type_params__");
-        out.attr("__qualname__") = py::str(python_names::requalified(text(trait.attr("__qualname__")),
-                                                       text(target.attr("__qualname__")),
-                                                       text(function.attr("__qualname__"))));
+        const auto trait_qual = text(trait.attr("__qualname__"));
+        const auto target_qual = text(target.attr("__qualname__"));
+        const python_names::NamePolicy from{trait_qual, trait_qual};  // the move keys on the qualified name
+        const python_names::NamePolicy to{target_qual, target_qual};
+        out.attr("__qualname__") = py::str(from.requalified(to, text(function.attr("__qualname__"))));
         return out;
     }
 
