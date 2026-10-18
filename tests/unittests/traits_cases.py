@@ -610,33 +610,78 @@ def _shown(model, value):
     return _code(value)
 
 
-def _model_section(model, records, called_by):
-    lines = [f"### {model.name}", "", f"`{model.call}` — called by {called_by}.", ""]
-    for note in model.notes:
-        lines += [note, ""]
+def model_groups(entries):
+    """Group only models with identical parameter domains and exact required inputs."""
+    groups = {}
+    for model, records in entries:
+        parameters = tuple(p.name for p in model.parameters)
+        domains = tuple((p.name, tuple(sorted(callspace.key(v) for v in callspace.rebuild(p.domain))))
+                        for p in model.parameters)
+        calls = tuple(sorted(callspace.key(r["arguments"]) for r in records))
+        identity = (parameters, domains, calls)
+        groups.setdefault(identity, []).append((model, records))
+    return list(groups.values())
+
+
+def comparison_rows(model, records, baseline):
+    """Show the baseline once, followed by calls changing exactly one input."""
+    indexed = {callspace.key(r["arguments"]): r for r in records}
+    baseline_key = callspace.key(baseline)
+    assert baseline_key in indexed, model.name
+    rows, seen = [indexed[baseline_key]], {baseline_key}
+    for group in callspace.one_input_comparisons(model, records, baseline):
+        for record in group["rows"]:
+            key = callspace.key(record["arguments"])
+            if key not in seen:
+                rows.append(record)
+                seen.add(key)
+    return rows
+
+
+def _model_section(entries, called_by):
+    """Join results by exact arguments, never by row position or matching labels."""
+    model, records = entries[0]
+    lines = ["### " + " / ".join(m.name for m, _ in entries), ""]
+    for member, member_records in entries:
+        lines += [f"`{member.call}` — called by {called_by}.", ""]
+        for note in member.notes:
+            lines += [note, ""]
     lines += _markdown_table(["parameter", "domain", "how it is made", "values"], [
         [_code(p.name), p.domain.name, _made(p.domain), str(len(p.domain.expand()))] for p in model.parameters])
-    calls, excluded = callspace.required(model)
-    product = 1
-    for p in model.parameters:
-        product *= len(callspace.rebuild(p.domain))
-    oracles = {}
-    for record in records:
-        oracles[record["oracle"]] = oracles.get(record["oracle"], 0) + 1
-    reasons = "; ".join(f"{reason} ({count})" for reason, count in excluded.items())
-    lines += [f"Product {product}, excluded {sum(excluded.values())}" + (f" — {reasons}" if reasons else "")
-              + f"; required {len(calls)}. Expected by: "
-              + ", ".join(f"{oracle} {count}" for oracle, count in sorted(oracles.items())) + ".", ""]
+    for member, member_records in entries:
+        calls, excluded = callspace.required(member)
+        product = 1
+        for parameter in member.parameters:
+            product *= len(callspace.rebuild(parameter.domain))
+        oracles = {}
+        for record in member_records:
+            oracles[record["oracle"]] = oracles.get(record["oracle"], 0) + 1
+        reasons = "; ".join(f"{reason} ({count})" for reason, count in excluded.items())
+        lines += [f"`{member.call}`: product {product}, excluded {sum(excluded.values())}"
+                  + (f" — {reasons}" if reasons else "") + f"; required {len(calls)}. Expectation sources: "
+                  + ", ".join(f"{oracle} {count}" for oracle, count in sorted(oracles.items())) + ".", ""]
     baseline = BASELINES[model.name]
-    assert any(callspace.key(r["arguments"]) == callspace.key(baseline) for r in records), model.name
-    lines += ["Baseline: " + "; ".join(f"`{k}` = {_cell(v)}" for k, v in baseline.items()) + ".", ""]
-    for group in callspace.one_input_comparisons(model, records, baseline):
-        varied = group["varied"]
-        lines += [f"#### Vary `{varied}`", ""]
-        lines += _markdown_table([varied, "expected", "by"], [
-            [_cell(r["arguments"][varied]), _shown(model, r["expected"])
-             + (" ⚠ divergence" if r.get("divergence") else ""), r["oracle"]] for r in group["rows"]])
-    return lines
+    lines += [("The first row is the shared baseline. Each later row changes one input from that baseline; "
+              "the changed cell is bold. All argument columns are shown. These are comparisons drawn from "
+              "the full generated product counted above, not its complete listing."), ""]
+    indexed = [{callspace.key(r["arguments"]): r for r in member_records} for _, member_records in entries]
+    headers = [p.name for p in model.parameters]
+    headers += [f"expected {member.name.rsplit('::', 1)[-1]}" for member, _ in entries]
+    output = []
+    for record in comparison_rows(model, records, baseline):
+        arguments = record["arguments"]
+        key = callspace.key(arguments)
+        cells = []
+        for parameter in model.parameters:
+            value = arguments[parameter.name]
+            cell = _cell(value)
+            cells.append(f"**{cell}**" if callspace.key(value) != callspace.key(baseline[parameter.name]) else cell)
+        for (member, _), member_index in zip(entries, indexed):
+            matched = member_index[key]
+            cells.append(_shown(member, matched["expected"])
+                         + (" ⚠ divergence" if matched.get("divergence") else ""))
+        output.append(cells)
+    return lines + _markdown_table(headers, output)
 
 
 def _made(domain):
@@ -701,7 +746,7 @@ def render_page():
         "",
         "Every expected result comes from Python, never from pygim: `enum._is_dunder`; Python's compiler — a name "
         "compiled inside `class <C>:`, a template's qualified name, a trait's members written into the target's own "
-        "source — or, where the compiler cannot be asked, the written contract. The `by` column says which.",
+        "source — or, where the compiler cannot be asked, the written contract. Each model states its expectation sources outside the comparison table.",
         "",
         "## The models",
         "",
@@ -720,16 +765,18 @@ def render_page():
               "(tests/static/run_python_names_callspace.py); a function or parameter without a model fails to "
               "compile there. Each parameter's domain is chosen by its role — its name in the declaration — as every "
               "parameter is a `std::string_view`.", ""]
-    for function, model in python_names_callspace.MODELS.items():
-        lines += _model_section(model, python_names[function], "every build and the GCC 16 probe")
+    entries = [(model, python_names[function]) for function, model in python_names_callspace.MODELS.items()]
+    for group in model_groups(entries):
+        lines += _model_section(group, "every build and the GCC 16 probe")
     lines += ["## The Python API", "",
               "Classes and code objects are made by factories from the data in each cell: a code template compiled "
               "inside the owner class, a class from its qualified name, a target from its source. Targets and traits "
               "are made fresh for every case. Besides the cells shown, every CodeBuilder case expects the rest of "
               "each code object unchanged, the code passed in unchanged and two builds equal; every compose() case "
               "that writes expects the traits untouched and the record's `defined` and `composed` locations.", ""]
-    for name, (model, _) in traits_callspace.MODELS.items():
-        lines += _model_section(model, traits[name].records, "pytest")
+    entries = [(model, traits[name].records) for name, (model, _) in traits_callspace.MODELS.items()]
+    for group in model_groups(entries):
+        lines += _model_section(group, "pytest")
     lines += ["## Found by the generated cases", "",
               "Calls whose outcome differs from the expectation, kept visible and not yet decided: each case named "
               "must keep failing and no other may (the checker reports either).", ""]

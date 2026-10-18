@@ -188,6 +188,11 @@ asked.
 [The cases page](traits_cases.md) is rendered from the same cases — the models, one-input
 comparisons from a baseline, what the cases found, the authored seed rows of
 `tests/unittests/traits_cases.py`, and what is not covered; the suite fails when it is stale.
+Functions with identical parameter domains and required inputs share a comparison table, with
+one expected-result column per function. Results are joined by exact arguments, not row order.
+Every argument stays visible; each shared baseline appears once and changed cells are bold.
+Expectation-source counts remain per function outside the table. Models with different call
+spaces stay separate, and this presentation does not change the generated coverage.
 
 ## Decided (2026-10-16)
 

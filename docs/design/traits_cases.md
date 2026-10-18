@@ -5,7 +5,7 @@
 
 Two kinds of case. **Generated** cases are the coverage: each function's call space is described as data — domains of argument values, some chosen by hand (*manual*), most expanded from declared factors and bounds (*generated*) — and expanded into every call; a checker rebuilds the space from the declaration and fails a run that misses, duplicates or adds a call, or whose domain shrank. **Authored** rows, further down, are hand-picked seed and edge cases kept as regression rows and worked examples.
 
-Every expected result comes from Python, never from pygim: `enum._is_dunder`; Python's compiler — a name compiled inside `class <C>:`, a template's qualified name, a trait's members written into the target's own source — or, where the compiler cannot be asked, the written contract. The `by` column says which.
+Every expected result comes from Python, never from pygim: `enum._is_dunder`; Python's compiler — a name compiled inside `class <C>:`, a template's qualified name, a trait's members written into the target's own source — or, where the compiler cannot be asked, the written contract. Each model states its expectation sources outside the comparison table.
 
 ## The models
 
@@ -32,85 +32,87 @@ Every expected result comes from Python, never from pygim: `enum._is_dunder`; Py
 
 Every function the namespace declares, found by GCC 16 reflection (tests/static/run_python_names_callspace.py); a function or parameter without a model fails to compile there. Each parameter's domain is chosen by its role — its name in the declaration — as every parameter is a `std::string_view`.
 
-### pygim::python_names::is_dunder
+### pygim::python_names::is_dunder / pygim::python_names::is_private_name
 
 `is_dunder(name)` — called by every build and the GCC 16 probe.
+
+`is_private_name(name)` — called by every build and the GCC 16 probe.
 
 | parameter | domain | how it is made | values |
 | --- | --- | --- | --- |
 | `name` | names | generated from shaped names = leading (4, manual) × stem (3, manual) × trailing (4, manual) and names spelt for an owner = owner (2, manual) × body (12, generated) | 63 |
 
-Product 63, excluded 0; required 63. Expected by: enum 63.
+`is_dunder(name)`: product 63, excluded 0; required 63. Expectation sources: enum 63.
 
-Baseline: `name` = `'__x__'`.
+`is_private_name(name)`: product 63, excluded 0; required 63. Expectation sources: compiler 62, contract 1.
 
-#### Vary `name`
+The first row is the shared baseline. Each later row changes one input from that baseline; the changed cell is bold. All argument columns are shown. These are comparisons drawn from the full generated product counted above, not its complete listing.
 
-| name | expected | by |
+| name | expected is_dunder | expected is_private_name |
 | --- | --- | --- |
-| `''` | `False` | enum |
-| `'_'` | `False` | enum |
-| `'__'` | `False` | enum |
-| `'___'` | `False` | enum |
-| `'x'` | `False` | enum |
-| `'x_'` | `False` | enum |
-| `'x__'` | `False` | enum |
-| `'x___'` | `False` | enum |
-| `'pkg.mod'` | `False` | enum |
-| `'pkg.mod_'` | `False` | enum |
-| `'pkg.mod__'` | `False` | enum |
-| `'pkg.mod___'` | `False` | enum |
-| `'____'` | `False` | enum |
-| `'_x'` | `False` | enum |
-| `'_x_'` | `False` | enum |
-| `'_x__'` | `False` | enum |
-| `'_x___'` | `False` | enum |
-| `'_pkg.mod'` | `False` | enum |
-| `'_pkg.mod_'` | `False` | enum |
-| `'_pkg.mod__'` | `False` | enum |
-| `'_pkg.mod___'` | `False` | enum |
-| `'_____'` | `False` | enum |
-| `'__x'` | `False` | enum |
-| `'__x_'` | `False` | enum |
-| `'__x__'` | `True` | enum |
-| `'__x___'` | `False` | enum |
-| `'__pkg.mod'` | `False` | enum |
-| `'__pkg.mod_'` | `False` | enum |
-| `'__pkg.mod__'` | `True` | enum |
-| `'__pkg.mod___'` | `False` | enum |
-| `'______'` | `False` | enum |
-| `'___x'` | `False` | enum |
-| `'___x_'` | `False` | enum |
-| `'___x__'` | `False` | enum |
-| `'___x___'` | `False` | enum |
-| `'___pkg.mod'` | `False` | enum |
-| `'___pkg.mod_'` | `False` | enum |
-| `'___pkg.mod__'` | `False` | enum |
-| `'___pkg.mod___'` | `False` | enum |
-| `'_Trait__'` | `False` | enum |
-| `'_Trait___'` | `False` | enum |
-| `'_Trait____'` | `False` | enum |
-| `'_Trait_____'` | `False` | enum |
-| `'_Trait__x'` | `False` | enum |
-| `'_Trait__x_'` | `False` | enum |
-| `'_Trait__x__'` | `False` | enum |
-| `'_Trait__x___'` | `False` | enum |
-| `'_Trait__pkg.mod'` | `False` | enum |
-| `'_Trait__pkg.mod_'` | `False` | enum |
-| `'_Trait__pkg.mod__'` | `False` | enum |
-| `'_Trait__pkg.mod___'` | `False` | enum |
-| `'_Target__'` | `False` | enum |
-| `'_Target___'` | `False` | enum |
-| `'_Target____'` | `False` | enum |
-| `'_Target_____'` | `False` | enum |
-| `'_Target__x'` | `False` | enum |
-| `'_Target__x_'` | `False` | enum |
-| `'_Target__x__'` | `False` | enum |
-| `'_Target__x___'` | `False` | enum |
-| `'_Target__pkg.mod'` | `False` | enum |
-| `'_Target__pkg.mod_'` | `False` | enum |
-| `'_Target__pkg.mod__'` | `False` | enum |
-| `'_Target__pkg.mod___'` | `False` | enum |
+| `'__x__'` | `True` | `False` |
+| **`''`** | `False` | `False` |
+| **`'_'`** | `False` | `False` |
+| **`'__'`** | `False` | `False` |
+| **`'___'`** | `False` | `False` |
+| **`'x'`** | `False` | `False` |
+| **`'x_'`** | `False` | `False` |
+| **`'x__'`** | `False` | `False` |
+| **`'x___'`** | `False` | `False` |
+| **`'pkg.mod'`** | `False` | `False` |
+| **`'pkg.mod_'`** | `False` | `False` |
+| **`'pkg.mod__'`** | `False` | `False` |
+| **`'pkg.mod___'`** | `False` | `False` |
+| **`'____'`** | `False` | `False` |
+| **`'_x'`** | `False` | `False` |
+| **`'_x_'`** | `False` | `False` |
+| **`'_x__'`** | `False` | `False` |
+| **`'_x___'`** | `False` | `False` |
+| **`'_pkg.mod'`** | `False` | `False` |
+| **`'_pkg.mod_'`** | `False` | `False` |
+| **`'_pkg.mod__'`** | `False` | `False` |
+| **`'_pkg.mod___'`** | `False` | `False` |
+| **`'_____'`** | `False` | `False` |
+| **`'__x'`** | `False` | `True` |
+| **`'__x_'`** | `False` | `True` |
+| **`'__x___'`** | `False` | `False` |
+| **`'__pkg.mod'`** | `False` | `False` |
+| **`'__pkg.mod_'`** | `False` | `False` |
+| **`'__pkg.mod__'`** | `True` | `False` |
+| **`'__pkg.mod___'`** | `False` | `False` |
+| **`'______'`** | `False` | `False` |
+| **`'___x'`** | `False` | `True` |
+| **`'___x_'`** | `False` | `True` |
+| **`'___x__'`** | `False` | `False` |
+| **`'___x___'`** | `False` | `False` |
+| **`'___pkg.mod'`** | `False` | `False` |
+| **`'___pkg.mod_'`** | `False` | `False` |
+| **`'___pkg.mod__'`** | `False` | `False` |
+| **`'___pkg.mod___'`** | `False` | `False` |
+| **`'_Trait__'`** | `False` | `False` |
+| **`'_Trait___'`** | `False` | `False` |
+| **`'_Trait____'`** | `False` | `False` |
+| **`'_Trait_____'`** | `False` | `False` |
+| **`'_Trait__x'`** | `False` | `False` |
+| **`'_Trait__x_'`** | `False` | `False` |
+| **`'_Trait__x__'`** | `False` | `False` |
+| **`'_Trait__x___'`** | `False` | `False` |
+| **`'_Trait__pkg.mod'`** | `False` | `False` |
+| **`'_Trait__pkg.mod_'`** | `False` | `False` |
+| **`'_Trait__pkg.mod__'`** | `False` | `False` |
+| **`'_Trait__pkg.mod___'`** | `False` | `False` |
+| **`'_Target__'`** | `False` | `False` |
+| **`'_Target___'`** | `False` | `False` |
+| **`'_Target____'`** | `False` | `False` |
+| **`'_Target_____'`** | `False` | `False` |
+| **`'_Target__x'`** | `False` | `False` |
+| **`'_Target__x_'`** | `False` | `False` |
+| **`'_Target__x__'`** | `False` | `False` |
+| **`'_Target__x___'`** | `False` | `False` |
+| **`'_Target__pkg.mod'`** | `False` | `False` |
+| **`'_Target__pkg.mod_'`** | `False` | `False` |
+| **`'_Target__pkg.mod__'`** | `False` | `False` |
+| **`'_Target__pkg.mod___'`** | `False` | `False` |
 
 ### pygim::python_names::owner_of
 
@@ -120,196 +122,23 @@ Baseline: `name` = `'__x__'`.
 | --- | --- | --- | --- |
 | `class_name` | class names | manual: a plain name and a second one to move to; one and two leading underscores, which mangling drops; trailing underscores, which it keeps; only underscores, which mangle nothing; and the empty string, which is no class name at all | 7 |
 
-Product 7, excluded 0; required 7. Expected by: compiler 6, contract 1.
+`owner_of(class_name)`: product 7, excluded 0; required 7. Expectation sources: compiler 6, contract 1.
 
-Baseline: `class_name` = `'_Trait'`.
+The first row is the shared baseline. Each later row changes one input from that baseline; the changed cell is bold. All argument columns are shown. These are comparisons drawn from the full generated product counted above, not its complete listing.
 
-#### Vary `class_name`
+| class_name | expected owner_of |
+| --- | --- |
+| `'_Trait'` | `'Trait'` |
+| **`'Trait'`** | `'Trait'` |
+| **`'Target'`** | `'Target'` |
+| **`'__Trait'`** | `'Trait'` |
+| **`'Trait__'`** | `'Trait__'` |
+| **`'__'`** | `''` |
+| **`''`** | `''` |
 
-| class_name | expected | by |
-| --- | --- | --- |
-| `'Trait'` | `'Trait'` | compiler |
-| `'Target'` | `'Target'` | compiler |
-| `'_Trait'` | `'Trait'` | compiler |
-| `'__Trait'` | `'Trait'` | compiler |
-| `'Trait__'` | `'Trait__'` | compiler |
-| `'__'` | `''` | compiler |
-| `''` | `''` | contract |
-
-### pygim::python_names::is_private_name
-
-`is_private_name(name)` — called by every build and the GCC 16 probe.
-
-| parameter | domain | how it is made | values |
-| --- | --- | --- | --- |
-| `name` | names | generated from shaped names = leading (4, manual) × stem (3, manual) × trailing (4, manual) and names spelt for an owner = owner (2, manual) × body (12, generated) | 63 |
-
-Product 63, excluded 0; required 63. Expected by: compiler 62, contract 1.
-
-Baseline: `name` = `'__x'`.
-
-#### Vary `name`
-
-| name | expected | by |
-| --- | --- | --- |
-| `''` | `False` | contract |
-| `'_'` | `False` | compiler |
-| `'__'` | `False` | compiler |
-| `'___'` | `False` | compiler |
-| `'x'` | `False` | compiler |
-| `'x_'` | `False` | compiler |
-| `'x__'` | `False` | compiler |
-| `'x___'` | `False` | compiler |
-| `'pkg.mod'` | `False` | compiler |
-| `'pkg.mod_'` | `False` | compiler |
-| `'pkg.mod__'` | `False` | compiler |
-| `'pkg.mod___'` | `False` | compiler |
-| `'____'` | `False` | compiler |
-| `'_x'` | `False` | compiler |
-| `'_x_'` | `False` | compiler |
-| `'_x__'` | `False` | compiler |
-| `'_x___'` | `False` | compiler |
-| `'_pkg.mod'` | `False` | compiler |
-| `'_pkg.mod_'` | `False` | compiler |
-| `'_pkg.mod__'` | `False` | compiler |
-| `'_pkg.mod___'` | `False` | compiler |
-| `'_____'` | `False` | compiler |
-| `'__x'` | `True` | compiler |
-| `'__x_'` | `True` | compiler |
-| `'__x__'` | `False` | compiler |
-| `'__x___'` | `False` | compiler |
-| `'__pkg.mod'` | `False` | compiler |
-| `'__pkg.mod_'` | `False` | compiler |
-| `'__pkg.mod__'` | `False` | compiler |
-| `'__pkg.mod___'` | `False` | compiler |
-| `'______'` | `False` | compiler |
-| `'___x'` | `True` | compiler |
-| `'___x_'` | `True` | compiler |
-| `'___x__'` | `False` | compiler |
-| `'___x___'` | `False` | compiler |
-| `'___pkg.mod'` | `False` | compiler |
-| `'___pkg.mod_'` | `False` | compiler |
-| `'___pkg.mod__'` | `False` | compiler |
-| `'___pkg.mod___'` | `False` | compiler |
-| `'_Trait__'` | `False` | compiler |
-| `'_Trait___'` | `False` | compiler |
-| `'_Trait____'` | `False` | compiler |
-| `'_Trait_____'` | `False` | compiler |
-| `'_Trait__x'` | `False` | compiler |
-| `'_Trait__x_'` | `False` | compiler |
-| `'_Trait__x__'` | `False` | compiler |
-| `'_Trait__x___'` | `False` | compiler |
-| `'_Trait__pkg.mod'` | `False` | compiler |
-| `'_Trait__pkg.mod_'` | `False` | compiler |
-| `'_Trait__pkg.mod__'` | `False` | compiler |
-| `'_Trait__pkg.mod___'` | `False` | compiler |
-| `'_Target__'` | `False` | compiler |
-| `'_Target___'` | `False` | compiler |
-| `'_Target____'` | `False` | compiler |
-| `'_Target_____'` | `False` | compiler |
-| `'_Target__x'` | `False` | compiler |
-| `'_Target__x_'` | `False` | compiler |
-| `'_Target__x__'` | `False` | compiler |
-| `'_Target__x___'` | `False` | compiler |
-| `'_Target__pkg.mod'` | `False` | compiler |
-| `'_Target__pkg.mod_'` | `False` | compiler |
-| `'_Target__pkg.mod__'` | `False` | compiler |
-| `'_Target__pkg.mod___'` | `False` | compiler |
-
-### pygim::python_names::mangled
+### pygim::python_names::mangled / pygim::python_names::unmangled
 
 `mangled(class_name, name)` — called by every build and the GCC 16 probe.
-
-| parameter | domain | how it is made | values |
-| --- | --- | --- | --- |
-| `class_name` | class names | manual: a plain name and a second one to move to; one and two leading underscores, which mangling drops; trailing underscores, which it keeps; only underscores, which mangle nothing; and the empty string, which is no class name at all | 7 |
-| `name` | names | generated from shaped names = leading (4, manual) × stem (3, manual) × trailing (4, manual) and names spelt for an owner = owner (2, manual) × body (12, generated) | 63 |
-
-Product 441, excluded 0; required 441. Expected by: compiler 372, compiler+contract 68, contract 1.
-
-Baseline: `class_name` = `'Trait'`; `name` = `'__x'`.
-
-#### Vary `class_name`
-
-| class_name | expected | by |
-| --- | --- | --- |
-| `'Trait'` | `'_Trait__x'` | compiler |
-| `'Target'` | `'_Target__x'` | compiler |
-| `'_Trait'` | `'_Trait__x'` | compiler |
-| `'__Trait'` | `'_Trait__x'` | compiler |
-| `'Trait__'` | `'_Trait____x'` | compiler |
-| `'__'` | `'__x'` | compiler |
-| `''` | `'__x'` | compiler+contract |
-
-#### Vary `name`
-
-| name | expected | by |
-| --- | --- | --- |
-| `''` | `''` | compiler+contract |
-| `'_'` | `'_'` | compiler |
-| `'__'` | `'__'` | compiler |
-| `'___'` | `'___'` | compiler |
-| `'x'` | `'x'` | compiler |
-| `'x_'` | `'x_'` | compiler |
-| `'x__'` | `'x__'` | compiler |
-| `'x___'` | `'x___'` | compiler |
-| `'pkg.mod'` | `'pkg.mod'` | compiler |
-| `'pkg.mod_'` | `'pkg.mod_'` | compiler |
-| `'pkg.mod__'` | `'pkg.mod__'` | compiler |
-| `'pkg.mod___'` | `'pkg.mod___'` | compiler |
-| `'____'` | `'____'` | compiler |
-| `'_x'` | `'_x'` | compiler |
-| `'_x_'` | `'_x_'` | compiler |
-| `'_x__'` | `'_x__'` | compiler |
-| `'_x___'` | `'_x___'` | compiler |
-| `'_pkg.mod'` | `'_pkg.mod'` | compiler |
-| `'_pkg.mod_'` | `'_pkg.mod_'` | compiler |
-| `'_pkg.mod__'` | `'_pkg.mod__'` | compiler |
-| `'_pkg.mod___'` | `'_pkg.mod___'` | compiler |
-| `'_____'` | `'_____'` | compiler |
-| `'__x'` | `'_Trait__x'` | compiler |
-| `'__x_'` | `'_Trait__x_'` | compiler |
-| `'__x__'` | `'__x__'` | compiler |
-| `'__x___'` | `'__x___'` | compiler |
-| `'__pkg.mod'` | `'__pkg.mod'` | compiler |
-| `'__pkg.mod_'` | `'__pkg.mod_'` | compiler |
-| `'__pkg.mod__'` | `'__pkg.mod__'` | compiler |
-| `'__pkg.mod___'` | `'__pkg.mod___'` | compiler |
-| `'______'` | `'______'` | compiler |
-| `'___x'` | `'_Trait___x'` | compiler |
-| `'___x_'` | `'_Trait___x_'` | compiler |
-| `'___x__'` | `'___x__'` | compiler |
-| `'___x___'` | `'___x___'` | compiler |
-| `'___pkg.mod'` | `'___pkg.mod'` | compiler |
-| `'___pkg.mod_'` | `'___pkg.mod_'` | compiler |
-| `'___pkg.mod__'` | `'___pkg.mod__'` | compiler |
-| `'___pkg.mod___'` | `'___pkg.mod___'` | compiler |
-| `'_Trait__'` | `'_Trait__'` | compiler |
-| `'_Trait___'` | `'_Trait___'` | compiler |
-| `'_Trait____'` | `'_Trait____'` | compiler |
-| `'_Trait_____'` | `'_Trait_____'` | compiler |
-| `'_Trait__x'` | `'_Trait__x'` | compiler |
-| `'_Trait__x_'` | `'_Trait__x_'` | compiler |
-| `'_Trait__x__'` | `'_Trait__x__'` | compiler |
-| `'_Trait__x___'` | `'_Trait__x___'` | compiler |
-| `'_Trait__pkg.mod'` | `'_Trait__pkg.mod'` | compiler |
-| `'_Trait__pkg.mod_'` | `'_Trait__pkg.mod_'` | compiler |
-| `'_Trait__pkg.mod__'` | `'_Trait__pkg.mod__'` | compiler |
-| `'_Trait__pkg.mod___'` | `'_Trait__pkg.mod___'` | compiler |
-| `'_Target__'` | `'_Target__'` | compiler |
-| `'_Target___'` | `'_Target___'` | compiler |
-| `'_Target____'` | `'_Target____'` | compiler |
-| `'_Target_____'` | `'_Target_____'` | compiler |
-| `'_Target__x'` | `'_Target__x'` | compiler |
-| `'_Target__x_'` | `'_Target__x_'` | compiler |
-| `'_Target__x__'` | `'_Target__x__'` | compiler |
-| `'_Target__x___'` | `'_Target__x___'` | compiler |
-| `'_Target__pkg.mod'` | `'_Target__pkg.mod'` | compiler |
-| `'_Target__pkg.mod_'` | `'_Target__pkg.mod_'` | compiler |
-| `'_Target__pkg.mod__'` | `'_Target__pkg.mod__'` | compiler |
-| `'_Target__pkg.mod___'` | `'_Target__pkg.mod___'` | compiler |
-
-### pygim::python_names::unmangled
 
 `unmangled(class_name, name)` — called by every build and the GCC 16 probe.
 
@@ -318,197 +147,87 @@ Baseline: `class_name` = `'Trait'`; `name` = `'__x'`.
 | `class_name` | class names | manual: a plain name and a second one to move to; one and two leading underscores, which mangling drops; trailing underscores, which it keeps; only underscores, which mangle nothing; and the empty string, which is no class name at all | 7 |
 | `name` | names | generated from shaped names = leading (4, manual) × stem (3, manual) × trailing (4, manual) and names spelt for an owner = owner (2, manual) × body (12, generated) | 63 |
 
-Product 441, excluded 0; required 441. Expected by: compiler 433, compiler+contract 8.
+`mangled(class_name, name)`: product 441, excluded 0; required 441. Expectation sources: compiler 372, compiler+contract 68, contract 1.
 
-Baseline: `class_name` = `'Trait'`; `name` = `'_Trait__x'`.
+`unmangled(class_name, name)`: product 441, excluded 0; required 441. Expectation sources: compiler 433, compiler+contract 8.
 
-#### Vary `class_name`
+The first row is the shared baseline. Each later row changes one input from that baseline; the changed cell is bold. All argument columns are shown. These are comparisons drawn from the full generated product counted above, not its complete listing.
 
-| class_name | expected | by |
-| --- | --- | --- |
-| `'Trait'` | `'__x'` | compiler |
-| `'Target'` | `''` | compiler |
-| `'_Trait'` | `'__x'` | compiler |
-| `'__Trait'` | `'__x'` | compiler |
-| `'Trait__'` | `''` | compiler |
-| `'__'` | `''` | compiler |
-| `''` | `''` | compiler+contract |
+| class_name | name | expected mangled | expected unmangled |
+| --- | --- | --- | --- |
+| `'Trait'` | `'__x'` | `'_Trait__x'` | `''` |
+| **`'Target'`** | `'__x'` | `'_Target__x'` | `''` |
+| **`'_Trait'`** | `'__x'` | `'_Trait__x'` | `''` |
+| **`'__Trait'`** | `'__x'` | `'_Trait__x'` | `''` |
+| **`'Trait__'`** | `'__x'` | `'_Trait____x'` | `''` |
+| **`'__'`** | `'__x'` | `'__x'` | `'__x'` |
+| **`''`** | `'__x'` | `'__x'` | `'__x'` |
+| `'Trait'` | **`''`** | `''` | `''` |
+| `'Trait'` | **`'_'`** | `'_'` | `''` |
+| `'Trait'` | **`'__'`** | `'__'` | `''` |
+| `'Trait'` | **`'___'`** | `'___'` | `''` |
+| `'Trait'` | **`'x'`** | `'x'` | `''` |
+| `'Trait'` | **`'x_'`** | `'x_'` | `''` |
+| `'Trait'` | **`'x__'`** | `'x__'` | `''` |
+| `'Trait'` | **`'x___'`** | `'x___'` | `''` |
+| `'Trait'` | **`'pkg.mod'`** | `'pkg.mod'` | `''` |
+| `'Trait'` | **`'pkg.mod_'`** | `'pkg.mod_'` | `''` |
+| `'Trait'` | **`'pkg.mod__'`** | `'pkg.mod__'` | `''` |
+| `'Trait'` | **`'pkg.mod___'`** | `'pkg.mod___'` | `''` |
+| `'Trait'` | **`'____'`** | `'____'` | `''` |
+| `'Trait'` | **`'_x'`** | `'_x'` | `''` |
+| `'Trait'` | **`'_x_'`** | `'_x_'` | `''` |
+| `'Trait'` | **`'_x__'`** | `'_x__'` | `''` |
+| `'Trait'` | **`'_x___'`** | `'_x___'` | `''` |
+| `'Trait'` | **`'_pkg.mod'`** | `'_pkg.mod'` | `''` |
+| `'Trait'` | **`'_pkg.mod_'`** | `'_pkg.mod_'` | `''` |
+| `'Trait'` | **`'_pkg.mod__'`** | `'_pkg.mod__'` | `''` |
+| `'Trait'` | **`'_pkg.mod___'`** | `'_pkg.mod___'` | `''` |
+| `'Trait'` | **`'_____'`** | `'_____'` | `''` |
+| `'Trait'` | **`'__x_'`** | `'_Trait__x_'` | `''` |
+| `'Trait'` | **`'__x__'`** | `'__x__'` | `''` |
+| `'Trait'` | **`'__x___'`** | `'__x___'` | `''` |
+| `'Trait'` | **`'__pkg.mod'`** | `'__pkg.mod'` | `''` |
+| `'Trait'` | **`'__pkg.mod_'`** | `'__pkg.mod_'` | `''` |
+| `'Trait'` | **`'__pkg.mod__'`** | `'__pkg.mod__'` | `''` |
+| `'Trait'` | **`'__pkg.mod___'`** | `'__pkg.mod___'` | `''` |
+| `'Trait'` | **`'______'`** | `'______'` | `''` |
+| `'Trait'` | **`'___x'`** | `'_Trait___x'` | `''` |
+| `'Trait'` | **`'___x_'`** | `'_Trait___x_'` | `''` |
+| `'Trait'` | **`'___x__'`** | `'___x__'` | `''` |
+| `'Trait'` | **`'___x___'`** | `'___x___'` | `''` |
+| `'Trait'` | **`'___pkg.mod'`** | `'___pkg.mod'` | `''` |
+| `'Trait'` | **`'___pkg.mod_'`** | `'___pkg.mod_'` | `''` |
+| `'Trait'` | **`'___pkg.mod__'`** | `'___pkg.mod__'` | `''` |
+| `'Trait'` | **`'___pkg.mod___'`** | `'___pkg.mod___'` | `''` |
+| `'Trait'` | **`'_Trait__'`** | `'_Trait__'` | `''` |
+| `'Trait'` | **`'_Trait___'`** | `'_Trait___'` | `''` |
+| `'Trait'` | **`'_Trait____'`** | `'_Trait____'` | `''` |
+| `'Trait'` | **`'_Trait_____'`** | `'_Trait_____'` | `''` |
+| `'Trait'` | **`'_Trait__x'`** | `'_Trait__x'` | `'__x'` |
+| `'Trait'` | **`'_Trait__x_'`** | `'_Trait__x_'` | `'__x_'` |
+| `'Trait'` | **`'_Trait__x__'`** | `'_Trait__x__'` | `''` |
+| `'Trait'` | **`'_Trait__x___'`** | `'_Trait__x___'` | `''` |
+| `'Trait'` | **`'_Trait__pkg.mod'`** | `'_Trait__pkg.mod'` | `''` |
+| `'Trait'` | **`'_Trait__pkg.mod_'`** | `'_Trait__pkg.mod_'` | `''` |
+| `'Trait'` | **`'_Trait__pkg.mod__'`** | `'_Trait__pkg.mod__'` | `''` |
+| `'Trait'` | **`'_Trait__pkg.mod___'`** | `'_Trait__pkg.mod___'` | `''` |
+| `'Trait'` | **`'_Target__'`** | `'_Target__'` | `''` |
+| `'Trait'` | **`'_Target___'`** | `'_Target___'` | `''` |
+| `'Trait'` | **`'_Target____'`** | `'_Target____'` | `''` |
+| `'Trait'` | **`'_Target_____'`** | `'_Target_____'` | `''` |
+| `'Trait'` | **`'_Target__x'`** | `'_Target__x'` | `''` |
+| `'Trait'` | **`'_Target__x_'`** | `'_Target__x_'` | `''` |
+| `'Trait'` | **`'_Target__x__'`** | `'_Target__x__'` | `''` |
+| `'Trait'` | **`'_Target__x___'`** | `'_Target__x___'` | `''` |
+| `'Trait'` | **`'_Target__pkg.mod'`** | `'_Target__pkg.mod'` | `''` |
+| `'Trait'` | **`'_Target__pkg.mod_'`** | `'_Target__pkg.mod_'` | `''` |
+| `'Trait'` | **`'_Target__pkg.mod__'`** | `'_Target__pkg.mod__'` | `''` |
+| `'Trait'` | **`'_Target__pkg.mod___'`** | `'_Target__pkg.mod___'` | `''` |
 
-#### Vary `name`
-
-| name | expected | by |
-| --- | --- | --- |
-| `''` | `''` | compiler |
-| `'_'` | `''` | compiler |
-| `'__'` | `''` | compiler |
-| `'___'` | `''` | compiler |
-| `'x'` | `''` | compiler |
-| `'x_'` | `''` | compiler |
-| `'x__'` | `''` | compiler |
-| `'x___'` | `''` | compiler |
-| `'pkg.mod'` | `''` | compiler |
-| `'pkg.mod_'` | `''` | compiler |
-| `'pkg.mod__'` | `''` | compiler |
-| `'pkg.mod___'` | `''` | compiler |
-| `'____'` | `''` | compiler |
-| `'_x'` | `''` | compiler |
-| `'_x_'` | `''` | compiler |
-| `'_x__'` | `''` | compiler |
-| `'_x___'` | `''` | compiler |
-| `'_pkg.mod'` | `''` | compiler |
-| `'_pkg.mod_'` | `''` | compiler |
-| `'_pkg.mod__'` | `''` | compiler |
-| `'_pkg.mod___'` | `''` | compiler |
-| `'_____'` | `''` | compiler |
-| `'__x'` | `''` | compiler |
-| `'__x_'` | `''` | compiler |
-| `'__x__'` | `''` | compiler |
-| `'__x___'` | `''` | compiler |
-| `'__pkg.mod'` | `''` | compiler |
-| `'__pkg.mod_'` | `''` | compiler |
-| `'__pkg.mod__'` | `''` | compiler |
-| `'__pkg.mod___'` | `''` | compiler |
-| `'______'` | `''` | compiler |
-| `'___x'` | `''` | compiler |
-| `'___x_'` | `''` | compiler |
-| `'___x__'` | `''` | compiler |
-| `'___x___'` | `''` | compiler |
-| `'___pkg.mod'` | `''` | compiler |
-| `'___pkg.mod_'` | `''` | compiler |
-| `'___pkg.mod__'` | `''` | compiler |
-| `'___pkg.mod___'` | `''` | compiler |
-| `'_Trait__'` | `''` | compiler |
-| `'_Trait___'` | `''` | compiler |
-| `'_Trait____'` | `''` | compiler |
-| `'_Trait_____'` | `''` | compiler |
-| `'_Trait__x'` | `'__x'` | compiler |
-| `'_Trait__x_'` | `'__x_'` | compiler |
-| `'_Trait__x__'` | `''` | compiler |
-| `'_Trait__x___'` | `''` | compiler |
-| `'_Trait__pkg.mod'` | `''` | compiler |
-| `'_Trait__pkg.mod_'` | `''` | compiler |
-| `'_Trait__pkg.mod__'` | `''` | compiler |
-| `'_Trait__pkg.mod___'` | `''` | compiler |
-| `'_Target__'` | `''` | compiler |
-| `'_Target___'` | `''` | compiler |
-| `'_Target____'` | `''` | compiler |
-| `'_Target_____'` | `''` | compiler |
-| `'_Target__x'` | `''` | compiler |
-| `'_Target__x_'` | `''` | compiler |
-| `'_Target__x__'` | `''` | compiler |
-| `'_Target__x___'` | `''` | compiler |
-| `'_Target__pkg.mod'` | `''` | compiler |
-| `'_Target__pkg.mod_'` | `''` | compiler |
-| `'_Target__pkg.mod__'` | `''` | compiler |
-| `'_Target__pkg.mod___'` | `''` | compiler |
-
-### pygim::python_names::respelt
+### pygim::python_names::respelt / pygim::python_names::reowned
 
 `respelt(from, to, name)` — called by every build and the GCC 16 probe.
-
-| parameter | domain | how it is made | values |
-| --- | --- | --- | --- |
-| `from` | class names | manual: a plain name and a second one to move to; one and two leading underscores, which mangling drops; trailing underscores, which it keeps; only underscores, which mangle nothing; and the empty string, which is no class name at all | 7 |
-| `to` | class names | manual: a plain name and a second one to move to; one and two leading underscores, which mangling drops; trailing underscores, which it keeps; only underscores, which mangle nothing; and the empty string, which is no class name at all | 7 |
-| `name` | names | generated from shaped names = leading (4, manual) × stem (3, manual) × trailing (4, manual) and names spelt for an owner = owner (2, manual) × body (12, generated) | 63 |
-
-Product 3087, excluded 0; required 3087. Expected by: compiler 3019, compiler+contract 68.
-
-Baseline: `from` = `'Trait'`; `to` = `'Target'`; `name` = `'_Trait__x'`.
-
-#### Vary `from`
-
-| from | expected | by |
-| --- | --- | --- |
-| `'Trait'` | `'_Target__x'` | compiler |
-| `'Target'` | `None` | compiler |
-| `'_Trait'` | `'_Target__x'` | compiler |
-| `'__Trait'` | `'_Target__x'` | compiler |
-| `'Trait__'` | `None` | compiler |
-| `'__'` | `None` | compiler |
-| `''` | `None` | compiler+contract |
-
-#### Vary `to`
-
-| to | expected | by |
-| --- | --- | --- |
-| `'Trait'` | `'_Trait__x'` | compiler |
-| `'Target'` | `'_Target__x'` | compiler |
-| `'_Trait'` | `'_Trait__x'` | compiler |
-| `'__Trait'` | `'_Trait__x'` | compiler |
-| `'Trait__'` | `'_Trait____x'` | compiler |
-| `'__'` | `'__x'` | compiler |
-| `''` | `'__x'` | compiler+contract |
-
-#### Vary `name`
-
-| name | expected | by |
-| --- | --- | --- |
-| `''` | `None` | compiler |
-| `'_'` | `None` | compiler |
-| `'__'` | `None` | compiler |
-| `'___'` | `None` | compiler |
-| `'x'` | `None` | compiler |
-| `'x_'` | `None` | compiler |
-| `'x__'` | `None` | compiler |
-| `'x___'` | `None` | compiler |
-| `'pkg.mod'` | `None` | compiler |
-| `'pkg.mod_'` | `None` | compiler |
-| `'pkg.mod__'` | `None` | compiler |
-| `'pkg.mod___'` | `None` | compiler |
-| `'____'` | `None` | compiler |
-| `'_x'` | `None` | compiler |
-| `'_x_'` | `None` | compiler |
-| `'_x__'` | `None` | compiler |
-| `'_x___'` | `None` | compiler |
-| `'_pkg.mod'` | `None` | compiler |
-| `'_pkg.mod_'` | `None` | compiler |
-| `'_pkg.mod__'` | `None` | compiler |
-| `'_pkg.mod___'` | `None` | compiler |
-| `'_____'` | `None` | compiler |
-| `'__x'` | `None` | compiler |
-| `'__x_'` | `None` | compiler |
-| `'__x__'` | `None` | compiler |
-| `'__x___'` | `None` | compiler |
-| `'__pkg.mod'` | `None` | compiler |
-| `'__pkg.mod_'` | `None` | compiler |
-| `'__pkg.mod__'` | `None` | compiler |
-| `'__pkg.mod___'` | `None` | compiler |
-| `'______'` | `None` | compiler |
-| `'___x'` | `None` | compiler |
-| `'___x_'` | `None` | compiler |
-| `'___x__'` | `None` | compiler |
-| `'___x___'` | `None` | compiler |
-| `'___pkg.mod'` | `None` | compiler |
-| `'___pkg.mod_'` | `None` | compiler |
-| `'___pkg.mod__'` | `None` | compiler |
-| `'___pkg.mod___'` | `None` | compiler |
-| `'_Trait__'` | `None` | compiler |
-| `'_Trait___'` | `None` | compiler |
-| `'_Trait____'` | `None` | compiler |
-| `'_Trait_____'` | `None` | compiler |
-| `'_Trait__x'` | `'_Target__x'` | compiler |
-| `'_Trait__x_'` | `'_Target__x_'` | compiler |
-| `'_Trait__x__'` | `None` | compiler |
-| `'_Trait__x___'` | `None` | compiler |
-| `'_Trait__pkg.mod'` | `None` | compiler |
-| `'_Trait__pkg.mod_'` | `None` | compiler |
-| `'_Trait__pkg.mod__'` | `None` | compiler |
-| `'_Trait__pkg.mod___'` | `None` | compiler |
-| `'_Target__'` | `None` | compiler |
-| `'_Target___'` | `None` | compiler |
-| `'_Target____'` | `None` | compiler |
-| `'_Target_____'` | `None` | compiler |
-| `'_Target__x'` | `None` | compiler |
-| `'_Target__x_'` | `None` | compiler |
-| `'_Target__x__'` | `None` | compiler |
-| `'_Target__x___'` | `None` | compiler |
-| `'_Target__pkg.mod'` | `None` | compiler |
-| `'_Target__pkg.mod_'` | `None` | compiler |
-| `'_Target__pkg.mod__'` | `None` | compiler |
-| `'_Target__pkg.mod___'` | `None` | compiler |
-
-### pygim::python_names::reowned
 
 `reowned(from, to, name)` — called by every build and the GCC 16 probe.
 
@@ -518,101 +237,89 @@ Baseline: `from` = `'Trait'`; `to` = `'Target'`; `name` = `'_Trait__x'`.
 | `to` | class names | manual: a plain name and a second one to move to; one and two leading underscores, which mangling drops; trailing underscores, which it keeps; only underscores, which mangle nothing; and the empty string, which is no class name at all | 7 |
 | `name` | names | generated from shaped names = leading (4, manual) × stem (3, manual) × trailing (4, manual) and names spelt for an owner = owner (2, manual) × body (12, generated) | 63 |
 
-Product 3087, excluded 0; required 3087. Expected by: compiler 3019, compiler+contract 68.
+`respelt(from, to, name)`: product 3087, excluded 0; required 3087. Expectation sources: compiler 3019, compiler+contract 68.
 
-Baseline: `from` = `'Trait'`; `to` = `'Target'`; `name` = `'_Trait__x'`.
+`reowned(from, to, name)`: product 3087, excluded 0; required 3087. Expectation sources: compiler 3019, compiler+contract 68.
 
-#### Vary `from`
+The first row is the shared baseline. Each later row changes one input from that baseline; the changed cell is bold. All argument columns are shown. These are comparisons drawn from the full generated product counted above, not its complete listing.
 
-| from | expected | by |
-| --- | --- | --- |
-| `'Trait'` | `'_Target__x'` | compiler |
-| `'Target'` | `'_Trait__x'` | compiler |
-| `'_Trait'` | `'_Target__x'` | compiler |
-| `'__Trait'` | `'_Target__x'` | compiler |
-| `'Trait__'` | `'_Trait__x'` | compiler |
-| `'__'` | `'_Trait__x'` | compiler |
-| `''` | `'_Trait__x'` | compiler+contract |
-
-#### Vary `to`
-
-| to | expected | by |
-| --- | --- | --- |
-| `'Trait'` | `'_Trait__x'` | compiler |
-| `'Target'` | `'_Target__x'` | compiler |
-| `'_Trait'` | `'_Trait__x'` | compiler |
-| `'__Trait'` | `'_Trait__x'` | compiler |
-| `'Trait__'` | `'_Trait____x'` | compiler |
-| `'__'` | `'__x'` | compiler |
-| `''` | `'__x'` | compiler+contract |
-
-#### Vary `name`
-
-| name | expected | by |
-| --- | --- | --- |
-| `''` | `''` | compiler |
-| `'_'` | `'_'` | compiler |
-| `'__'` | `'__'` | compiler |
-| `'___'` | `'___'` | compiler |
-| `'x'` | `'x'` | compiler |
-| `'x_'` | `'x_'` | compiler |
-| `'x__'` | `'x__'` | compiler |
-| `'x___'` | `'x___'` | compiler |
-| `'pkg.mod'` | `'pkg.mod'` | compiler |
-| `'pkg.mod_'` | `'pkg.mod_'` | compiler |
-| `'pkg.mod__'` | `'pkg.mod__'` | compiler |
-| `'pkg.mod___'` | `'pkg.mod___'` | compiler |
-| `'____'` | `'____'` | compiler |
-| `'_x'` | `'_x'` | compiler |
-| `'_x_'` | `'_x_'` | compiler |
-| `'_x__'` | `'_x__'` | compiler |
-| `'_x___'` | `'_x___'` | compiler |
-| `'_pkg.mod'` | `'_pkg.mod'` | compiler |
-| `'_pkg.mod_'` | `'_pkg.mod_'` | compiler |
-| `'_pkg.mod__'` | `'_pkg.mod__'` | compiler |
-| `'_pkg.mod___'` | `'_pkg.mod___'` | compiler |
-| `'_____'` | `'_____'` | compiler |
-| `'__x'` | `'__x'` | compiler |
-| `'__x_'` | `'__x_'` | compiler |
-| `'__x__'` | `'__x__'` | compiler |
-| `'__x___'` | `'__x___'` | compiler |
-| `'__pkg.mod'` | `'__pkg.mod'` | compiler |
-| `'__pkg.mod_'` | `'__pkg.mod_'` | compiler |
-| `'__pkg.mod__'` | `'__pkg.mod__'` | compiler |
-| `'__pkg.mod___'` | `'__pkg.mod___'` | compiler |
-| `'______'` | `'______'` | compiler |
-| `'___x'` | `'___x'` | compiler |
-| `'___x_'` | `'___x_'` | compiler |
-| `'___x__'` | `'___x__'` | compiler |
-| `'___x___'` | `'___x___'` | compiler |
-| `'___pkg.mod'` | `'___pkg.mod'` | compiler |
-| `'___pkg.mod_'` | `'___pkg.mod_'` | compiler |
-| `'___pkg.mod__'` | `'___pkg.mod__'` | compiler |
-| `'___pkg.mod___'` | `'___pkg.mod___'` | compiler |
-| `'_Trait__'` | `'_Trait__'` | compiler |
-| `'_Trait___'` | `'_Trait___'` | compiler |
-| `'_Trait____'` | `'_Trait____'` | compiler |
-| `'_Trait_____'` | `'_Trait_____'` | compiler |
-| `'_Trait__x'` | `'_Target__x'` | compiler |
-| `'_Trait__x_'` | `'_Target__x_'` | compiler |
-| `'_Trait__x__'` | `'_Trait__x__'` | compiler |
-| `'_Trait__x___'` | `'_Trait__x___'` | compiler |
-| `'_Trait__pkg.mod'` | `'_Trait__pkg.mod'` | compiler |
-| `'_Trait__pkg.mod_'` | `'_Trait__pkg.mod_'` | compiler |
-| `'_Trait__pkg.mod__'` | `'_Trait__pkg.mod__'` | compiler |
-| `'_Trait__pkg.mod___'` | `'_Trait__pkg.mod___'` | compiler |
-| `'_Target__'` | `'_Target__'` | compiler |
-| `'_Target___'` | `'_Target___'` | compiler |
-| `'_Target____'` | `'_Target____'` | compiler |
-| `'_Target_____'` | `'_Target_____'` | compiler |
-| `'_Target__x'` | `'_Target__x'` | compiler |
-| `'_Target__x_'` | `'_Target__x_'` | compiler |
-| `'_Target__x__'` | `'_Target__x__'` | compiler |
-| `'_Target__x___'` | `'_Target__x___'` | compiler |
-| `'_Target__pkg.mod'` | `'_Target__pkg.mod'` | compiler |
-| `'_Target__pkg.mod_'` | `'_Target__pkg.mod_'` | compiler |
-| `'_Target__pkg.mod__'` | `'_Target__pkg.mod__'` | compiler |
-| `'_Target__pkg.mod___'` | `'_Target__pkg.mod___'` | compiler |
+| from | to | name | expected respelt | expected reowned |
+| --- | --- | --- | --- | --- |
+| `'Trait'` | `'Target'` | `'_Trait__x'` | `'_Target__x'` | `'_Target__x'` |
+| **`'Target'`** | `'Target'` | `'_Trait__x'` | `None` | `'_Trait__x'` |
+| **`'_Trait'`** | `'Target'` | `'_Trait__x'` | `'_Target__x'` | `'_Target__x'` |
+| **`'__Trait'`** | `'Target'` | `'_Trait__x'` | `'_Target__x'` | `'_Target__x'` |
+| **`'Trait__'`** | `'Target'` | `'_Trait__x'` | `None` | `'_Trait__x'` |
+| **`'__'`** | `'Target'` | `'_Trait__x'` | `None` | `'_Trait__x'` |
+| **`''`** | `'Target'` | `'_Trait__x'` | `None` | `'_Trait__x'` |
+| `'Trait'` | **`'Trait'`** | `'_Trait__x'` | `'_Trait__x'` | `'_Trait__x'` |
+| `'Trait'` | **`'_Trait'`** | `'_Trait__x'` | `'_Trait__x'` | `'_Trait__x'` |
+| `'Trait'` | **`'__Trait'`** | `'_Trait__x'` | `'_Trait__x'` | `'_Trait__x'` |
+| `'Trait'` | **`'Trait__'`** | `'_Trait__x'` | `'_Trait____x'` | `'_Trait____x'` |
+| `'Trait'` | **`'__'`** | `'_Trait__x'` | `'__x'` | `'__x'` |
+| `'Trait'` | **`''`** | `'_Trait__x'` | `'__x'` | `'__x'` |
+| `'Trait'` | `'Target'` | **`''`** | `None` | `''` |
+| `'Trait'` | `'Target'` | **`'_'`** | `None` | `'_'` |
+| `'Trait'` | `'Target'` | **`'__'`** | `None` | `'__'` |
+| `'Trait'` | `'Target'` | **`'___'`** | `None` | `'___'` |
+| `'Trait'` | `'Target'` | **`'x'`** | `None` | `'x'` |
+| `'Trait'` | `'Target'` | **`'x_'`** | `None` | `'x_'` |
+| `'Trait'` | `'Target'` | **`'x__'`** | `None` | `'x__'` |
+| `'Trait'` | `'Target'` | **`'x___'`** | `None` | `'x___'` |
+| `'Trait'` | `'Target'` | **`'pkg.mod'`** | `None` | `'pkg.mod'` |
+| `'Trait'` | `'Target'` | **`'pkg.mod_'`** | `None` | `'pkg.mod_'` |
+| `'Trait'` | `'Target'` | **`'pkg.mod__'`** | `None` | `'pkg.mod__'` |
+| `'Trait'` | `'Target'` | **`'pkg.mod___'`** | `None` | `'pkg.mod___'` |
+| `'Trait'` | `'Target'` | **`'____'`** | `None` | `'____'` |
+| `'Trait'` | `'Target'` | **`'_x'`** | `None` | `'_x'` |
+| `'Trait'` | `'Target'` | **`'_x_'`** | `None` | `'_x_'` |
+| `'Trait'` | `'Target'` | **`'_x__'`** | `None` | `'_x__'` |
+| `'Trait'` | `'Target'` | **`'_x___'`** | `None` | `'_x___'` |
+| `'Trait'` | `'Target'` | **`'_pkg.mod'`** | `None` | `'_pkg.mod'` |
+| `'Trait'` | `'Target'` | **`'_pkg.mod_'`** | `None` | `'_pkg.mod_'` |
+| `'Trait'` | `'Target'` | **`'_pkg.mod__'`** | `None` | `'_pkg.mod__'` |
+| `'Trait'` | `'Target'` | **`'_pkg.mod___'`** | `None` | `'_pkg.mod___'` |
+| `'Trait'` | `'Target'` | **`'_____'`** | `None` | `'_____'` |
+| `'Trait'` | `'Target'` | **`'__x'`** | `None` | `'__x'` |
+| `'Trait'` | `'Target'` | **`'__x_'`** | `None` | `'__x_'` |
+| `'Trait'` | `'Target'` | **`'__x__'`** | `None` | `'__x__'` |
+| `'Trait'` | `'Target'` | **`'__x___'`** | `None` | `'__x___'` |
+| `'Trait'` | `'Target'` | **`'__pkg.mod'`** | `None` | `'__pkg.mod'` |
+| `'Trait'` | `'Target'` | **`'__pkg.mod_'`** | `None` | `'__pkg.mod_'` |
+| `'Trait'` | `'Target'` | **`'__pkg.mod__'`** | `None` | `'__pkg.mod__'` |
+| `'Trait'` | `'Target'` | **`'__pkg.mod___'`** | `None` | `'__pkg.mod___'` |
+| `'Trait'` | `'Target'` | **`'______'`** | `None` | `'______'` |
+| `'Trait'` | `'Target'` | **`'___x'`** | `None` | `'___x'` |
+| `'Trait'` | `'Target'` | **`'___x_'`** | `None` | `'___x_'` |
+| `'Trait'` | `'Target'` | **`'___x__'`** | `None` | `'___x__'` |
+| `'Trait'` | `'Target'` | **`'___x___'`** | `None` | `'___x___'` |
+| `'Trait'` | `'Target'` | **`'___pkg.mod'`** | `None` | `'___pkg.mod'` |
+| `'Trait'` | `'Target'` | **`'___pkg.mod_'`** | `None` | `'___pkg.mod_'` |
+| `'Trait'` | `'Target'` | **`'___pkg.mod__'`** | `None` | `'___pkg.mod__'` |
+| `'Trait'` | `'Target'` | **`'___pkg.mod___'`** | `None` | `'___pkg.mod___'` |
+| `'Trait'` | `'Target'` | **`'_Trait__'`** | `None` | `'_Trait__'` |
+| `'Trait'` | `'Target'` | **`'_Trait___'`** | `None` | `'_Trait___'` |
+| `'Trait'` | `'Target'` | **`'_Trait____'`** | `None` | `'_Trait____'` |
+| `'Trait'` | `'Target'` | **`'_Trait_____'`** | `None` | `'_Trait_____'` |
+| `'Trait'` | `'Target'` | **`'_Trait__x_'`** | `'_Target__x_'` | `'_Target__x_'` |
+| `'Trait'` | `'Target'` | **`'_Trait__x__'`** | `None` | `'_Trait__x__'` |
+| `'Trait'` | `'Target'` | **`'_Trait__x___'`** | `None` | `'_Trait__x___'` |
+| `'Trait'` | `'Target'` | **`'_Trait__pkg.mod'`** | `None` | `'_Trait__pkg.mod'` |
+| `'Trait'` | `'Target'` | **`'_Trait__pkg.mod_'`** | `None` | `'_Trait__pkg.mod_'` |
+| `'Trait'` | `'Target'` | **`'_Trait__pkg.mod__'`** | `None` | `'_Trait__pkg.mod__'` |
+| `'Trait'` | `'Target'` | **`'_Trait__pkg.mod___'`** | `None` | `'_Trait__pkg.mod___'` |
+| `'Trait'` | `'Target'` | **`'_Target__'`** | `None` | `'_Target__'` |
+| `'Trait'` | `'Target'` | **`'_Target___'`** | `None` | `'_Target___'` |
+| `'Trait'` | `'Target'` | **`'_Target____'`** | `None` | `'_Target____'` |
+| `'Trait'` | `'Target'` | **`'_Target_____'`** | `None` | `'_Target_____'` |
+| `'Trait'` | `'Target'` | **`'_Target__x'`** | `None` | `'_Target__x'` |
+| `'Trait'` | `'Target'` | **`'_Target__x_'`** | `None` | `'_Target__x_'` |
+| `'Trait'` | `'Target'` | **`'_Target__x__'`** | `None` | `'_Target__x__'` |
+| `'Trait'` | `'Target'` | **`'_Target__x___'`** | `None` | `'_Target__x___'` |
+| `'Trait'` | `'Target'` | **`'_Target__pkg.mod'`** | `None` | `'_Target__pkg.mod'` |
+| `'Trait'` | `'Target'` | **`'_Target__pkg.mod_'`** | `None` | `'_Target__pkg.mod_'` |
+| `'Trait'` | `'Target'` | **`'_Target__pkg.mod__'`** | `None` | `'_Target__pkg.mod__'` |
+| `'Trait'` | `'Target'` | **`'_Target__pkg.mod___'`** | `None` | `'_Target__pkg.mod___'` |
 
 ### pygim::python_names::requalified
 
@@ -624,71 +331,57 @@ Baseline: `from` = `'Trait'`; `to` = `'Target'`; `name` = `'_Trait__x'`.
 | `to` | class names | manual: a plain name and a second one to move to; one and two leading underscores, which mangling drops; trailing underscores, which it keeps; only underscores, which mangle nothing; and the empty string, which is no class name at all | 7 |
 | `qualname` | qualified names | generated from owned qualified names = owner (7, manual) × tail (4, manual) and unowned qualified names (5, manual) | 33 |
 
-Product 1617, excluded 0; required 1617. Expected by: compiler 144, contract 1473.
+`requalified(from, to, qualname)`: product 1617, excluded 0; required 1617. Expectation sources: compiler 144, contract 1473.
 
-Baseline: `from` = `'Trait'`; `to` = `'Target'`; `qualname` = `'Trait.f'`.
+The first row is the shared baseline. Each later row changes one input from that baseline; the changed cell is bold. All argument columns are shown. These are comparisons drawn from the full generated product counted above, not its complete listing.
 
-#### Vary `from`
-
-| from | expected | by |
-| --- | --- | --- |
-| `'Trait'` | `'Target.f'` | compiler |
-| `'Target'` | `'Trait.f'` | contract |
-| `'_Trait'` | `'Trait.f'` | contract |
-| `'__Trait'` | `'Trait.f'` | contract |
-| `'Trait__'` | `'Trait.f'` | contract |
-| `'__'` | `'Trait.f'` | contract |
-| `''` | `'Trait.f'` | contract |
-
-#### Vary `to`
-
-| to | expected | by |
-| --- | --- | --- |
-| `'Trait'` | `'Trait.f'` | compiler |
-| `'Target'` | `'Target.f'` | compiler |
-| `'_Trait'` | `'_Trait.f'` | compiler |
-| `'__Trait'` | `'__Trait.f'` | compiler |
-| `'Trait__'` | `'Trait__.f'` | compiler |
-| `'__'` | `'__.f'` | compiler |
-| `''` | `'.f'` | contract |
-
-#### Vary `qualname`
-
-| qualname | expected | by |
-| --- | --- | --- |
-| `'Trait.f'` | `'Target.f'` | compiler |
-| `'Trait.f.<locals>.<lambda>'` | `'Target.f.<locals>.<lambda>'` | compiler |
-| `'Trait.f.<locals>.g'` | `'Target.f.<locals>.g'` | compiler |
-| `'Trait.Inner.f'` | `'Target.Inner.f'` | compiler |
-| `'Target.f'` | `'Target.f'` | contract |
-| `'Target.f.<locals>.<lambda>'` | `'Target.f.<locals>.<lambda>'` | contract |
-| `'Target.f.<locals>.g'` | `'Target.f.<locals>.g'` | contract |
-| `'Target.Inner.f'` | `'Target.Inner.f'` | contract |
-| `'_Trait.f'` | `'_Trait.f'` | contract |
-| `'_Trait.f.<locals>.<lambda>'` | `'_Trait.f.<locals>.<lambda>'` | contract |
-| `'_Trait.f.<locals>.g'` | `'_Trait.f.<locals>.g'` | contract |
-| `'_Trait.Inner.f'` | `'_Trait.Inner.f'` | contract |
-| `'__Trait.f'` | `'__Trait.f'` | contract |
-| `'__Trait.f.<locals>.<lambda>'` | `'__Trait.f.<locals>.<lambda>'` | contract |
-| `'__Trait.f.<locals>.g'` | `'__Trait.f.<locals>.g'` | contract |
-| `'__Trait.Inner.f'` | `'__Trait.Inner.f'` | contract |
-| `'Trait__.f'` | `'Trait__.f'` | contract |
-| `'Trait__.f.<locals>.<lambda>'` | `'Trait__.f.<locals>.<lambda>'` | contract |
-| `'Trait__.f.<locals>.g'` | `'Trait__.f.<locals>.g'` | contract |
-| `'Trait__.Inner.f'` | `'Trait__.Inner.f'` | contract |
-| `'__.f'` | `'__.f'` | contract |
-| `'__.f.<locals>.<lambda>'` | `'__.f.<locals>.<lambda>'` | contract |
-| `'__.f.<locals>.g'` | `'__.f.<locals>.g'` | contract |
-| `'__.Inner.f'` | `'__.Inner.f'` | contract |
-| `'.f'` | `'.f'` | contract |
-| `'.f.<locals>.<lambda>'` | `'.f.<locals>.<lambda>'` | contract |
-| `'.f.<locals>.g'` | `'.f.<locals>.g'` | contract |
-| `'.Inner.f'` | `'.Inner.f'` | contract |
-| `'f'` | `'f'` | contract |
-| `'TraitX.f'` | `'TraitX.f'` | contract |
-| `'Trait'` | `'Trait'` | contract |
-| `'Trait.'` | `'Target.'` | contract |
-| `''` | `''` | contract |
+| from | to | qualname | expected requalified |
+| --- | --- | --- | --- |
+| `'Trait'` | `'Target'` | `'Trait.f'` | `'Target.f'` |
+| **`'Target'`** | `'Target'` | `'Trait.f'` | `'Trait.f'` |
+| **`'_Trait'`** | `'Target'` | `'Trait.f'` | `'Trait.f'` |
+| **`'__Trait'`** | `'Target'` | `'Trait.f'` | `'Trait.f'` |
+| **`'Trait__'`** | `'Target'` | `'Trait.f'` | `'Trait.f'` |
+| **`'__'`** | `'Target'` | `'Trait.f'` | `'Trait.f'` |
+| **`''`** | `'Target'` | `'Trait.f'` | `'Trait.f'` |
+| `'Trait'` | **`'Trait'`** | `'Trait.f'` | `'Trait.f'` |
+| `'Trait'` | **`'_Trait'`** | `'Trait.f'` | `'_Trait.f'` |
+| `'Trait'` | **`'__Trait'`** | `'Trait.f'` | `'__Trait.f'` |
+| `'Trait'` | **`'Trait__'`** | `'Trait.f'` | `'Trait__.f'` |
+| `'Trait'` | **`'__'`** | `'Trait.f'` | `'__.f'` |
+| `'Trait'` | **`''`** | `'Trait.f'` | `'.f'` |
+| `'Trait'` | `'Target'` | **`'Trait.f.<locals>.<lambda>'`** | `'Target.f.<locals>.<lambda>'` |
+| `'Trait'` | `'Target'` | **`'Trait.f.<locals>.g'`** | `'Target.f.<locals>.g'` |
+| `'Trait'` | `'Target'` | **`'Trait.Inner.f'`** | `'Target.Inner.f'` |
+| `'Trait'` | `'Target'` | **`'Target.f'`** | `'Target.f'` |
+| `'Trait'` | `'Target'` | **`'Target.f.<locals>.<lambda>'`** | `'Target.f.<locals>.<lambda>'` |
+| `'Trait'` | `'Target'` | **`'Target.f.<locals>.g'`** | `'Target.f.<locals>.g'` |
+| `'Trait'` | `'Target'` | **`'Target.Inner.f'`** | `'Target.Inner.f'` |
+| `'Trait'` | `'Target'` | **`'_Trait.f'`** | `'_Trait.f'` |
+| `'Trait'` | `'Target'` | **`'_Trait.f.<locals>.<lambda>'`** | `'_Trait.f.<locals>.<lambda>'` |
+| `'Trait'` | `'Target'` | **`'_Trait.f.<locals>.g'`** | `'_Trait.f.<locals>.g'` |
+| `'Trait'` | `'Target'` | **`'_Trait.Inner.f'`** | `'_Trait.Inner.f'` |
+| `'Trait'` | `'Target'` | **`'__Trait.f'`** | `'__Trait.f'` |
+| `'Trait'` | `'Target'` | **`'__Trait.f.<locals>.<lambda>'`** | `'__Trait.f.<locals>.<lambda>'` |
+| `'Trait'` | `'Target'` | **`'__Trait.f.<locals>.g'`** | `'__Trait.f.<locals>.g'` |
+| `'Trait'` | `'Target'` | **`'__Trait.Inner.f'`** | `'__Trait.Inner.f'` |
+| `'Trait'` | `'Target'` | **`'Trait__.f'`** | `'Trait__.f'` |
+| `'Trait'` | `'Target'` | **`'Trait__.f.<locals>.<lambda>'`** | `'Trait__.f.<locals>.<lambda>'` |
+| `'Trait'` | `'Target'` | **`'Trait__.f.<locals>.g'`** | `'Trait__.f.<locals>.g'` |
+| `'Trait'` | `'Target'` | **`'Trait__.Inner.f'`** | `'Trait__.Inner.f'` |
+| `'Trait'` | `'Target'` | **`'__.f'`** | `'__.f'` |
+| `'Trait'` | `'Target'` | **`'__.f.<locals>.<lambda>'`** | `'__.f.<locals>.<lambda>'` |
+| `'Trait'` | `'Target'` | **`'__.f.<locals>.g'`** | `'__.f.<locals>.g'` |
+| `'Trait'` | `'Target'` | **`'__.Inner.f'`** | `'__.Inner.f'` |
+| `'Trait'` | `'Target'` | **`'.f'`** | `'.f'` |
+| `'Trait'` | `'Target'` | **`'.f.<locals>.<lambda>'`** | `'.f.<locals>.<lambda>'` |
+| `'Trait'` | `'Target'` | **`'.f.<locals>.g'`** | `'.f.<locals>.g'` |
+| `'Trait'` | `'Target'` | **`'.Inner.f'`** | `'.Inner.f'` |
+| `'Trait'` | `'Target'` | **`'f'`** | `'f'` |
+| `'Trait'` | `'Target'` | **`'TraitX.f'`** | `'TraitX.f'` |
+| `'Trait'` | `'Target'` | **`'Trait'`** | `'Trait'` |
+| `'Trait'` | `'Target'` | **`'Trait.'`** | `'Target.'` |
+| `'Trait'` | `'Target'` | **`''`** | `''` |
 
 ## The Python API
 
@@ -705,70 +398,50 @@ Classes and code objects are made by factories from the data in each cell: a cod
 | `owner` | owners of the code | manual: the class the code is compiled in: a plain name, a leading underscore mangling drops, only underscores (which mangle nothing) | 3 |
 | `step` | one step or none | generated from no step (1, manual) and steps = source (5, manual) × target (5, manual) | 26 |
 
-Product 3276, excluded 390 — a dotted name is written only by an import (390); required 2886. Expected by: compiler 2886.
+`CodeBuilder(template(name) compiled in class owner).reown(*step).build()`: product 3276, excluded 390 — a dotted name is written only by an import (390); required 2886. Expectation sources: compiler 2886.
 
-Baseline: `template` = `'attribute'`; `name` = `'__x'`; `owner` = `'Trait'`; `step` = `('Trait', 'Target')`.
+The first row is the shared baseline. Each later row changes one input from that baseline; the changed cell is bold. All argument columns are shown. These are comparisons drawn from the full generated product counted above, not its complete listing.
 
-#### Vary `template`
-
-| template | expected | by |
-| --- | --- | --- |
-| `'attribute'` | `('_Target__x',) Target.f` | compiler |
-| `'global'` | `('_Target__x',) Target.f` | compiler |
-| `'lambda'` | `() Target.f` · `('_Target__x',) Target.f.<locals>.<lambda>` | compiler |
-| `'nested def'` | `() Target.f` · `('_Target__x',) Target.f.<locals>.g` | compiler |
-| `'import'` | `('_Target__x',) Target.f` ⚠ divergence | compiler |
-| `'local'` | `() Target.f` ⚠ divergence | compiler |
-
-#### Vary `name`
-
-| name | expected | by |
-| --- | --- | --- |
-| `'__x'` | `('_Target__x',) Target.f` | compiler |
-| `'__x__'` | `('__x__',) Target.f` | compiler |
-| `'_x'` | `('_x',) Target.f` | compiler |
-| `'x'` | `('x',) Target.f` | compiler |
-| `'_Trait__x'` | `('_Target__x',) Target.f` | compiler |
-| `'_Target__x'` | `('_Target__x',) Target.f` | compiler |
-
-#### Vary `owner`
-
-| owner | expected | by |
-| --- | --- | --- |
-| `'Trait'` | `('_Target__x',) Target.f` | compiler |
-| `'_Trait'` | `('_Target__x',) _Trait.f` | compiler |
-| `'__'` | `('__x',) __.f` | compiler |
-
-#### Vary `step`
-
-| step | expected | by |
-| --- | --- | --- |
-| `None` | `('_Trait__x',) Trait.f` | compiler |
-| `('Trait', 'Trait')` | `('_Trait__x',) Trait.f` | compiler |
-| `('Trait', '_Trait')` | `('_Trait__x',) _Trait.f` | compiler |
-| `('Trait', '__')` | `('__x',) __.f` | compiler |
-| `('Trait', 'Target')` | `('_Target__x',) Target.f` | compiler |
-| `('Trait', 'Outer.Target')` | `('_Target__x',) Outer.Target.f` | compiler |
-| `('_Trait', 'Trait')` | `('_Trait__x',) Trait.f` | compiler |
-| `('_Trait', '_Trait')` | `('_Trait__x',) Trait.f` | compiler |
-| `('_Trait', '__')` | `('__x',) Trait.f` | compiler |
-| `('_Trait', 'Target')` | `('_Target__x',) Trait.f` | compiler |
-| `('_Trait', 'Outer.Target')` | `('_Target__x',) Trait.f` | compiler |
-| `('__', 'Trait')` | `('_Trait__x',) Trait.f` | compiler |
-| `('__', '_Trait')` | `('_Trait__x',) Trait.f` | compiler |
-| `('__', '__')` | `('_Trait__x',) Trait.f` | compiler |
-| `('__', 'Target')` | `('_Trait__x',) Trait.f` | compiler |
-| `('__', 'Outer.Target')` | `('_Trait__x',) Trait.f` | compiler |
-| `('Target', 'Trait')` | `('_Trait__x',) Trait.f` | compiler |
-| `('Target', '_Trait')` | `('_Trait__x',) Trait.f` | compiler |
-| `('Target', '__')` | `('_Trait__x',) Trait.f` | compiler |
-| `('Target', 'Target')` | `('_Trait__x',) Trait.f` | compiler |
-| `('Target', 'Outer.Target')` | `('_Trait__x',) Trait.f` | compiler |
-| `('Outer.Target', 'Trait')` | `('_Trait__x',) Trait.f` | compiler |
-| `('Outer.Target', '_Trait')` | `('_Trait__x',) Trait.f` | compiler |
-| `('Outer.Target', '__')` | `('_Trait__x',) Trait.f` | compiler |
-| `('Outer.Target', 'Target')` | `('_Trait__x',) Trait.f` | compiler |
-| `('Outer.Target', 'Outer.Target')` | `('_Trait__x',) Trait.f` | compiler |
+| template | name | owner | step | expected pygim.traits.CodeBuilder: one step |
+| --- | --- | --- | --- | --- |
+| `'attribute'` | `'__x'` | `'Trait'` | `('Trait', 'Target')` | `('_Target__x',) Target.f` |
+| **`'global'`** | `'__x'` | `'Trait'` | `('Trait', 'Target')` | `('_Target__x',) Target.f` |
+| **`'lambda'`** | `'__x'` | `'Trait'` | `('Trait', 'Target')` | `() Target.f` · `('_Target__x',) Target.f.<locals>.<lambda>` |
+| **`'nested def'`** | `'__x'` | `'Trait'` | `('Trait', 'Target')` | `() Target.f` · `('_Target__x',) Target.f.<locals>.g` |
+| **`'import'`** | `'__x'` | `'Trait'` | `('Trait', 'Target')` | `('_Target__x',) Target.f` ⚠ divergence |
+| **`'local'`** | `'__x'` | `'Trait'` | `('Trait', 'Target')` | `() Target.f` ⚠ divergence |
+| `'attribute'` | **`'__x__'`** | `'Trait'` | `('Trait', 'Target')` | `('__x__',) Target.f` |
+| `'attribute'` | **`'_x'`** | `'Trait'` | `('Trait', 'Target')` | `('_x',) Target.f` |
+| `'attribute'` | **`'x'`** | `'Trait'` | `('Trait', 'Target')` | `('x',) Target.f` |
+| `'attribute'` | **`'_Trait__x'`** | `'Trait'` | `('Trait', 'Target')` | `('_Target__x',) Target.f` |
+| `'attribute'` | **`'_Target__x'`** | `'Trait'` | `('Trait', 'Target')` | `('_Target__x',) Target.f` |
+| `'attribute'` | `'__x'` | **`'_Trait'`** | `('Trait', 'Target')` | `('_Target__x',) _Trait.f` |
+| `'attribute'` | `'__x'` | **`'__'`** | `('Trait', 'Target')` | `('__x',) __.f` |
+| `'attribute'` | `'__x'` | `'Trait'` | **`None`** | `('_Trait__x',) Trait.f` |
+| `'attribute'` | `'__x'` | `'Trait'` | **`('Trait', 'Trait')`** | `('_Trait__x',) Trait.f` |
+| `'attribute'` | `'__x'` | `'Trait'` | **`('Trait', '_Trait')`** | `('_Trait__x',) _Trait.f` |
+| `'attribute'` | `'__x'` | `'Trait'` | **`('Trait', '__')`** | `('__x',) __.f` |
+| `'attribute'` | `'__x'` | `'Trait'` | **`('Trait', 'Outer.Target')`** | `('_Target__x',) Outer.Target.f` |
+| `'attribute'` | `'__x'` | `'Trait'` | **`('_Trait', 'Trait')`** | `('_Trait__x',) Trait.f` |
+| `'attribute'` | `'__x'` | `'Trait'` | **`('_Trait', '_Trait')`** | `('_Trait__x',) Trait.f` |
+| `'attribute'` | `'__x'` | `'Trait'` | **`('_Trait', '__')`** | `('__x',) Trait.f` |
+| `'attribute'` | `'__x'` | `'Trait'` | **`('_Trait', 'Target')`** | `('_Target__x',) Trait.f` |
+| `'attribute'` | `'__x'` | `'Trait'` | **`('_Trait', 'Outer.Target')`** | `('_Target__x',) Trait.f` |
+| `'attribute'` | `'__x'` | `'Trait'` | **`('__', 'Trait')`** | `('_Trait__x',) Trait.f` |
+| `'attribute'` | `'__x'` | `'Trait'` | **`('__', '_Trait')`** | `('_Trait__x',) Trait.f` |
+| `'attribute'` | `'__x'` | `'Trait'` | **`('__', '__')`** | `('_Trait__x',) Trait.f` |
+| `'attribute'` | `'__x'` | `'Trait'` | **`('__', 'Target')`** | `('_Trait__x',) Trait.f` |
+| `'attribute'` | `'__x'` | `'Trait'` | **`('__', 'Outer.Target')`** | `('_Trait__x',) Trait.f` |
+| `'attribute'` | `'__x'` | `'Trait'` | **`('Target', 'Trait')`** | `('_Trait__x',) Trait.f` |
+| `'attribute'` | `'__x'` | `'Trait'` | **`('Target', '_Trait')`** | `('_Trait__x',) Trait.f` |
+| `'attribute'` | `'__x'` | `'Trait'` | **`('Target', '__')`** | `('_Trait__x',) Trait.f` |
+| `'attribute'` | `'__x'` | `'Trait'` | **`('Target', 'Target')`** | `('_Trait__x',) Trait.f` |
+| `'attribute'` | `'__x'` | `'Trait'` | **`('Target', 'Outer.Target')`** | `('_Trait__x',) Trait.f` |
+| `'attribute'` | `'__x'` | `'Trait'` | **`('Outer.Target', 'Trait')`** | `('_Trait__x',) Trait.f` |
+| `'attribute'` | `'__x'` | `'Trait'` | **`('Outer.Target', '_Trait')`** | `('_Trait__x',) Trait.f` |
+| `'attribute'` | `'__x'` | `'Trait'` | **`('Outer.Target', '__')`** | `('_Trait__x',) Trait.f` |
+| `'attribute'` | `'__x'` | `'Trait'` | **`('Outer.Target', 'Target')`** | `('_Trait__x',) Trait.f` |
+| `'attribute'` | `'__x'` | `'Trait'` | **`('Outer.Target', 'Outer.Target')`** | `('_Trait__x',) Trait.f` |
 
 ### pygim.traits.CodeBuilder: two steps
 
@@ -783,86 +456,66 @@ A reduction: every chain of two steps, crossed with the attribute template only 
 | `steps[0]` | steps | generated: steps = source (5, manual) × target (5, manual) | 25 |
 | `steps[1]` | steps | generated: steps = source (5, manual) × target (5, manual) | 25 |
 
-Product 7500, excluded 0; required 7500. Expected by: compiler 7500.
+`CodeBuilder(attribute(name) compiled in class owner).reown(*steps[0]).reown(*steps[1]).build()`: product 7500, excluded 0; required 7500. Expectation sources: compiler 7500.
 
-Baseline: `name` = `'__x'`; `owner` = `'Trait'`; `steps[0]` = `('Trait', 'Target')`; `steps[1]` = `('Target', 'Outer.Target')`.
+The first row is the shared baseline. Each later row changes one input from that baseline; the changed cell is bold. All argument columns are shown. These are comparisons drawn from the full generated product counted above, not its complete listing.
 
-#### Vary `name`
-
-| name | expected | by |
-| --- | --- | --- |
-| `'__x'` | `('_Target__x',) Outer.Target.f` | compiler |
-| `'_Trait__x'` | `('_Target__x',) Outer.Target.f` | compiler |
-| `'_Target__x'` | `('_Target__x',) Outer.Target.f` | compiler |
-| `'x'` | `('x',) Outer.Target.f` | compiler |
-
-#### Vary `owner`
-
-| owner | expected | by |
-| --- | --- | --- |
-| `'Trait'` | `('_Target__x',) Outer.Target.f` | compiler |
-| `'_Trait'` | `('_Target__x',) _Trait.f` | compiler |
-| `'__'` | `('__x',) __.f` | compiler |
-
-#### Vary `steps[0]`
-
-| steps[0] | expected | by |
-| --- | --- | --- |
-| `('Trait', 'Trait')` | `('_Trait__x',) Trait.f` | compiler |
-| `('Trait', '_Trait')` | `('_Trait__x',) _Trait.f` | compiler |
-| `('Trait', '__')` | `('__x',) __.f` | compiler |
-| `('Trait', 'Target')` | `('_Target__x',) Outer.Target.f` | compiler |
-| `('Trait', 'Outer.Target')` | `('_Target__x',) Outer.Target.f` | compiler |
-| `('_Trait', 'Trait')` | `('_Trait__x',) Trait.f` | compiler |
-| `('_Trait', '_Trait')` | `('_Trait__x',) Trait.f` | compiler |
-| `('_Trait', '__')` | `('__x',) Trait.f` | compiler |
-| `('_Trait', 'Target')` | `('_Target__x',) Trait.f` | compiler |
-| `('_Trait', 'Outer.Target')` | `('_Target__x',) Trait.f` | compiler |
-| `('__', 'Trait')` | `('_Trait__x',) Trait.f` | compiler |
-| `('__', '_Trait')` | `('_Trait__x',) Trait.f` | compiler |
-| `('__', '__')` | `('_Trait__x',) Trait.f` | compiler |
-| `('__', 'Target')` | `('_Trait__x',) Trait.f` | compiler |
-| `('__', 'Outer.Target')` | `('_Trait__x',) Trait.f` | compiler |
-| `('Target', 'Trait')` | `('_Trait__x',) Trait.f` | compiler |
-| `('Target', '_Trait')` | `('_Trait__x',) Trait.f` | compiler |
-| `('Target', '__')` | `('_Trait__x',) Trait.f` | compiler |
-| `('Target', 'Target')` | `('_Trait__x',) Trait.f` | compiler |
-| `('Target', 'Outer.Target')` | `('_Trait__x',) Trait.f` | compiler |
-| `('Outer.Target', 'Trait')` | `('_Trait__x',) Trait.f` | compiler |
-| `('Outer.Target', '_Trait')` | `('_Trait__x',) Trait.f` | compiler |
-| `('Outer.Target', '__')` | `('_Trait__x',) Trait.f` | compiler |
-| `('Outer.Target', 'Target')` | `('_Trait__x',) Trait.f` | compiler |
-| `('Outer.Target', 'Outer.Target')` | `('_Trait__x',) Trait.f` | compiler |
-
-#### Vary `steps[1]`
-
-| steps[1] | expected | by |
-| --- | --- | --- |
-| `('Trait', 'Trait')` | `('_Target__x',) Target.f` | compiler |
-| `('Trait', '_Trait')` | `('_Target__x',) Target.f` | compiler |
-| `('Trait', '__')` | `('_Target__x',) Target.f` | compiler |
-| `('Trait', 'Target')` | `('_Target__x',) Target.f` | compiler |
-| `('Trait', 'Outer.Target')` | `('_Target__x',) Target.f` | compiler |
-| `('_Trait', 'Trait')` | `('_Target__x',) Target.f` | compiler |
-| `('_Trait', '_Trait')` | `('_Target__x',) Target.f` | compiler |
-| `('_Trait', '__')` | `('_Target__x',) Target.f` | compiler |
-| `('_Trait', 'Target')` | `('_Target__x',) Target.f` | compiler |
-| `('_Trait', 'Outer.Target')` | `('_Target__x',) Target.f` | compiler |
-| `('__', 'Trait')` | `('_Target__x',) Target.f` | compiler |
-| `('__', '_Trait')` | `('_Target__x',) Target.f` | compiler |
-| `('__', '__')` | `('_Target__x',) Target.f` | compiler |
-| `('__', 'Target')` | `('_Target__x',) Target.f` | compiler |
-| `('__', 'Outer.Target')` | `('_Target__x',) Target.f` | compiler |
-| `('Target', 'Trait')` | `('_Trait__x',) Trait.f` | compiler |
-| `('Target', '_Trait')` | `('_Trait__x',) _Trait.f` | compiler |
-| `('Target', '__')` | `('__x',) __.f` | compiler |
-| `('Target', 'Target')` | `('_Target__x',) Target.f` | compiler |
-| `('Target', 'Outer.Target')` | `('_Target__x',) Outer.Target.f` | compiler |
-| `('Outer.Target', 'Trait')` | `('_Trait__x',) Target.f` | compiler |
-| `('Outer.Target', '_Trait')` | `('_Trait__x',) Target.f` | compiler |
-| `('Outer.Target', '__')` | `('__x',) Target.f` | compiler |
-| `('Outer.Target', 'Target')` | `('_Target__x',) Target.f` | compiler |
-| `('Outer.Target', 'Outer.Target')` | `('_Target__x',) Target.f` | compiler |
+| name | owner | steps[0] | steps[1] | expected pygim.traits.CodeBuilder: two steps |
+| --- | --- | --- | --- | --- |
+| `'__x'` | `'Trait'` | `('Trait', 'Target')` | `('Target', 'Outer.Target')` | `('_Target__x',) Outer.Target.f` |
+| **`'_Trait__x'`** | `'Trait'` | `('Trait', 'Target')` | `('Target', 'Outer.Target')` | `('_Target__x',) Outer.Target.f` |
+| **`'_Target__x'`** | `'Trait'` | `('Trait', 'Target')` | `('Target', 'Outer.Target')` | `('_Target__x',) Outer.Target.f` |
+| **`'x'`** | `'Trait'` | `('Trait', 'Target')` | `('Target', 'Outer.Target')` | `('x',) Outer.Target.f` |
+| `'__x'` | **`'_Trait'`** | `('Trait', 'Target')` | `('Target', 'Outer.Target')` | `('_Target__x',) _Trait.f` |
+| `'__x'` | **`'__'`** | `('Trait', 'Target')` | `('Target', 'Outer.Target')` | `('__x',) __.f` |
+| `'__x'` | `'Trait'` | **`('Trait', 'Trait')`** | `('Target', 'Outer.Target')` | `('_Trait__x',) Trait.f` |
+| `'__x'` | `'Trait'` | **`('Trait', '_Trait')`** | `('Target', 'Outer.Target')` | `('_Trait__x',) _Trait.f` |
+| `'__x'` | `'Trait'` | **`('Trait', '__')`** | `('Target', 'Outer.Target')` | `('__x',) __.f` |
+| `'__x'` | `'Trait'` | **`('Trait', 'Outer.Target')`** | `('Target', 'Outer.Target')` | `('_Target__x',) Outer.Target.f` |
+| `'__x'` | `'Trait'` | **`('_Trait', 'Trait')`** | `('Target', 'Outer.Target')` | `('_Trait__x',) Trait.f` |
+| `'__x'` | `'Trait'` | **`('_Trait', '_Trait')`** | `('Target', 'Outer.Target')` | `('_Trait__x',) Trait.f` |
+| `'__x'` | `'Trait'` | **`('_Trait', '__')`** | `('Target', 'Outer.Target')` | `('__x',) Trait.f` |
+| `'__x'` | `'Trait'` | **`('_Trait', 'Target')`** | `('Target', 'Outer.Target')` | `('_Target__x',) Trait.f` |
+| `'__x'` | `'Trait'` | **`('_Trait', 'Outer.Target')`** | `('Target', 'Outer.Target')` | `('_Target__x',) Trait.f` |
+| `'__x'` | `'Trait'` | **`('__', 'Trait')`** | `('Target', 'Outer.Target')` | `('_Trait__x',) Trait.f` |
+| `'__x'` | `'Trait'` | **`('__', '_Trait')`** | `('Target', 'Outer.Target')` | `('_Trait__x',) Trait.f` |
+| `'__x'` | `'Trait'` | **`('__', '__')`** | `('Target', 'Outer.Target')` | `('_Trait__x',) Trait.f` |
+| `'__x'` | `'Trait'` | **`('__', 'Target')`** | `('Target', 'Outer.Target')` | `('_Trait__x',) Trait.f` |
+| `'__x'` | `'Trait'` | **`('__', 'Outer.Target')`** | `('Target', 'Outer.Target')` | `('_Trait__x',) Trait.f` |
+| `'__x'` | `'Trait'` | **`('Target', 'Trait')`** | `('Target', 'Outer.Target')` | `('_Trait__x',) Trait.f` |
+| `'__x'` | `'Trait'` | **`('Target', '_Trait')`** | `('Target', 'Outer.Target')` | `('_Trait__x',) Trait.f` |
+| `'__x'` | `'Trait'` | **`('Target', '__')`** | `('Target', 'Outer.Target')` | `('_Trait__x',) Trait.f` |
+| `'__x'` | `'Trait'` | **`('Target', 'Target')`** | `('Target', 'Outer.Target')` | `('_Trait__x',) Trait.f` |
+| `'__x'` | `'Trait'` | **`('Target', 'Outer.Target')`** | `('Target', 'Outer.Target')` | `('_Trait__x',) Trait.f` |
+| `'__x'` | `'Trait'` | **`('Outer.Target', 'Trait')`** | `('Target', 'Outer.Target')` | `('_Trait__x',) Trait.f` |
+| `'__x'` | `'Trait'` | **`('Outer.Target', '_Trait')`** | `('Target', 'Outer.Target')` | `('_Trait__x',) Trait.f` |
+| `'__x'` | `'Trait'` | **`('Outer.Target', '__')`** | `('Target', 'Outer.Target')` | `('_Trait__x',) Trait.f` |
+| `'__x'` | `'Trait'` | **`('Outer.Target', 'Target')`** | `('Target', 'Outer.Target')` | `('_Trait__x',) Trait.f` |
+| `'__x'` | `'Trait'` | **`('Outer.Target', 'Outer.Target')`** | `('Target', 'Outer.Target')` | `('_Trait__x',) Trait.f` |
+| `'__x'` | `'Trait'` | `('Trait', 'Target')` | **`('Trait', 'Trait')`** | `('_Target__x',) Target.f` |
+| `'__x'` | `'Trait'` | `('Trait', 'Target')` | **`('Trait', '_Trait')`** | `('_Target__x',) Target.f` |
+| `'__x'` | `'Trait'` | `('Trait', 'Target')` | **`('Trait', '__')`** | `('_Target__x',) Target.f` |
+| `'__x'` | `'Trait'` | `('Trait', 'Target')` | **`('Trait', 'Target')`** | `('_Target__x',) Target.f` |
+| `'__x'` | `'Trait'` | `('Trait', 'Target')` | **`('Trait', 'Outer.Target')`** | `('_Target__x',) Target.f` |
+| `'__x'` | `'Trait'` | `('Trait', 'Target')` | **`('_Trait', 'Trait')`** | `('_Target__x',) Target.f` |
+| `'__x'` | `'Trait'` | `('Trait', 'Target')` | **`('_Trait', '_Trait')`** | `('_Target__x',) Target.f` |
+| `'__x'` | `'Trait'` | `('Trait', 'Target')` | **`('_Trait', '__')`** | `('_Target__x',) Target.f` |
+| `'__x'` | `'Trait'` | `('Trait', 'Target')` | **`('_Trait', 'Target')`** | `('_Target__x',) Target.f` |
+| `'__x'` | `'Trait'` | `('Trait', 'Target')` | **`('_Trait', 'Outer.Target')`** | `('_Target__x',) Target.f` |
+| `'__x'` | `'Trait'` | `('Trait', 'Target')` | **`('__', 'Trait')`** | `('_Target__x',) Target.f` |
+| `'__x'` | `'Trait'` | `('Trait', 'Target')` | **`('__', '_Trait')`** | `('_Target__x',) Target.f` |
+| `'__x'` | `'Trait'` | `('Trait', 'Target')` | **`('__', '__')`** | `('_Target__x',) Target.f` |
+| `'__x'` | `'Trait'` | `('Trait', 'Target')` | **`('__', 'Target')`** | `('_Target__x',) Target.f` |
+| `'__x'` | `'Trait'` | `('Trait', 'Target')` | **`('__', 'Outer.Target')`** | `('_Target__x',) Target.f` |
+| `'__x'` | `'Trait'` | `('Trait', 'Target')` | **`('Target', 'Trait')`** | `('_Trait__x',) Trait.f` |
+| `'__x'` | `'Trait'` | `('Trait', 'Target')` | **`('Target', '_Trait')`** | `('_Trait__x',) _Trait.f` |
+| `'__x'` | `'Trait'` | `('Trait', 'Target')` | **`('Target', '__')`** | `('__x',) __.f` |
+| `'__x'` | `'Trait'` | `('Trait', 'Target')` | **`('Target', 'Target')`** | `('_Target__x',) Target.f` |
+| `'__x'` | `'Trait'` | `('Trait', 'Target')` | **`('Outer.Target', 'Trait')`** | `('_Trait__x',) Target.f` |
+| `'__x'` | `'Trait'` | `('Trait', 'Target')` | **`('Outer.Target', '_Trait')`** | `('_Trait__x',) Target.f` |
+| `'__x'` | `'Trait'` | `('Trait', 'Target')` | **`('Outer.Target', '__')`** | `('__x',) Target.f` |
+| `'__x'` | `'Trait'` | `('Trait', 'Target')` | **`('Outer.Target', 'Target')`** | `('_Target__x',) Target.f` |
+| `'__x'` | `'Trait'` | `('Trait', 'Target')` | **`('Outer.Target', 'Outer.Target')`** | `('_Target__x',) Target.f` |
 
 ### pygim.traits.CodeBuilder: refusals
 
@@ -873,26 +526,18 @@ Baseline: `name` = `'__x'`; `owner` = `'Trait'`; `steps[0]` = `('Trait', 'Target
 | `position` | the argument that is wrong | manual: each argument CodeBuilder takes, wrong alone | 3 |
 | `wrong` | wrong arguments | manual: source text instead of code, the function instead of its code, None, an instance instead of its class | 4 |
 
-Product 12, excluded 0; required 12. Expected by: contract 12.
+`CodeBuilder(code).reown(source, target), one argument wrong`: product 12, excluded 0; required 12. Expectation sources: contract 12.
 
-Baseline: `position` = `'code'`; `wrong` = `'text'`.
+The first row is the shared baseline. Each later row changes one input from that baseline; the changed cell is bold. All argument columns are shown. These are comparisons drawn from the full generated product counted above, not its complete listing.
 
-#### Vary `position`
-
-| position | expected | by |
+| position | wrong | expected pygim.traits.CodeBuilder: refusals |
 | --- | --- | --- |
-| `'code'` | `raises TypeError: CodeBuilder takes a code object, not str` | contract |
-| `'source'` | `raises TypeError` | contract |
-| `'target'` | `raises TypeError` | contract |
-
-#### Vary `wrong`
-
-| wrong | expected | by |
-| --- | --- | --- |
-| `'text'` | `raises TypeError: CodeBuilder takes a code object, not str` | contract |
-| `'function'` | `raises TypeError: CodeBuilder takes a code object, not function` | contract |
-| `'none'` | `raises TypeError: CodeBuilder takes a code object, not NoneType` | contract |
-| `'instance'` | `raises TypeError: CodeBuilder takes a code object, not Target` | contract |
+| `'code'` | `'text'` | `raises TypeError: CodeBuilder takes a code object, not str` |
+| **`'source'`** | `'text'` | `raises TypeError` |
+| **`'target'`** | `'text'` | `raises TypeError` |
+| `'code'` | **`'function'`** | `raises TypeError: CodeBuilder takes a code object, not function` |
+| `'code'` | **`'none'`** | `raises TypeError: CodeBuilder takes a code object, not NoneType` |
+| `'code'` | **`'instance'`** | `raises TypeError: CodeBuilder takes a code object, not Target` |
 
 ### pygim.traits.compose: one trait
 
@@ -904,50 +549,36 @@ Baseline: `position` = `'code'`; `wrong` = `'text'`.
 | `traits[0]` | one trait or none | generated from none (1, manual) and traits (17, generated) | 18 |
 | `override` | override | manual: both | 2 |
 
-Product 216, excluded 8 — Python itself cannot answer: zero-argument super() written in a slots dataclass raises TypeError (CPython gh-90562), so the member written there is no oracle (8); required 208. Expected by: contract 73, contract+compiler 135.
+`compose(target, *traits[:1], override=override); traits_of(target)`: product 216, excluded 8 — Python itself cannot answer: zero-argument super() written in a slots dataclass raises TypeError (CPython gh-90562), so the member written there is no oracle (8); required 208. Expectation sources: contract 73, contract+compiler 135.
 
-Baseline: `target` = `'plain'`; `traits[0]` = `('function', 'private', 'greet')`; `override` = `False`.
+The first row is the shared baseline. Each later row changes one input from that baseline; the changed cell is bold. All argument columns are shown. These are comparisons drawn from the full generated product counted above, not its complete listing.
 
-#### Vary `target`
-
-| target | expected | by |
-| --- | --- | --- |
-| `'plain'` | `writes greet; record greet ← TraitA; greet → 'TraitA:ann' (Person.greet)` | contract+compiler |
-| `'with a base'` | `writes greet; record greet ← TraitA; greet → 'TraitA:ann' (Child.greet)` | contract+compiler |
-| `'with greet'` | `raises ValueError: Person already has greet; traits_callspace.generated.TraitA would replace it (pass override=True)` | contract |
-| `'frozen slots dataclass'` | `writes greet; record greet ← TraitA; greet → raises AttributeError (Point.greet)` | contract+compiler |
-| `'enum'` | `writes greet; record greet ← TraitA; greet → raises AttributeError (Colour.greet)` | contract+compiler |
-| `'not a class'` | `raises TypeError` | contract |
-
-#### Vary `traits[0]`
-
-| traits[0] | expected | by |
-| --- | --- | --- |
-| `None` | `writes nothing` | contract+compiler |
-| `('function', 'plain', 'greet')` | `writes greet; record greet ← TraitA; greet → 'TraitA' (Person.greet)` | contract+compiler |
-| `('function', 'plain', 'hello')` | `writes hello; record hello ← TraitA; hello → 'TraitA' (Person.hello)` | contract+compiler |
-| `('function', 'private', 'greet')` | `writes greet; record greet ← TraitA; greet → 'TraitA:ann' (Person.greet)` | contract+compiler |
-| `('function', 'private', 'hello')` | `writes hello; record hello ← TraitA; hello → 'TraitA:ann' (Person.hello)` | contract+compiler |
-| `('function', 'super', 'greet')` | `writes greet; record greet ← TraitA; greet → raises AttributeError (Person.greet)` | contract+compiler |
-| `('function', 'super', 'hello')` | `writes hello; record hello ← TraitA; hello → raises AttributeError (Person.hello)` | contract+compiler |
-| `('property', 'private', 'greet')` | `writes greet; record greet ← TraitA; greet → 'TraitA:ann' (Person.greet)` | contract+compiler |
-| `('property', 'private', 'hello')` | `writes hello; record hello ← TraitA; hello → 'TraitA:ann' (Person.hello)` | contract+compiler |
-| `('property', 'super', 'greet')` | `writes greet; record greet ← TraitA; greet → raises AttributeError (Person.greet)` | contract+compiler |
-| `('property', 'super', 'hello')` | `writes hello; record hello ← TraitA; hello → raises AttributeError (Person.hello)` | contract+compiler |
-| `('classmethod', 'private', 'greet')` | `writes greet; record greet ← TraitA; greet → 'TraitA:person' (Person.greet)` | contract+compiler |
-| `('classmethod', 'private', 'hello')` | `writes hello; record hello ← TraitA; hello → 'TraitA:person' (Person.hello)` | contract+compiler |
-| `('staticmethod', 'plain', 'greet')` | `writes greet; record greet ← TraitA; greet → 'TraitA' (Person.greet)` | contract+compiler |
-| `('staticmethod', 'plain', 'hello')` | `writes hello; record hello ← TraitA; hello → 'TraitA' (Person.hello)` | contract+compiler |
-| `('constant', 'plain', 'greet')` | `raises TypeError: TraitA.greet is int; a trait composes functions, properties, classmethods and staticmethods` | contract |
-| `('constant', 'plain', 'hello')` | `raises TypeError: TraitA.hello is int; a trait composes functions, properties, classmethods and staticmethods` | contract |
-| `'not a class'` | `raises TypeError: compose takes classes as traits, not function` | contract |
-
-#### Vary `override`
-
-| override | expected | by |
-| --- | --- | --- |
-| `False` | `writes greet; record greet ← TraitA; greet → 'TraitA:ann' (Person.greet)` | contract+compiler |
-| `True` | `writes greet; record greet ← TraitA; greet → 'TraitA:ann' (Person.greet)` | contract+compiler |
+| target | traits[0] | override | expected pygim.traits.compose: one trait |
+| --- | --- | --- | --- |
+| `'plain'` | `('function', 'private', 'greet')` | `False` | `writes greet; record greet ← TraitA; greet → 'TraitA:ann' (Person.greet)` |
+| **`'with a base'`** | `('function', 'private', 'greet')` | `False` | `writes greet; record greet ← TraitA; greet → 'TraitA:ann' (Child.greet)` |
+| **`'with greet'`** | `('function', 'private', 'greet')` | `False` | `raises ValueError: Person already has greet; traits_callspace.generated.TraitA would replace it (pass override=True)` |
+| **`'frozen slots dataclass'`** | `('function', 'private', 'greet')` | `False` | `writes greet; record greet ← TraitA; greet → raises AttributeError (Point.greet)` |
+| **`'enum'`** | `('function', 'private', 'greet')` | `False` | `writes greet; record greet ← TraitA; greet → raises AttributeError (Colour.greet)` |
+| **`'not a class'`** | `('function', 'private', 'greet')` | `False` | `raises TypeError` |
+| `'plain'` | **`None`** | `False` | `writes nothing` |
+| `'plain'` | **`('function', 'plain', 'greet')`** | `False` | `writes greet; record greet ← TraitA; greet → 'TraitA' (Person.greet)` |
+| `'plain'` | **`('function', 'plain', 'hello')`** | `False` | `writes hello; record hello ← TraitA; hello → 'TraitA' (Person.hello)` |
+| `'plain'` | **`('function', 'private', 'hello')`** | `False` | `writes hello; record hello ← TraitA; hello → 'TraitA:ann' (Person.hello)` |
+| `'plain'` | **`('function', 'super', 'greet')`** | `False` | `writes greet; record greet ← TraitA; greet → raises AttributeError (Person.greet)` |
+| `'plain'` | **`('function', 'super', 'hello')`** | `False` | `writes hello; record hello ← TraitA; hello → raises AttributeError (Person.hello)` |
+| `'plain'` | **`('property', 'private', 'greet')`** | `False` | `writes greet; record greet ← TraitA; greet → 'TraitA:ann' (Person.greet)` |
+| `'plain'` | **`('property', 'private', 'hello')`** | `False` | `writes hello; record hello ← TraitA; hello → 'TraitA:ann' (Person.hello)` |
+| `'plain'` | **`('property', 'super', 'greet')`** | `False` | `writes greet; record greet ← TraitA; greet → raises AttributeError (Person.greet)` |
+| `'plain'` | **`('property', 'super', 'hello')`** | `False` | `writes hello; record hello ← TraitA; hello → raises AttributeError (Person.hello)` |
+| `'plain'` | **`('classmethod', 'private', 'greet')`** | `False` | `writes greet; record greet ← TraitA; greet → 'TraitA:person' (Person.greet)` |
+| `'plain'` | **`('classmethod', 'private', 'hello')`** | `False` | `writes hello; record hello ← TraitA; hello → 'TraitA:person' (Person.hello)` |
+| `'plain'` | **`('staticmethod', 'plain', 'greet')`** | `False` | `writes greet; record greet ← TraitA; greet → 'TraitA' (Person.greet)` |
+| `'plain'` | **`('staticmethod', 'plain', 'hello')`** | `False` | `writes hello; record hello ← TraitA; hello → 'TraitA' (Person.hello)` |
+| `'plain'` | **`('constant', 'plain', 'greet')`** | `False` | `raises TypeError: TraitA.greet is int; a trait composes functions, properties, classmethods and staticmethods` |
+| `'plain'` | **`('constant', 'plain', 'hello')`** | `False` | `raises TypeError: TraitA.hello is int; a trait composes functions, properties, classmethods and staticmethods` |
+| `'plain'` | **`'not a class'`** | `False` | `raises TypeError: compose takes classes as traits, not function` |
+| `'plain'` | `('function', 'private', 'greet')` | **`True`** | `writes greet; record greet ← TraitA; greet → 'TraitA:ann' (Person.greet)` |
 
 ### pygim.traits.compose: two traits
 
@@ -962,51 +593,31 @@ A reduction: a second trait meets the first through its names (a conflict, which
 | `traits[1]` | traits, for two | generated from trait classes = member (3, manual) × name (2, manual) and not a trait (1, manual) | 7 |
 | `override` | override | manual: both | 2 |
 
-Product 588, excluded 0; required 588. Expected by: contract 476, contract+compiler 112.
+`compose(target, traits[0], traits[1], override=override); traits_of(target)`: product 588, excluded 0; required 588. Expectation sources: contract 476, contract+compiler 112.
 
-Baseline: `target` = `'plain'`; `traits[0]` = `('function', 'private', 'greet')`; `traits[1]` = `('function', 'private', 'hello')`; `override` = `False`.
+The first row is the shared baseline. Each later row changes one input from that baseline; the changed cell is bold. All argument columns are shown. These are comparisons drawn from the full generated product counted above, not its complete listing.
 
-#### Vary `target`
-
-| target | expected | by |
-| --- | --- | --- |
-| `'plain'` | `writes greet, hello; record greet ← TraitA, hello ← TraitB; greet → 'TraitA:ann' (Person.greet); hello → 'TraitB:ann' (Person.hello)` | contract+compiler |
-| `'with a base'` | `writes greet, hello; record greet ← TraitA, hello ← TraitB; greet → 'TraitA:ann' (Child.greet); hello → 'TraitB:ann' (Child.hello)` | contract+compiler |
-| `'with greet'` | `raises ValueError: Person already has greet; traits_callspace.generated.TraitA would replace it (pass override=True)` | contract |
-| `'frozen slots dataclass'` | `writes greet, hello; record greet ← TraitA, hello ← TraitB; greet → raises AttributeError (Point.greet); hello → raises AttributeError (Point.hello)` | contract+compiler |
-| `'enum'` | `writes greet, hello; record greet ← TraitA, hello ← TraitB; greet → raises AttributeError (Colour.greet); hello → raises AttributeError (Colour.hello)` | contract+compiler |
-| `'not a class'` | `raises TypeError` | contract |
-
-#### Vary `traits[0]`
-
-| traits[0] | expected | by |
-| --- | --- | --- |
-| `('function', 'private', 'greet')` | `writes greet, hello; record greet ← TraitA, hello ← TraitB; greet → 'TraitA:ann' (Person.greet); hello → 'TraitB:ann' (Person.hello)` | contract+compiler |
-| `('function', 'private', 'hello')` | `raises ValueError: traits_callspace.generated.TraitA and traits_callspace.generated.TraitB both define hello (pass override=True to let the later win)` | contract |
-| `('property', 'private', 'greet')` | `writes greet, hello; record greet ← TraitA, hello ← TraitB; greet → 'TraitA:ann' (Person.greet); hello → 'TraitB:ann' (Person.hello)` | contract+compiler |
-| `('property', 'private', 'hello')` | `raises ValueError: traits_callspace.generated.TraitA and traits_callspace.generated.TraitB both define hello (pass override=True to let the later win)` | contract |
-| `('constant', 'plain', 'greet')` | `raises TypeError: TraitA.greet is int; a trait composes functions, properties, classmethods and staticmethods` | contract |
-| `('constant', 'plain', 'hello')` | `raises TypeError: TraitA.hello is int; a trait composes functions, properties, classmethods and staticmethods` | contract |
-| `'not a class'` | `raises TypeError: compose takes classes as traits, not function` | contract |
-
-#### Vary `traits[1]`
-
-| traits[1] | expected | by |
-| --- | --- | --- |
-| `('function', 'private', 'greet')` | `raises ValueError: traits_callspace.generated.TraitA and traits_callspace.generated.TraitB both define greet (pass override=True to let the later win)` | contract |
-| `('function', 'private', 'hello')` | `writes greet, hello; record greet ← TraitA, hello ← TraitB; greet → 'TraitA:ann' (Person.greet); hello → 'TraitB:ann' (Person.hello)` | contract+compiler |
-| `('property', 'private', 'greet')` | `raises ValueError: traits_callspace.generated.TraitA and traits_callspace.generated.TraitB both define greet (pass override=True to let the later win)` | contract |
-| `('property', 'private', 'hello')` | `writes greet, hello; record greet ← TraitA, hello ← TraitB; greet → 'TraitA:ann' (Person.greet); hello → 'TraitB:ann' (Person.hello)` | contract+compiler |
-| `('constant', 'plain', 'greet')` | `raises TypeError: TraitB.greet is int; a trait composes functions, properties, classmethods and staticmethods` | contract |
-| `('constant', 'plain', 'hello')` | `raises TypeError: TraitB.hello is int; a trait composes functions, properties, classmethods and staticmethods` | contract |
-| `'not a class'` | `raises TypeError: compose takes classes as traits, not function` | contract |
-
-#### Vary `override`
-
-| override | expected | by |
-| --- | --- | --- |
-| `False` | `writes greet, hello; record greet ← TraitA, hello ← TraitB; greet → 'TraitA:ann' (Person.greet); hello → 'TraitB:ann' (Person.hello)` | contract+compiler |
-| `True` | `writes greet, hello; record greet ← TraitA, hello ← TraitB; greet → 'TraitA:ann' (Person.greet); hello → 'TraitB:ann' (Person.hello)` | contract+compiler |
+| target | traits[0] | traits[1] | override | expected pygim.traits.compose: two traits |
+| --- | --- | --- | --- | --- |
+| `'plain'` | `('function', 'private', 'greet')` | `('function', 'private', 'hello')` | `False` | `writes greet, hello; record greet ← TraitA, hello ← TraitB; greet → 'TraitA:ann' (Person.greet); hello → 'TraitB:ann' (Person.hello)` |
+| **`'with a base'`** | `('function', 'private', 'greet')` | `('function', 'private', 'hello')` | `False` | `writes greet, hello; record greet ← TraitA, hello ← TraitB; greet → 'TraitA:ann' (Child.greet); hello → 'TraitB:ann' (Child.hello)` |
+| **`'with greet'`** | `('function', 'private', 'greet')` | `('function', 'private', 'hello')` | `False` | `raises ValueError: Person already has greet; traits_callspace.generated.TraitA would replace it (pass override=True)` |
+| **`'frozen slots dataclass'`** | `('function', 'private', 'greet')` | `('function', 'private', 'hello')` | `False` | `writes greet, hello; record greet ← TraitA, hello ← TraitB; greet → raises AttributeError (Point.greet); hello → raises AttributeError (Point.hello)` |
+| **`'enum'`** | `('function', 'private', 'greet')` | `('function', 'private', 'hello')` | `False` | `writes greet, hello; record greet ← TraitA, hello ← TraitB; greet → raises AttributeError (Colour.greet); hello → raises AttributeError (Colour.hello)` |
+| **`'not a class'`** | `('function', 'private', 'greet')` | `('function', 'private', 'hello')` | `False` | `raises TypeError` |
+| `'plain'` | **`('function', 'private', 'hello')`** | `('function', 'private', 'hello')` | `False` | `raises ValueError: traits_callspace.generated.TraitA and traits_callspace.generated.TraitB both define hello (pass override=True to let the later win)` |
+| `'plain'` | **`('property', 'private', 'greet')`** | `('function', 'private', 'hello')` | `False` | `writes greet, hello; record greet ← TraitA, hello ← TraitB; greet → 'TraitA:ann' (Person.greet); hello → 'TraitB:ann' (Person.hello)` |
+| `'plain'` | **`('property', 'private', 'hello')`** | `('function', 'private', 'hello')` | `False` | `raises ValueError: traits_callspace.generated.TraitA and traits_callspace.generated.TraitB both define hello (pass override=True to let the later win)` |
+| `'plain'` | **`('constant', 'plain', 'greet')`** | `('function', 'private', 'hello')` | `False` | `raises TypeError: TraitA.greet is int; a trait composes functions, properties, classmethods and staticmethods` |
+| `'plain'` | **`('constant', 'plain', 'hello')`** | `('function', 'private', 'hello')` | `False` | `raises TypeError: TraitA.hello is int; a trait composes functions, properties, classmethods and staticmethods` |
+| `'plain'` | **`'not a class'`** | `('function', 'private', 'hello')` | `False` | `raises TypeError: compose takes classes as traits, not function` |
+| `'plain'` | `('function', 'private', 'greet')` | **`('function', 'private', 'greet')`** | `False` | `raises ValueError: traits_callspace.generated.TraitA and traits_callspace.generated.TraitB both define greet (pass override=True to let the later win)` |
+| `'plain'` | `('function', 'private', 'greet')` | **`('property', 'private', 'greet')`** | `False` | `raises ValueError: traits_callspace.generated.TraitA and traits_callspace.generated.TraitB both define greet (pass override=True to let the later win)` |
+| `'plain'` | `('function', 'private', 'greet')` | **`('property', 'private', 'hello')`** | `False` | `writes greet, hello; record greet ← TraitA, hello ← TraitB; greet → 'TraitA:ann' (Person.greet); hello → 'TraitB:ann' (Person.hello)` |
+| `'plain'` | `('function', 'private', 'greet')` | **`('constant', 'plain', 'greet')`** | `False` | `raises TypeError: TraitB.greet is int; a trait composes functions, properties, classmethods and staticmethods` |
+| `'plain'` | `('function', 'private', 'greet')` | **`('constant', 'plain', 'hello')`** | `False` | `raises TypeError: TraitB.hello is int; a trait composes functions, properties, classmethods and staticmethods` |
+| `'plain'` | `('function', 'private', 'greet')` | **`'not a class'`** | `False` | `raises TypeError: compose takes classes as traits, not function` |
+| `'plain'` | `('function', 'private', 'greet')` | `('function', 'private', 'hello')` | **`True`** | `writes greet, hello; record greet ← TraitA, hello ← TraitB; greet → 'TraitA:ann' (Person.greet); hello → 'TraitB:ann' (Person.hello)` |
 
 ### pygim.utils.is_dunder
 
@@ -1016,80 +627,78 @@ Baseline: `target` = `'plain'`; `traits[0]` = `('function', 'private', 'greet')`
 | --- | --- | --- | --- |
 | `name` | names and not names | generated from names (63, generated) and not text (3, manual) | 66 |
 
-Product 66, excluded 0; required 66. Expected by: contract 3, enum 63.
+`is_dunder(name)`: product 66, excluded 0; required 66. Expectation sources: contract 3, enum 63.
 
-Baseline: `name` = `'__x__'`.
+The first row is the shared baseline. Each later row changes one input from that baseline; the changed cell is bold. All argument columns are shown. These are comparisons drawn from the full generated product counted above, not its complete listing.
 
-#### Vary `name`
-
-| name | expected | by |
-| --- | --- | --- |
-| `''` | `False` | enum |
-| `'_'` | `False` | enum |
-| `'__'` | `False` | enum |
-| `'___'` | `False` | enum |
-| `'x'` | `False` | enum |
-| `'x_'` | `False` | enum |
-| `'x__'` | `False` | enum |
-| `'x___'` | `False` | enum |
-| `'pkg.mod'` | `False` | enum |
-| `'pkg.mod_'` | `False` | enum |
-| `'pkg.mod__'` | `False` | enum |
-| `'pkg.mod___'` | `False` | enum |
-| `'____'` | `False` | enum |
-| `'_x'` | `False` | enum |
-| `'_x_'` | `False` | enum |
-| `'_x__'` | `False` | enum |
-| `'_x___'` | `False` | enum |
-| `'_pkg.mod'` | `False` | enum |
-| `'_pkg.mod_'` | `False` | enum |
-| `'_pkg.mod__'` | `False` | enum |
-| `'_pkg.mod___'` | `False` | enum |
-| `'_____'` | `False` | enum |
-| `'__x'` | `False` | enum |
-| `'__x_'` | `False` | enum |
-| `'__x__'` | `True` | enum |
-| `'__x___'` | `False` | enum |
-| `'__pkg.mod'` | `False` | enum |
-| `'__pkg.mod_'` | `False` | enum |
-| `'__pkg.mod__'` | `True` | enum |
-| `'__pkg.mod___'` | `False` | enum |
-| `'______'` | `False` | enum |
-| `'___x'` | `False` | enum |
-| `'___x_'` | `False` | enum |
-| `'___x__'` | `False` | enum |
-| `'___x___'` | `False` | enum |
-| `'___pkg.mod'` | `False` | enum |
-| `'___pkg.mod_'` | `False` | enum |
-| `'___pkg.mod__'` | `False` | enum |
-| `'___pkg.mod___'` | `False` | enum |
-| `'_Trait__'` | `False` | enum |
-| `'_Trait___'` | `False` | enum |
-| `'_Trait____'` | `False` | enum |
-| `'_Trait_____'` | `False` | enum |
-| `'_Trait__x'` | `False` | enum |
-| `'_Trait__x_'` | `False` | enum |
-| `'_Trait__x__'` | `False` | enum |
-| `'_Trait__x___'` | `False` | enum |
-| `'_Trait__pkg.mod'` | `False` | enum |
-| `'_Trait__pkg.mod_'` | `False` | enum |
-| `'_Trait__pkg.mod__'` | `False` | enum |
-| `'_Trait__pkg.mod___'` | `False` | enum |
-| `'_Target__'` | `False` | enum |
-| `'_Target___'` | `False` | enum |
-| `'_Target____'` | `False` | enum |
-| `'_Target_____'` | `False` | enum |
-| `'_Target__x'` | `False` | enum |
-| `'_Target__x_'` | `False` | enum |
-| `'_Target__x__'` | `False` | enum |
-| `'_Target__x___'` | `False` | enum |
-| `'_Target__pkg.mod'` | `False` | enum |
-| `'_Target__pkg.mod_'` | `False` | enum |
-| `'_Target__pkg.mod__'` | `False` | enum |
-| `'_Target__pkg.mod___'` | `False` | enum |
-| `None` | `raises TypeError` | contract |
-| `1` | `raises TypeError` | contract |
-| `b'__x__'` | `raises TypeError` ⚠ divergence | contract |
+| name | expected pygim.utils.is_dunder |
+| --- | --- |
+| `'__x__'` | `True` |
+| **`''`** | `False` |
+| **`'_'`** | `False` |
+| **`'__'`** | `False` |
+| **`'___'`** | `False` |
+| **`'x'`** | `False` |
+| **`'x_'`** | `False` |
+| **`'x__'`** | `False` |
+| **`'x___'`** | `False` |
+| **`'pkg.mod'`** | `False` |
+| **`'pkg.mod_'`** | `False` |
+| **`'pkg.mod__'`** | `False` |
+| **`'pkg.mod___'`** | `False` |
+| **`'____'`** | `False` |
+| **`'_x'`** | `False` |
+| **`'_x_'`** | `False` |
+| **`'_x__'`** | `False` |
+| **`'_x___'`** | `False` |
+| **`'_pkg.mod'`** | `False` |
+| **`'_pkg.mod_'`** | `False` |
+| **`'_pkg.mod__'`** | `False` |
+| **`'_pkg.mod___'`** | `False` |
+| **`'_____'`** | `False` |
+| **`'__x'`** | `False` |
+| **`'__x_'`** | `False` |
+| **`'__x___'`** | `False` |
+| **`'__pkg.mod'`** | `False` |
+| **`'__pkg.mod_'`** | `False` |
+| **`'__pkg.mod__'`** | `True` |
+| **`'__pkg.mod___'`** | `False` |
+| **`'______'`** | `False` |
+| **`'___x'`** | `False` |
+| **`'___x_'`** | `False` |
+| **`'___x__'`** | `False` |
+| **`'___x___'`** | `False` |
+| **`'___pkg.mod'`** | `False` |
+| **`'___pkg.mod_'`** | `False` |
+| **`'___pkg.mod__'`** | `False` |
+| **`'___pkg.mod___'`** | `False` |
+| **`'_Trait__'`** | `False` |
+| **`'_Trait___'`** | `False` |
+| **`'_Trait____'`** | `False` |
+| **`'_Trait_____'`** | `False` |
+| **`'_Trait__x'`** | `False` |
+| **`'_Trait__x_'`** | `False` |
+| **`'_Trait__x__'`** | `False` |
+| **`'_Trait__x___'`** | `False` |
+| **`'_Trait__pkg.mod'`** | `False` |
+| **`'_Trait__pkg.mod_'`** | `False` |
+| **`'_Trait__pkg.mod__'`** | `False` |
+| **`'_Trait__pkg.mod___'`** | `False` |
+| **`'_Target__'`** | `False` |
+| **`'_Target___'`** | `False` |
+| **`'_Target____'`** | `False` |
+| **`'_Target_____'`** | `False` |
+| **`'_Target__x'`** | `False` |
+| **`'_Target__x_'`** | `False` |
+| **`'_Target__x__'`** | `False` |
+| **`'_Target__x___'`** | `False` |
+| **`'_Target__pkg.mod'`** | `False` |
+| **`'_Target__pkg.mod_'`** | `False` |
+| **`'_Target__pkg.mod__'`** | `False` |
+| **`'_Target__pkg.mod___'`** | `False` |
+| **`None`** | `raises TypeError` |
+| **`1`** | `raises TypeError` |
+| **`b'__x__'`** | `raises TypeError` ⚠ divergence |
 
 ## Found by the generated cases
 
