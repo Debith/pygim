@@ -223,11 +223,26 @@ can leave a dangling handle); a code object nested past the recursion limit cras
 `TypeError`, and `traits_of` ignores a foreign attribute of that name). A non-str member name and a
 lone-surrogate name are now refused with a clear error.
 
-Open policy questions, surfaced not silently decided: whether a failure partway through a multi-member
-composition should roll back the members already written (today it does not — the record is still only
-attached at the end, so a hostile `__setattr__` that raises on a later member can leave earlier ones
-written); and whether a class that misreports its own `__name__`/`__qualname__` through a metaclass
-should be believed (today it is, as that is the class's declared identity).
+**Decided — no rollback on a partial failure (2026-10-18).** When a write partway through a
+multi-member composition fails (a slot Python refuses, or a hostile `__setattr__` that raises on a
+later member), the members already written are left in place; `compose()` does not undo them.
+Debith: rolling back "would lead to even more unexpected behavior" — un-setting attributes the
+caller's hooks saw created, firing those hooks again in reverse, is less predictable than stopping
+where the failure happened. The record is still attached only at the end, so bookkeeping is never
+left half-written; only the member attributes up to the failure are. `compose()` keeps the
+two-pass guarantee for the failures it controls (a bad trait, a conflict, the reserved name, a
+foreign record slot) — those are all detected before any write — so a partial write happens only
+when an attribute write pygim cannot foresee is rejected by Python or by the target's own hooks.
+`test_traits_regressions.py::TestNoRollbackOnAPartialFailure` pins this.
+
+Open policy question — self-reported identity. A class whose metaclass misreports its own
+`__name__`/`__qualname__` (for example a metaclass `__name__` property that returns a different
+string) is believed: `CodeBuilder` mangles private names and builds qualified names from whatever
+the class reports as its name. The question is whether `compose()`/`CodeBuilder` should instead
+read the real `__name__` through `type.__dict__` to defeat such a lie, or keep trusting the class's
+declared identity (today's behaviour — a class's name is whatever it says it is, as everywhere else
+in Python). It matters only for a deliberately deceptive metaclass; an honest class reports its
+name truthfully. No test pins a wrong-answer case; it is left as the open choice.
 
 ## Decided (2026-10-16)
 

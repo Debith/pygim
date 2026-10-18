@@ -134,6 +134,31 @@ class TestNothingComposedNothingWritten:
         assert dict(Person.__dict__) == before
 
 
+class TestNoRollbackOnAPartialFailure:
+    """Decided 2026-10-18 (docs/design/traits.md): when a write partway through a composition fails,
+    the members already written are left in place; compose() does not undo them. Debith: rolling back
+    "would lead to even more unexpected behavior". This pins that decision so a later change cannot
+    quietly add rollback. It is characterization, not a bug: the behaviour is intended."""
+
+    def test_members_written_before_a_failing_write_are_kept(self):
+        class Meta(type):
+            def __setattr__(cls, name, value):
+                if name == "zzz":
+                    raise RuntimeError("the hook refuses zzz")
+                super().__setattr__(name, value)
+
+        class Target(metaclass=Meta):
+            pass
+
+        # The members are written in the trait's dict order, so "aaa" is written before "zzz" fails.
+        with pytest.raises(RuntimeError, match="the hook refuses zzz"):
+            compose(Target, type("Trait", (), {"aaa": _function("a"), "zzz": _function("z")}))
+        assert "aaa" in Target.__dict__          # kept: no rollback
+        assert "zzz" not in Target.__dict__       # its own write failed
+        assert "__pygim_traits__" not in Target.__dict__  # the record is attached last, after every member
+        assert list(traits_of(Target)) == []      # so a half-composition records nothing
+
+
 class TestAnAttributeNamedLikeTheRecord:
     def test_compose_refuses_a_class_whose_own_attribute_is_not_a_record(self):
         """F6: compose() failed with pybind11's cast error, naming nothing."""
