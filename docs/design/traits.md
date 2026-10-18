@@ -247,6 +247,15 @@ What changes, each from a measurement or a rule:
 
 ## Open
 
+- **Found by the generated cases (2026-10-18), not decided.** (1) `CodeBuilder` respells `co_names`
+  and qualified names but not a private *local* name: `co_varnames`, `co_cellvars` and
+  `co_freevars` keep `_Trait__x` where the method compiled in the target has `_Target__x`.
+  Behaviour is unchanged (locals are found by position; a cell and its free variable still
+  match), but `locals()` shows the old spelling, against "respells every private name". Fix it
+  (respell those three too), or narrow the docstring to the names that are looked up. (2)
+  `pygim.utils.is_dunder` accepts `bytes` — pybind11's string caster converts them — though its
+  signature says `name: str`: refuse them, or say so. Both are declared divergences in
+  `tests/unittests/traits_callspace.py`; the check fails when either stops happening.
 - **The Python call sites of the naming rules,** on `core/memory`: `_interface.py` (a public method;
   a trailing underscore escaping a name), `_inventory.py` (a public module) and `test_layering.py`
   (an internal name) each write a rule by hand. Once this branch is in, they use `pygim.utils`, with
