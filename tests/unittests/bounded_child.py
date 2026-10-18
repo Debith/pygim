@@ -46,8 +46,11 @@ def _limits(memory_bytes, cpu_seconds):
 
 
 def run(source, *, timeout=20.0, memory_bytes=2 << 30, cpu_seconds=20):
-    """Run `source` (dedented) with `python -I`-like isolation of the working directory."""
-    env = {key: value for key, value in os.environ.items() if key in ("PATH", "PYTHONPATH", "LANG", "LC_ALL")}
+    """Run `source` (dedented) in a fresh working directory with hard limits."""
+    # Inherit the parent's full environment — Windows needs SYSTEMROOT and friends to start Python at
+    # all, so a stripped whitelist leaves the child unable to launch (empty output). We only add our
+    # own keys; isolation here is of the working directory and the resource limits, not the env.
+    env = dict(os.environ)
     env["PYTHONPATH"] = os.pathsep.join(p for p in sys.path if p and os.path.isdir(p))
     env["PYTHONFAULTHANDLER"] = "1"  # a native crash prints the Python stack it happened under
     with tempfile.TemporaryDirectory() as workdir:

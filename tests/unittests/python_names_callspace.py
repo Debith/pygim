@@ -40,6 +40,7 @@ from pathlib import Path
 from callspace import Atoms, Either, Grammar, Model, Parameter, generate
 
 PROOF = Path(__file__).resolve().parents[1] / "static" / "python_names_callspace_proofs.cpp"
+PROOF_SHARD = 256  # calls proven per static_assert: each stays under clang's per-evaluation step cap
 
 # ── the domains ─────────────────────────────────────────────────────────────────────────────────
 
@@ -327,13 +328,19 @@ def render_proof():
         arrays = [role_array[p] for p in parameters]
         loops = []
         indent = "    "
-        lines.append(f"consteval std::size_t first_failing_{function}_call() {{")
+        # The check runs only for calls whose flat index is in [begin, end): a string-building call
+        # evaluated during constant evaluation costs many steps, and clang caps the steps per
+        # static_assert (macOS hit "constexpr evaluation hit maximum step limit"), so the product is
+        # proven in bounded shards. The ++at walk itself is cheap; only the guarded calls build strings.
+        lines.append(f"consteval std::size_t first_failing_{function}_call(std::size_t begin, std::size_t end) {{")
         lines.append(f"{indent}std::size_t at = 0;")
         for depth, (p, array) in enumerate(zip(parameters, arrays)):
             loops.append(f"{indent * (depth + 1)}for (const std::string_view {_param(p)} : {array}) {{")
         lines += loops
-        inner = indent * (len(parameters) + 1)
+        inner = indent * (len(parameters) + 2)
+        guard = indent * (len(parameters) + 1)
         call = f"{function}({', '.join(_param(p) for p in parameters)})"
+        lines.append(f"{guard}if (at >= begin && at < end) {{")
         if kind == "bool":
             lines.append(f"{inner}if ({call} != {function}_expected[at]) return at;")
         elif kind == "text":
@@ -342,11 +349,16 @@ def render_proof():
             lines.append(f"{inner}const auto result = {call};")
             lines.append(f"{inner}const auto want = {function}_expected[at];")
             lines.append(f"{inner}if (want == none ? result.has_value() : (!result || *result != texts[want])) return at;")
-        lines.append(f"{inner}++at;")
+        lines.append(f"{guard}}}")
+        lines.append(f"{guard}++at;")
         for depth in reversed(range(len(parameters))):
             lines.append(f"{indent * (depth + 1)}}}")
-        lines.append(f"{indent}return at == {function}_expected.size() ? every_row_holds : at;")
-        lines += ["}", f"static_assert(first_failing_{function}_call() == every_row_holds);", ""]
+        lines.append(f"{indent}return every_row_holds;")
+        lines += ["}", f"static_assert({function}_expected.size() == {len(records)});  // every call is tiled below"]
+        for start in range(0, len(records), PROOF_SHARD):
+            end = min(start + PROOF_SHARD, len(records))
+            lines.append(f"static_assert(first_failing_{function}_call({start}, {end}) == every_row_holds);")
+        lines.append("")
     lines += ["}  // namespace", ""]
     return "\n".join(lines)
 

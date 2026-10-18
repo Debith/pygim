@@ -255,44 +255,53 @@ constexpr std::array<bool, 63> is_dunder_expected{
     false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false,
 };
 
-consteval std::size_t first_failing_is_dunder_call() {
+consteval std::size_t first_failing_is_dunder_call(std::size_t begin, std::size_t end) {
     std::size_t at = 0;
     for (const std::string_view name : names) {
-        if (is_dunder(name) != is_dunder_expected[at]) return at;
+        if (at >= begin && at < end) {
+            if (is_dunder(name) != is_dunder_expected[at]) return at;
+        }
         ++at;
     }
-    return at == is_dunder_expected.size() ? every_row_holds : at;
+    return every_row_holds;
 }
-static_assert(first_failing_is_dunder_call() == every_row_holds);
+static_assert(is_dunder_expected.size() == 63);  // every call is tiled below
+static_assert(first_failing_is_dunder_call(0, 63) == every_row_holds);
 
 constexpr std::array<std::int16_t, 7> owner_of_expected{
     12, 6, 12, 12, 19, 0, 0,
 };
 
-consteval std::size_t first_failing_owner_of_call() {
+consteval std::size_t first_failing_owner_of_call(std::size_t begin, std::size_t end) {
     std::size_t at = 0;
     for (const std::string_view class_name : class_names) {
-        if (owner_of(class_name) != texts[owner_of_expected[at]]) return at;
+        if (at >= begin && at < end) {
+            if (owner_of(class_name) != texts[owner_of_expected[at]]) return at;
+        }
         ++at;
     }
-    return at == owner_of_expected.size() ? every_row_holds : at;
+    return every_row_holds;
 }
-static_assert(first_failing_owner_of_call() == every_row_holds);
+static_assert(owner_of_expected.size() == 7);  // every call is tiled below
+static_assert(first_failing_owner_of_call(0, 7) == every_row_holds);
 
 constexpr std::array<bool, 63> is_private_name_expected{
     false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, true, true, false, false, false, false, false, false, false, true,
     true, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false,
 };
 
-consteval std::size_t first_failing_is_private_name_call() {
+consteval std::size_t first_failing_is_private_name_call(std::size_t begin, std::size_t end) {
     std::size_t at = 0;
     for (const std::string_view name : names) {
-        if (is_private_name(name) != is_private_name_expected[at]) return at;
+        if (at >= begin && at < end) {
+            if (is_private_name(name) != is_private_name_expected[at]) return at;
+        }
         ++at;
     }
-    return at == is_private_name_expected.size() ? every_row_holds : at;
+    return every_row_holds;
 }
-static_assert(first_failing_is_private_name_call() == every_row_holds);
+static_assert(is_private_name_expected.size() == 63);  // every call is tiled below
+static_assert(first_failing_is_private_name_call(0, 63) == every_row_holds);
 
 constexpr std::array<std::int16_t, 441> mangled_expected{
     0, 25, 63, 74, 107, 108, 109, 110, 103, 104, 105, 106, 75, 98, 99, 100, 101, 94, 95, 96, 97, 76, 59, 60, 92, 93, 86, 87, 88, 89, 77, 53,
@@ -311,17 +320,21 @@ constexpr std::array<std::int16_t, 441> mangled_expected{
     81, 45, 46, 47, 48, 59, 60, 61, 62, 55, 56, 57, 58, 26, 27, 28, 29, 36, 37, 38, 39, 32, 33, 34, 35,
 };
 
-consteval std::size_t first_failing_mangled_call() {
+consteval std::size_t first_failing_mangled_call(std::size_t begin, std::size_t end) {
     std::size_t at = 0;
     for (const std::string_view class_name : class_names) {
         for (const std::string_view name : names) {
-            if (mangled(class_name, name) != texts[mangled_expected[at]]) return at;
+            if (at >= begin && at < end) {
+                if (mangled(class_name, name) != texts[mangled_expected[at]]) return at;
+            }
             ++at;
         }
     }
-    return at == mangled_expected.size() ? every_row_holds : at;
+    return every_row_holds;
 }
-static_assert(first_failing_mangled_call() == every_row_holds);
+static_assert(mangled_expected.size() == 441);  // every call is tiled below
+static_assert(first_failing_mangled_call(0, 256) == every_row_holds);
+static_assert(first_failing_mangled_call(256, 441) == every_row_holds);
 
 constexpr std::array<std::int16_t, 441> unmangled_expected{
     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
@@ -340,17 +353,21 @@ constexpr std::array<std::int16_t, 441> unmangled_expected{
     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
 };
 
-consteval std::size_t first_failing_unmangled_call() {
+consteval std::size_t first_failing_unmangled_call(std::size_t begin, std::size_t end) {
     std::size_t at = 0;
     for (const std::string_view class_name : class_names) {
         for (const std::string_view name : names) {
-            if (unmangled(class_name, name) != texts[unmangled_expected[at]]) return at;
+            if (at >= begin && at < end) {
+                if (unmangled(class_name, name) != texts[unmangled_expected[at]]) return at;
+            }
             ++at;
         }
     }
-    return at == unmangled_expected.size() ? every_row_holds : at;
+    return every_row_holds;
 }
-static_assert(first_failing_unmangled_call() == every_row_holds);
+static_assert(unmangled_expected.size() == 441);  // every call is tiled below
+static_assert(first_failing_unmangled_call(0, 256) == every_row_holds);
+static_assert(first_failing_unmangled_call(256, 441) == every_row_holds);
 
 constexpr std::array<std::int16_t, 3087> respelt_expected{
     -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
@@ -452,21 +469,36 @@ constexpr std::array<std::int16_t, 3087> respelt_expected{
     -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
 };
 
-consteval std::size_t first_failing_respelt_call() {
+consteval std::size_t first_failing_respelt_call(std::size_t begin, std::size_t end) {
     std::size_t at = 0;
     for (const std::string_view source : class_names) {
         for (const std::string_view target : class_names) {
             for (const std::string_view name : names) {
-                const auto result = respelt(source, target, name);
-                const auto want = respelt_expected[at];
-                if (want == none ? result.has_value() : (!result || *result != texts[want])) return at;
+                if (at >= begin && at < end) {
+                    const auto result = respelt(source, target, name);
+                    const auto want = respelt_expected[at];
+                    if (want == none ? result.has_value() : (!result || *result != texts[want])) return at;
+                }
                 ++at;
             }
         }
     }
-    return at == respelt_expected.size() ? every_row_holds : at;
+    return every_row_holds;
 }
-static_assert(first_failing_respelt_call() == every_row_holds);
+static_assert(respelt_expected.size() == 3087);  // every call is tiled below
+static_assert(first_failing_respelt_call(0, 256) == every_row_holds);
+static_assert(first_failing_respelt_call(256, 512) == every_row_holds);
+static_assert(first_failing_respelt_call(512, 768) == every_row_holds);
+static_assert(first_failing_respelt_call(768, 1024) == every_row_holds);
+static_assert(first_failing_respelt_call(1024, 1280) == every_row_holds);
+static_assert(first_failing_respelt_call(1280, 1536) == every_row_holds);
+static_assert(first_failing_respelt_call(1536, 1792) == every_row_holds);
+static_assert(first_failing_respelt_call(1792, 2048) == every_row_holds);
+static_assert(first_failing_respelt_call(2048, 2304) == every_row_holds);
+static_assert(first_failing_respelt_call(2304, 2560) == every_row_holds);
+static_assert(first_failing_respelt_call(2560, 2816) == every_row_holds);
+static_assert(first_failing_respelt_call(2816, 3072) == every_row_holds);
+static_assert(first_failing_respelt_call(3072, 3087) == every_row_holds);
 
 constexpr std::array<std::int16_t, 3087> reowned_expected{
     0, 25, 63, 74, 107, 108, 109, 110, 103, 104, 105, 106, 75, 98, 99, 100, 101, 94, 95, 96, 97, 76, 90, 91, 92, 93, 86, 87, 88, 89, 77, 82,
@@ -568,19 +600,34 @@ constexpr std::array<std::int16_t, 3087> reowned_expected{
     56, 57, 58, 26, 27, 28, 29, 36, 37, 38, 39, 32, 33, 34, 35,
 };
 
-consteval std::size_t first_failing_reowned_call() {
+consteval std::size_t first_failing_reowned_call(std::size_t begin, std::size_t end) {
     std::size_t at = 0;
     for (const std::string_view source : class_names) {
         for (const std::string_view target : class_names) {
             for (const std::string_view name : names) {
-                if (reowned(source, target, name) != texts[reowned_expected[at]]) return at;
+                if (at >= begin && at < end) {
+                    if (reowned(source, target, name) != texts[reowned_expected[at]]) return at;
+                }
                 ++at;
             }
         }
     }
-    return at == reowned_expected.size() ? every_row_holds : at;
+    return every_row_holds;
 }
-static_assert(first_failing_reowned_call() == every_row_holds);
+static_assert(reowned_expected.size() == 3087);  // every call is tiled below
+static_assert(first_failing_reowned_call(0, 256) == every_row_holds);
+static_assert(first_failing_reowned_call(256, 512) == every_row_holds);
+static_assert(first_failing_reowned_call(512, 768) == every_row_holds);
+static_assert(first_failing_reowned_call(768, 1024) == every_row_holds);
+static_assert(first_failing_reowned_call(1024, 1280) == every_row_holds);
+static_assert(first_failing_reowned_call(1280, 1536) == every_row_holds);
+static_assert(first_failing_reowned_call(1536, 1792) == every_row_holds);
+static_assert(first_failing_reowned_call(1792, 2048) == every_row_holds);
+static_assert(first_failing_reowned_call(2048, 2304) == every_row_holds);
+static_assert(first_failing_reowned_call(2304, 2560) == every_row_holds);
+static_assert(first_failing_reowned_call(2560, 2816) == every_row_holds);
+static_assert(first_failing_reowned_call(2816, 3072) == every_row_holds);
+static_assert(first_failing_reowned_call(3072, 3087) == every_row_holds);
 
 constexpr std::array<std::int16_t, 1617> requalified_expected{
     15, 16, 17, 14, 9, 10, 11, 8, 42, 43, 44, 41, 71, 72, 73, 70, 22, 23, 24, 21, 66, 67, 68, 65, 3, 4, 5, 2, 102, 18, 12, 13,
@@ -636,18 +683,27 @@ constexpr std::array<std::int16_t, 1617> requalified_expected{
     22, 23, 24, 21, 66, 67, 68, 65, 3, 4, 5, 2, 102, 18, 12, 13, 0,
 };
 
-consteval std::size_t first_failing_requalified_call() {
+consteval std::size_t first_failing_requalified_call(std::size_t begin, std::size_t end) {
     std::size_t at = 0;
     for (const std::string_view source : class_names) {
         for (const std::string_view target : class_names) {
             for (const std::string_view qualname : qualnames) {
-                if (requalified(source, target, qualname) != texts[requalified_expected[at]]) return at;
+                if (at >= begin && at < end) {
+                    if (requalified(source, target, qualname) != texts[requalified_expected[at]]) return at;
+                }
                 ++at;
             }
         }
     }
-    return at == requalified_expected.size() ? every_row_holds : at;
+    return every_row_holds;
 }
-static_assert(first_failing_requalified_call() == every_row_holds);
+static_assert(requalified_expected.size() == 1617);  // every call is tiled below
+static_assert(first_failing_requalified_call(0, 256) == every_row_holds);
+static_assert(first_failing_requalified_call(256, 512) == every_row_holds);
+static_assert(first_failing_requalified_call(512, 768) == every_row_holds);
+static_assert(first_failing_requalified_call(768, 1024) == every_row_holds);
+static_assert(first_failing_requalified_call(1024, 1280) == every_row_holds);
+static_assert(first_failing_requalified_call(1280, 1536) == every_row_holds);
+static_assert(first_failing_requalified_call(1536, 1617) == every_row_holds);
 
 }  // namespace
