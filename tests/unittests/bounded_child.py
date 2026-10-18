@@ -37,11 +37,25 @@ class Outcome:
 
 def _limits(memory_bytes, cpu_seconds):
     def apply():
-        os.setsid()  # its own process group, so a timeout kills everything it started
+        # Any exception here becomes subprocess.SubprocessError and the child never starts, so each
+        # limit is best-effort: macOS rejects setting RLIMIT_AS (it is advisory there), and a limit
+        # a platform does not enforce is simply skipped. setsid gives the child its own process group
+        # so a timeout kills everything it started; the wall-clock timeout bounds it regardless.
+        try:
+            os.setsid()
+        except OSError:
+            pass
         if resource is not None:
-            resource.setrlimit(resource.RLIMIT_AS, (memory_bytes, memory_bytes))
-            resource.setrlimit(resource.RLIMIT_CPU, (cpu_seconds, cpu_seconds))
-            resource.setrlimit(resource.RLIMIT_CORE, (0, 0))  # a crash leaves no core file
+            limits = [(getattr(resource, "RLIMIT_AS", None), memory_bytes),
+                      (getattr(resource, "RLIMIT_CPU", None), cpu_seconds),
+                      (getattr(resource, "RLIMIT_CORE", None), 0)]  # no core file on a crash
+            for which, value in limits:
+                if which is None:
+                    continue
+                try:
+                    resource.setrlimit(which, (value, value))
+                except (OSError, ValueError):
+                    pass
     return apply
 
 
