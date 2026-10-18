@@ -539,7 +539,7 @@ LIMITS = (
     "interactions included.",
     "The native product of utils/python_names.h is called and branch-measured only by "
     "tests/static/run_python_names_callspace.py, which needs GCC 16 (-freflection); every build proves the same "
-    "product at compile time. Branch coverage of the pybind11 adapters (traits/compose.h, traits/adapter.h) is not "
+    "product at compile time. Branch coverage of the pybind11 adapters (traits/adapter/compose.h, traits/adapter/code_builder.h) is not "
     "measured. utils/core_utils.h keeps authored tables only.",
 )
 

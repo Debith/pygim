@@ -1,4 +1,4 @@
-// traits/adapter.h — CodeBuilder: a code object rebuilt so that it belongs to another class.
+// traits/adapter/code_builder.h — CodeBuilder: a code object rebuilt so that it belongs to another class.
 //
 // Worked example:
 //
@@ -46,7 +46,7 @@
 
 #include <pybind11/pybind11.h>
 
-#include "../utils/python_names.h"
+#include "../../utils/python_names.h"
 
 namespace pygim::traits {
 

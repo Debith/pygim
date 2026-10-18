@@ -1,4 +1,4 @@
-// traits/compose.h — compose(): a trait's members copied into a class, rewritten to belong there;
+// traits/adapter/compose.h — compose(): a trait's members copied into a class, rewritten to belong there;
 // traits_of(): where each composed member came from.
 //
 // Worked example:
@@ -41,9 +41,9 @@
 
 #include <pybind11/pybind11.h>
 
-#include "../wiring/registry/core.h"
-#include "adapter.h"
-#include "../utils/python_names.h"
+#include "../../wiring/registry/core.h"
+#include "code_builder.h"
+#include "../../utils/python_names.h"
 
 namespace pygim::traits {
 

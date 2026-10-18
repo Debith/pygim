@@ -1,4 +1,4 @@
-// traits/bindings.cpp — registers pygim.traits. The work lives in adapter.h and compose.h; the naming rules in utils/python_names.h.
+// traits/bindings.cpp — registers pygim.traits. The work lives in adapter/code_builder.h and adapter/compose.h; the naming rules in utils/python_names.h.
 
 #include <format>
 #include <string>
@@ -6,8 +6,8 @@
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 
-#include "adapter.h"
-#include "compose.h"
+#include "adapter/code_builder.h"
+#include "adapter/compose.h"
 
 namespace py = pybind11;
 
