@@ -215,23 +215,24 @@ Six defects the adversarial work found were fixed test-first (seeds in
 a member name with an embedded NUL was written truncated (now the whole name is written, from the
 key's real characters, so the conflict check and the write agree); a `str`-subclass key was composed
 under its `__str__` result (now under its own characters); a trait member named `__pygim_traits__`
-and a hook deleting the record mid-write crashed the interpreter (the record name is now refused to a
-trait, and `compose()` writes members first and attaches the record last, holding it alive so no hook
-can leave a dangling handle); a code object nested past the recursion limit crashed `build()` (now a
-`RecursionError`, via a recursion guard); `compose()` with nothing to compose wrote an empty record
-(now it is a true no-op); and an existing non-record `__pygim_traits__` gave a cast error (now a clear
-`TypeError`, and `traits_of` ignores a foreign attribute of that name). A non-str member name and a
-lone-surrogate name are now refused with a clear error.
+and a hook deleting the record mid-write crashed the interpreter (fixed first by refusing the name
+and attaching the record last); a code object nested past the recursion limit crashed `build()` (now
+a `RecursionError`, via a recursion guard); `compose()` with nothing to compose wrote an empty record
+(now it is a true no-op); and an existing non-record `__pygim_traits__` gave a cast error (fixed
+first by a clear `TypeError`). A non-str member name and a lone-surrogate name are now refused with a
+clear error. The two record defects had one cause, a record kept where a member can be: since
+2026-10-19 the record is kept off the class (below), the guards are gone, and the seeds now check
+that a member or attribute of that name is an ordinary one.
 
 **Decided — no rollback on a partial failure (2026-10-18).** When a write partway through a
 multi-member composition fails (a slot Python refuses, or a hostile `__setattr__` that raises on a
 later member), the members already written are left in place; `compose()` does not undo them.
 Debith: rolling back "would lead to even more unexpected behavior" — un-setting attributes the
 caller's hooks saw created, firing those hooks again in reverse, is less predictable than stopping
-where the failure happened. The record is still attached only at the end, so bookkeeping is never
-left half-written; only the member attributes up to the failure are. `compose()` keeps the
-two-pass guarantee for the failures it controls (a bad trait, a conflict, the reserved name, a
-foreign record slot) — those are all detected before any write — so a partial write happens only
+where the failure happened. The record is noted only after every member is written, so
+bookkeeping is never left half-written; only the member attributes up to the failure are. `compose()`
+keeps the two-pass guarantee for the failures it controls (a bad trait, a conflict) — those are all
+detected before any write — so a partial write happens only
 when an attribute write pygim cannot foresee is rejected by Python or by the target's own hooks.
 `test_traits_regressions.py::TestNoRollbackOnAPartialFailure` pins this.
 
@@ -259,6 +260,20 @@ each matched to where Python applies it — `enum._is_dunder`, the compiler's `_
 #113). Rejected: keeping them in a traits core (the rules belong to one family that `each`,
 `pygim.utils` and four hand-written Python call sites on `core/memory` already use), and folding them
 into `core_utils.h` (one more subject in a header of joining, units and rates).
+
+## Decided (2026-10-19) — the record, kept off the class
+
+From the review of PR #38. The record is what `traits_of(cls)` reads: for each composed member, the
+trait it came from, where the trait defined it, and where it was composed.
+
+| | Decision | Rejected, and why |
+|---|---|---|
+| R1 | For any class `compose()` accepts, the record lives in a side table in C++ (`traits/adapter/compose.h`, `RecordStore`): a `RegistryCore` over the hashed engine (#131), keyed by the class's address, each entry holding a weak reference to its class whose callback removes the entry while the class is destroyed, before its memory is freed. A class made by `gim_type` will carry its record as a private member instead, beside the unique id it is to have (open, below) | **the class attribute `__pygim_traits__`:** visible, so a trait member or the class's own attribute of that name collided with it (F2 crashed the interpreter, F6 broke `compose()`), and guarding the name only refused the collision; **a private slot on every class:** CPython gives a class none — its layout is its metaclass's, and a metaclass cannot gain a field from Python (measured: `nonempty __slots__ not supported for subtype of 'type'`); **a `WeakKeyDictionary`,** functools.singledispatch's table: it hashes and compares the class, so a metaclass whose `__hash__`/`__eq__` lie merges two classes' records (the test asks and is never answered); **no eviction:** CPython reuses a freed class's address almost every time (200 of 200 measured), so a dead class's record would be read as the new class's own (the test sees the reuse and fails when the callback does nothing) |
+| R2 | Composing a class that has a record carries the record along: in `compose(class1, class2)`, where `class2` was composed from traits, each member is attributed to the trait it first came from and where that trait defined it, and composed at the new call; `class2`'s own members are attributed to `class2` | attributing every member to `class2`: `class1` would forget the traits behind it, so `class1 << class2` would lose what `class2 << trait1 << trait2` knew |
+| R3 | No name is reserved: a member named `__pygim_traits__`, or a class's own attribute of that name, is an ordinary one; the guards that refused them (F2, F6) are removed | keeping them: with the record off the class the collision cannot happen, so they would refuse a legitimate name for nothing |
+
+`RegistryCore` gained `remove(key)` for R1, proven in `tests/static/registry_core_proofs.cpp`; every
+storage engine already had `erase`. `tests/unittests/test_traits_record.py` pins R1 and R2.
 
 Still to show, before the quantity traits are built: that a composed C++ `+` is fast enough — an
 A/B in one process against the hand-written one (`benchmarks/`) — and that a pybind11 function can
@@ -297,7 +312,7 @@ What changes, each from a measurement or a rule:
 | rewrote the names of the top-level code only | every nested code object as well | measured: a lambda inside a trait method still read `_Trait__secret` and raised `AttributeError` |
 | copied the closure as it was | the `__class__` cell rebound to the target | measured: `super()` raised `TypeError` |
 | functions only | a pack of member kinds | properties and class methods are members a trait needs |
-| provenance recorded only under `__debug__` | always, in a `TraitRecord` kept on the class: a `RegistryCore` over the flat engine | `python -O` silently dropped it; every keyed store is a `RegistryCore` (#131); kept on the class it dies with the class, where one registry keyed by class would outlive classes that are collected |
+| provenance recorded only under `__debug__` | always, in a `TraitRecord` (a `RegistryCore` over the flat engine), kept off the class and dropped when the class is collected (2026-10-19, below) | `python -O` silently dropped it; every keyed store is a `RegistryCore` (#131) |
 | Python | C++ core and adapter | the definition of done: behaviour lives in C++ |
 
 ## Open
@@ -327,6 +342,11 @@ What changes, each from a measurement or a rule:
   `ValueObject` requires only `__eq__`, so a list, a dict and `object()` all pass
   `isinstance(x, ValueObject)` (measured). `quantified_value_object` gives that protocol something
   real to check.
+- **Unique class ids.** `gim_type` is to give each class an id unique over the process's life —
+  unlike `id()`, which a new class reuses (above). Proposed: one id space, the `gim_type` member for
+  its classes and a serial in the record's side table for every other; not taking over class
+  creation for all classes (a metaclass for every class conflicts with `Enum`, `ABC` and pybind11
+  classes, as D1 measured). Awaiting a decision.
 - **The supported Pythons, 3.9 to 3.14.** A code object has `co_qualname` only from 3.11; on 3.9
   and 3.10 the function's `__qualname__` carries the name alone.
 

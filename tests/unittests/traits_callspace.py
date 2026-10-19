@@ -460,7 +460,7 @@ def compose_case(arguments, composer=compose, recorder=traits_of):
             outcome["nothing written"] = dict(vars(target)) == own
             want = {**want, "nothing written": True}
         return outcome, want, "contract"
-    written = sorted(n for n, v in vars(target).items() if n != "__pygim_traits__" and (n not in own or own[n] is not v))
+    written = sorted(n for n, v in vars(target).items() if n not in own or own[n] is not v)
     record = recorder(target)
     outcome = {"returns": "the target" if returned is target else repr(returned), "written": written,
                "record": {name: record[name].trait for name in record}}

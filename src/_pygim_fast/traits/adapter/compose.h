@@ -24,9 +24,13 @@
 // matches is refused by name — unless it is a dunder, which is the trait class's own machinery
 // (__module__, __doc__, __dict__) and stays behind.
 //
-// Lifetime and threading: a class's record is stored on the class as __pygim_traits__ and dies with
-// it; a class composed into gets a record of its own, never its base's. compose() holds the GIL
-// throughout, as every pybind11 call does.
+// Composing a class that was itself composed into carries its record along: each member keeps the
+// trait it first came from and where that trait defined it; only `composed` names the new call. A
+// member the class defined itself is attributed to that class.
+//
+// Lifetime and threading: a class's record is kept off the class, in a side table keyed by the class's
+// identity, and removed when the class is collected (detail::RecordStore); a class composed into gets a
+// record of its own, never its base's. compose() holds the GIL throughout, as every pybind11 call does.
 
 #pragma once
 
@@ -214,9 +218,55 @@ std::optional<Rewritten> rewritten(std::tuple<Kinds...>*, const py::handle& memb
     return out;
 }
 
-/// The attribute name under which compose() keeps a class's record. A trait cannot define a member
-/// of this name, and its presence on a target is validated before anything is written.
-inline constexpr const char* RECORD = "__pygim_traits__";
+/// The records of the classes composed into, kept off the classes themselves (R1 in
+/// docs/design/traits.md, 2026-10-19).
+///
+/// CPython gives a class no private slot — its layout is its metaclass's, and the only per-class
+/// storage it offers is the `__dict__` Python sees — so a record kept on the class is visible and can
+/// collide with a member of the same name. Instead, the table functools.singledispatch uses, with one
+/// change: keyed by the class's identity rather than its equality, so no metaclass `__hash__` or
+/// `__eq__` is ever asked (one that lies cannot merge two classes' records). Each entry holds a weak
+/// reference to its class whose callback removes the entry while the class is being destroyed — before
+/// its memory is freed, so a new class at the same address (CPython reuses it almost every time) starts
+/// with no record. A class made by gim_type will carry its record as a member instead; this table is
+/// for every other class.
+///
+/// A RegistryCore over the hashed engine (#131), keyed by the class's address. Allocated once and never
+/// destroyed: its weak references must not be released after Python has finalised. Every call holds
+/// the GIL.
+class RecordStore {
+public:
+    /// The record of `cls`, or nullptr when nothing was composed into it.
+    [[nodiscard]] const TraitRecord* find(const py::handle& cls) const {
+        const Entry* found = m_core.try_get_const(cls.ptr());
+        return found == nullptr ? nullptr : &found->record;
+    }
+
+    /// The record of `cls`, created empty — with the weak reference that removes it — on first use.
+    /// The reference stays valid until `cls` is collected: the hashed engine's entries are nodes,
+    /// untouched by other inserts and removals.
+    TraitRecord& at(const py::handle& cls) {
+        PyObject* key = cls.ptr();
+        if (Entry* found = m_core.try_get(key)) return found->record;
+        const py::cpp_function evict([this, key](const py::handle&) { m_core.remove(key); });
+        PyObject* guard = PyWeakref_NewRef(key, evict.ptr());
+        if (guard == nullptr) throw py::error_already_set();
+        m_core.register_value(key, Entry{TraitRecord{}, py::reinterpret_steal<py::object>(guard)});
+        return m_core.try_get(key)->record;
+    }
+
+private:
+    struct Entry {
+        TraitRecord record;
+        py::object guard;  // the weak reference to the class; its callback removes this entry
+    };
+    core::DynamicRegistryCore<PyObject*, Entry> m_core;
+};
+
+inline RecordStore& records() {
+    static auto* const store = new RecordStore();
+    return *store;
+}
 
 /// The attribute name a dict key spells, by its real characters, and that name as a fresh str. The
 /// characters come straight from the key, so a str subclass cannot change them through __str__ and
@@ -231,26 +281,6 @@ inline std::pair<std::string, py::object> attribute_name(const py::handle& key) 
     py::object canonical = py::reinterpret_steal<py::object>(PyUnicode_FromStringAndSize(data, size));
     if (!canonical) throw py::error_already_set();
     return {std::string(data, static_cast<std::size_t>(size)), std::move(canonical)};
-}
-
-/// Refuse, before anything is written, a target whose RECORD name is already taken by something that
-/// is not a trait record: compose() cannot keep its bookkeeping there, and must not overwrite it.
-inline void check_record_slot(const py::type& target) {
-    const py::object own = target.attr("__dict__");
-    if (own.contains(RECORD) && !py::isinstance<TraitRecord>(own[RECORD]))
-        throw py::type_error(std::format("{}.{} is {}; compose() keeps its record there",
-                                         text(target.attr("__qualname__")), RECORD, type_name(own[RECORD])));
-}
-
-/// The target's own record, created empty if absent — returned as a py::object so the caller holds
-/// it alive across the attribute writes: a hook fired by one of them may delete it from the class,
-/// but the record the caller notes into survives. Assumes check_record_slot() has already passed.
-inline py::object fetch_or_create_record(const py::type& target) {
-    const py::object own = target.attr("__dict__");
-    if (own.contains(RECORD) && py::isinstance<TraitRecord>(own[RECORD])) return own[RECORD];
-    py::object fresh = py::cast(TraitRecord{});
-    py::setattr(target, RECORD, fresh);
-    return fresh;
 }
 
 }  // namespace detail
@@ -280,20 +310,12 @@ inline py::type compose(const py::type& target, const py::args& traits, bool ove
         const auto trait_qualname = detail::text(trait.attr("__qualname__"));
         const auto trait_name = std::format("{}.{}", detail::text(trait.attr("__module__")), trait_qualname);
         const detail::Move move{trait, target};
+        // A class that was itself composed into passes its members on with where they came from (R2).
+        const TraitRecord* carried = detail::records().find(trait);
 
         for (const auto& [key, member] : py::dict(trait.attr("__dict__"))) {
             auto [name, name_obj] = detail::attribute_name(key);
             auto done = detail::rewritten(static_cast<detail::member_kinds*>(nullptr), member, move);
-            if (name == detail::RECORD) {
-                // A trait that was itself composed into carries a record here; it is not a member,
-                // so it is skipped. A trait defining a real member here would collide with the
-                // bookkeeping compose() writes, so that is refused.
-                if (done)
-                    throw py::value_error(std::format(
-                        "{}.{} is compose()'s record of what it composed; a trait cannot define it",
-                        trait_qualname, detail::RECORD));
-                continue;
-            }
             if (!done) {
                 if (python_names::is_dunder(name)) continue;  // the trait class's own machinery
                 throw py::type_error(std::format(
@@ -310,23 +332,27 @@ inline py::type compose(const py::type& target, const py::args& traits, bool ove
                 throw py::value_error(std::format("{} already has {}; {} would replace it (pass override=True)",
                                                   target_name, name, trait_name));
             }
-            plan.push_back({std::move(name), std::move(name_obj), std::move(done->member), trait_name,
-                            detail::where(done->code)});
+            if (carried != nullptr && carried->contains(name)) {
+                const Provenance first = carried->at(name);   // the trait it first came from, and where
+                plan.push_back({std::move(name), std::move(name_obj), std::move(done->member), first.trait,
+                                first.defined});
+            } else {
+                plan.push_back({std::move(name), std::move(name_obj), std::move(done->member), trait_name,
+                                detail::where(done->code)});
+            }
         }
     }
 
     // Writing nothing on refusal: every member is planned and every refusal raised above, before the
-    // first write below. The RECORD slot is validated here too, so a foreign one is refused untouched.
-    detail::check_record_slot(target);
+    // first write below.
     if (plan.empty()) return target;  // nothing composed: the target is left exactly as it was
 
     const auto composed = detail::caller();
     for (auto& planned : plan)  // the member writes first: a write may fire a hook that edits the class
         if (PyObject_SetAttr(target.ptr(), planned.name_obj.ptr(), planned.member.ptr()) != 0)
             throw py::error_already_set();
-    // The record last, held alive so a hook that deletes it mid-note cannot leave a dangling handle.
-    py::object record_object = detail::fetch_or_create_record(target);
-    auto& record = record_object.cast<TraitRecord&>();
+    // The record last, in the side table: no hook can reach it, and a failed write leaves none.
+    auto& record = detail::records().at(target);
     for (auto& planned : plan)
         record.note(planned.name, {planned.trait, planned.defined, composed});
     return target;
@@ -335,10 +361,8 @@ inline py::type compose(const py::type& target, const py::args& traits, bool ove
 /// The record of what was composed into `cls` itself; empty for a class nothing was composed into.
 /// Example: list(traits_of(Person)) is ['greet'].
 inline py::object traits_of(const py::type& cls) {
-    const py::object own = cls.attr("__dict__");
-    if (own.contains(detail::RECORD) && py::isinstance<TraitRecord>(own[detail::RECORD]))
-        return own[detail::RECORD];  // only compose()'s own record; a foreign attribute of this name is not one
-    return py::cast(TraitRecord{});
+    const TraitRecord* found = detail::records().find(cls);
+    return py::cast(found != nullptr ? *found : TraitRecord{});  // a snapshot: the store stays private
 }
 
 }  // namespace pygim::traits

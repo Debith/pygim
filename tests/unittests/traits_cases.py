@@ -432,8 +432,8 @@ COMPOSE = Table(
     call="compose(target, traits[0], traits[1], override=override)",
     columns=("target", "traits[0]", "traits[1]", "override", "expected_result", "effect: written", "effect: traits_of"),
     arguments=4,
-    notes=("`effect: written` is the names the call set in the target's own namespace, its record "
-           "`__pygim_traits__` aside; a refused call writes nothing. `effect: traits_of` is "
+    notes=("`effect: written` is the names the call set in the target's own namespace — the members "
+           "only, as the record is kept off the class; a refused call writes nothing. `effect: traits_of` is "
            "list(traits_of(target)) after the call.",),
     rows=(
         # target                       traits[0]           traits[1]   override

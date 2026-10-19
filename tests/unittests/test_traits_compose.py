@@ -30,9 +30,6 @@ from traits_cases import (
     defined_at,
 )
 
-RECORD = "__pygim_traits__"  # where compose() keeps a class's record; not one of the written members
-
-
 def _target(cell):
     """(the target class, a factory of its instances) — or the raw value and None."""
     return cell.make() if isinstance(cell, Fresh) else (cell, None)
@@ -46,7 +43,7 @@ def _traits(case):
 def _written(before, target):
     """The names the call set in the target's own namespace: new ones, and replaced ones."""
     return tuple(sorted(name for name, value in vars(target).items()
-                        if name != RECORD and (name not in before or before[name] is not value)))
+                        if name not in before or before[name] is not value))
 
 
 def _read(instance, other, member):

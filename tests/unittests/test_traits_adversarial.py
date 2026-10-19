@@ -25,7 +25,7 @@ def test_every_legitimate_name_is_composed_not_refused():
     """The boundary: a name is never refused merely for looking unusual."""
     run = runs()[ADVERSARIAL.name]
     legitimate = {"greet", "__init__", "greet\x00x", "__slots__", "_" * 40, "x" * 300,
-                  "ɡreet", "café", "é"}
+                  "ɡreet", "café", "é", traits_adversarial.FORMER_RECORD}
     composed = {r["arguments"]["name"] for r in run.records if r["outcome"]["raised"] is None}
     assert legitimate <= composed
 
@@ -50,13 +50,16 @@ def _leaky_compose(target, *traits, override=False):
     return result
 
 
+_PLAIN = frozenset(vars(type("Plain", (), {})))  # what every class owns: not a trait's members
+
+
 def _forgetful_compose(target, *traits, override=False):
-    """Writes the members but drops the provenance record."""
-    before = dict(vars(target))
-    result = compose(target, *traits, override=override)
-    if "__pygim_traits__" in vars(target) and "__pygim_traits__" not in before:
-        delattr(target, "__pygim_traits__")
-    return result
+    """Writes the members itself, past compose(): they land, and no record of them is kept."""
+    for trait in traits:
+        for name, value in vars(trait).items():
+            if name not in _PLAIN:
+                setattr(target, name, value)
+    return target
 
 
 def _trait_mutating_compose(target, *traits, override=False):
@@ -68,7 +71,7 @@ def _trait_mutating_compose(target, *traits, override=False):
 
 @pytest.mark.parametrize("composer, obligation", [
     (_leaky_compose, "names changed"),
-    (_forgetful_compose, "record written"),
+    (_forgetful_compose, "record"),
     (_trait_mutating_compose, "trait untouched"),
 ], ids=["an extra write is caught", "a dropped record is caught", "a mutated trait is caught"])
 def test_a_state_defect_is_caught(composer, obligation):
@@ -94,10 +97,11 @@ def test_a_stale_bookkeeping_defect_is_caught():
             raise
 
     run = _run_with(_stale)
-    # On the refusal cases, a later good compose must still work; the ghost attribute is gone but its
-    # record entry lingers, which the retry obligation detects as the record and the class disagreeing.
+    # On the refusal cases the ghost attribute is gone but its record entry lingers: the record must
+    # be exactly empty after a refusal, so the exact-record obligation catches it.
     refused = [r for r in run.records if r["expected"]["raised"] is not None]
-    assert refused and any(not r["passed"] for r in refused)
+    assert refused and all(r["outcome"]["record"] == ("ghost",) for r in refused)
+    assert not any(r["passed"] for r in refused)
 
 
 # ── authored seeds: identity and aliasing (family 2) ─────────────────────────────────────────────

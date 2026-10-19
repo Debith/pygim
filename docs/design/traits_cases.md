@@ -718,7 +718,7 @@ Each call composes one member of the given name and kind. The expected outcome i
 | parameter | domain | how it is made | values |
 | --- | --- | --- | --- |
 | `target` | targets | manual: a bare class; one that already defines the baseline name; one with a base, so an inherited name is not mistaken for an owned one | 3 |
-| `name` | adversarial names | manual: one of each name a caller might pass that could confuse the write, the conflict check or the record: a NUL that truncates, the record's own name, reserved type slots, over-long and non-ASCII names, and two legitimate names that must pass | 12 |
+| `name` | adversarial names | manual: one of each name a caller might pass that could confuse the write, the conflict check or the record: a NUL that truncates, the record's former attribute, reserved type slots, over-long and non-ASCII names, and two legitimate names that must pass | 12 |
 | `kind` | member kinds | manual: the two kinds whose write path differs; the others reduce to a function inside | 2 |
 | `override` | override | manual: both | 2 |
 
@@ -729,7 +729,7 @@ Product 144, excluded 24 — not expressible as a class member (Python forbids t
 | `'greet'` | composed | written whole; only this name and the record change |
 | `'__init__'` | composed | written whole; only this name and the record change |
 | `'greet\x00x'` | composed | written whole; only this name and the record change |
-| `'__pygim_traits__'` | raises ValueError | nothing written; a later composition still works |
+| `'__pygim_traits__'` | composed | written whole; only this name and the record change |
 | `'__dict__'` | — excluded — | not expressible as a class member |
 | `'__class__'` | — excluded — | not expressible as a class member |
 | `'__slots__'` | composed | written whole; only this name and the record change |
@@ -746,10 +746,10 @@ Every adversarial family and how it is covered: *generated* (a model), *seeded* 
 
 | family | covered by | how |
 | --- | --- | --- |
-| Names: NUL, confusables, combining marks, long underscore runs and names, non-ASCII, reserved type slots, collision with the record name | generated | traits_adversarial.ADVERSARIAL — the name domain; reserved slots Python forbids as members are excluded with that reason, and the record name and owned slots are refusals. |
+| Names: NUL, confusables, combining marks, long underscore runs and names, non-ASCII, reserved type slots, the record's former attribute name | generated | traits_adversarial.ADVERSARIAL — the name domain; reserved slots Python forbids as members are excluded with that reason, owned slots are refusals, and the record's former name composes. |
 | Names: non-str keys and lone surrogates | generated+seeded | A non-str key and a surrogate name are refused by compose() (TypeError / UnicodeEncodeError); the surrogate is in the name domain, the non-str key is an authored seed. |
 | Identity and aliasing: distinct classes with identical names, repeated traits, an aliased function, inherited conflicts, independent copies per target | seeded | test_traits_adversarial.TestIdentityAndAliasing — these are relationships between whole classes, not one member's name, so they are authored, not generated. |
-| Hostile protocol objects: a metaclass __setattr__ that raises or deletes the record mid-write | seeded+subprocess | test_traits_regressions (the record-deleting hook, in a bounded child) and the state model's cleanup obligation. A hook that raises mid-write is the open rollback policy question (docs/design/traits.md), so its partial-write outcome is surfaced, not asserted as a contract. |
+| Hostile protocol objects: a metaclass __setattr__ that raises or tampers with the class mid-write | seeded+subprocess | test_traits_regressions (the tampering hook, in a bounded child) and the state model's cleanup obligation. A hook that raises mid-write leaves the earlier writes in place: the decided no-rollback policy (docs/design/traits.md), pinned by TestNoRollbackOnAPartialFailure. |
 | Code objects: nested functions, lambdas, closures, __class__/super cells, private locals vs attributes, reown chains | generated | traits_callspace.py — the CodeBuilder one-step and two-step models and the compose member bodies; a private local name is the known divergence recorded in traits.md. |
 | Resource abuse: code nested past the recursion limit, and (bounded) large inputs | subprocess | test_traits_regressions runs the deep-nesting case in a bounded child; it now raises RecursionError instead of crashing. Wide trait sets and many compositions are not yet modelled. |
 | Native memory safety of the C++ naming rules | sanitizer | tests/static/run_python_names_sanitizer.py drives utils/python_names.h over a seed corpus with bounded mutations under ASan+UBSan, with a planted-OOB negative control. No coverage-guided fuzzer is installed (no libFuzzer/AFL), so there is no feedback-driven search; this is reported, not faked. |
@@ -825,7 +825,7 @@ Besides these literal expectations, every row but `source_not_the_owner` and `ot
 
 `compose(target, traits[0], traits[1], override=override)`
 
-`effect: written` is the names the call set in the target's own namespace, its record `__pygim_traits__` aside; a refused call writes nothing. `effect: traits_of` is list(traits_of(target)) after the call.
+`effect: written` is the names the call set in the target's own namespace — the members only, as the record is kept off the class; a refused call writes nothing. `effect: traits_of` is list(traits_of(target)) after the call.
 
 | target | traits[0] | traits[1] | override | expected_result | effect: written | effect: traits_of | case |
 | --- | --- | --- | --- | --- | --- | --- | --- |

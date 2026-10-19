@@ -47,39 +47,41 @@ class TestTheNameWrittenIsTheNameChecked:
 
 
 class TestTheRecordSurvivesWhatTheWritesDo:
-    def test_a_trait_cannot_define_the_record(self):
-        """F2: a member named __pygim_traits__ replaced the record mid-write — a use after free."""
+    """F2: when the record was the class attribute `__pygim_traits__`, a member of that name replaced
+    it mid-write while compose() held a reference into it — a use after free. Fixed first by refusing
+    the name; since 2026-10-19 (R1, R3 in traits.md) the record is kept off the class, so the name is
+    an ordinary one and nothing a write does can reach the record. Still run in a bounded child: the
+    crash it was."""
+
+    def test_a_trait_member_named_like_the_old_record_is_an_ordinary_member(self):
         outcome = bounded_child.run("""
             from pygim.traits import compose, traits_of
             class Target: pass
             Trait = type("Trait", (), {"a": lambda self: 1, "__pygim_traits__": lambda self: 2})
-            try:
-                compose(Target, Trait)
-            except ValueError as error:
-                print("refused:", error)
+            compose(Target, Trait)
             print("written:", sorted(k for k in vars(Target) if k in ("a", "__pygim_traits__")))
             print("record:", list(traits_of(Target)))
         """)
         assert not outcome.crashed and not outcome.timed_out, outcome.stderr
-        assert outcome.stdout.splitlines() == [
-            "refused: Trait.__pygim_traits__ is compose()'s record of what it composed; a trait cannot define it",
-            "written: []", "record: []"]
+        assert outcome.stdout.splitlines() == ["written: ['__pygim_traits__', 'a']",
+                                               "record: ['__pygim_traits__', 'a']"]
 
-    def test_a_hook_that_deletes_the_record_mid_write_cannot_crash(self):
-        """F2: compose() kept a reference into the record across writes a hook could undo."""
+    def test_a_hook_tampering_with_the_class_mid_write_cannot_reach_the_record(self):
         outcome = bounded_child.run("""
             from pygim.traits import compose, traits_of
             class Meta(type):
                 def __setattr__(cls, name, value):
                     super().__setattr__(name, value)
-                    if name == "b" and "__pygim_traits__" in cls.__dict__:
-                        delattr(cls, "__pygim_traits__")  # the hook's own doing, not compose()'s
+                    if name == "b":
+                        for attr in [k for k in cls.__dict__ if k.startswith("__pygim")]:
+                            delattr(cls, attr)  # the hook's own doing, not compose()'s
             class Target(metaclass=Meta): pass
             compose(Target, type("Trait", (), {"a": lambda self: 1, "b": lambda self: 2, "c": lambda self: 3}))
             print("written:", sorted(k for k in vars(Target) if k in "abc"))
+            print("record:", list(traits_of(Target)))
         """)
         assert not outcome.crashed and not outcome.timed_out, outcome.stderr
-        assert outcome.stdout.splitlines() == ["written: ['a', 'b', 'c']"]
+        assert outcome.stdout.splitlines() == ["written: ['a', 'b', 'c']", "record: ['a', 'b', 'c']"]
 
 
 def test_a_code_object_nested_too_deep_raises_instead_of_crashing():
@@ -155,23 +157,24 @@ class TestNoRollbackOnAPartialFailure:
             compose(Target, type("Trait", (), {"aaa": _function("a"), "zzz": _function("z")}))
         assert "aaa" in Target.__dict__          # kept: no rollback
         assert "zzz" not in Target.__dict__       # its own write failed
-        assert "__pygim_traits__" not in Target.__dict__  # the record is attached last, after every member
-        assert list(traits_of(Target)) == []      # so a half-composition records nothing
+        assert set(Target.__dict__) & {"aaa", "zzz"} == {"aaa"}  # nothing else written either
+        assert list(traits_of(Target)) == []      # the record is noted after every member: none here
 
 
 class TestAnAttributeNamedLikeTheRecord:
-    def test_compose_refuses_a_class_whose_own_attribute_is_not_a_record(self):
-        """F6: compose() failed with pybind11's cast error, naming nothing."""
+    """F6: when the record was the class attribute `__pygim_traits__`, a class's own attribute of that
+    name broke compose() with pybind11's cast error, and traits_of() returned it. Since 2026-10-19
+    (R1, R3 in traits.md) the record is kept off the class: such an attribute is the class's own."""
 
+    def test_a_classs_own_attribute_of_that_name_is_left_alone(self):
         class Person:
             __pygim_traits__ = "mine"
 
-        with pytest.raises(TypeError, match=r"Person.__pygim_traits__ is str; compose\(\) keeps its record there"):
-            compose(Person, type("Trait", (), {"greet": _function("trait")}))
-        assert "greet" not in Person.__dict__ and Person.__dict__["__pygim_traits__"] == "mine"
+        compose(Person, type("Trait", (), {"greet": _function("trait")}))
+        assert Person.__dict__["__pygim_traits__"] == "mine"
+        assert list(traits_of(Person)) == ["greet"]
 
     def test_traits_of_does_not_report_an_attribute_that_is_not_a_record(self):
-        """F6: traits_of() returned the attribute itself, whatever it was."""
 
         class Person:
             __pygim_traits__ = "mine"

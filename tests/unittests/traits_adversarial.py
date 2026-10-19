@@ -10,16 +10,16 @@ a refusal nor a hostile hook leaves stale bookkeeping that a later composition w
 legitimate name is never refused merely for looking unusual.
 
 Each case is one compose() call generated from callspace domains. Its expected outcome comes from an
-oracle independent of pygim: the documented refusals (the record name, a name the target already
-owns, a non-str name) and, for whether an attribute name is settable at all, Python's own setattr on
+oracle independent of pygim: the documented refusals (a name the target already owns, a non-str
+name) and, for whether an attribute name is settable at all, Python's own setattr on
 a throwaway class — never from what compose() did. State is read through trusted projections only —
 names and object identity, never a value's __eq__, __repr__ or __hash__ — so the snapshot itself
 cannot be fooled by a hostile object, and sentinels on unrelated classes catch collateral writes.
 
 Resource-abuse and crash-risk families (deep code nesting, huge trait sets) are not run here: they
 live in bounded subprocesses (test_traits_regressions.py via bounded_child.py). Hostile-protocol
-hooks that raise or re-enter are covered by authored seeds, not generated, because their outcome is
-the open rollback policy question (docs/design/traits.md), not a settled contract.
+hooks that raise or re-enter are covered by authored seeds, not generated: a raising hook's outcome is
+the decided no-rollback policy (docs/design/traits.md), pinned there as a characterization.
 """
 
 from __future__ import annotations
@@ -29,7 +29,9 @@ import functools
 from callspace import Atoms, Exclusion, Model, Parameter, Run, advertise, generate
 from pygim.traits import compose, traits_of
 
-RECORD = "__pygim_traits__"
+# The class attribute compose() kept its record under until 2026-10-19 (R1, R3 in traits.md);
+# now an ordinary name.
+FORMER_RECORD = "__pygim_traits__"
 
 # ── adversarial domains ───────────────────────────────────────────────────────────────────────
 
@@ -39,7 +41,7 @@ NAMES = Atoms(
         "greet",                 # legitimate baseline: must not be refused for sitting among hostile ones
         "__init__",              # a legitimate dunder method name — not machinery, must compose
         "greet\x00x",            # an embedded NUL: the whole name is the attribute, not "greet"
-        RECORD,                  # collides with compose()'s own bookkeeping
+        FORMER_RECORD,           # the record's old attribute: must compose like any other name
         "__dict__",              # a type slot no class can hold as a member (excluded, not expressible)
         "__class__",             # a slot Python forbids setting to a function (excluded)
         "__slots__",             # placeable post-creation as a plain attribute; must compose harmlessly
@@ -50,8 +52,8 @@ NAMES = Atoms(
         "é",                     # a non-ASCII but ordinary identifier character
     ),
     why="one of each name a caller might pass that could confuse the write, the conflict check or the "
-        "record: a NUL that truncates, the record's own name, reserved type slots, over-long and "
-        "non-ASCII names, and two legitimate names that must pass",
+        "record: a NUL that truncates, the record's former attribute, reserved type slots, over-long "
+        "and non-ASCII names, and two legitimate names that must pass",
 )
 TARGETS = Atoms("targets", ("empty", "has greet", "has base"),
                 why="a bare class; one that already defines the baseline name; one with a base, so an "
@@ -136,12 +138,10 @@ def _settable(name):
 def expected(target_kind, name, override):
     """(outcome kind, the one name allowed to change) the contract predicts, with no call made.
     outcome is "compose" or an exception name; the second item is the attribute compose() may write
-    (the member), always besides the record it keeps."""
+    (the member) — the only one, as the record is kept off the class."""
     owned = {"empty": set(), "has greet": {"greet"}, "has base": set()}[target_kind]
     # A plain class always owns these type slots in its own dict (so composing one is "already has"):
     owned |= {"__doc__", "__module__", "__dict__", "__weakref__"}
-    if name == RECORD:
-        return "ValueError", None             # a trait cannot define the record
     if name in owned and not override:
         return "ValueError", None             # the target already has it
     forbidden = _settable(name)               # Python itself refuses some slots whatever compose does
@@ -181,21 +181,20 @@ def run_case(arguments, composer=compose):
     outcome = {
         "raised": raised,
         "returned target": returned is target,
-        "names changed": tuple(sorted(added - {RECORD})),
-        "record written": RECORD in after,
-        "in record": arguments["name"] in record_names(target),
+        "names changed": tuple(sorted(added)),
+        "record": tuple(record_names(target)),   # exactly: read before the cleanup composes more
         "trait untouched": own_names(trait) == trait_before,
         "sibling untouched": own_names(sibling) == sibling_before and sibling.keep == SIBLING_SENTINEL,
         "retry then good compose works": _cleanup_holds(target, arguments["name"]),
     }
     if kind == "compose":
         want = {"raised": None, "returned target": True, "names changed": (arguments["name"],),
-                "record written": True, "in record": True, "trait untouched": True,
+                "record": (arguments["name"],), "trait untouched": True,
                 "sibling untouched": True, "retry then good compose works": True}
         oracle = "contract+python"
     else:
-        want = {"raised": kind, "returned target": False, "names changed": (), "record written": False,
-                "in record": False, "trait untouched": True, "sibling untouched": True,
+        want = {"raised": kind, "returned target": False, "names changed": (), "record": (),
+                "trait untouched": True, "sibling untouched": True,
                 "retry then good compose works": True}
         oracle = "contract+python"
     return outcome, want, oracle
@@ -222,9 +221,9 @@ MODELS = {ADVERSARIAL.name: (ADVERSARIAL, run_case)}
 
 FAMILIES = (
     ("Names: NUL, confusables, combining marks, long underscore runs and names, non-ASCII, "
-     "reserved type slots, collision with the record name", "generated",
+     "reserved type slots, the record's former attribute name", "generated",
      "traits_adversarial.ADVERSARIAL — the name domain; reserved slots Python forbids as members are "
-     "excluded with that reason, and the record name and owned slots are refusals."),
+     "excluded with that reason, owned slots are refusals, and the record's former name composes."),
     ("Names: non-str keys and lone surrogates", "generated+seeded",
      "A non-str key and a surrogate name are refused by compose() (TypeError / UnicodeEncodeError); "
      "the surrogate is in the name domain, the non-str key is an authored seed."),
@@ -232,11 +231,11 @@ FAMILIES = (
      "function, inherited conflicts, independent copies per target", "seeded",
      "test_traits_adversarial.TestIdentityAndAliasing — these are relationships between whole classes, "
      "not one member's name, so they are authored, not generated."),
-    ("Hostile protocol objects: a metaclass __setattr__ that raises or deletes the record mid-write",
+    ("Hostile protocol objects: a metaclass __setattr__ that raises or tampers with the class mid-write",
      "seeded+subprocess",
-     "test_traits_regressions (the record-deleting hook, in a bounded child) and the state model's "
-     "cleanup obligation. A hook that raises mid-write is the open rollback policy question "
-     "(docs/design/traits.md), so its partial-write outcome is surfaced, not asserted as a contract."),
+     "test_traits_regressions (the tampering hook, in a bounded child) and the state model's "
+     "cleanup obligation. A hook that raises mid-write leaves the earlier writes in place: the decided "
+     "no-rollback policy (docs/design/traits.md), pinned by TestNoRollbackOnAPartialFailure."),
     ("Code objects: nested functions, lambdas, closures, __class__/super cells, private locals vs "
      "attributes, reown chains", "generated",
      "traits_callspace.py — the CodeBuilder one-step and two-step models and the compose member bodies; "
