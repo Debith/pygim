@@ -83,24 +83,24 @@ def test_a_state_defect_is_caught(composer, obligation):
 
 
 def test_a_stale_bookkeeping_defect_is_caught():
-    """A composer that leaves a half-built record behind on refusal must fail the cleanup obligation."""
-    class Meta(type):
-        pass
+    """A composer that leaves bookkeeping behind on a refusal must fail the state obligations.
+
+    Since D15 (2026-10-19) traits_of() reports only members the class still holds, so a record entry
+    whose member is gone is invisible by design; this control leaves the whole ghost behind — the
+    member and its entry — which a refusal must not."""
 
     def _stale(target, *traits, override=False):
         try:
             return compose(target, *traits, override=override)
         except Exception:
-            # Leave a record of a member that was never written: stale bookkeeping.
-            compose(target, make_trait("ghost", "function"), override=True)
-            delattr(target, "ghost")
+            compose(target, make_trait("ghost", "function"), override=True)   # bookkeeping left behind
             raise
 
     run = _run_with(_stale)
-    # On the refusal cases the ghost attribute is gone but its record entry lingers: the record must
-    # be exactly empty after a refusal, so the exact-record obligation catches it.
+    # After a refusal the record must be exactly empty and nothing written: both obligations catch it.
     refused = [r for r in run.records if r["expected"]["raised"] is not None]
     assert refused and all(r["outcome"]["record"] == ("ghost",) for r in refused)
+    assert all(r["outcome"]["names changed"] == ("ghost",) for r in refused)
     assert not any(r["passed"] for r in refused)
 
 

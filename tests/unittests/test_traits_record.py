@@ -102,3 +102,62 @@ class TestComposingAComposedClass:
         assert traits_of(target)["own"].trait == f"{MODULE}.Middle"
         assert traits_of(target)["greet"].trait == f"{MODULE}.First"
         assert target().own() == "mine" and target().greet() == "hi"
+
+
+class TestTheRecordIsAccurate:
+    """D15 (Debith, 2026-10-19: "A, accurately"): traits_of(cls) lists only the members cls still holds
+    as compose() left them. A member replaced or deleted since is the class's own business, and
+    composing the class elsewhere attributes it to the class, not to the trait it once came from."""
+
+    def _middle(self):
+        trait = type("Greeter", (), {"greet": _function("hello"), "__module__": MODULE})
+        middle = type("Middle", (), {"__module__": MODULE})
+        compose(middle, trait)
+        return middle, trait
+
+    def test_a_replaced_member_is_no_longer_reported(self):
+        middle, _ = self._middle()
+        middle.greet = _function("custom")
+        assert list(traits_of(middle)) == []
+
+    def test_a_deleted_member_is_no_longer_reported(self):
+        middle, _ = self._middle()
+        del middle.greet
+        assert list(traits_of(middle)) == []
+
+    def test_an_unrelated_change_leaves_the_record_alone(self):
+        middle, _ = self._middle()
+        middle.other = _function("other")
+        assert list(traits_of(middle)) == ["greet"]
+
+    def test_a_replaced_member_is_attributed_to_the_class_that_holds_it(self):
+        middle, _ = self._middle()
+
+        def custom(self):
+            return "custom"
+
+        middle.greet = custom
+        target = type("Target", (), {})
+        compose(target, middle)
+        record = traits_of(target)["greet"]
+        assert record.trait == f"{MODULE}.Middle"
+        assert record.defined == f"{custom.__code__.co_filename}:{custom.__code__.co_firstlineno}"
+        assert target().greet() == "custom"
+
+    def test_composing_over_a_replaced_member_reports_it_again(self):
+        middle, trait = self._middle()
+        middle.greet = _function("custom")
+        compose(middle, trait, override=True)
+        assert traits_of(middle)["greet"].trait == f"{MODULE}.Greeter"
+
+    def test_a_member_a_hook_stored_differently_is_still_reported(self):
+        """A metaclass __setattr__ may store something other than what compose() passed; the record
+        holds what landed in the class, so the member is still compose()'s."""
+        class Wrapping(type):
+            def __setattr__(cls, name, value):
+                super().__setattr__(name, staticmethod(value) if callable(value) else value)
+
+        target = Wrapping("Target", (), {})
+        compose(target, type("Greeter", (), {"greet": _function("hello")}))
+        assert isinstance(vars(target)["greet"], staticmethod)
+        assert list(traits_of(target)) == ["greet"]

@@ -26,7 +26,8 @@
 //
 // Composing a class that was itself composed into carries its record along: each member keeps the
 // trait it first came from and where that trait defined it; only `composed` names the new call. A
-// member the class defined itself is attributed to that class.
+// member the class defined itself — or replaced since it was composed — is attributed to that class.
+// The record is accurate: it lists only the members the class still holds as compose() left them.
 //
 // Lifetime and threading: a class's record is kept off the class, in a side table keyed by the class's
 // identity, and removed when the class is collected (detail::RecordStore); a class composed into gets a
@@ -63,31 +64,71 @@ struct Provenance {
 };
 
 /// The composed members of one class, by name, in name order: a RegistryCore over the flat engine.
+/// Each entry keeps the object compose() left in the class, so the record can tell a member still
+/// composed from one replaced or deleted since (D15: traits_of reports only the former).
 /// Cost: a binary search to read; a sorted insert to note. Example: names() of Person above is ['greet'].
 class TraitRecord {
 public:
-    /// Record `name`, replacing what was recorded under it (an override composes over it).
-    void note(const std::string& name, Provenance provenance) { m_core.upsert_value(name, std::move(provenance)); }
+    /// Record `name` as composed, holding `member` — what the class's own namespace held right after
+    /// the write — and replacing what was recorded under it (an override composes over it).
+    void note(const std::string& name, Provenance provenance, py::object member) {
+        m_core.upsert_value(name, Composed{std::move(provenance), std::move(member)});
+    }
 
     /// The provenance of `name`; KeyError when nothing was composed under it.
     [[nodiscard]] Provenance at(const std::string& name) const {
         const auto* found = m_core.try_get_const(name);
         if (found == nullptr) throw py::key_error(name);
-        return *found;
+        return found->provenance;
     }
 
     [[nodiscard]] bool contains(const std::string& name) const { return m_core.contains(name); }
     [[nodiscard]] std::size_t size() const noexcept { return m_core.size(); }
     [[nodiscard]] pygim::Strings names() const { return m_core.keys(); }
 
+    /// Whether `member` is still what compose() left under `name`, compared by identity.
+    [[nodiscard]] bool holds(const std::string& name, const py::handle& member) const {
+        const auto* found = m_core.try_get_const(name);
+        return found != nullptr && found->member.is(member);
+    }
+
+    /// This record as it stands in a class whose own namespace is `own`: only the members still there
+    /// as compose() left them. Example: after `Person.greet = other`, greet is not in it.
+    [[nodiscard]] TraitRecord standing_in(const py::dict& own) const {
+        TraitRecord out;
+        for (const auto& [name, composed] : m_core.storage().items()) {
+            const py::str key(name);
+            PyObject* current = PyDict_GetItemWithError(own.ptr(), key.ptr());  // borrowed; no hook is asked
+            if (current == nullptr && PyErr_Occurred()) throw py::error_already_set();
+            if (current == composed.member.ptr()) out.m_core.upsert_value(name, composed);
+        }
+        return out;
+    }
+
 private:
-    core::StaticRegistryCore<std::string, Provenance> m_core;
+    struct Composed {
+        Provenance provenance;
+        py::object member;  // the object compose() left in the class's own namespace
+    };
+    core::StaticRegistryCore<std::string, Composed> m_core;
 };
 
 namespace detail {
 
 inline std::string text(const py::handle& value) { return py::str(value).cast<std::string>(); }
 inline std::string type_name(const py::handle& value) { return text(py::type::of(value).attr("__name__")); }
+
+/// A class's own namespace, through the C API: the dict itself, so no metaclass attribute named
+/// `__dict__` and no descriptor is asked. Example: own_namespace(Person)["greet"] is Person.greet's function.
+inline py::dict own_namespace(const py::handle& cls) {
+#if PY_VERSION_HEX >= 0x030C0000
+    PyObject* dict = PyType_GetDict(reinterpret_cast<PyTypeObject*>(cls.ptr()));  // new reference
+    return dict != nullptr ? py::reinterpret_steal<py::dict>(dict) : py::dict();
+#else
+    PyObject* dict = reinterpret_cast<PyTypeObject*>(cls.ptr())->tp_dict;           // borrowed
+    return dict != nullptr ? py::reinterpret_borrow<py::dict>(dict) : py::dict();
+#endif
+}
 
 /// "file:line" of a code object; "" for None.
 inline std::string where(const py::handle& code) {
@@ -337,9 +378,16 @@ public:
         if (PyObject_SetAttr(target.ptr(), m_name_obj.ptr(), m_member.ptr()) != 0) throw py::error_already_set();
     }
 
-    /// Note the member in `record`, composed at `composed` ("file:line").
-    void note_into(TraitRecord& record, const std::string& composed) const {
-        record.note(m_name, {m_trait, m_defined, composed});
+    /// Note the member in `record`, composed at `composed` ("file:line"), holding what landed under its
+    /// name in `own`, the class's namespace after the writes — a metaclass hook may have stored
+    /// something else, or nothing, in which case there is nothing to note.
+    void note_into(TraitRecord& record, const std::string& composed, const py::dict& own) const {
+        PyObject* landed = PyDict_GetItemWithError(own.ptr(), m_name_obj.ptr());  // borrowed
+        if (landed == nullptr) {
+            if (PyErr_Occurred()) throw py::error_already_set();
+            return;
+        }
+        record.note(m_name, {m_trait, m_defined, composed}, py::reinterpret_borrow<py::object>(landed));
     }
 
 private:
@@ -381,7 +429,8 @@ public:
                     "{}.{} is {}; a trait composes functions, properties, classmethods and staticmethods",
                     trait_qualname, name, type_name(member)));
             }
-            const bool passed_on = carried != nullptr && carried->contains(name);
+            // Passed on only while the trait still holds what compose() left there (D15).
+            const bool passed_on = carried != nullptr && carried->holds(name, member);
             const Provenance origin = passed_on ? carried->at(name) : Provenance{trait_name, where(done->code), {}};
             admit(PlannedMember{std::move(name), std::move(name_obj), std::move(done->member), origin.trait,
                                 origin.defined},
@@ -397,9 +446,10 @@ public:
         const auto composed = caller();
         for (const auto& member : m_plan)  // the member writes first: a write may fire a hook
             member.write_into(m_target);
+        const py::dict own = own_namespace(m_target);
         auto& record = records().at(m_target);  // in the side table: no hook can reach it
         for (const auto& member : m_plan)
-            member.note_into(record, composed);
+            member.note_into(record, composed, own);
         return m_target;
     }
 
@@ -442,11 +492,13 @@ inline py::type compose(const py::type& target, const py::args& traits, bool ove
     return composition.commit();
 }
 
-/// The record of what was composed into `cls` itself; empty for a class nothing was composed into.
+/// The record of what was composed into `cls` itself and is still there: a member replaced or
+/// deleted since is left out (D15). Empty for a class nothing was composed into.
 /// Example: list(traits_of(Person)) is ['greet'].
 inline py::object traits_of(const py::type& cls) {
     const TraitRecord* found = detail::records().find(cls);
-    return py::cast(found != nullptr ? *found : TraitRecord{});  // a snapshot: the store stays private
+    // A snapshot: the store stays private.
+    return py::cast(found != nullptr ? found->standing_in(detail::own_namespace(cls)) : TraitRecord{});
 }
 
 }  // namespace pygim::traits
