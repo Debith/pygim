@@ -118,3 +118,39 @@ def test_the_trait_itself_is_untouched():
     assert Ref("Greeter").resolve().__dict__["greet"] is greet
     assert vars(target)["greet"] is not greet
     assert "_Greeter__name" in greet.__code__.co_names
+
+
+def test_a_composed_function_keeps_what_it_carries():
+    """Everything a function carries besides its code comes along unchanged: its name (even one that
+    differs from its code's), defaults, keyword defaults, annotations, docstring, module, attributes,
+    type parameters and closure cells — only the code, the __class__ cell and the qualified name move."""
+    captured = "from the enclosing scope"
+
+    def greet(self, greeting="hi", *, punctuation="!") -> str:
+        """Say hello."""
+        return f"{greeting}{punctuation} {captured}"
+
+    greet.__name__ = "renamed"            # differs from greet.__code__.co_name
+    greet.__module__ = "elsewhere"
+    greet.marker = "kept"
+    if sys.version_info >= (3, 12):
+        greet.__type_params__ = (type("T", (), {}),)
+    trait = type("Trait", (), {"greet": greet})
+    target = type("Target", (), {})
+    compose(target, trait)
+
+    composed = vars(target)["greet"]
+    assert composed is not greet
+    assert composed.__name__ == "renamed"
+    assert composed.__defaults__ == ("hi",)
+    assert composed.__kwdefaults__ == {"punctuation": "!"}
+    assert composed.__annotations__ == {"return": str}
+    assert composed.__doc__ == "Say hello."
+    assert composed.__module__ == "elsewhere"
+    assert composed.marker == "kept"
+    assert composed.__globals__ is greet.__globals__
+    if sys.version_info >= (3, 12):
+        assert composed.__type_params__ == greet.__type_params__
+    assert composed.__closure__[0] is greet.__closure__[0]   # an ordinary cell is shared, not copied
+    assert target().greet() == "hi! from the enclosing scope"
+    assert target().greet("hey", punctuation="?") == "hey? from the enclosing scope"
