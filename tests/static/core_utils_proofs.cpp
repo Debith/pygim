@@ -46,7 +46,7 @@ constexpr csv_row to_csv_rows[] = {
     {{"c", "a", "b"},          3,     true,    "a, b, c",   "three_sorted"},    // interaction: three and sorted
 };
 static_assert(first_failing_row(to_csv_rows, [](const auto& r) {
-                  std::vector<std::string> strings;
+                  pygim::Strings strings;
                   for (std::size_t i = 0; i < r.count; ++i) strings.emplace_back(r.strings[i]);
                   return to_csv(strings, r.sorted) == r.expected;
               }) == every_row_holds);

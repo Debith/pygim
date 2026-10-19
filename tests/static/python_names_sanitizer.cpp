@@ -9,6 +9,8 @@
 
 #include "python_names.h"
 
+#include "aliases.h"
+
 #include <cstdio>
 #include <string>
 #include <string_view>
@@ -38,7 +40,7 @@ static void use(const std::string& s) { use(std::string_view{s}); }
 
 int main(int argc, char** argv) {
     if (argc < 2) { std::fprintf(stderr, "usage: %s corpus\n", argv[0]); return 2; }
-    std::vector<std::string> corpus;
+    pygim::Strings corpus;
     if (FILE* file = std::fopen(argv[1], "rb")) {
         char* line = nullptr;
         std::size_t cap = 0;

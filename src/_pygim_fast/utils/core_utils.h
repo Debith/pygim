@@ -27,9 +27,11 @@
 #include <string>
 #include <vector>
 
+#include "aliases.h"
+
 /// `strings` joined with ", ", sorted first when `sorted`. Cost: one sort when asked, one allocation.
 /// Example: to_csv({"b", "a"}) is "b, a"; to_csv({"b", "a"}, true) is "a, b"; to_csv({}) is "".
-[[nodiscard]] constexpr std::string to_csv(std::vector<std::string> strings, bool sorted = false) {
+[[nodiscard]] constexpr std::string to_csv(pygim::Strings strings, bool sorted = false) {
     if (sorted) {
         std::ranges::sort(strings);
     }

@@ -99,7 +99,7 @@ def discover(compiler):
 
 def build_and_run(compiler, out, header_dir, corpus, label):
     binary = out / f"harness-{label}"
-    argv = [compiler, "-std=c++26", "-O1", "-g", *SANITIZE, f"-I{header_dir}", HERE / "python_names_sanitizer.cpp",
+    argv = [compiler, "-std=c++26", "-O1", "-g", *SANITIZE, f"-I{header_dir}", f"-I{HEADER.parent}", HERE / "python_names_sanitizer.cpp",
             "-o", binary]
     build = run(argv, out)
     (out / f"build-{label}.log").write_text(build.stdout + build.stderr, encoding="utf-8")

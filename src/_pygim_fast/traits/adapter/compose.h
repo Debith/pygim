@@ -43,6 +43,7 @@
 
 #include "../../wiring/registry/core.h"
 #include "code_builder.h"
+#include "../../utils/aliases.h"
 #include "../../utils/python_names.h"
 
 namespace pygim::traits {
@@ -73,7 +74,7 @@ public:
 
     [[nodiscard]] bool contains(const std::string& name) const { return m_core.contains(name); }
     [[nodiscard]] std::size_t size() const noexcept { return m_core.size(); }
-    [[nodiscard]] std::vector<std::string> names() const { return m_core.keys(); }
+    [[nodiscard]] pygim::Strings names() const { return m_core.keys(); }
 
 private:
     core::StaticRegistryCore<std::string, Provenance> m_core;

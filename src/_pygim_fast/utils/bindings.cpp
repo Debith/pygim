@@ -240,7 +240,7 @@ PYBIND11_MODULE(utils, m) {
           "characters, two underscores at each end, and neither pair part of a longer run of underscores.");
 
     m.def("to_csv",
-          py::overload_cast<std::vector<std::string>, bool>(&to_csv),
+          py::overload_cast<pygim::Strings, bool>(&to_csv),
           "Convert a vector of strings to a CSV string");
 
     m.def("format_bytes_per_second",
