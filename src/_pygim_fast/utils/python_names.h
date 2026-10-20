@@ -48,6 +48,8 @@ constexpr bool is_dunder(std::string_view name) noexcept {
     return name.size() > 4 && name.starts_with("__") && name.ends_with("__") && name[2] != '_' &&
            name[name.size() - 3] != '_';
 }
+static_assert(is_dunder("__lt__"));                       // compose() leaves a trait's __lt__ behind, as machinery
+static_assert(!is_dunder("___x__"));                      // a longer run of underscores is not one, as enum says
 
 /// The part of a class name that mangling uses: the name without its leading underscores.
 /// Cost: one scan over the leading underscores.
@@ -56,6 +58,7 @@ constexpr std::string_view owner_of(std::string_view class_name) noexcept {
     const auto first = class_name.find_first_not_of('_');
     return first == std::string_view::npos ? std::string_view{} : class_name.substr(first);
 }
+static_assert(owner_of("_Trait") == "Trait");             // class _Trait mangles as _Trait__x, not __Trait__x
 
 /// Whether Python mangles `name` inside a class body (_Py_Mangle): it starts with two underscores,
 /// does not end with two, and has no dot (a dotted name only occurs in an import of a package).
@@ -64,6 +67,7 @@ constexpr std::string_view owner_of(std::string_view class_name) noexcept {
 constexpr bool is_private_name(std::string_view name) noexcept {
     return name.starts_with("__") && !name.ends_with("__") && name.find('.') == std::string_view::npos;
 }
+static_assert(is_private_name("__secret") && !is_private_name("__init__"));   // self.__secret, not self.__init__
 
 /// `name` as Python spells it inside class `class_name`.
 /// Cost: one allocation of the result.
@@ -78,6 +82,7 @@ constexpr std::string mangled(std::string_view class_name, std::string_view name
     out += name;
     return out;
 }
+static_assert(mangled("Trait", "__secret") == "_Trait__secret");   // self.__secret, written in class Trait
 
 /// The private name that `name` spells inside class `class_name`, or "" when `name` is not one of
 /// that class's private names. In an all-underscore class private names are not mangled, so there
@@ -91,6 +96,7 @@ constexpr std::string_view unmangled(std::string_view class_name, std::string_vi
     const auto rest = name.substr(1 + owner.size());
     return is_private_name(rest) ? rest : std::string_view{};
 }
+static_assert(unmangled("Trait", "_Trait__secret") == "__secret");  // the name class Trait's code wrote
 
 /// The new spelling of `name` when code compiled in class `from` moves into class `to`: a private
 /// name of `from` becomes the same private name of `to`. Nothing for every other name, which does
@@ -103,6 +109,8 @@ constexpr std::optional<std::string> respelt(std::string_view from, std::string_
     if (private_name.empty()) return std::nullopt;
     return mangled(to, private_name);
 }
+static_assert(respelt("Trait", "Target", "_Trait__secret") == "_Target__secret");   // a co_names entry, moved
+static_assert(!respelt("Trait", "Target", "value"));                                 // a public name stays put
 
 /// `name`, taken from code compiled in class `from` into code that belongs to class `to`: respelt()'s
 /// new spelling, or `name` itself when it does not move.
@@ -113,6 +121,8 @@ constexpr std::string reowned(std::string_view from, std::string_view to, std::s
     auto moved = respelt(from, to, name);
     return moved ? std::move(*moved) : std::string{name};
 }
+static_assert(reowned("Trait", "Target", "_Trait__secret") == "_Target__secret");
+static_assert(reowned("Trait", "Target", "value") == "value");   // every name has an answer: itself, unmoved
 
 /// `qualname` with the qualified name of its owner, `from`, replaced by `to`. A qualified name that
 /// does not start with `from` followed by a dot is unchanged.
@@ -127,6 +137,7 @@ constexpr std::string requalified(std::string_view from, std::string_view to, st
     out += qualname.substr(from.size());
     return out;
 }
+static_assert(requalified("Trait", "Target", "Trait.f.<locals>.<lambda>") == "Target.f.<locals>.<lambda>");
 
 /// The naming rules gathered for one class. Constructed with the class's name — and, where a
 /// qualified name or module is in play, those too — it answers the forms that depend on a class:
@@ -188,6 +199,8 @@ private:
     std::string_view m_qualname;
     std::string_view m_module;
 };
+static_assert(NamePolicy{"daa"}.mangled("__attr") == "_daa__attr");
+static_assert(NamePolicy{"Trait"}.respelt(NamePolicy{"Target"}, "_Trait__secret") == "_Target__secret");
 
 /// Code moved from class to class, in order — reown(A, B), then reown(B, C) — and what that does to
 /// each name the code spells. Each move is NamePolicy's rule; this applies them in order. Unlike
@@ -255,5 +268,8 @@ private:
 
     std::vector<Move> m_moves;
 };
+static_assert(Reowning{}.then(NamePolicy{"Trait"}, NamePolicy{"Target"}).respelt("_Trait__secret") == "_Target__secret");
+static_assert(Reowning{}.then(NamePolicy{"A"}, NamePolicy{"B"}).then(NamePolicy{"B"}, NamePolicy{"C"}).requalified("A.f")
+              == "C.f");  // CodeBuilder(code).reown(A, B).reown(B, C)
 
 }  // namespace pygim::python_names
