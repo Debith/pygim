@@ -18,9 +18,9 @@
 // The rules are utils/python_names.h's Reowning, kept apart from the builder: a builder is one code
 // object, and reads them. A nested code object (a lambda, an inner def, a generator expression) gets
 // its own builder, reading the same rules — code objects never change, so a new nested one means a
-// new parent holding it, built from the leaves up. This header only walks Python's code objects and
-// calls code.replace(), the language's own way to derive a code object, so no table of CodeType's
-// constructor arguments per Python version is kept here.
+// new parent holding it, built from the leaves up. The fields are read and replaced through
+// code_object.h: code.replace(), the language's own way to derive a code object, so no table of
+// CodeType's constructor arguments per Python version is kept here.
 //
 // A name is read in place, through the UTF-8 text CPython keeps with every str, and a name no step
 // moves is passed on as the very same object: only a re-spelt name allocates. The walk uses the C
@@ -50,6 +50,7 @@
 #include <pybind11/pybind11.h>
 
 #include "../../utils/python_names.h"
+#include "code_object.h"
 
 namespace pygim::traits {
 
@@ -86,25 +87,8 @@ public:
     /// tree; per name and step one comparison, and an allocation only for a name that is re-spelt.
     /// Example: build().co_names is ('_Target__secret',).
     py::object build() const {
-        const RecursionGuard guard;  // left on every exit, including an exception thrown below
-        static PyObject* const co_names = interned("co_names");
-        static PyObject* const co_consts = interned("co_consts");
-        static PyObject* const co_qualname = interned("co_qualname");
-        static PyObject* const replace = interned("replace");
-        static const bool has_qualname = PyObject_HasAttr(m_code.ptr(), co_qualname) == 1;  // Python 3.11 and later
-        static PyObject* const keywords = has_qualname ? Py_BuildValue("(OOO)", co_names, co_consts, co_qualname)
-                                                       : Py_BuildValue("(OO)", co_names, co_consts);
-        if (keywords == nullptr) throw py::error_already_set();
-
-        const py::object names = mapped(attribute(m_code, co_names), &CodeBuilder::moved);
-        const py::object constants = mapped(attribute(m_code, co_consts), &CodeBuilder::built_if_code);
-        const py::object qualname = has_qualname ? requalified(attribute(m_code, co_qualname)) : py::object();
-
-        // code.replace(co_names=..., co_consts=..., co_qualname=...) by vectorcall: no dict is built.
-        PyObject* arguments[] = {m_code.ptr(), names.ptr(), constants.ptr(), qualname.ptr()};
-        PyObject* result = PyObject_VectorcallMethod(replace, arguments, 1 | PY_VECTORCALL_ARGUMENTS_OFFSET, keywords);
-        if (result == nullptr) throw py::error_already_set();
-        return py::reinterpret_steal<py::object>(result);
+        const RecursionGuard guard;  // a nested code object's build() runs inside this one's
+        return code_object::ReplaceCall::execute(m_code, moved_names(), built_constants(), moved_qualname());
     }
 
 private:
@@ -125,6 +109,25 @@ private:
         return {data, static_cast<std::size_t>(size)};
     }
 
+    /// co_names after every step: ('_Trait__secret',) is ('_Target__secret',).
+    py::object moved_names() const {
+        return mapped(code_object::field(m_code, code_object::co_names), &CodeBuilder::moved);
+    }
+
+    /// co_consts with each nested code object (a lambda, an inner def) built by its own builder.
+    py::object built_constants() const {
+        return mapped(code_object::field(m_code, code_object::co_consts), &CodeBuilder::built_if_code);
+    }
+
+    /// co_qualname after every step: 'Trait.f' is 'Target.f'. Nothing before Python 3.11, where a code
+    /// object has none (the function carries its qualified name, and compose() moves that).
+    py::object moved_qualname() const {
+        if constexpr (code_object::has_qualname)
+            return requalified(code_object::field(m_code, code_object::co_qualname));
+        else
+            return {};
+    }
+
     /// `name` after every step, in order: the same object when no step moves it, a new str when one does.
     py::object moved(const py::handle& name) const {
         const auto spelling = m_rules->respelt(utf8(name));
@@ -143,20 +146,6 @@ private:
     py::object built_if_code(const py::handle& constant) const {
         if (!PyCode_Check(constant.ptr())) return py::reinterpret_borrow<py::object>(constant);
         return CodeBuilder(py::reinterpret_borrow<py::object>(constant), m_rules).build();
-    }
-
-    /// An attribute looked up by an interned name, so no str is made per lookup.
-    static py::object attribute(const py::handle& owner, PyObject* name) {
-        PyObject* value = PyObject_GetAttr(owner.ptr(), name);
-        if (value == nullptr) throw py::error_already_set();
-        return py::reinterpret_steal<py::object>(value);
-    }
-
-    /// `text` as an interned str, kept for the life of the process as interned names are.
-    static PyObject* interned(const char* text) {
-        PyObject* name = PyUnicode_InternFromString(text);
-        if (name == nullptr) throw py::error_already_set();
-        return name;
     }
 
     /// A new tuple holding `(this->*each)(item)` for every item of `tuple`, in order — Python's
