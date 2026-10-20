@@ -29,6 +29,7 @@ using pygim::python_names::is_dunder;
 using pygim::python_names::is_private_name;
 using pygim::python_names::mangled;
 using pygim::python_names::NamePolicy;
+using pygim::python_names::Reowning;
 using pygim::python_names::owner_of;
 using pygim::python_names::reowned;
 using pygim::python_names::requalified;
@@ -268,5 +269,25 @@ consteval bool name_policy_agrees_with_the_free_functions() {
     return true;
 }
 static_assert(name_policy_agrees_with_the_free_functions());
+
+// Reowning applies NamePolicy's moves in order: it must agree with the chained free functions,
+// the exception included, and then() must leave the reowning it extends as it was.
+consteval bool reowning_applies_the_moves_in_order() {
+    const Reowning none;
+    if (none.respelt("_A__x") || none.requalified("A.f") != "A.f") return false;   // no moves: nothing moves
+    const Reowning ab = none.then(NamePolicy{"A"}, NamePolicy{"B"});
+    if (ab.respelt("_A__x") != "_B__x" || ab.respelt("value") || ab.respelt("_Other__x")) return false;
+    if (ab.requalified("A.f.<locals>.g") != "B.f.<locals>.g" || ab.requalified("AX.f") != "AX.f") return false;
+    const Reowning abc = ab.then(NamePolicy{"B"}, NamePolicy{"C"});
+    if (abc.respelt("_A__x") != reowned("B", "C", reowned("A", "B", "_A__x"))) return false;   // moved twice
+    if (abc.respelt("_B__x") != "_C__x") return false;      // the exception: B's own after A -> B, moved on
+    if (abc.respelt("_C__x")) return false;                 // C's own was never A's or B's
+    if (abc.requalified("A.f") != "C.f") return false;
+    if (ab.respelt("_A__x") != "_B__x" || none.respelt("_A__x")) return false;   // then() changed neither
+    const Reowning qualified = none.then(NamePolicy{"T", "Outer.T"}, NamePolicy{"U", "Other.U"});
+    if (qualified.respelt("_T__x") != "_U__x" || qualified.requalified("Outer.T.f") != "Other.U.f") return false;
+    return true;
+}
+static_assert(reowning_applies_the_moves_in_order());
 
 }  // namespace

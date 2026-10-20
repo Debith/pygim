@@ -6,7 +6,8 @@
 //   is_private_name  the compiler's _Py_Mangle: which names it mangles inside a class body
 //   mangled          _Py_Mangle: `__secret` inside `class Trait:` is `_Trait__secret`
 // and the moves built on them: unmangled (back), respelt and reowned (to another class), requalified
-// (a qualified name to another owner). Users: utils (pygim.utils.is_dunder), each (its dunder guard),
+// (a qualified name to another owner). NamePolicy gathers them for one class; Reowning applies a
+// chain of moves, class to class. Users: utils (pygim.utils.is_dunder), each (its dunder guard),
 // traits (CodeBuilder and compose()). tests/static/python_names_proofs.cpp proves the rules.
 //
 // Worked example — the names a CodeBuilder.reown(Trait, Target) meets:
@@ -26,7 +27,8 @@
 //   reowned("Trait", "Target", "value")                -> "value"           respelt's spelling, or the name
 //   requalified("Trait", "Target", "Trait.f.<locals>.<lambda>") -> "Target.f.<locals>.<lambda>"
 //
-// Lifetime and threading: free functions over string_views; nothing is stored, nothing is shared.
+// Lifetime and threading: free functions over string_views, and NamePolicy, a view, store nothing.
+// Reowning owns the class names it is given and is a value: then() returns a new one.
 
 #pragma once
 
@@ -34,6 +36,7 @@
 #include <string>
 #include <string_view>
 #include <utility>
+#include <vector>
 
 namespace pygim::python_names {
 
@@ -184,6 +187,73 @@ private:
     std::string_view m_class;
     std::string_view m_qualname;
     std::string_view m_module;
+};
+
+/// Code moved from class to class, in order — reown(A, B), then reown(B, C) — and what that does to
+/// each name the code spells. Each move is NamePolicy's rule; this applies them in order. Unlike
+/// NamePolicy it owns the classes' names, so it can be kept: CodeBuilder holds one while it builds,
+/// and code nested at any depth reads the same one.
+///
+/// Example: Reowning{}.then(NamePolicy{"Trait"}, NamePolicy{"Target"}) respells "_Trait__secret" as
+/// "_Target__secret", requalifies "Trait.f" as "Target.f", and leaves "value" alone (nothing).
+class Reowning {
+public:
+    constexpr Reowning() = default;  // no moves: every name stays as it is
+
+    /// This reowning followed by a move from class `from` to class `to`, whose names are copied.
+    /// A value: this one is left as it was.
+    [[nodiscard]] constexpr Reowning then(const NamePolicy& from, const NamePolicy& to) const {
+        Reowning out = *this;
+        out.m_moves.push_back(Move{from, to});
+        return out;
+    }
+
+    /// `name` after every move, in order: its new spelling, or nothing when no move changes it. Each
+    /// move reads the spelling the ones before it left, so code in A that names B's private attribute
+    /// is moved on by a following B -> C (the exception python_names_proofs.cpp states).
+    [[nodiscard]] constexpr std::optional<std::string> respelt(std::string_view name) const {
+        std::optional<std::string> spelling;
+        for (const Move& move : m_moves)
+            if (auto next = move.respelt(spelling ? std::string_view{*spelling} : name)) spelling = std::move(next);
+        return spelling;
+    }
+
+    /// `qualname` re-rooted by every move, in order: "Trait.f.<locals>.g" moved to Target is
+    /// "Target.f.<locals>.g".
+    [[nodiscard]] constexpr std::string requalified(std::string_view qualname) const {
+        std::string out{qualname};
+        for (const Move& move : m_moves) out = move.requalified(out);
+        return out;
+    }
+
+private:
+    /// One move, owning both classes' names; the NamePolicy views over them are made per call.
+    class Move {
+    public:
+        constexpr Move(const NamePolicy& from, const NamePolicy& to)
+            : m_from_name(from.class_name()),
+              m_from_qualname(from.qualname()),
+              m_to_name(to.class_name()),
+              m_to_qualname(to.qualname()) {}
+
+        [[nodiscard]] constexpr std::optional<std::string> respelt(std::string_view name) const {
+            return from().respelt(to(), name);
+        }
+        [[nodiscard]] constexpr std::string requalified(std::string_view qualname) const {
+            return from().requalified(to(), qualname);
+        }
+
+    private:
+        [[nodiscard]] constexpr NamePolicy from() const { return NamePolicy{m_from_name, m_from_qualname}; }
+        [[nodiscard]] constexpr NamePolicy to() const { return NamePolicy{m_to_name, m_to_qualname}; }
+
+        std::string m_from_name;
+        std::string m_from_qualname;
+        std::string m_to_name;
+        std::string m_to_qualname;
+    };
+
+    std::vector<Move> m_moves;
 };
 
 }  // namespace pygim::python_names
