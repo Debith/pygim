@@ -81,6 +81,8 @@ consteval std::string_view result_kind() {
     else if constexpr (std::is_convertible_v<R, std::string_view>) return "text";
     else return {};
 }
+static_assert(result_kind<bool>() == "bool" && result_kind<std::optional<std::string>>() == "optional text"
+              && result_kind<std::string>() == "text" && result_kind<int>().empty());
 
 template <std::meta::info F>
 consteval auto parameters() {
@@ -104,6 +106,20 @@ consteval bool modeled() {
                   std::string("Unmodeled reflected result: ") + std::string(name));
     return true;
 }
+
+// The intended use, on a model of one function: a probe of a namespace's `is_private_name(name)`.
+namespace example {
+inline constexpr std::array<std::string_view, 2> names{"__x", "x"};
+struct domains {
+    static constexpr std::array<role_domain, 1> roles{{{"name", names}}};
+    static constexpr std::array<std::string_view, 1> functions{"is_private_name"};
+};
+constexpr bool is_private_name(std::string_view name) { return name.starts_with("__"); }
+}  // namespace example
+static_assert(domain_of<example::domains>("name").size() == 2 && domain_of<example::domains>("class_name").empty());
+static_assert(covered<example::domains>("is_private_name") && !covered<example::domains>("mangled"));
+static_assert(parameters<^^example::is_private_name>().size() == 1);
+static_assert(modeled<^^example::is_private_name, example::domains>());
 
 template <std::meta::info F, std::size_t... I>
 auto call(const std::array<std::string_view, sizeof...(I)>& arguments, std::index_sequence<I...>) {

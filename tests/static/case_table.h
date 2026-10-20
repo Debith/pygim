@@ -14,6 +14,7 @@
 #pragma once
 
 #include <cstddef>
+#include <array>
 
 namespace pygim::proofs {
 
@@ -31,5 +32,7 @@ consteval std::size_t first_failing_row(const Rows& rows, Holds holds) {
     }
     return every_row_holds;
 }
+static_assert(first_failing_row(std::array{1, 2, 3}, [](int row) { return row > 0; }) == every_row_holds);
+static_assert(first_failing_row(std::array{1, 2, 3}, [](int row) { return row != 2; }) == 1);   // names row 1
 
 }  // namespace pygim::proofs

@@ -171,6 +171,38 @@ def coverage(out_dir, gcov):
     return per_function
 
 
+def without_examples(header_text):
+    """The header without its own examples — the namespace-scope static_asserts under each function
+    (project #252). A mutant must compile for the probe and the every-build proof to be shown catching
+    it; whether the examples alone refuse it is reported apart (examples_refuse)."""
+    kept, lines, index = [], header_text.splitlines(keepends=True), 0
+    while index < len(lines):
+        if not lines[index].startswith("static_assert("):
+            kept.append(lines[index])
+            index += 1
+            continue
+        depth = 0
+        while True:                                   # to the line where the statement's parentheses close
+            code, quoted = lines[index].split("//", 1)[0], False
+            for at, char in enumerate(code):
+                if char == '"' and (at == 0 or code[at - 1] != "\\"):
+                    quoted = not quoted
+                elif not quoted:
+                    depth += (char == "(") - (char == ")")
+            index += 1
+            if depth <= 0 and code.rstrip().endswith(";"):
+                break
+    return "".join(kept)
+
+
+def examples_refuse(mutant_root, header_text, cxx):
+    """Whether the header's own examples refuse a mutated header: one translation unit that includes it."""
+    write(mutant_root / "python_names.h", header_text)
+    write(mutant_root / "examples.cpp", '#include "python_names.h"\nint main() {}\n')
+    result, _ = run([cxx, "-std=c++23", "-fsyntax-only", mutant_root / "examples.cpp"], mutant_root)
+    return result.returncode != 0
+
+
 def mutant_proof_fails(mutant_root, header_text, conda_cxx):
     """Compile the every-build proof against a mutated header; the names of the failing functions."""
     write(mutant_root / "src" / "_pygim_fast" / "utils" / "python_names.h", header_text)
@@ -231,8 +263,10 @@ def main(argv):
     report["controls"]["mutants"] = []
     for index, (name, old, new) in enumerate(MUTANTS):
         assert header_text.count(old) == 1, f"mutant {name!r} no longer applies to python_names.h"
-        mutated = header_text.replace(old, new, 1)
+        with_examples = header_text.replace(old, new, 1)
+        mutated = without_examples(with_examples)
         mutant_dir = out / f"mutant-{index}"
+        examples_refused = examples_refuse(mutant_dir / "examples", with_examples, args.proof_compiler)
         write(mutant_dir / "include" / "python_names.h", mutated)
         # The probe's quoted include finds the mutant's directory before the real header's.
         result, _, _ = build(mutant_dir, (mutant_dir / "include", domains_header()), args.compiler, coverage=False)
@@ -246,7 +280,7 @@ def main(argv):
             "defect": name, "native_failures": {f: n for f, n in failures.items() if n},
             "space_intact": all(not [i for i in callspace.check(model.MODELS[f], r) if i["kind"] != "oracle_failures"]
                                 for f, r in mutant_runs.items()),
-            "every_build_proof_refused": refused, "proof_names": failing})
+            "every_build_proof_refused": refused, "proof_names": failing, "examples_refused": examples_refused})
 
     # 5d: a function added to the namespace must not compile into the probe.
     drift_dir = out / "drift"
@@ -296,7 +330,8 @@ def render(report):
     lines += [f"    {name}: {kinds}" for name, kinds in controls["shrunken_domain"]["caught_by"].items()]
     for m in controls["mutants"]:
         lines.append(f"  defect '{m['defect']}': native failures {m['native_failures']}; space intact {m['space_intact']};"
-                     f" every-build proof refused {m['every_build_proof_refused']} at {m['proof_names']}")
+                     f" every-build proof refused {m['every_build_proof_refused']} at {m['proof_names']};"
+                     f" the header's own examples refused it {m['examples_refused']}")
     lines.append(f"  added function: refused {controls['added_function']['refused']}: "
                  f"{controls['added_function']['message']}")
     lines.append("")

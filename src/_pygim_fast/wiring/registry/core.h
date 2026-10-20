@@ -333,4 +333,12 @@ template<class Key, class Value, class PostArg = Value>
 using StaticRegistryCore =
     RegistryCore<Key, Value, mapping::flat_storage<Key, Value>, NoHooks<Key, Value, PostArg>, PostArg>;
 
+// remove(), as traits' record store uses it when a class is collected: the key is gone, and
+// removing it again reports nothing removed.
+static_assert([] {
+    StaticRegistryCore<int, int> registry;
+    registry.register_value(1, 10);
+    return registry.remove(1) && !registry.contains(1) && !registry.remove(1);
+}());
+
 } // namespace pygim::core

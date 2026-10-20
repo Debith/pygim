@@ -48,6 +48,7 @@
     }
     return result;
 }
+static_assert(to_csv({"b", "a"}, true) == "a, b");   // the sorted list a message names
 
 /// `value` with its ASCII letters lowered; every other byte, UTF-8 included, kept. This is what
 /// std::tolower does in the "C" locale, as a constexpr function. Example: to_lower_copy("MiB") is "mib".
@@ -56,6 +57,7 @@
                            [](char ch) { return ch >= 'A' && ch <= 'Z' ? static_cast<char>(ch - 'A' + 'a') : ch; });
     return value;
 }
+static_assert(to_lower_copy("MiB") == "mib");      // a unit as a caller spells it, matched case-blind
 
 /// `step` raised to the whole power `exponent`, by repeated multiplication: exact for the powers of
 /// two the units use, where std::pow is not constexpr. Example: whole_power(1024.0, 2) is 1048576.0.
@@ -64,6 +66,7 @@
     for (int i = 0; i < exponent; ++i) result *= step;
     return result;
 }
+static_assert(whole_power(1024.0, 2) == 1048576.0);   // a mebibyte in bytes
 
 /// `quantity` of `unit_raw` in bytes; a unit is matched in any case. std::invalid_argument for a
 /// unit it does not know. Example: to_bytes(1.0, "KiB") is 1024.0; to_bytes(8.0, "bits") is 1.0.
@@ -109,6 +112,7 @@
     }
     throw std::invalid_argument("Unsupported data unit: " + unit_raw);
 }
+static_assert(to_bytes(1.0, "KiB") == 1024.0);
 
 /// `duration` of `unit_raw` in seconds; a unit is matched in any case. std::invalid_argument for a
 /// unit it does not know. Example: to_seconds(1500.0, "ms") is 1.5; to_seconds(2.0, "h") is 7200.0.
@@ -134,6 +138,7 @@
     }
     throw std::invalid_argument("Unsupported duration unit: " + unit_raw);
 }
+static_assert(to_seconds(1500.0, "ms") == 1.5);
 
 /// A value expressed in one of a list of units: `value` of the unit at index `unit`.
 struct scaled_value {
@@ -154,6 +159,7 @@ struct scaled_value {
     }
     return {value, index};
 }
+static_assert(scale_down(2048.0, 6, 1024.0) == scaled_value{2.0, 1});   // 2 of the second unit: "2.00 KB/s"
 
 /// `value` written in the largest of `units` it reaches, to `precision` decimals. Runs at run time:
 /// std::format is not constexpr. Example: format_scaled_value(2048.0, {"B", "KB"}) is "2.00 KB".
@@ -184,6 +190,7 @@ template <std::size_t N>
     }
     return to_bytes(quantity, quantity_unit) / to_seconds(duration, duration_unit);
 }
+static_assert(bytes_per_second(1.0, "KiB", 500.0, "ms") == 2048.0);   // calculate_rate's number
 
 /// The rate bytes_per_second() computes, written with its unit. Runs at run time: std::format is
 /// not constexpr. Example: calculate_rate(1.0, "KiB", 500.0, "ms") is "2.00 KB/s".
