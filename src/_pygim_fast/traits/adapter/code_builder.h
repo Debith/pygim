@@ -128,14 +128,24 @@ private:
         return name;
     }
 
-    /// A new tuple of `count` items, each `item(i)`, written straight into the tuple. Measured on a
-    /// 40-name method: 3.46 us through pybind11's item accessors, 1.55 us with these macros.
-    template <class Item>
-    static py::object tuple_of(Py_ssize_t count, Item&& item) {
+    /// A new tuple holding `each(item)` for every item of `tuple`, in order — Python's
+    /// `tuple(each(x) for x in tuple)`. Example: mapped(code.co_names, moved) is the names after every
+    /// step. Written straight into the new tuple: measured on a 40-name method, 3.46 us through
+    /// pybind11's item accessors, 1.55 us this way.
+    template <class Each>
+    static py::object mapped(const py::handle& tuple, Each&& each) {
+        const Py_ssize_t count = PyTuple_GET_SIZE(tuple.ptr());
         auto out = py::reinterpret_steal<py::object>(PyTuple_New(count));
         if (!out) throw py::error_already_set();
-        for (Py_ssize_t i = 0; i < count; ++i) PyTuple_SET_ITEM(out.ptr(), i, item(i).release().ptr());
+        for (Py_ssize_t i = 0; i < count; ++i)
+            PyTuple_SET_ITEM(out.ptr(), i, each(py::handle(PyTuple_GET_ITEM(tuple.ptr(), i))).release().ptr());
         return out;
+    }
+
+    /// `constant` rebuilt when it is a code object (a lambda, a nested function or class body);
+    /// anything else as it is.
+    py::object rebuilt_if_code(const py::handle& constant) const {
+        return PyCode_Check(constant.ptr()) ? rebuilt(constant) : py::reinterpret_borrow<py::object>(constant);
     }
 
     // Guards the native recursion over nested code objects: a code object nested past CPython's
@@ -161,14 +171,11 @@ private:
                                                        : Py_BuildValue("(OO)", co_names, co_consts);
         if (keywords == nullptr) throw py::error_already_set();
 
-        const py::object names = attribute(code, co_names);
-        const py::object moved_names = tuple_of(PyTuple_GET_SIZE(names.ptr()), [&](Py_ssize_t i) {
-            return moved(PyTuple_GET_ITEM(names.ptr(), i));
+        const py::object moved_names = mapped(attribute(code, co_names), [this](const py::handle& name) {
+            return moved(name);
         });
-        const py::object constants = attribute(code, co_consts);
-        const py::object rebuilt_constants = tuple_of(PyTuple_GET_SIZE(constants.ptr()), [&](Py_ssize_t i) {
-            const py::handle constant = PyTuple_GET_ITEM(constants.ptr(), i);
-            return PyCode_Check(constant.ptr()) ? rebuilt(constant) : py::reinterpret_borrow<py::object>(constant);
+        const py::object rebuilt_constants = mapped(attribute(code, co_consts), [this](const py::handle& constant) {
+            return rebuilt_if_code(constant);
         });
 
         py::object qualname;
