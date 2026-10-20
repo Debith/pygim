@@ -111,19 +111,19 @@ private:
 
     /// co_names after every step: ('_Trait__secret',) is ('_Target__secret',).
     py::object moved_names() const {
-        return mapped(code_object::field(m_code, code_object::co_names), &CodeBuilder::moved);
+        return mapped(code_object::field(m_code, code_object::co_names()), &CodeBuilder::moved);
     }
 
     /// co_consts with each nested code object (a lambda, an inner def) built by its own builder.
     py::object built_constants() const {
-        return mapped(code_object::field(m_code, code_object::co_consts), &CodeBuilder::built_if_code);
+        return mapped(code_object::field(m_code, code_object::co_consts()), &CodeBuilder::built_if_code);
     }
 
     /// co_qualname after every step: 'Trait.f' is 'Target.f'. Nothing before Python 3.11, where a code
     /// object has none (the function carries its qualified name, and compose() moves that).
     py::object moved_qualname() const {
         if constexpr (code_object::has_qualname)
-            return requalified(code_object::field(m_code, code_object::co_qualname));
+            return requalified(code_object::field(m_code, code_object::co_qualname()));
         else
             return {};
     }
