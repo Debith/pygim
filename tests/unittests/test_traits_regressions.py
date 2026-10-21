@@ -181,3 +181,40 @@ class TestAnAttributeNamedLikeTheRecord:
 
         record = traits_of(Person)
         assert type(record).__name__ == "TraitRecord" and list(record) == []
+
+
+class TestAClassNamespaceIsReadOneWay:
+    """Found 2026-10-21 reviewing compose.h: the conflict check read the target's namespace through
+    attribute lookup (`target.__dict__`), which a metaclass can intercept, while the writes and the
+    record used the class's real dict. A metaclass that hid a name let compose() replace the target's
+    own member without override=True — against the rule that a name the target has is refused."""
+
+    @staticmethod
+    def _hiding(hidden):
+        class Hiding(type):
+            def __getattribute__(cls, name):
+                if name == "__dict__":
+                    real = type.__getattribute__(cls, "__dict__")
+                    return {k: v for k, v in real.items() if k != hidden}
+                return type.__getattribute__(cls, name)
+        return Hiding
+
+    @staticmethod
+    def _real(cls):
+        return type.__dict__["__dict__"].__get__(cls)
+
+    def test_a_metaclass_cannot_hide_a_name_from_the_conflict_check(self):
+        class Person(metaclass=self._hiding("greet")):
+            def greet(self):
+                return "own"
+
+        own = self._real(Person)["greet"]
+        with pytest.raises(ValueError, match="Person already has greet"):
+            compose(Person, type("Trait", (), {"greet": _function("trait")}))
+        assert self._real(Person)["greet"] is own
+
+    def test_a_metaclass_cannot_hide_a_member_from_compose(self):
+        Trait = self._hiding("wave")("Trait", (), {"greet": _function("hi"), "wave": _function("bye")})
+        target = type("Person", (), {})
+        compose(target, Trait)
+        assert list(traits_of(target)) == ["greet", "wave"]

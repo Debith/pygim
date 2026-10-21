@@ -119,7 +119,9 @@ inline std::string text(const py::handle& value) { return py::str(value).cast<st
 inline std::string type_name(const py::handle& value) { return text(py::type::of(value).attr("__name__")); }
 
 /// A class's own namespace, through the C API: the dict itself, so no metaclass attribute named
-/// `__dict__` and no descriptor is asked. Example: own_namespace(Person)["greet"] is Person.greet's function.
+/// `__dict__` and no descriptor is asked. compose() reads every class namespace this way — the
+/// conflict check, the members of a trait, the record — so a metaclass cannot show it one thing and
+/// the writes another. Example: own_namespace(Person)["greet"] is Person.greet's function.
 inline py::dict own_namespace(const py::handle& cls) {
 #if PY_VERSION_HEX >= 0x030C0000
     PyObject* dict = PyType_GetDict(reinterpret_cast<PyTypeObject*>(cls.ptr()));  // new reference
@@ -405,7 +407,7 @@ public:
     Composition(py::type target, bool override_existing)
         : m_target(std::move(target)),
           m_override(override_existing),
-          m_own(m_target.attr("__dict__")),
+          m_own(own_namespace(m_target)),
           m_target_name(text(m_target.attr("__qualname__"))) {}
 
     /// Plan every member of `candidate`. Refuses a candidate that is not a class, a member no kind
@@ -420,7 +422,10 @@ public:
         // A class that was itself composed into passes its members on with where they came from (R2).
         const TraitRecord* carried = records().find(trait);
 
-        for (const auto& [key, member] : py::dict(trait.attr("__dict__"))) {
+        // A copy: planning runs Python code (a property subclass's constructor), which could edit it.
+        const auto members = py::reinterpret_steal<py::dict>(PyDict_Copy(own_namespace(trait).ptr()));
+        if (!members) throw py::error_already_set();
+        for (const auto& [key, member] : members) {
             auto [name, name_obj] = attribute_name(key);
             auto done = rewritten(static_cast<member_kinds*>(nullptr), member, move);
             if (!done) {
@@ -472,7 +477,7 @@ private:
 
     py::type m_target;
     bool m_override;
-    py::object m_own;            // the target's own namespace (a live view)
+    py::dict m_own;              // the target's own namespace: its real dict, live
     std::string m_target_name;
     std::vector<PlannedMember> m_plan;
 };
