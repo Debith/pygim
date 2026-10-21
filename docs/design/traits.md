@@ -276,6 +276,36 @@ trait it came from, where the trait defined it, and where it was composed.
 `RegistryCore` gained `remove(key)` for R1, proven in `tests/static/registry_core_proofs.cpp`; every
 storage engine already had `erase`. `tests/unittests/test_traits_record.py` pins R1, R2 and R4.
 
+## Decided (2026-10-21) — compose() reads like its pseudo code, at every level
+
+From the review of compose.h with Debith: "the main flow reads almost like pseudo code. But the flow
+below it should also read simply. Like, resolution part should be fairly simple structure", and
+py3traits (the predecessor, ~/projects/py3traits), whose structure he liked: a pair object and one
+class per kind of member.
+
+```
+compose(target, *traits)                → Composer(target).add(trait)….override(…).compose()
+Composer::compose:   for each trait: TraitMove;  for each member it plans: plan.admit(member)
+                     then plan.write(), then plan.record()
+Plan::admit:         refuse a Clash unless override;  the later trait wins
+TraitMove::planned:  Member::of(value) → rewritten for the target, attributed (R2, R4)
+TraitMove::function: FunctionCopy(f).with_code(CodeBuilder(code, rules).build())
+                                     .with_qualname(rules.requalified(…)).with_class_cell(target).make()
+```
+
+| | Decision | Rejected, and why |
+|---|---|---|
+| S1 | `Composer` is a builder over the target (`add`, `override`, `compose`), C++-only for now; `compose()` and later `gim_type`'s `<<` are its entries | py3traits' fixed pair `Composer(target, source)`: options (override, later renames or cherry-picking) have no home, and conflicts between traits need an object above the pairs anyway (Debith: "the pair may be bit inflexible") |
+| S2 | `TraitMove` owns one trait's move into the target, built once when compose() reaches it: the trait's `NamePolicy`, the `Reowning` to the target, the record it carries | four places deriving the same names (each class's `__qualname__` was read 5× for a 3-method trait; now once per trait) |
+| S3 | `Plan` holds the members in write order; `Clash` holds the two conflict rules and their messages | the rules inline in a 12-line `admit` |
+| S4 | one class per kind of member (`FunctionMember`, `PropertyMember`, `ClassMethodMember`, `StaticMethodMember`) behind `Member`, a `std::variant` classified once by `Member::of` | four static descriptor structs plus `Rewritten` and a fold: one rule encoded four times, and no place for behaviour specific to a kind (Debith: "we can bind very specific behavior for each of them") |
+| S5 | `FunctionCopy` makes a function again in three named steps; `CodeBuilder` takes a `TraitMove`'s rules through a C++-only constructor | 18 lines mixing pybind11 and the C API; a `reown()` per function re-reading the classes' names |
+| S6 | one concept per header: `composer.h`, `trait_move.h`, `member.h`, `plan.h`, `function_copy.h`, `record.h`, `introspection.h`; `compose.h` is the overview and the API | a 504-line compose.h holding nine concepts |
+| S7 | every class namespace is read one way, `PyType_GetDict` (D27) | `cls.__dict__` through attribute lookup: a metaclass could hide a name from the conflict check (found and fixed test-first) |
+
+Order of refusals is unchanged: a trait is checked when compose() reaches it and each member is
+admitted as soon as it is classified, so with two errors the same one is raised as before.
+
 Still to show, before the quantity traits are built: that a composed C++ `+` is fast enough — an
 A/B in one process against the hand-written one (`benchmarks/`) — and that a pybind11 function can
 be composed as a method at all (it is not a descriptor, so it needs a wrapper that binds it).
