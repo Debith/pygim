@@ -1,6 +1,9 @@
 #pragma once
 
 #include "core_utils.h"
+#include <algorithm>
+#include <cstddef>
+#include <string_view>
 #include <pybind11/pybind11.h>
 #include <pybind11/functional.h>
 
@@ -12,3 +15,30 @@ namespace py = pybind11;
 inline bool is_generator(const py::object &instance) {
     return PyGen_Check(instance.ptr());
 }
+
+namespace pygim::adapter {
+
+/// A string literal usable as a template argument, so a name can select a function: interned<"co_names">().
+/// C++ requires a class used as a template argument to have public data, so this one is a struct.
+template <std::size_t N>
+struct literal {
+    char text[N];
+    constexpr literal(const char (&s)[N]) { std::copy_n(s, N, text); }
+};
+static_assert(std::string_view{literal{"co_names"}.text} == "co_names");
+
+/// `Text` as an interned str: made on first use, inside a call and so under the GIL — never while the
+/// extension loads, when Windows holds no GIL (project #254) — and kept for the life of the process.
+/// One function, and so one str, per spelling; a failed first use throws and the next retries.
+/// Example: interned<"co_names">() is the str 'co_names', the same object on every call.
+template <literal Text>
+PyObject* interned() {
+    static PyObject* const name = [] {
+        PyObject* made = PyUnicode_InternFromString(Text.text);
+        if (made == nullptr) throw py::error_already_set();
+        return made;
+    }();
+    return name;
+}
+
+}  // namespace pygim::adapter
