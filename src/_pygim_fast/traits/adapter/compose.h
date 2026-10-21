@@ -19,10 +19,10 @@
 // target's OWN namespace holds it, or when two traits of one call both define it; an inherited name
 // is not (every class inherits object.__lt__), and composing over it is what defining it would do.
 //
-// The kinds of member are a pack of descriptors, folded in order (pygim's #134): a kind says whether
-// it matches, how it is rewritten and which code object says where it was defined. A member no kind
-// matches is refused by name — unless it is a dunder, which is the trait class's own machinery
-// (__module__, __doc__, __dict__) and stays behind.
+// The kinds of member are classes, each with its own behaviour, held by Member (a std::variant,
+// pygim's #134): a kind says whether it is one, how it is rewritten and which code object says where
+// it was defined. A member no kind takes is refused by name — unless it is a dunder, which is the
+// trait class's own machinery (__module__, __doc__, __dict__) and stays behind.
 //
 // Composing a class that was itself composed into carries its record along: each member keeps the
 // trait it first came from and where that trait defined it; only `composed` names the new call. A
@@ -40,8 +40,8 @@
 #include <format>
 #include <optional>
 #include <string>
-#include <tuple>
 #include <utility>
+#include <variant>
 #include <vector>
 
 #include <pybind11/pybind11.h>
@@ -258,6 +258,92 @@ private:
     std::string m_from;     // the trait of this call that brings it: module and qualified name
 };
 
+/// A Python function made again with a new code object and qualified name, as types.FunctionType
+/// makes one, through the C API. Everything else it carries comes along as it is: defaults, keyword
+/// defaults, docstring, module, __dict__, annotations, type parameters. With a class cell, the
+/// closure's __class__ cell holds that class.
+/// Example: FunctionCopy(f).with_code(code).with_qualname("Person.greet").with_class_cell(Person).make().
+class FunctionCopy {
+public:
+    explicit FunctionCopy(const py::handle& function) : m_function(py::reinterpret_borrow<py::object>(function)) {}
+
+    FunctionCopy& with_code(py::object code) {
+        m_code = std::move(code);
+        return *this;
+    }
+    FunctionCopy& with_qualname(std::string qualname) {
+        m_qualname = std::move(qualname);
+        return *this;
+    }
+    FunctionCopy& with_class_cell(py::type cls) {
+        m_class = std::move(cls);
+        return *this;
+    }
+
+    [[nodiscard]] py::object make() const {
+        py::object copy = made();
+        set_closure(copy);
+        carry_attributes(copy);
+        return copy;
+    }
+
+private:
+    /// The new function: the code, the original's globals, the qualified name.
+    [[nodiscard]] py::object made() const {
+        const py::object globals = m_function.attr("__globals__");
+        const py::str qualname(m_qualname);
+        auto copy = py::reinterpret_steal<py::object>(
+            PyFunction_NewWithQualName(m_code.ptr(), globals.ptr(), qualname.ptr()));
+        if (!copy) throw py::error_already_set();
+        return copy;
+    }
+
+    /// The original's closure, its __class__ cell replaced by one holding the class; checked against
+    /// the new code's free variables, as types.FunctionType checks and PyFunction_SetClosure does not.
+    void set_closure(const py::object& copy) const {
+        const py::object closure = m_function.attr("__closure__");
+        const py::tuple freevars = m_code.attr("co_freevars");
+        if (closure.is_none()) {
+            if (!freevars.empty())
+                throw py::value_error(std::format("{} needs a closure of {} cells and has none",
+                                                  text(m_function.attr("__qualname__")), freevars.size()));
+            return;
+        }
+        const py::tuple cells = closure;
+        if (cells.size() != freevars.size())
+            throw py::value_error(std::format("{} has {} closure cells for {} free variables",
+                                              text(m_function.attr("__qualname__")), cells.size(), freevars.size()));
+        py::tuple rebound(cells.size());
+        for (std::size_t i = 0; i < cells.size(); ++i)
+            rebound[i] = m_class && text(freevars[i]) == "__class__" ? class_cell() : py::object(cells[i]);
+        if (PyFunction_SetClosure(copy.ptr(), rebound.ptr()) != 0) throw py::error_already_set();
+    }
+
+    [[nodiscard]] py::object class_cell() const {
+        PyObject* cell = PyCell_New(m_class.ptr());
+        if (cell == nullptr) throw py::error_already_set();
+        return py::reinterpret_steal<py::object>(cell);
+    }
+
+    /// Everything else the original carries, as it is.
+    void carry_attributes(const py::object& copy) const {
+        for (const char* attribute : {"__name__", "__defaults__", "__kwdefaults__", "__doc__", "__module__"})
+            copy.attr(attribute) = m_function.attr(attribute);
+        copy.attr("__dict__").attr("update")(m_function.attr("__dict__"));
+        if (py::hasattr(m_function, "__annotate__"))  // Python 3.14: annotations are evaluated lazily
+            copy.attr("__annotate__") = m_function.attr("__annotate__");
+        else
+            copy.attr("__annotations__") = py::dict(m_function.attr("__annotations__"));
+        if (py::hasattr(m_function, "__type_params__"))  // Python 3.12 and later
+            copy.attr("__type_params__") = m_function.attr("__type_params__");
+    }
+
+    py::object m_function;
+    py::object m_code;
+    std::string m_qualname;
+    py::object m_class;   // none: the closure's cells are kept as they are
+};
+
 /// One trait moved into one class: the two classes, the rules that move code between them, and the
 /// record the trait carries when it was itself composed into (R2). Built once, when compose() reaches
 /// the trait, so each class's names are read once per trait.
@@ -302,29 +388,14 @@ public:
     }
 
     /// `function`, rebuilt to belong to the target: its code by CodeBuilder with this move's rules
-    /// (private and qualified names, nested code too), its __class__ cell rebound so zero-argument
-    /// super() resolves in the target, its qualified name moved. Defaults, keyword defaults,
-    /// annotations, docstring, module and __dict__ come along unchanged. Built as types.FunctionType
-    /// builds one, through the C API.
+    /// (private and qualified names, nested code too), its qualified name moved, and its __class__ cell
+    /// holding the target, so zero-argument super() resolves there.
     [[nodiscard]] py::object function(const py::handle& function) const {
-        const py::object code = CodeBuilder(function.attr("__code__"), m_rules).build();
-        const py::object globals = function.attr("__globals__");
-        const py::str qualname(m_rules.requalified(text(function.attr("__qualname__"))));
-        auto out = py::reinterpret_steal<py::object>(
-            PyFunction_NewWithQualName(code.ptr(), globals.ptr(), qualname.ptr()));
-        if (!out) throw py::error_already_set();
-        const py::object closure = closure_in_target(function, code);
-        if (PyFunction_SetClosure(out.ptr(), closure.ptr()) != 0) throw py::error_already_set();
-        for (const char* attribute : {"__name__", "__defaults__", "__kwdefaults__", "__doc__", "__module__"})
-            out.attr(attribute) = function.attr(attribute);
-        out.attr("__dict__").attr("update")(function.attr("__dict__"));
-        if (py::hasattr(function, "__annotate__"))  // Python 3.14: annotations are evaluated lazily
-            out.attr("__annotate__") = function.attr("__annotate__");
-        else
-            out.attr("__annotations__") = py::dict(function.attr("__annotations__"));
-        if (py::hasattr(function, "__type_params__"))  // Python 3.12 and later
-            out.attr("__type_params__") = function.attr("__type_params__");
-        return out;
+        return FunctionCopy(function)
+            .with_code(CodeBuilder(function.attr("__code__"), m_rules).build())
+            .with_qualname(m_rules.requalified(text(function.attr("__qualname__"))))
+            .with_class_cell(m_target)
+            .make();
     }
 
     /// `value` rebuilt when it is a Python function; anything else (None, a builtin) as it is.
@@ -339,34 +410,6 @@ private:
         return py::reinterpret_borrow<py::type>(candidate);
     }
 
-    /// The function's closure with its __class__ cell, if any, replaced by a cell holding the target;
-    /// None for a function without one. Checked against the rebuilt code's free variables, which
-    /// types.FunctionType would have checked and PyFunction_SetClosure does not.
-    [[nodiscard]] py::object closure_in_target(const py::handle& function, const py::object& code) const {
-        const py::object closure = function.attr("__closure__");
-        const py::tuple freevars = code.attr("co_freevars");
-        if (closure.is_none()) {
-            if (freevars.empty()) return closure;
-            throw py::value_error(std::format("{} needs a closure of {} cells and has none",
-                                              text(function.attr("__qualname__")), freevars.size()));
-        }
-        const py::tuple cells = closure;
-        if (cells.size() != freevars.size())
-            throw py::value_error(std::format("{} has {} closure cells for {} free variables",
-                                              text(function.attr("__qualname__")), cells.size(), freevars.size()));
-        py::tuple rebound(cells.size());
-        for (std::size_t i = 0; i < cells.size(); ++i) {
-            if (text(freevars[i]) != "__class__") {
-                rebound[i] = cells[i];
-                continue;
-            }
-            PyObject* cell = PyCell_New(m_target.ptr());
-            if (cell == nullptr) throw py::error_already_set();
-            rebound[i] = py::reinterpret_steal<py::object>(cell);
-        }
-        return rebound;
-    }
-
     py::type m_trait;
     py::type m_target;
     python_names::NamePolicy m_trait_names;
@@ -375,82 +418,117 @@ private:
     const TraitRecord* m_carried;     // the trait's own record when it was composed into; nullptr otherwise
 };
 
+/// The code of `value` when it is a Python function; None for anything else (None, a builtin).
 inline py::object code_or_none(const py::object& value) {
     return PyFunction_Check(value.ptr()) ? py::object(value.attr("__code__")) : py::object(py::none());
 }
 
-// ── the kinds of member, one descriptor each ───────────────────────────────────────────────────
+// ── the kinds of member, one class each ───────────────────────────────────────────────────────
 
-/// A plain function.
-struct function_member {
-    static bool matches(const py::handle& m) { return PyFunction_Check(m.ptr()); }
-    static py::object rewritten(const py::handle& m, const TraitMove& move) { return move.function(m); }
-    static py::object code(const py::handle& m) { return m.attr("__code__"); }
+/// A plain function: rebuilt for the target.
+class FunctionMember {
+public:
+    static bool is(const py::handle& value) { return PyFunction_Check(value.ptr()); }
+    explicit FunctionMember(py::object function) : m_function(std::move(function)) {}
+
+    [[nodiscard]] py::object rewritten(const TraitMove& trait) const { return trait.function(m_function); }
+    [[nodiscard]] py::object code() const { return m_function.attr("__code__"); }
+
+private:
+    py::object m_function;
 };
 
 /// A property: each accessor rebuilt; a property subclass stays that subclass.
-struct property_member {
-    static bool matches(const py::handle& m) { return PyObject_TypeCheck(m.ptr(), &PyProperty_Type); }
-    static py::object rewritten(const py::handle& m, const TraitMove& move) {
-        return py::type::of(m)(move.function_or_same(m.attr("fget")), move.function_or_same(m.attr("fset")),
-                               move.function_or_same(m.attr("fdel")), m.attr("__doc__"));
+class PropertyMember {
+public:
+    static bool is(const py::handle& value) { return PyObject_TypeCheck(value.ptr(), &PyProperty_Type); }
+    explicit PropertyMember(py::object property) : m_property(std::move(property)) {}
+
+    [[nodiscard]] py::object rewritten(const TraitMove& trait) const {
+        return py::type::of(m_property)(trait.function_or_same(accessor("fget")),
+                                        trait.function_or_same(accessor("fset")),
+                                        trait.function_or_same(accessor("fdel")), m_property.attr("__doc__"));
     }
-    static py::object code(const py::handle& m) { return code_or_none(m.attr("fget")); }
+    [[nodiscard]] py::object code() const { return code_or_none(accessor("fget")); }
+
+private:
+    [[nodiscard]] py::object accessor(const char* name) const { return m_property.attr(name); }
+    py::object m_property;
 };
 
 /// A classmethod: the function inside rebuilt, so `cls` is the class it is called on.
-struct classmethod_member {
-    static bool matches(const py::handle& m) { return PyObject_TypeCheck(m.ptr(), &PyClassMethod_Type); }
-    static py::object rewritten(const py::handle& m, const TraitMove& move) {
-        return py::type::of(m)(move.function_or_same(m.attr("__func__")));
+class ClassMethodMember {
+public:
+    static bool is(const py::handle& value) { return PyObject_TypeCheck(value.ptr(), &PyClassMethod_Type); }
+    explicit ClassMethodMember(py::object method) : m_method(std::move(method)) {}
+
+    [[nodiscard]] py::object rewritten(const TraitMove& trait) const {
+        return py::type::of(m_method)(trait.function_or_same(m_method.attr("__func__")));
     }
-    static py::object code(const py::handle& m) { return code_or_none(m.attr("__func__")); }
+    [[nodiscard]] py::object code() const { return code_or_none(m_method.attr("__func__")); }
+
+private:
+    py::object m_method;
 };
 
 /// A staticmethod: the function inside rebuilt.
-struct staticmethod_member {
-    static bool matches(const py::handle& m) { return PyObject_TypeCheck(m.ptr(), &PyStaticMethod_Type); }
-    static py::object rewritten(const py::handle& m, const TraitMove& move) {
-        return py::type::of(m)(move.function_or_same(m.attr("__func__")));
+class StaticMethodMember {
+public:
+    static bool is(const py::handle& value) { return PyObject_TypeCheck(value.ptr(), &PyStaticMethod_Type); }
+    explicit StaticMethodMember(py::object method) : m_method(std::move(method)) {}
+
+    [[nodiscard]] py::object rewritten(const TraitMove& trait) const {
+        return py::type::of(m_method)(trait.function_or_same(m_method.attr("__func__")));
     }
-    static py::object code(const py::handle& m) { return code_or_none(m.attr("__func__")); }
+    [[nodiscard]] py::object code() const { return code_or_none(m_method.attr("__func__")); }
+
+private:
+    py::object m_method;
 };
 
-using member_kinds = std::tuple<function_member, property_member, classmethod_member, staticmethod_member>;
+/// A member of a trait as its kind — each kind a class with its own behaviour, chosen once, here.
+/// Example: Member::of(Greeter.__dict__["greet"])->rewritten(trait) is greet rebuilt for the target.
+class Member {
+public:
+    /// `value` as its kind; nothing when no kind composes it.
+    static std::optional<Member> of(const py::object& value) { return classified(static_cast<Kinds*>(nullptr), value); }
 
-/// A member rewritten for the target, and the code that says where the trait defined it.
-struct Rewritten {
-    py::object member;
-    py::object code;
+    /// The member rewritten for the target `trait` moves into.
+    [[nodiscard]] py::object rewritten(const TraitMove& trait) const {
+        return std::visit([&](const auto& kind) { return kind.rewritten(trait); }, m_kind);
+    }
+    /// The code that says where the trait defined it; None for a member with no Python code.
+    [[nodiscard]] py::object code() const {
+        return std::visit([](const auto& kind) { return kind.code(); }, m_kind);
+    }
+
+private:
+    using Kinds = std::variant<FunctionMember, PropertyMember, ClassMethodMember, StaticMethodMember>;
+    explicit Member(Kinds kind) : m_kind(std::move(kind)) {}
+
+    // The first kind whose is() accepts `value`, folded over the variant's kinds in order.
+    template <class... Kind>
+    static std::optional<Member> classified(std::variant<Kind...>*, const py::object& value) {
+        std::optional<Member> out;
+        ((Kind::is(value) && (out = Member{Kinds{std::in_place_type<Kind>, value}}, true)) || ...);
+        return out;
+    }
+
+    Kinds m_kind;
 };
-
-template <class Kind>
-bool rewrite_if(const py::handle& member, const TraitMove& move, std::optional<Rewritten>& out) {
-    if (!Kind::matches(member)) return false;
-    out = Rewritten{Kind::rewritten(member, move), Kind::code(member)};
-    return true;
-}
-
-/// The member rewritten by the first kind that matches it; nothing when no kind does.
-template <class... Kinds>
-std::optional<Rewritten> rewritten(std::tuple<Kinds...>*, const py::handle& member, const TraitMove& move) {
-    std::optional<Rewritten> out;
-    (rewrite_if<Kinds>(member, move, out) || ...);
-    return out;
-}
-
 
 inline std::optional<PlannedMember> TraitMove::planned(const py::handle& key, const py::handle& value) const {
     auto [name, name_obj] = attribute_name(key);
-    auto done = rewritten(static_cast<member_kinds*>(nullptr), value, *this);
-    if (!done) {
+    const auto member = Member::of(py::reinterpret_borrow<py::object>(value));
+    if (!member) {
         if (python_names::is_dunder(name)) return std::nullopt;  // the trait class's own machinery
         throw py::type_error(std::format(
             "{}.{} is {}; a trait composes functions, properties, classmethods and staticmethods",
             qualname(), name, type_name(value)));
     }
-    Provenance origin = attribution(name, value, done->code);
-    return PlannedMember{std::move(name), std::move(name_obj), std::move(done->member), std::move(origin), m_name};
+    py::object rewritten = member->rewritten(*this);
+    Provenance origin = attribution(name, value, member->code());
+    return PlannedMember{std::move(name), std::move(name_obj), std::move(rewritten), std::move(origin), m_name};
 }
 
 /// Why a member cannot join the plan without override: another trait of this call planned the same
