@@ -81,8 +81,7 @@ def write_corpus(path, entries):
 
 def discover(compiler):
     report = {"compiler": compiler, "address_undefined": False, "fuzzer": False, "notes": []}
-    check = run([compiler, "-x", "c++", "-std=c++26", *SANITIZE, "-fsyntax-only", "-"], HERE)
-    # feed a trivial TU on stdin
+    # A trivial translation unit on stdin: does the compiler accept the sanitizer flags?
     check = subprocess.run([compiler, "-x", "c++", "-std=c++26", *SANITIZE, "-fsyntax-only", "-"],
                            input="int main(){}", text=True, capture_output=True)
     report["address_undefined"] = check.returncode == 0
