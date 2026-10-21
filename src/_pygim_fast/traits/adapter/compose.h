@@ -49,6 +49,7 @@
 #include "../../wiring/registry/core.h"
 #include "code_builder.h"
 #include "../../utils/aliases.h"
+#include "../../utils/adapter_utils.h"
 #include "../../utils/python_names.h"
 
 namespace pygim::traits {
@@ -148,154 +149,6 @@ inline std::string caller() {
     return std::format("{}:{}", text(code.attr("co_filename")), PyFrame_GetLineNumber(frame));
 }
 
-/// One trait's functions moved into one class. Example: Move(Greeter, Person).function(Greeter.greet)
-/// is greet rebuilt for Person — reading `_Person__name` where it read `_Greeter__name`, with the
-/// qualified name `Person.greet`.
-class Move {
-public:
-    Move(py::type trait, py::type target)
-        : m_trait(std::move(trait)),
-          m_target(std::move(target)),
-          m_trait_qualname(text(m_trait.attr("__qualname__"))),
-          m_target_qualname(text(m_target.attr("__qualname__"))) {}
-
-    /// `function`, rebuilt to belong to the target: its code by CodeBuilder (private and qualified
-    /// names, nested code too), its __class__ cell rebound so zero-argument super() resolves in the
-    /// target, its qualified name moved. Defaults, keyword defaults, annotations, docstring, module
-    /// and __dict__ come along unchanged. Built as types.FunctionType builds one, through the C API.
-    [[nodiscard]] py::object function(const py::handle& function) const {
-        const py::object code = CodeBuilder(function.attr("__code__")).reown(m_trait, m_target).build();
-        const py::object globals = function.attr("__globals__");
-        const py::str qualname(qualname_in_target(function));
-        auto out = py::reinterpret_steal<py::object>(
-            PyFunction_NewWithQualName(code.ptr(), globals.ptr(), qualname.ptr()));
-        if (!out) throw py::error_already_set();
-        const py::object closure = closure_in_target(function, code);
-        if (PyFunction_SetClosure(out.ptr(), closure.ptr()) != 0) throw py::error_already_set();
-        for (const char* attribute : {"__name__", "__defaults__", "__kwdefaults__", "__doc__", "__module__"})
-            out.attr(attribute) = function.attr(attribute);
-        out.attr("__dict__").attr("update")(function.attr("__dict__"));
-        if (py::hasattr(function, "__annotate__"))  // Python 3.14: annotations are evaluated lazily
-            out.attr("__annotate__") = function.attr("__annotate__");
-        else
-            out.attr("__annotations__") = py::dict(function.attr("__annotations__"));
-        if (py::hasattr(function, "__type_params__"))  // Python 3.12 and later
-            out.attr("__type_params__") = function.attr("__type_params__");
-        return out;
-    }
-
-    /// `value` rebuilt when it is a Python function; anything else (None, a builtin) as it is.
-    [[nodiscard]] py::object function_or_same(const py::object& value) const {
-        return PyFunction_Check(value.ptr()) ? function(value) : value;
-    }
-
-private:
-    /// The function's qualified name re-rooted from the trait onto the target: `Greeter.greet` is
-    /// `Person.greet`. The move keys on the qualified name, so it is each policy's class name too.
-    [[nodiscard]] std::string qualname_in_target(const py::handle& function) const {
-        const python_names::NamePolicy from{m_trait_qualname, m_trait_qualname};
-        const python_names::NamePolicy to{m_target_qualname, m_target_qualname};
-        return from.requalified(to, text(function.attr("__qualname__")));
-    }
-
-    /// The function's closure with its __class__ cell, if any, replaced by a cell holding the target;
-    /// None for a function without one. Checked against the rebuilt code's free variables, which
-    /// types.FunctionType would have checked and PyFunction_SetClosure does not.
-    [[nodiscard]] py::object closure_in_target(const py::handle& function, const py::object& code) const {
-        const py::object closure = function.attr("__closure__");
-        const py::tuple freevars = code.attr("co_freevars");
-        if (closure.is_none()) {
-            if (freevars.empty()) return closure;
-            throw py::value_error(std::format("{} needs a closure of {} cells and has none",
-                                              text(function.attr("__qualname__")), freevars.size()));
-        }
-        const py::tuple cells = closure;
-        if (cells.size() != freevars.size())
-            throw py::value_error(std::format("{} has {} closure cells for {} free variables",
-                                              text(function.attr("__qualname__")), cells.size(), freevars.size()));
-        py::tuple rebound(cells.size());
-        for (std::size_t i = 0; i < cells.size(); ++i) {
-            if (text(freevars[i]) != "__class__") {
-                rebound[i] = cells[i];
-                continue;
-            }
-            PyObject* cell = PyCell_New(m_target.ptr());
-            if (cell == nullptr) throw py::error_already_set();
-            rebound[i] = py::reinterpret_steal<py::object>(cell);
-        }
-        return rebound;
-    }
-
-    py::type m_trait;
-    py::type m_target;
-    std::string m_trait_qualname;   // owned here: the name policies above view them
-    std::string m_target_qualname;
-};
-
-inline py::object code_or_none(const py::object& value) {
-    return PyFunction_Check(value.ptr()) ? py::object(value.attr("__code__")) : py::object(py::none());
-}
-
-// ── the kinds of member, one descriptor each ───────────────────────────────────────────────────
-
-/// A plain function.
-struct function_member {
-    static bool matches(const py::handle& m) { return PyFunction_Check(m.ptr()); }
-    static py::object rewritten(const py::handle& m, const Move& move) { return move.function(m); }
-    static py::object code(const py::handle& m) { return m.attr("__code__"); }
-};
-
-/// A property: each accessor rebuilt; a property subclass stays that subclass.
-struct property_member {
-    static bool matches(const py::handle& m) { return PyObject_TypeCheck(m.ptr(), &PyProperty_Type); }
-    static py::object rewritten(const py::handle& m, const Move& move) {
-        return py::type::of(m)(move.function_or_same(m.attr("fget")), move.function_or_same(m.attr("fset")),
-                               move.function_or_same(m.attr("fdel")), m.attr("__doc__"));
-    }
-    static py::object code(const py::handle& m) { return code_or_none(m.attr("fget")); }
-};
-
-/// A classmethod: the function inside rebuilt, so `cls` is the class it is called on.
-struct classmethod_member {
-    static bool matches(const py::handle& m) { return PyObject_TypeCheck(m.ptr(), &PyClassMethod_Type); }
-    static py::object rewritten(const py::handle& m, const Move& move) {
-        return py::type::of(m)(move.function_or_same(m.attr("__func__")));
-    }
-    static py::object code(const py::handle& m) { return code_or_none(m.attr("__func__")); }
-};
-
-/// A staticmethod: the function inside rebuilt.
-struct staticmethod_member {
-    static bool matches(const py::handle& m) { return PyObject_TypeCheck(m.ptr(), &PyStaticMethod_Type); }
-    static py::object rewritten(const py::handle& m, const Move& move) {
-        return py::type::of(m)(move.function_or_same(m.attr("__func__")));
-    }
-    static py::object code(const py::handle& m) { return code_or_none(m.attr("__func__")); }
-};
-
-using member_kinds = std::tuple<function_member, property_member, classmethod_member, staticmethod_member>;
-
-/// A member rewritten for the target, and the code that says where the trait defined it.
-struct Rewritten {
-    py::object member;
-    py::object code;
-};
-
-template <class Kind>
-bool rewrite_if(const py::handle& member, const Move& move, std::optional<Rewritten>& out) {
-    if (!Kind::matches(member)) return false;
-    out = Rewritten{Kind::rewritten(member, move), Kind::code(member)};
-    return true;
-}
-
-/// The member rewritten by the first kind that matches it; nothing when no kind does.
-template <class... Kinds>
-std::optional<Rewritten> rewritten(std::tuple<Kinds...>*, const py::handle& member, const Move& move) {
-    std::optional<Rewritten> out;
-    (rewrite_if<Kinds>(member, move, out) || ...);
-    return out;
-}
-
 /// The records of the classes composed into, kept off the classes themselves (R1 in
 /// docs/design/traits.md, 2026-10-19).
 ///
@@ -361,19 +214,24 @@ inline std::pair<std::string, py::object> attribute_name(const py::handle& key) 
     return {std::string(data, static_cast<std::size_t>(size)), std::move(canonical)};
 }
 
-/// A member planned for the target: rewritten, under the name it will be written as, and attributed
-/// to the trait it came from. Nothing is written until every member of the call is planned.
+/// A member planned for the target: rewritten, under the name it will be written as, attributed to
+/// where it came from, and naming the trait of this call that brings it (for a refusal's message).
+/// Nothing is written until every member of the call is planned.
 class PlannedMember {
 public:
-    PlannedMember(std::string name, py::object name_obj, py::object member, std::string trait, std::string defined)
+    PlannedMember(std::string name, py::object name_obj, py::object member, Provenance origin, std::string from)
         : m_name(std::move(name)),
           m_name_obj(std::move(name_obj)),
           m_member(std::move(member)),
-          m_trait(std::move(trait)),
-          m_defined(std::move(defined)) {}
+          m_origin(std::move(origin)),
+          m_from(std::move(from)) {}
 
     [[nodiscard]] const std::string& name() const noexcept { return m_name; }
-    [[nodiscard]] const std::string& trait() const noexcept { return m_trait; }
+    [[nodiscard]] const py::object& name_object() const noexcept { return m_name_obj; }
+    /// The trait it first came from (R2): the trait of this call, or one that trait was composed from.
+    [[nodiscard]] const std::string& trait() const noexcept { return m_origin.trait; }
+    /// The trait of this call that brings it.
+    [[nodiscard]] const std::string& from() const noexcept { return m_from; }
 
     /// Set the member on `target`; raises what the write raises (a slot Python refuses, a hook).
     void write_into(const py::type& target) const {
@@ -389,97 +247,336 @@ public:
             if (PyErr_Occurred()) throw py::error_already_set();
             return;
         }
-        record.note(m_name, {m_trait, m_defined, composed}, py::reinterpret_borrow<py::object>(landed));
+        record.note(m_name, {m_origin.trait, m_origin.defined, composed}, py::reinterpret_borrow<py::object>(landed));
     }
 
 private:
     std::string m_name;
     py::object m_name_obj;  // the name as a canonical str: what is written, NUL and all
     py::object m_member;
-    std::string m_trait;    // the trait it came from: module and qualified name
-    std::string m_defined;  // "file:line" where that trait defined it
+    Provenance m_origin;    // the trait it first came from and where that trait defined it
+    std::string m_from;     // the trait of this call that brings it: module and qualified name
 };
 
-/// One compose() call, in two passes so a refusal writes nothing: plan() each trait — every member
-/// classified, checked and rewritten, every refusal raised — then commit() the plan.
-class Composition {
+/// One trait moved into one class: the two classes, the rules that move code between them, and the
+/// record the trait carries when it was itself composed into (R2). Built once, when compose() reaches
+/// the trait, so each class's names are read once per trait.
+/// Example: TraitMove(Greeter, Person).function(Greeter.greet) is greet rebuilt for Person — reading
+/// `_Person__name` where it read `_Greeter__name`, qualified as `Person.greet`.
+class TraitMove {
 public:
-    Composition(py::type target, bool override_existing)
+    /// Refuses a candidate that is not a class.
+    TraitMove(const py::handle& candidate, py::type target)
+        : m_trait(trait_of(candidate)),
+          m_target(std::move(target)),
+          m_trait_names(::pygim::adapter::name_policy_of(m_trait)),
+          m_name(std::format("{}.{}", text(m_trait.attr("__module__")), m_trait_names.qualname())),
+          m_rules(python_names::Reowning{}.then(m_trait_names, ::pygim::adapter::name_policy_of(m_target))),
+          m_carried(records().find(m_trait)) {}
+
+    /// The trait's qualified name: "Greeter".
+    [[nodiscard]] std::string_view qualname() const noexcept { return m_trait_names.qualname(); }
+    /// The trait's module and qualified name, what Provenance.trait says: "tests.Greeter".
+    [[nodiscard]] const std::string& name() const noexcept { return m_name; }
+
+    /// The trait's own namespace, copied: planning runs Python code (a property subclass's
+    /// constructor) that could edit it.
+    [[nodiscard]] py::dict members() const {
+        auto copy = py::reinterpret_steal<py::dict>(PyDict_Copy(own_namespace(m_trait).ptr()));
+        if (!copy) throw py::error_already_set();
+        return copy;
+    }
+
+    /// The member `value` under `key`, planned for the target; nothing for the trait class's own
+    /// machinery (a dunder no kind composes). Refuses a key that is not a str and a member no kind
+    /// composes. Defined after the kinds of member, which it uses.
+    [[nodiscard]] std::optional<PlannedMember> planned(const py::handle& key, const py::handle& value) const;
+
+    /// Where `name` came from: the trait it first came from, when this trait was itself composed from
+    /// it and still holds `value` as compose() left it (R2, R4); otherwise this trait, where `code`
+    /// defines it.
+    [[nodiscard]] Provenance attribution(const std::string& name, const py::handle& value,
+                                         const py::object& code) const {
+        if (m_carried != nullptr && m_carried->holds(name, value)) return m_carried->at(name);
+        return Provenance{m_name, where(code), {}};
+    }
+
+    /// `function`, rebuilt to belong to the target: its code by CodeBuilder with this move's rules
+    /// (private and qualified names, nested code too), its __class__ cell rebound so zero-argument
+    /// super() resolves in the target, its qualified name moved. Defaults, keyword defaults,
+    /// annotations, docstring, module and __dict__ come along unchanged. Built as types.FunctionType
+    /// builds one, through the C API.
+    [[nodiscard]] py::object function(const py::handle& function) const {
+        const py::object code = CodeBuilder(function.attr("__code__"), m_rules).build();
+        const py::object globals = function.attr("__globals__");
+        const py::str qualname(m_rules.requalified(text(function.attr("__qualname__"))));
+        auto out = py::reinterpret_steal<py::object>(
+            PyFunction_NewWithQualName(code.ptr(), globals.ptr(), qualname.ptr()));
+        if (!out) throw py::error_already_set();
+        const py::object closure = closure_in_target(function, code);
+        if (PyFunction_SetClosure(out.ptr(), closure.ptr()) != 0) throw py::error_already_set();
+        for (const char* attribute : {"__name__", "__defaults__", "__kwdefaults__", "__doc__", "__module__"})
+            out.attr(attribute) = function.attr(attribute);
+        out.attr("__dict__").attr("update")(function.attr("__dict__"));
+        if (py::hasattr(function, "__annotate__"))  // Python 3.14: annotations are evaluated lazily
+            out.attr("__annotate__") = function.attr("__annotate__");
+        else
+            out.attr("__annotations__") = py::dict(function.attr("__annotations__"));
+        if (py::hasattr(function, "__type_params__"))  // Python 3.12 and later
+            out.attr("__type_params__") = function.attr("__type_params__");
+        return out;
+    }
+
+    /// `value` rebuilt when it is a Python function; anything else (None, a builtin) as it is.
+    [[nodiscard]] py::object function_or_same(const py::object& value) const {
+        return PyFunction_Check(value.ptr()) ? function(value) : value;
+    }
+
+private:
+    static py::type trait_of(const py::handle& candidate) {
+        if (!PyType_Check(candidate.ptr()))
+            throw py::type_error(std::format("compose takes classes as traits, not {}", type_name(candidate)));
+        return py::reinterpret_borrow<py::type>(candidate);
+    }
+
+    /// The function's closure with its __class__ cell, if any, replaced by a cell holding the target;
+    /// None for a function without one. Checked against the rebuilt code's free variables, which
+    /// types.FunctionType would have checked and PyFunction_SetClosure does not.
+    [[nodiscard]] py::object closure_in_target(const py::handle& function, const py::object& code) const {
+        const py::object closure = function.attr("__closure__");
+        const py::tuple freevars = code.attr("co_freevars");
+        if (closure.is_none()) {
+            if (freevars.empty()) return closure;
+            throw py::value_error(std::format("{} needs a closure of {} cells and has none",
+                                              text(function.attr("__qualname__")), freevars.size()));
+        }
+        const py::tuple cells = closure;
+        if (cells.size() != freevars.size())
+            throw py::value_error(std::format("{} has {} closure cells for {} free variables",
+                                              text(function.attr("__qualname__")), cells.size(), freevars.size()));
+        py::tuple rebound(cells.size());
+        for (std::size_t i = 0; i < cells.size(); ++i) {
+            if (text(freevars[i]) != "__class__") {
+                rebound[i] = cells[i];
+                continue;
+            }
+            PyObject* cell = PyCell_New(m_target.ptr());
+            if (cell == nullptr) throw py::error_already_set();
+            rebound[i] = py::reinterpret_steal<py::object>(cell);
+        }
+        return rebound;
+    }
+
+    py::type m_trait;
+    py::type m_target;
+    python_names::NamePolicy m_trait_names;
+    std::string m_name;               // module and qualified name: "tests.Greeter"
+    python_names::Reowning m_rules;   // trait -> target, for private and qualified names
+    const TraitRecord* m_carried;     // the trait's own record when it was composed into; nullptr otherwise
+};
+
+inline py::object code_or_none(const py::object& value) {
+    return PyFunction_Check(value.ptr()) ? py::object(value.attr("__code__")) : py::object(py::none());
+}
+
+// ── the kinds of member, one descriptor each ───────────────────────────────────────────────────
+
+/// A plain function.
+struct function_member {
+    static bool matches(const py::handle& m) { return PyFunction_Check(m.ptr()); }
+    static py::object rewritten(const py::handle& m, const TraitMove& move) { return move.function(m); }
+    static py::object code(const py::handle& m) { return m.attr("__code__"); }
+};
+
+/// A property: each accessor rebuilt; a property subclass stays that subclass.
+struct property_member {
+    static bool matches(const py::handle& m) { return PyObject_TypeCheck(m.ptr(), &PyProperty_Type); }
+    static py::object rewritten(const py::handle& m, const TraitMove& move) {
+        return py::type::of(m)(move.function_or_same(m.attr("fget")), move.function_or_same(m.attr("fset")),
+                               move.function_or_same(m.attr("fdel")), m.attr("__doc__"));
+    }
+    static py::object code(const py::handle& m) { return code_or_none(m.attr("fget")); }
+};
+
+/// A classmethod: the function inside rebuilt, so `cls` is the class it is called on.
+struct classmethod_member {
+    static bool matches(const py::handle& m) { return PyObject_TypeCheck(m.ptr(), &PyClassMethod_Type); }
+    static py::object rewritten(const py::handle& m, const TraitMove& move) {
+        return py::type::of(m)(move.function_or_same(m.attr("__func__")));
+    }
+    static py::object code(const py::handle& m) { return code_or_none(m.attr("__func__")); }
+};
+
+/// A staticmethod: the function inside rebuilt.
+struct staticmethod_member {
+    static bool matches(const py::handle& m) { return PyObject_TypeCheck(m.ptr(), &PyStaticMethod_Type); }
+    static py::object rewritten(const py::handle& m, const TraitMove& move) {
+        return py::type::of(m)(move.function_or_same(m.attr("__func__")));
+    }
+    static py::object code(const py::handle& m) { return code_or_none(m.attr("__func__")); }
+};
+
+using member_kinds = std::tuple<function_member, property_member, classmethod_member, staticmethod_member>;
+
+/// A member rewritten for the target, and the code that says where the trait defined it.
+struct Rewritten {
+    py::object member;
+    py::object code;
+};
+
+template <class Kind>
+bool rewrite_if(const py::handle& member, const TraitMove& move, std::optional<Rewritten>& out) {
+    if (!Kind::matches(member)) return false;
+    out = Rewritten{Kind::rewritten(member, move), Kind::code(member)};
+    return true;
+}
+
+/// The member rewritten by the first kind that matches it; nothing when no kind does.
+template <class... Kinds>
+std::optional<Rewritten> rewritten(std::tuple<Kinds...>*, const py::handle& member, const TraitMove& move) {
+    std::optional<Rewritten> out;
+    (rewrite_if<Kinds>(member, move, out) || ...);
+    return out;
+}
+
+
+inline std::optional<PlannedMember> TraitMove::planned(const py::handle& key, const py::handle& value) const {
+    auto [name, name_obj] = attribute_name(key);
+    auto done = rewritten(static_cast<member_kinds*>(nullptr), value, *this);
+    if (!done) {
+        if (python_names::is_dunder(name)) return std::nullopt;  // the trait class's own machinery
+        throw py::type_error(std::format(
+            "{}.{} is {}; a trait composes functions, properties, classmethods and staticmethods",
+            qualname(), name, type_name(value)));
+    }
+    Provenance origin = attribution(name, value, done->code);
+    return PlannedMember{std::move(name), std::move(name_obj), std::move(done->member), std::move(origin), m_name};
+}
+
+/// Why a member cannot join the plan without override: another trait of this call planned the same
+/// name, or the target's own namespace already has it. The two conflict rules, and their messages.
+/// Example: Clash::with_target("Person", greet).message() is
+/// "Person already has greet; tests.Greeter would replace it (pass override=True)".
+class Clash {
+public:
+    static Clash between_traits(const PlannedMember& earlier, const PlannedMember& later) {
+        return Clash{std::format("{} and {} both define {} (pass override=True to let the later win)",
+                                 earlier.trait(), later.from(), later.name())};
+    }
+    static Clash with_target(const std::string& target_name, const PlannedMember& member) {
+        return Clash{std::format("{} already has {}; {} would replace it (pass override=True)",
+                                 target_name, member.name(), member.from())};
+    }
+    [[nodiscard]] const std::string& message() const noexcept { return m_message; }
+
+private:
+    explicit Clash(std::string message) : m_message(std::move(message)) {}
+    std::string m_message;
+};
+
+/// The members one compose() call will write, in the order they will be written, and the rule for
+/// joining it: a member that clashes is refused unless override, and with override the later trait
+/// wins. Every refusal happens before anything is written.
+class Plan {
+public:
+    Plan(py::type target, bool override_existing)
         : m_target(std::move(target)),
           m_override(override_existing),
           m_own(own_namespace(m_target)),
           m_target_name(text(m_target.attr("__qualname__"))) {}
 
-    /// Plan every member of `candidate`. Refuses a candidate that is not a class, a member no kind
-    /// composes, and a name that conflicts (admit()).
-    void plan(const py::handle& candidate) {
-        if (!PyType_Check(candidate.ptr()))
-            throw py::type_error(std::format("compose takes classes as traits, not {}", type_name(candidate)));
-        const auto trait = py::reinterpret_borrow<py::type>(candidate);
-        const auto trait_qualname = text(trait.attr("__qualname__"));
-        const auto trait_name = std::format("{}.{}", text(trait.attr("__module__")), trait_qualname);
-        const Move move{trait, m_target};
-        // A class that was itself composed into passes its members on with where they came from (R2).
-        const TraitRecord* carried = records().find(trait);
-
-        // A copy: planning runs Python code (a property subclass's constructor), which could edit it.
-        const auto members = py::reinterpret_steal<py::dict>(PyDict_Copy(own_namespace(trait).ptr()));
-        if (!members) throw py::error_already_set();
-        for (const auto& [key, member] : members) {
-            auto [name, name_obj] = attribute_name(key);
-            auto done = rewritten(static_cast<member_kinds*>(nullptr), member, move);
-            if (!done) {
-                if (python_names::is_dunder(name)) continue;  // the trait class's own machinery
-                throw py::type_error(std::format(
-                    "{}.{} is {}; a trait composes functions, properties, classmethods and staticmethods",
-                    trait_qualname, name, type_name(member)));
-            }
-            // Passed on only while the trait still holds what compose() left there (D15).
-            const bool passed_on = carried != nullptr && carried->holds(name, member);
-            const Provenance origin = passed_on ? carried->at(name) : Provenance{trait_name, where(done->code), {}};
-            admit(PlannedMember{std::move(name), std::move(name_obj), std::move(done->member), origin.trait,
-                                origin.defined},
-                  trait_name);
-        }
+    void admit(PlannedMember member) {
+        if (const auto clash = clash_of(member); clash && !m_override)
+            throw py::value_error(clash->message());
+        replace_or_append(std::move(member));
     }
 
-    /// Write every planned member into the target, then note them in its record. With nothing planned
-    /// the target is left exactly as it was. A write that fails leaves the members before it (no
-    /// rollback, decided 2026-10-18) and no record: the record is noted only after every write.
-    py::type commit() const {
-        if (m_plan.empty()) return m_target;
-        const auto composed = caller();
-        for (const auto& member : m_plan)  // the member writes first: a write may fire a hook
-            member.write_into(m_target);
+    [[nodiscard]] bool empty() const noexcept { return m_members.empty(); }
+
+    /// Write every member into the target, in order. A write that fails leaves the members before it
+    /// (no rollback, decided 2026-10-18).
+    void write() const {
+        for (const auto& member : m_members) member.write_into(m_target);
+    }
+
+    /// Note every member in the target's record, composed at `composed`, holding what landed. The
+    /// record is in the side table: no hook can reach it.
+    void record(const std::string& composed) const {
         const py::dict own = own_namespace(m_target);
-        auto& record = records().at(m_target);  // in the side table: no hook can reach it
-        for (const auto& member : m_plan)
-            member.note_into(record, composed, own);
-        return m_target;
+        auto& record = records().at(m_target);
+        for (const auto& member : m_members) member.note_into(record, composed, own);
     }
 
 private:
-    /// Add `member`, from `trait_name`, to the plan: a name an earlier trait of this call planned, or
-    /// the target's own namespace holds, is refused unless override, which replaces (the later wins).
-    void admit(PlannedMember member, const std::string& trait_name) {
-        const auto earlier = std::ranges::find(m_plan, member.name(), &PlannedMember::name);
-        if (earlier != m_plan.end()) {
-            if (!m_override)
-                throw py::value_error(std::format("{} and {} both define {} (pass override=True to let the later win)",
-                                                  earlier->trait(), trait_name, member.name()));
-            m_plan.erase(earlier);
-        } else if (m_own.contains(member.name()) && !m_override) {
-            throw py::value_error(std::format("{} already has {}; {} would replace it (pass override=True)",
-                                              m_target_name, member.name(), trait_name));
-        }
-        m_plan.push_back(std::move(member));
+    [[nodiscard]] std::optional<Clash> clash_of(const PlannedMember& member) const {
+        if (const PlannedMember* earlier = find(member.name())) return Clash::between_traits(*earlier, member);
+        if (target_has(member)) return Clash::with_target(m_target_name, member);
+        return std::nullopt;
+    }
+
+    [[nodiscard]] const PlannedMember* find(const std::string& name) const {
+        const auto found = std::ranges::find(m_members, name, &PlannedMember::name);
+        return found == m_members.end() ? nullptr : &*found;
+    }
+
+    [[nodiscard]] bool target_has(const PlannedMember& member) const {
+        const int has = PyDict_Contains(m_own.ptr(), member.name_object().ptr());
+        if (has < 0) throw py::error_already_set();
+        return has == 1;
+    }
+
+    /// The later trait wins: an earlier member of the same name leaves, and this one is written in turn.
+    void replace_or_append(PlannedMember member) {
+        std::erase_if(m_members, [&](const PlannedMember& planned) { return planned.name() == member.name(); });
+        m_members.push_back(std::move(member));
     }
 
     py::type m_target;
     bool m_override;
     py::dict m_own;              // the target's own namespace: its real dict, live
     std::string m_target_name;
-    std::vector<PlannedMember> m_plan;
+    std::vector<PlannedMember> m_members;
+};
+
+/// compose() as a builder over the target: add() the traits, choose override(), then compose().
+/// Example: Composer(Person).add(Greeter).add(Loud).compose() is Person, with both traits' members.
+class Composer {
+public:
+    explicit Composer(py::type target) : m_target(std::move(target)) {}
+
+    /// A trait to compose; it is checked when compose() reaches it.
+    Composer& add(const py::handle& trait) {
+        m_traits.push_back(py::reinterpret_borrow<py::object>(trait));
+        return *this;
+    }
+
+    /// Whether a member may replace one of the target's own, or one an earlier trait brings.
+    Composer& override(bool replace = true) {
+        m_override = replace;
+        return *this;
+    }
+
+    /// Plan every trait — each member classified, rewritten and admitted, every refusal raised — then
+    /// write the members and record them. With nothing planned the target is left exactly as it was.
+    py::type compose() const {
+        Plan plan(m_target, m_override);
+        for (const py::object& candidate : m_traits) {
+            const TraitMove trait(candidate, m_target);    // refuses a candidate that is not a class
+            for (const auto& [key, value] : trait.members())
+                if (auto member = trait.planned(key, value))  // nothing for the trait class's own machinery
+                    plan.admit(std::move(*member));
+        }
+        if (plan.empty()) return m_target;
+        const std::string composed = caller();
+        plan.write();                                       // the members first: a write may fire a hook
+        plan.record(composed);                              // then the record, out of any hook's reach
+        return m_target;
+    }
+
+private:
+    py::type m_target;
+    std::vector<py::object> m_traits;
+    bool m_override = false;
 };
 
 }  // namespace detail
@@ -491,10 +588,9 @@ private:
 /// Cost: per member, one CodeBuilder build per function in it; per call, one frame lookup.
 /// Example: compose(Person, Greeter) is Person, and Person("ann").greet() is 'hello ann'.
 inline py::type compose(const py::type& target, const py::args& traits, bool override_existing) {
-    detail::Composition composition{target, override_existing};
-    for (const auto& trait : traits)
-        composition.plan(trait);
-    return composition.commit();
+    detail::Composer composer(target);
+    for (const auto& trait : traits) composer.add(trait);
+    return composer.override(override_existing).compose();
 }
 
 /// The record of what was composed into `cls` itself and is still there: a member replaced or

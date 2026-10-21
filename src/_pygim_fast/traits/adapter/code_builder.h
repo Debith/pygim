@@ -60,7 +60,11 @@ class CodeBuilder {
 public:
     /// Start from `code`, a code object, with no moves. It is never changed: build() returns a new one.
     /// Cost: one type check. Example: CodeBuilder(Trait.nested.__code__).
-    explicit CodeBuilder(py::object code) : CodeBuilder(std::move(code), python_names::Reowning{}) {
+    explicit CodeBuilder(py::object code) : CodeBuilder(std::move(code), python_names::Reowning{}) {}
+
+    /// Start from `code` with its rules already set — compose()'s TraitMove hands over its own. C++
+    /// only; Python builds the rules with reown().
+    CodeBuilder(py::object code, python_names::Reowning rules) : m_code(std::move(code)), m_rules(std::move(rules)) {
         if (!PyCode_Check(m_code.ptr()))
             throw py::type_error(std::format("CodeBuilder takes a code object, not {}",
                                              py::str(py::type::of(m_code).attr("__name__")).cast<std::string>()));
@@ -86,9 +90,6 @@ public:
     }
 
 private:
-    /// A builder with the rules already set: the builder of a code object nested in another.
-    CodeBuilder(py::object code, python_names::Reowning rules) : m_code(std::move(code)), m_rules(std::move(rules)) {}
-
     /// The UTF-8 text of a Python str, borrowed: CPython keeps it with the string, so this copies
     /// nothing (it is made once, on the first request, for a str that is not ASCII).
     static std::string_view utf8(const py::handle& str) {
