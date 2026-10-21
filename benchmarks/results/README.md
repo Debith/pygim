@@ -9,10 +9,11 @@ history IS the attribution, and `git log` on this file dates every point.
 
 A record carries the raw measurements (seconds, full precision) under
 `sections`, plus the metadata that makes runs comparable over time:
-`dirty`, `branch`, `python`, `cpu`, `hostname`, `reps`.
+`dirty`, `branch`, `python`, `platform` (a coarse OS-and-architecture tag),
+`reps`. Identifying host details (hostname, CPU model) are not stored.
 
 When reading a series, **filter before trending**: compare only records with
-the same `hostname`/`cpu` and `python`.
+the same `platform` and `python`.
 
 Quick look at a series:
 

@@ -207,6 +207,17 @@ public:
     }
 
     /**
+     * \brief Remove a key and its value.
+     * \param[in] key Key to remove.
+     * \return `true` when something was removed, else `false`.
+     * \note Exists for stores whose entries end with something outside them — traits' records end
+     *       with the class they describe, when it is collected.
+     */
+    constexpr bool remove(const key_type& key) {
+        return m_store.erase(key);
+    }
+
+    /**
      * \brief Check key existence.
      * \param[in] key Key to test.
      * \return `true` when key exists, else `false`.
@@ -321,5 +332,13 @@ using DynamicRegistryCore =
 template<class Key, class Value, class PostArg = Value>
 using StaticRegistryCore =
     RegistryCore<Key, Value, mapping::flat_storage<Key, Value>, NoHooks<Key, Value, PostArg>, PostArg>;
+
+// remove(), as traits' record store uses it when a class is collected: the key is gone, and
+// removing it again reports nothing removed.
+static_assert([] {
+    StaticRegistryCore<int, int> registry;
+    registry.register_value(1, 10);
+    return registry.remove(1) && !registry.contains(1) && !registry.remove(1);
+}());
 
 } // namespace pygim::core

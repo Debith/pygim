@@ -27,6 +27,7 @@
 // ---------------------------------------------------------------------------
 #pragma once
 
+#include <format>
 #include <optional>
 #include <string>
 #include <memory>
@@ -35,6 +36,7 @@
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 #include "../utils/adapter_utils.h"
+#include "../utils/python_names.h"
 
 namespace py = pybind11;
 
@@ -109,7 +111,7 @@ public:
     }
 
     std::string representation() const {
-        return "<Each-proxy bound to " + py::repr(m_iterable).cast<std::string>() + ">";
+        return std::format("<Each-proxy bound to {}>", py::repr(m_iterable).cast<std::string>());
     }
 
 private:
@@ -138,7 +140,7 @@ public:
             throw std::runtime_error(
                 "Direct use: call each(iterable).attr");
         }
-        if (is_dunder(name))
+        if (pygim::python_names::is_dunder(name))
             throw py::attribute_error("Cannot access dunder attributes with `each`");
 
         // Allocate the proxy on the heap so its lifetime is managed by Python.
@@ -219,7 +221,7 @@ public:
     }
 
     std::string representation() const {
-        return "<Each bound to " + py::repr(m_iterable).cast<std::string>() + ">";
+        return std::format("<Each bound to {}>", py::repr(m_iterable).cast<std::string>());
     }
 private:
     py::object m_iterable;     //!< Iterable for factory mode; None in descriptor mode

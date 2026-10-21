@@ -118,6 +118,14 @@ consteval bool registers_and_finds() {
 }
 static_assert(registers_and_finds());
 
+consteval bool remove_removes_and_reports() {
+    Static r = three();
+    const bool hit = r.remove("json");
+    const bool miss = r.remove("csv");
+    return hit && !miss && r.size() == 2 && !r.contains("json") && r.contains("yaml") && r.contains("toml");
+}
+static_assert(remove_removes_and_reports());
+
 consteval bool keys_are_sorted_on_the_flat_engine() {
     const Static r = three();
     const auto k = r.keys();
