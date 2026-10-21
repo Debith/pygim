@@ -1,6 +1,7 @@
 #pragma once
 
 #include "core_utils.h"
+#include "python_names.h"
 #include <algorithm>
 #include <cstddef>
 #include <string_view>
@@ -39,6 +40,18 @@ PyObject* interned() {
         return made;
     }();
     return name;
+}
+
+/// A Python class's names as a NamePolicy: its __name__ (what mangling uses) and __qualname__ (what its
+/// functions' qualified names start with), each read as str() of the attribute.
+/// Example: name_policy_of(Outer.Inner).mangled("__x") is "_Inner__x".
+inline python_names::NamePolicy name_policy_of(const py::handle& cls) {
+    auto text = [&](PyObject* attribute) {
+        PyObject* value = PyObject_GetAttr(cls.ptr(), attribute);
+        if (value == nullptr) throw py::error_already_set();
+        return py::str(py::reinterpret_steal<py::object>(value)).cast<std::string>();
+    };
+    return python_names::NamePolicy{text(interned<"__name__">()), text(interned<"__qualname__">())};
 }
 
 }  // namespace pygim::adapter

@@ -33,8 +33,8 @@
 // names to C. A name that A's code spells as B's own is moved on by the second step too — the
 // exception python_names_proofs.cpp states beside the law.
 //
-// Lifetime and threading: a builder holds a reference to its code object and a shared, read-only
-// Reowning; reown() swaps in a longer one, so a builder never changes rules another builder reads.
+// Lifetime and threading: a builder holds a reference to its code object and its own Reowning; the
+// builder of a nested code object gets a copy.
 // build() allocates new code objects and holds the GIL throughout, as every pybind11 call does.
 
 #pragma once
@@ -42,7 +42,6 @@
 #include <cstddef>
 #include <format>
 #include <functional>
-#include <memory>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -50,6 +49,7 @@
 #include <pybind11/pybind11.h>
 
 #include "../../utils/python_names.h"
+#include "../../utils/adapter_utils.h"
 #include "code_object.h"
 
 namespace pygim::traits {
@@ -60,25 +60,19 @@ class CodeBuilder {
 public:
     /// Start from `code`, a code object, with no moves. It is never changed: build() returns a new one.
     /// Cost: one type check. Example: CodeBuilder(Trait.nested.__code__).
-    explicit CodeBuilder(py::object code)
-        : CodeBuilder(std::move(code), std::make_shared<const python_names::Reowning>()) {
+    explicit CodeBuilder(py::object code) : CodeBuilder(std::move(code), python_names::Reowning{}) {
         if (!PyCode_Check(m_code.ptr()))
             throw py::type_error(std::format("CodeBuilder takes a code object, not {}",
-                                             text(py::type::of(m_code), "__name__")));
+                                             py::str(py::type::of(m_code).attr("__name__")).cast<std::string>()));
     }
 
     /// Move the code from class `source` to class `target`: its private names (by the classes'
     /// names) and its qualified names (by their qualified names). Returns this builder, so steps
-    /// chain. Cost: the rules copied once, with two strings per class; nothing is rewritten until
-    /// build(). Example: .reown(Trait, Target) turns '_Trait__secret' into '_Target__secret'.
+    /// chain. Nothing is rewritten until build().
+    /// Example: .reown(Trait, Target) turns '_Trait__secret' into '_Target__secret'.
     CodeBuilder& reown(const py::type& source, const py::type& target) {
-        const auto source_name = text(source, "__name__");
-        const auto target_name = text(target, "__name__");
-        const auto source_qualname = text(source, "__qualname__");
-        const auto target_qualname = text(target, "__qualname__");
-        m_rules = std::make_shared<const python_names::Reowning>(
-            m_rules->then(python_names::NamePolicy{source_name, source_qualname},
-                          python_names::NamePolicy{target_name, target_qualname}));
+        using ::pygim::adapter::name_policy_of;
+        m_rules = m_rules.then(name_policy_of(source), name_policy_of(target));
         return *this;
     }
 
@@ -92,13 +86,8 @@ public:
     }
 
 private:
-    /// The builder of a code object nested in another, reading the same rules.
-    CodeBuilder(py::object code, std::shared_ptr<const python_names::Reowning> rules)
-        : m_code(std::move(code)), m_rules(std::move(rules)) {}
-
-    static std::string text(const py::handle& owner, const char* attribute) {
-        return py::str(owner.attr(attribute)).cast<std::string>();
-    }
+    /// A builder with the rules already set: the builder of a code object nested in another.
+    CodeBuilder(py::object code, python_names::Reowning rules) : m_code(std::move(code)), m_rules(std::move(rules)) {}
 
     /// The UTF-8 text of a Python str, borrowed: CPython keeps it with the string, so this copies
     /// nothing (it is made once, on the first request, for a str that is not ASCII).
@@ -130,14 +119,14 @@ private:
 
     /// `name` after every step, in order: the same object when no step moves it, a new str when one does.
     py::object moved(const py::handle& name) const {
-        const auto spelling = m_rules->respelt(utf8(name));
+        const auto spelling = m_rules.respelt(utf8(name));
         return spelling ? py::object(py::str(*spelling)) : py::reinterpret_borrow<py::object>(name);
     }
 
     /// `qualname` after every step: the same object when no step moves it, a new str when one does.
     py::object requalified(const py::handle& qualname) const {
         const std::string_view original = utf8(qualname);
-        const std::string moved = m_rules->requalified(original);
+        const std::string moved = m_rules.requalified(original);
         return moved != original ? py::object(py::str(moved)) : py::reinterpret_borrow<py::object>(qualname);
     }
 
@@ -177,7 +166,7 @@ private:
     };
 
     py::object m_code;
-    std::shared_ptr<const python_names::Reowning> m_rules;  // shared with the builders of nested code; never changed
+    python_names::Reowning m_rules;  // each nested builder gets a copy: a few names, once per class at import (#255)
 };
 
 }  // namespace pygim::traits

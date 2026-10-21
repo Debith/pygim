@@ -27,8 +27,9 @@
 //   reowned("Trait", "Target", "value")                -> "value"           respelt's spelling, or the name
 //   requalified("Trait", "Target", "Trait.f.<locals>.<lambda>") -> "Target.f.<locals>.<lambda>"
 //
-// Lifetime and threading: free functions over string_views, and NamePolicy, a view, store nothing.
-// Reowning owns the class names it is given and is a value: then() returns a new one.
+// Lifetime and threading: the free functions take string_views and store nothing. NamePolicy and
+// Reowning are values that own their names: they can be stored, copied and passed on; then() returns
+// a new Reowning.
 
 #pragma once
 
@@ -147,16 +148,19 @@ static_assert(requalified("Trait", "Target", "Trait.f.<locals>.<lambda>") == "Ta
 ///
 /// It is a thin value over the free functions above (the ones the compile-time proofs check), so it
 /// adds cohesion, not logic: a class's identity travels as one object instead of parallel strings,
-/// and a move reads as ``source.reowned(target, name)``. It holds ``string_view``s and owns nothing,
-/// so the text it is built from must outlive it.
+/// and a move reads as ``source.reowned(target, name)``. It owns its names, so it can be kept: a
+/// Reowning holds pairs of them.
 ///
 /// Example: ``NamePolicy("daa").mangled("__attr")`` is ``"_daa__attr"``;
 /// ``NamePolicy("Inner", "Outer.Inner", "pkg.mod").qualified_name()`` is ``"pkg.mod.Outer.Inner"``.
 class NamePolicy {
 public:
-    constexpr explicit NamePolicy(std::string_view class_name, std::string_view qualname = {},
-                                  std::string_view module = {}) noexcept
-        : m_class(class_name), m_qualname(qualname.empty() ? class_name : qualname), m_module(module) {}
+    /// A literal, a std::string (copied, or moved in), or std::string{view}: one constructor takes them
+    /// all. `qualname` defaults to the class name, `module` to none.
+    constexpr explicit NamePolicy(std::string class_name, std::string qualname = {}, std::string module = {})
+        : m_class(std::move(class_name)),
+          m_qualname(qualname.empty() ? m_class : std::move(qualname)),
+          m_module(std::move(module)) {}
 
     constexpr std::string_view class_name() const noexcept { return m_class; }
     constexpr std::string_view qualname() const noexcept { return m_qualname; }
@@ -195,17 +199,16 @@ public:
     }
 
 private:
-    std::string_view m_class;
-    std::string_view m_qualname;
-    std::string_view m_module;
+    std::string m_class;
+    std::string m_qualname;
+    std::string m_module;
 };
 static_assert(NamePolicy{"daa"}.mangled("__attr") == "_daa__attr");
 static_assert(NamePolicy{"Trait"}.respelt(NamePolicy{"Target"}, "_Trait__secret") == "_Target__secret");
 
 /// Code moved from class to class, in order — reown(A, B), then reown(B, C) — and what that does to
-/// each name the code spells. Each move is NamePolicy's rule; this applies them in order. Unlike
-/// NamePolicy it owns the classes' names, so it can be kept: CodeBuilder holds one while it builds,
-/// and code nested at any depth reads the same one.
+/// each name the code spells. Each move is NamePolicy's rule; this applies them in order. CodeBuilder
+/// holds one, and hands a copy to the builder of each nested code object.
 ///
 /// Example: Reowning{}.then(NamePolicy{"Trait"}, NamePolicy{"Target"}) respells "_Trait__secret" as
 /// "_Target__secret", requalifies "Trait.f" as "Target.f", and leaves "value" alone (nothing).
@@ -213,11 +216,11 @@ class Reowning {
 public:
     constexpr Reowning() = default;  // no moves: every name stays as it is
 
-    /// This reowning followed by a move from class `from` to class `to`, whose names are copied.
-    /// A value: this one is left as it was.
-    [[nodiscard]] constexpr Reowning then(const NamePolicy& from, const NamePolicy& to) const {
+    /// This reowning followed by a move from class `from` to class `to`. A value: this one is left as
+    /// it was.
+    [[nodiscard]] constexpr Reowning then(NamePolicy from, NamePolicy to) const {
         Reowning out = *this;
-        out.m_moves.push_back(Move{from, to});
+        out.m_moves.push_back(Move{std::move(from), std::move(to)});
         return out;
     }
 
@@ -240,30 +243,21 @@ public:
     }
 
 private:
-    /// One move, owning both classes' names; the NamePolicy views over them are made per call.
+    /// One move: the class the code comes from and the class it goes to.
     class Move {
     public:
-        constexpr Move(const NamePolicy& from, const NamePolicy& to)
-            : m_from_name(from.class_name()),
-              m_from_qualname(from.qualname()),
-              m_to_name(to.class_name()),
-              m_to_qualname(to.qualname()) {}
+        constexpr Move(NamePolicy from, NamePolicy to) : m_from(std::move(from)), m_to(std::move(to)) {}
 
         [[nodiscard]] constexpr std::optional<std::string> respelt(std::string_view name) const {
-            return from().respelt(to(), name);
+            return m_from.respelt(m_to, name);
         }
         [[nodiscard]] constexpr std::string requalified(std::string_view qualname) const {
-            return from().requalified(to(), qualname);
+            return m_from.requalified(m_to, qualname);
         }
 
     private:
-        [[nodiscard]] constexpr NamePolicy from() const { return NamePolicy{m_from_name, m_from_qualname}; }
-        [[nodiscard]] constexpr NamePolicy to() const { return NamePolicy{m_to_name, m_to_qualname}; }
-
-        std::string m_from_name;
-        std::string m_from_qualname;
-        std::string m_to_name;
-        std::string m_to_qualname;
+        NamePolicy m_from;
+        NamePolicy m_to;
     };
 
     std::vector<Move> m_moves;
