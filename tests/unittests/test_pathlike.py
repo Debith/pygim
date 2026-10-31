@@ -2,6 +2,7 @@
 """Tests for ``pygim.path`` — the self-reading, self-decoding PathLike."""
 
 import os
+import sys
 
 import pytest
 
@@ -100,6 +101,51 @@ def test_read_bytes_is_raw(temp_dir):
     f = temp_dir / "raw.yaml"
     f.write_bytes(b"x: 1\n")
     assert pygim.path(f).read_bytes() == b"x: 1\n"
+
+
+@pytest.mark.parametrize("size", [0, 1, 4095, 4096, 4097, 3 << 20])
+def test_read_bytes_is_what_pathlib_reads_at_any_size(temp_dir, size):
+    f = temp_dir / "blob.bin"
+    f.write_bytes(os.urandom(size))
+    assert pygim.path(f).read_bytes() == f.read_bytes()
+
+
+def _refusal(read):
+    with pytest.raises(OSError) as refused:
+        read()
+    return type(refused.value), refused.value.errno
+
+
+def test_read_bytes_of_nothing_there_fails_as_pathlibs_does(temp_dir):
+    missing = temp_dir / "missing" / "f.bin"
+    assert _refusal(pygim.path(missing).read_bytes) == _refusal(missing.read_bytes)
+
+
+def test_read_bytes_of_a_directory_fails_as_pathlibs_does(temp_dir):
+    """IsADirectoryError on POSIX, PermissionError on Windows: pathlib's own answer on this system."""
+    assert _refusal(pygim.path(temp_dir).read_bytes) == _refusal(temp_dir.read_bytes)
+
+
+@pytest.mark.skipif(sys.platform == "win32" or os.geteuid() == 0, reason="permission bits bind a non-root POSIX user")
+def test_read_bytes_of_a_refused_file_fails_as_pathlibs_does(temp_dir):
+    secret = temp_dir / "secret.bin"
+    secret.write_bytes(b"x")
+    secret.chmod(0)
+    try:
+        assert _refusal(pygim.path(secret).read_bytes) == _refusal(secret.read_bytes)
+    finally:
+        secret.chmod(0o600)
+
+
+@pytest.mark.skipif(not os.path.exists("/proc/self/status"), reason="a /proc file: st_size 0, its text written as it is read")
+def test_read_bytes_of_a_file_that_says_it_is_empty_reads_to_its_end():
+    text = pygim.path("/proc/self/status").read_bytes()
+    assert text.startswith(b"Name:") and text.endswith(b"\n") and len(text) > 512
+
+
+@pytest.mark.skipif(not os.path.exists("/dev/null"), reason="POSIX devices")
+def test_read_bytes_of_a_device_reads_what_it_gives():
+    assert pygim.path("/dev/null").read_bytes() == pathlib.Path("/dev/null").read_bytes() == b""
 
 
 def test_engine_override_when_extension_is_absent(temp_dir):

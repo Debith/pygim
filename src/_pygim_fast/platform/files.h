@@ -11,6 +11,7 @@
 #include <cerrno>
 #include <climits>
 #include <cstddef>
+#include <expected>
 #include <filesystem>
 #include <string>
 #include <string_view>
@@ -67,6 +68,19 @@ inline constexpr bool path_text_is_utf8 = native == family::windows;
 [[nodiscard]] inline long long write_some(int fd, const char* data, std::size_t size) {
     return ::_write(fd, data, static_cast<unsigned>(std::min<std::size_t>(size, INT_MAX)));
 }
+[[nodiscard]] inline int open_reading(const fs::path& p) {
+    int fd = -1;
+    const errno_t err = ::_wsopen_s(&fd, p.c_str(), _O_RDONLY | _O_BINARY | _O_NOINHERIT, _SH_DENYNO, 0);
+    if (err != 0) errno = err;
+    return err == 0 ? fd : -1;
+}
+[[nodiscard]] inline long long read_some(int fd, char* data, std::size_t size) {
+    return ::_read(fd, data, static_cast<unsigned>(std::min<std::size_t>(size, INT_MAX)));
+}
+[[nodiscard]] inline std::size_t told_size(int fd) {
+    struct ::_stat64 st {};
+    return ::_fstat64(fd, &st) == 0 && st.st_size > 0 ? static_cast<std::size_t>(st.st_size) : 0;
+}
 inline int force_fd(int fd) { return ::_commit(fd); }
 inline int close_fd(int fd) { return ::_close(fd); }
 inline int force_folder(const fs::path&) { return 0; }   // Windows has no folder to force; see pathlike_writes.md, Open
@@ -75,6 +89,12 @@ inline int force_folder(const fs::path&) { return 0; }   // Windows has no folde
     return ::open(p.c_str(), O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, 0666);
 }
 [[nodiscard]] inline long long write_some(int fd, const char* data, std::size_t size) { return ::write(fd, data, size); }
+[[nodiscard]] inline int open_reading(const fs::path& p) { return ::open(p.c_str(), O_RDONLY | O_CLOEXEC); }
+[[nodiscard]] inline long long read_some(int fd, char* data, std::size_t size) { return ::read(fd, data, size); }
+[[nodiscard]] inline std::size_t told_size(int fd) {
+    struct ::stat st {};
+    return ::fstat(fd, &st) == 0 && st.st_size > 0 ? static_cast<std::size_t>(st.st_size) : 0;
+}
 inline int force_fd(int fd) {
 #ifdef __APPLE__
     if (::fcntl(fd, F_FULLFSYNC) == 0) return 0;   // macOS's fsync stops at the drive's cache
@@ -101,6 +121,41 @@ inline int force_folder(const fs::path& folder) {
 #else
     return ::unlink(p.c_str());
 #endif
+}
+
+/// Reads every byte of the file at `p` into the room `grow` gives — grow(n) returns a buffer of
+/// at least n bytes that keeps what it held — and returns how many, or the errno of the open or
+/// the read that failed. Opened as open() opens a file for reading (a FIFO waits for its writer,
+/// as pathlib's read_bytes does; a directory opens on POSIX and its read fails with EISDIR,
+/// Windows refuses its open with EACCES). The room is sized from what fstat tells, one byte over:
+/// a regular file ends at the read that comes back short at its size, a file that tells 0 (a
+/// /proc one) is read until a read returns nothing. Found 2026-10-31: an ifstream copied through
+/// an ostringstream and then into a bytes object read 50 MB in 124 ms where pathlib took 28.
+template <class Grow>
+[[nodiscard]] std::expected<std::size_t, int> read_whole_into(const fs::path& p, Grow&& grow) {
+    const int fd = open_reading(p);
+    if (fd < 0) return std::unexpected(errno);
+    const struct closer {
+        int fd;
+        ~closer() { (void)close_fd(fd); }
+    } close_at_end{fd};
+    const std::size_t size = told_size(fd);
+    std::size_t room = size != 0 ? size + 1 : 4096;
+    char* data = grow(room);
+    std::size_t have = 0;
+    for (;;) {
+        if (have == room) data = grow(room *= 2);
+        const long long got = read_some(fd, data + have, room - have);
+        if (got > 0) {
+            have += static_cast<std::size_t>(got);
+            if (size != 0 && have == size && have < room) break;   // short at its size: its end
+        } else if (got == 0) {
+            break;
+        } else if (errno != EINTR) {
+            return std::unexpected(errno);
+        }
+    }
+    return have;
 }
 
 }  // namespace pygim::platform

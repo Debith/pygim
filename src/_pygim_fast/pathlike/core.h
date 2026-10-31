@@ -29,7 +29,6 @@
 #include <fstream>
 #include <optional>
 #include <random>
-#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -420,21 +419,25 @@ public:
         return glob("**/" + std::string(pattern));
     }
 
-    // The raw bytes of the file, undecoded (binary, no newline translation). Fails as pathlib
-    // does: file_error with the errno of the open, and EISDIR for a directory, which POSIX lets
-    // open and then reads as nothing — checked only when nothing was read, so a file with
-    // content pays no extra stat.
+    // The raw bytes of the file, undecoded (binary, no newline translation), read by the system's
+    // calls into the room `grow` gives (platform::read_whole_into: grow(n) is a buffer of at least
+    // n bytes that keeps what it held); how many. Fails as pathlib does: file_error with the errno
+    // of the open or the read — EISDIR for a directory on POSIX, EACCES on Windows.
+    template <class Grow>
+    std::size_t read_bytes_into(Grow&& grow) const {
+        const auto got = platform::read_whole_into(to_fs(), std::forward<Grow>(grow));
+        if (!got) throw file_error(got.error(), fspath(), got.error() == EISDIR ? "is a directory" : "cannot read file");
+        return *got;
+    }
+
+    // The same, as a string.
     [[nodiscard]] std::string read_bytes() const {
-        const fs::path p = to_fs();
-        errno = 0;
-        std::ifstream ifs(p, std::ios::binary);
-        if (!ifs) throw file_error(detail::open_errno(p), fspath(), "cannot open file");
-        std::ostringstream buffer;
-        buffer << ifs.rdbuf();
-        std::string bytes = std::move(buffer).str();
-        if (std::error_code ec; bytes.empty() && fs::is_directory(p, ec)) {
-            throw file_error(EISDIR, fspath(), "is a directory");
-        }
+        std::string bytes;
+        const std::size_t got = read_bytes_into([&bytes](std::size_t n) {
+            bytes.resize_and_overwrite(n, [](char*, std::size_t m) noexcept { return m; });   // filled by the read, not zeroed
+            return bytes.data();
+        });
+        bytes.resize(got);
         return bytes;
     }
 

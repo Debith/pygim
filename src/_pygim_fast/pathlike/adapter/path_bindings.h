@@ -65,6 +65,18 @@
 
 namespace pygim::pathlike {
 
+/// `bytes` made `n` bytes long, its content kept up to n, and where its bytes lie: a bytes object
+/// a file is read into, sized as the read goes. Holds the GIL; MemoryError when it cannot.
+inline char* resized_bytes(py::object& bytes, std::size_t n) {
+    PyObject* raw = bytes.release().ptr();
+    const auto size = static_cast<Py_ssize_t>(n);
+    if (raw == nullptr ? (raw = PyBytes_FromStringAndSize(nullptr, size)) == nullptr : _PyBytes_Resize(&raw, size) != 0) {
+        throw py::error_already_set();   // _PyBytes_Resize freed it
+    }
+    bytes = py::reinterpret_steal<py::object>(raw);
+    return PyBytes_AS_STRING(raw);
+}
+
 /// What glob(pattern) finds under `root`, walked with the GIL released, touching only its own values.
 /// One that lists one directory at most (`src/*.py`) walks here. One that may list many — a `**`, or
 /// a wildcard before its last segment (`*/*/*.py`) — walks its first glob_head_start directories
@@ -338,7 +350,20 @@ py::class_<pathview> bind_path(engine_list<Es...> es, py::module_& m, const path
         .def("is_dir", [](const pathview& v) { return v.value().is_dir(); }, "Whether it is a directory.")
         .def("is_symlink", [](const pathview& v) { return v.value().is_symlink(); }, "Whether it is a symbolic link.")
         .def("size", [](const pathview& v) { return v.value().size(); }, "File size in bytes (raises if it does not exist).")
-        .def("read_bytes", [](const pathview& v) { return py::bytes(v.value().read_bytes()); }, "The raw file bytes, undecoded.")
+        .def("read_bytes", [](const pathview& v) {
+                const file f = v.value();
+                py::object bytes;   // read into where it lies, with the GIL released: no copy
+                std::size_t got = 0;
+                {
+                    py::gil_scoped_release nogil;
+                    got = f.read_bytes_into([&bytes](std::size_t n) {
+                        py::gil_scoped_acquire gil;
+                        return resized_bytes(bytes, n);
+                    });
+                }
+                resized_bytes(bytes, got);
+                return bytes;
+            }, "The raw file bytes, undecoded.")
         .def("write_bytes", [](const pathview& v, py::bytes data, bool atomic) {
                 const std::string_view sv = data;
                 const file f = v.value();
