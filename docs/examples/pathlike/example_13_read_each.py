@@ -85,7 +85,7 @@ if sys.platform != "win32" and os.geteuid() != 0:   # permission bits bind a non
 #                                    ▼          ▼
 bounded = PathSet(members).read_each(threads=4, ahead_bytes=64 * 1024)
 fixed = [c.text() for c in bounded]
-assert fixed == [m.read_text() for m in members]                 # same results, whatever the width
+assert fixed == [m.read_bytes().decode() for m in members]       # same results, whatever the width
 
 # ----------------------------------------------------------------------------
 # 5. read_all_files(): the whole set as str, in one call

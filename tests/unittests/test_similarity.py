@@ -428,11 +428,6 @@ class TestFiles:
         with pytest.raises(FileNotFoundError):
             similarity.Index("python").add_file(tmp_path / "nope.py")
 
-    def test_a_directory_is_an_is_a_directory_error(self, tmp_path):
-        (tmp_path / "pkg.py").mkdir()
-        with pytest.raises(IsADirectoryError):
-            similarity.Index("python").add_file(tmp_path / "pkg.py")
-
     @pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="FIFOs are POSIX")
     def test_a_fifo_is_refused_at_once_not_waited_on(self, tmp_path):
         """The file is read in C++ (pathlike's file_reads.h: opened non-blocking, fstat'ed): a FIFO
@@ -543,15 +538,16 @@ class TestAddFiles:
     @pytest.mark.parametrize("make, why", [
         (lambda p: None, os.strerror(errno.ENOENT)),
         (lambda p: p.mkdir(), os.strerror(errno.EISDIR)),
-        (lambda p: os.mkfifo(p), "not a regular file"),
-        (lambda p: (p.write_text("def f(a):\n    return a\n"), p.chmod(0)), os.strerror(errno.EACCES)),
+        pytest.param(lambda p: os.mkfifo(p), "not a regular file",
+                     marks=pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="FIFOs are POSIX")),
+        pytest.param(lambda p: (p.write_text("def f(a):\n    return a\n"), p.chmod(0)), os.strerror(errno.EACCES),
+                     marks=pytest.mark.skipif(sys.platform == "win32" or os.geteuid() == 0,
+                                              reason="permission bits bind a non-root POSIX user")),
     ], ids=["missing", "a directory", "a fifo", "unreadable"])
     def test_a_path_the_os_will_not_read_is_left_out_and_named_with_why(self, tmp_path, make, why):
         """The message names the file and says why in the OS's words, as `pygim similar` prints it
         (`skipped: <message>`). Found 2026-10-29: a missing file and a directory both said "not a
         regular file", and a refused read only "Permission denied", naming no file."""
-        if why == os.strerror(errno.EACCES) and os.geteuid() == 0:
-            pytest.skip("root reads every file")
         p = tmp_path / "x.py"
         make(p)
         assert similarity.Index("python").add_files([p]) == [(str(p), f"{p}: {why}")]

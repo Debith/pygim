@@ -24,6 +24,9 @@ except ImportError:  # Python < 3.11: the [test] extra installs the backport
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 BENCHMARKS = sorted(pathlib.Path(str(p)) for p in path(str(ROOT / "benchmarks")).glob("*.py"))   # pygim's own walker
 PROJECT = {"pygim", "_pygim"}
+# The standard library's on a later Python than this one may be: tomllib from 3.11, the [test]
+# extra's tomli standing in before it.
+LATER_STDLIB = {"tomllib"}
 pytestmark = [
     pytest.mark.skipif(not BENCHMARKS, reason="benchmarks/ not present (testing the installed package)"),
     pytest.mark.skipif(sys.version_info < (3, 10), reason="sys.stdlib_module_names is 3.10's"),
@@ -64,10 +67,11 @@ def _providers():
 def _undeclared(script):
     """The third-party modules `script` imports that no declared distribution provides."""
     siblings = {p.stem for p in BENCHMARKS}
-    third_party = _imported(script) - set(sys.stdlib_module_names) - PROJECT - siblings
+    third_party = _imported(script) - set(sys.stdlib_module_names) - LATER_STDLIB - PROJECT - siblings
     declared = _declared()
     providers = _providers()
-    return sorted(m for m in third_party if _normal(providers.get(m, "")) not in declared)
+    # a module nothing installed here provides is taken by its own name: tomli, declared for older Pythons
+    return sorted(m for m in third_party if _normal(providers.get(m, m)) not in declared)
 
 
 @pytest.mark.parametrize("benchmark", BENCHMARKS or [ROOT], ids=lambda p: p.name)

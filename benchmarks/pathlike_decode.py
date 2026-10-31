@@ -55,7 +55,10 @@ def make_files(tmp):
     format-specific fact left is which reference parser to race (chosen by
     suffix), and that TOML roots must be mappings (TOML documents are tables).
     """
-    import tomllib
+    try:
+        import tomllib
+    except ImportError:   # Python 3.10 and older: the [test] extra's backport
+        import tomli as tomllib
     import yaml
 
     oracles = {

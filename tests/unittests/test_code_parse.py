@@ -148,6 +148,7 @@ SAME_AS_CPYTHON = {
 
 
 @pytest.mark.filterwarnings("ignore::SyntaxWarning")   # '\\q' is an invalid escape: CPython warns, and keeps it
+@pytest.mark.skipif(sys.version_info < (3, 12), reason="the oracle is this Python's ast, which reads f-strings and an import's names as 3.14 does from 3.12")
 @pytest.mark.parametrize("source", list(SAME_AS_CPYTHON.values()), ids=list(SAME_AS_CPYTHON))
 def test_the_tree_is_cpythons(source):
     assert code.parse_source(source).dump(include_attributes=True) == dump314(cpython_tree(source), True)
@@ -155,7 +156,7 @@ def test_the_tree_is_cpythons(source):
 
 def cpython_tree(source):
     """The running Python's tree of `source`; a skip where it is older than 3.14 and its ast cannot
-    read 3.14's syntax (f-strings inside f-strings before 3.12)."""
+    read syntax that is 3.14's own."""
     try:
         return ast.parse(source)
     except SyntaxError as refused:
@@ -249,14 +250,13 @@ def test_the_buffer_scans_agree_with_cpython_at_every_offset_around_their_steps(
 
 @pytest.mark.parametrize("source, line", list(NOT_PYTHON.values()), ids=list(NOT_PYTHON))
 def test_what_cpython_refuses_is_refused(source, line):
-    with pytest.raises((SyntaxError, ValueError)) as theirs:
-        ast.parse(source)
-    if isinstance(theirs.value, ValueError):   # a NUL, before 3.12: refused with no line to compare
-        assert sys.version_info < (3, 12), theirs.value
-        pytest.skip("this Python's ast refuses a NUL as a ValueError, with no line")
     with pytest.raises(SyntaxError) as raised:
         code.parse_source(source)
-    assert (theirs.value.lineno, raised.value.lineno) == (line, line)
+    assert raised.value.lineno == line
+    if sys.version_info >= (3, 12):   # older Pythons accept some (4,301 digits) or refuse them elsewhere
+        with pytest.raises(SyntaxError) as theirs:
+            ast.parse(source)
+        assert theirs.value.lineno == line
 
 
 @pytest.mark.parametrize("source, missing", [("def (x): pass", "a name"), ("import\n", "a name"),
