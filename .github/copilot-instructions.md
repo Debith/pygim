@@ -101,7 +101,7 @@ Concise, actionable guidance for AI agents contributing to this repo. Focus on t
 - Put unit tests under `tests/unittests/` with `test_*.py` prefix. Use runtime behavior validations (e.g., ensure override semantics) not structural introspection of C++ templates.
 - For C++ exposed functionality, favor black-box tests importing compiled modules from `pygim` package.
 - Registry Tests Matrix: Always parametrize over (policy × hooks). Cover: register/get, duplicate rejection, override success/failure (missing key), decorator path, hook invocation counts (when enabled), introspection (registered_keys, find_id), representation, and negative id forms (string for identity policy).
-- Persistence Tests: `persistence/ext.persistence_test.toml` builds a test-only pybind11 module (`_persistence_test`) with `py::module_local()` to avoid type conflicts. Parametrize by backend when multiple backends exist. Tests requiring a live database use `test_persistence.py`; C++ unit tests via `test_bindings.cpp`.
+- Persistence Tests: tests reach persistence only through `pygim.persistence` — `Query` and the dialects are public and need no store, so query building and SQL rendering are tested without a database; there is no test-only module. Parametrize by backend when multiple backends exist. Tests requiring a live database use `test_persistence.py`.
 
 ## 7. Safe Changes Checklist (pre-commit mentally)
 - Definition of done: a change is done when every line of `docs/definition_of_done.md` holds (layers, generality, proofs, measurements, worked-example docs, runnable examples, stub, design note, changelog, error messages naming file/line/value, CI green on the matrix). A PR that cannot tick a line says so and why.

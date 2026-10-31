@@ -57,6 +57,15 @@ Both commands accept the same flags described in ``pygim --help``, so you can
 mix and match automation-friendly options (like ``--quiet`` or ``--yes``) to
 fit your workflow.
 
+``pygim similar`` finds duplicated code: it compares every function (or, with
+``--kind class``, every class) with every other one of the same language —
+Python with Python, C/C++ with C/C++, never across — and prints the pairs
+scoring at least ``--threshold`` (1.0 means identical up to local names):
+
+.. code-block:: bash
+
+    $ pygim similar src --threshold 0.9 --min-size 20 --exclude third_party
+
 Sub-modules
 -----------
 
@@ -77,7 +86,17 @@ Every served page gets a ✎ button (click anywhere, or select text, to leave a
 comment); comments append to ``__notes__/site-comments.jsonl`` under the served
 root, ready to be read back and acted on. Dropping an image on a page writes it
 under ``images/``. ``GET /pages`` lists the site's pages, and ``--rebuild``
-reports which pages the rebuild added and removed. ``/`` falls back to the first of ``site/``, ``docs/``,
+reports which pages the rebuild added and removed. Opening a Markdown page
+generates its HTML beside it (Mermaid fences become diagrams, ``.md`` links
+point at the generated pages) and serves that, so the commenter works on it
+and comments key on the HTML page — a design folder is served as it is
+written:
+
+.. code-block:: bash
+
+    $ oo docs serve --dir docs/design --host 127.0.0.1
+
+``/`` falls back to the first of ``site/``, ``docs/``,
 ``build/html/`` or ``docs/_build/html/`` that has an ``index.html`` (override
 with ``--index``). It binds all interfaces by default so the page is reachable
 via the WSL IP; set ``PYGIM_HOST`` or pass ``--host 127.0.0.1`` for

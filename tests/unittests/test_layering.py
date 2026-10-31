@@ -194,10 +194,10 @@ OS_WALKS = {"walk", "listdir", "scandir"}       # and os's
 ORACLE = ("test_pathlike.py", "test_path_store.py", "benchmarks/")
 
 # What is still walked by hand, counted on 2026-09-22 (19), 2026-09-23 (17), 2026-10-29 (14:
-# `pygim clean` walks with pygim's paths) and 2026-10-31 (5). It may fall; it may not rise. A
+# `pygim clean` walks with pygim's paths) and 2026-10-31 (4). It may fall; it may not rise. A
 # ratchet rather than a ban, because banning it today would mean converting nineteen call sites in
 # one commit, and a rule that has to be obeyed all at once is a rule that gets turned off.
-WALKS_BY_HAND = 5
+WALKS_BY_HAND = 4
 
 
 OURS = {"path", "PathSet", "PathStore"}         # pygim's own, which is the point of the rule
