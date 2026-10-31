@@ -39,7 +39,7 @@ def corpus(folder):
     """A corpus as a record names it: its checkout's folder name and the path below it
     (``cpython/Lib``, ``llvm-project``), never where on this machine it lies; a folder outside any
     checkout by its own name."""
-    here = path(os.path.expanduser(str(folder))).resolve()
+    here = path(folder).expanduser().resolve()
     top = _git("rev-parse", "--show-toplevel", cwd=here if here.is_dir() else here.parent)
     if not top:
         return here.name

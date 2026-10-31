@@ -1525,3 +1525,70 @@ def test_a_path_is_not_ordered_against_another_type(other):
         pygim.path("a") < other
     with pytest.raises(TypeError):
         other < pygim.path("a")
+
+
+# --------------------------------------------------------------------------- #
+# expanduser (pathlib parity; global rule #305: replicate, never reach around)
+# --------------------------------------------------------------------------- #
+@pytest.fixture
+def a_home(monkeypatch):
+    """This test's own home, as each system names it: the machine's own never decides a result."""
+    if os.name == "nt":
+        monkeypatch.setenv("USERPROFILE", "C:\\Users\\someone")
+        monkeypatch.setenv("USERNAME", "someone")
+        return "C:\\Users\\someone"
+    monkeypatch.setenv("HOME", "/home/someone")
+    return "/home/someone"
+
+
+@pytest.mark.parametrize("text", ["~", "~/x", "~/a/b.yaml", "x/~", "a/~/b", "/~x", "plain", "."])
+def test_expanduser_is_pathlibs(a_home, text):
+    assert str(pygim.path(text).expanduser()) == str(pathlib.Path(text).expanduser())
+
+
+def test_expanduser_of_a_home_with_a_trailing_separator_is_pathlibs(monkeypatch):
+    name = "USERPROFILE" if os.name == "nt" else "HOME"
+    monkeypatch.setenv(name, "C:\\Users\\someone\\" if os.name == "nt" else "/home/someone/")
+    assert str(pygim.path("~/x").expanduser()) == str(pathlib.Path("~/x").expanduser())
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX: an empty $HOME is the root, as posixpath has it")
+def test_expanduser_of_an_empty_home_is_the_root(monkeypatch):
+    monkeypatch.setenv("HOME", "")
+    assert str(pygim.path("~/x").expanduser()) == str(pathlib.Path("~/x").expanduser()) == "/x"
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX: the password database answers where $HOME is not set")
+def test_expanduser_without_a_home_asks_the_password_database(monkeypatch):
+    monkeypatch.delenv("HOME", raising=False)
+    try:
+        expected = str(pathlib.Path("~/x").expanduser())
+    except RuntimeError:
+        pytest.skip("this user is not in the password database")
+    assert str(pygim.path("~/x").expanduser()) == expected
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX: another user's home from the password database")
+def test_expanduser_of_another_user_is_pathlibs(a_home):
+    assert str(pygim.path("~root/x").expanduser()) == str(pathlib.Path("~root/x").expanduser())
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows: another user's home guessed beside this one's, as ntpath has it")
+def test_expanduser_of_another_user_is_guessed_beside_this_ones(a_home):
+    assert str(pygim.path("~other\\x").expanduser()) == str(pathlib.Path("~other\\x").expanduser()) == "C:\\Users\\other\\x"
+
+
+def test_expanduser_of_a_user_no_one_knows_fails_as_pathlibs_does(a_home, monkeypatch):
+    unknown = "~no_such_user_7f3a/x"
+    if os.name == "nt":   # ntpath guesses only beside a profile named after its user
+        monkeypatch.setenv("USERPROFILE", "C:\\Profiles\\elsewhere")
+    with pytest.raises(RuntimeError, match="Could not determine home directory"):
+        pathlib.Path(unknown).expanduser()
+    with pytest.raises(RuntimeError, match="Could not determine home directory"):
+        pygim.path(unknown).expanduser()
+
+
+def test_expanduser_keeps_a_typed_paths_engine(a_home):
+    expanded = pathlike.yamlpath("~/a.yaml").expanduser()
+    assert type(expanded) is pathlike.yamlpath
+    assert str(expanded) == str(pathlib.Path("~/a.yaml").expanduser())

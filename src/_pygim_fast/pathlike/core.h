@@ -41,6 +41,7 @@
 #include "../utils/hash.h"
 #include "../utils/string_list.h"
 #include "../platform/files.h"
+#include "../platform/home.h"
 #include "glob_walk.h"
 #include "path_rules.h"
 #include "uri.h"
@@ -315,6 +316,24 @@ public:
         Strategy::join_into(out.m_uri, m_uri);
         return out;
     }
+
+    // pathlib's expanduser(): a path with no drive and no root whose first part starts with "~"
+    // has that part replaced by the home it names — "~" this user's, "~name" that user's — and
+    // keeps every later part; any other path is itself. `home_of(user)` answers ("" for this user),
+    // by default the system (platform/home.h). No home known, or one that starts with "~" itself,
+    // is std::runtime_error, as pathlib's RuntimeError.
+    //
+    //     basic_file("~/a/b").expanduser(home)   -> "/home/someone/a/b"     ("~root/x" -> "/root/x")
+    template <class HomeOf>
+    [[nodiscard]] constexpr basic_file expanduser(HomeOf&& home_of) const {
+        if (m_uri.absolute || anchor_count() != 0 || m_uri.segments.empty() || !m_uri.segments.front().starts_with('~')) return *this;
+        const std::optional<std::string> home = home_of(std::string_view(m_uri.segments.front()).substr(1));
+        if (!home || home->starts_with('~')) throw std::runtime_error("Could not determine home directory.");
+        basic_file out(Strategy::parse(*home), m_pin);
+        out.m_uri.segments.insert(out.m_uri.segments.end(), m_uri.segments.begin() + 1, m_uri.segments.end());
+        return out;
+    }
+    [[nodiscard]] basic_file expanduser() const { return expanduser(platform::home_of); }
 
     [[nodiscard]] constexpr basic_file parent() const {
         basic_file out = *this;

@@ -359,6 +359,16 @@ py::class_<pathview> bind_path(engine_list<Es...> es, py::module_& m, const path
              "An absolute copy (does not resolve symlinks/..).")
         .def("resolve", [es](const pathview& v) { return wrap(es, v.intern(v.value().resolve())); },
              "A canonical, absolute copy (resolves symlinks/..).")
+        .def("expanduser", [es](const pathview& v) {
+                const file f = v.value();
+                file expanded;
+                {
+                    py::gil_scoped_release nogil;   // the password database may be asked
+                    expanded = f.expanduser();
+                }
+                return wrap(es, v.intern(expanded));
+            }, "pathlib's expanduser(): a leading ~ or ~user replaced by that user's home; "
+               "RuntimeError when no home is known.")
         // -- filesystem --
         .def("is_absolute", [](const pathview& v) { return v.table()->is_absolute<native_strategy>(v.row()); },
              "Whether the path is absolute.")

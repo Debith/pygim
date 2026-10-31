@@ -19,7 +19,6 @@ with add_file() in a loop, so the same script measures an older build.
 """
 
 import collections
-import os
 import subprocess
 import sys
 import time
@@ -73,7 +72,7 @@ def main():
     args = [a for a in sys.argv[1:] if not a.startswith("--")]
     if len(args) < 2:
         sys.exit(__doc__)
-    root = path(os.path.expanduser(args[0])).resolve()
+    root = path(args[0]).expanduser().resolve()
     corpora = {name: dirs.split(",") for name, dirs in (a.split("=", 1) for a in args[1:])}
     try:
         commit = subprocess.run(["git", "-C", str(root), "log", "-1", "--format=%h %cd", "--date=short"],

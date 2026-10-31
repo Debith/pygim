@@ -21,6 +21,8 @@
 
 #include <array>
 #include <initializer_list>
+#include <optional>
+#include <string>
 #include <string_view>
 
 namespace {
@@ -390,6 +392,23 @@ static_assert(table_agrees_with_file<posix_strategy>("a/b/c.yaml") && table_agre
 static_assert(table_agrees_with_file<windows_strategy>("C:\\Users\\x.yaml") && table_agrees_with_file<windows_strategy>("\\\\srv\\share\\x") &&
               table_agrees_with_file<windows_strategy>("a\\b") && table_agrees_with_file<windows_strategy>("C:x") &&
               table_agrees_with_file<windows_strategy>("\\abs"));
+
+// expanduser with the homes given as data (platform::home_of asks the system): "~" and "~name"
+// replaced, every later part kept; a "~" further in, or under a root, left as it is.
+constexpr auto given_homes = [](std::string_view user) -> std::optional<std::string> {
+    if (user.empty()) return std::string("/home/someone");
+    if (user == "root") return std::string("/root");
+    return std::nullopt;
+};
+static_assert(basic_file<posix_strategy>("~/a/b").expanduser(given_homes).fspath() == "/home/someone/a/b" &&
+              basic_file<posix_strategy>("~").expanduser(given_homes).fspath() == "/home/someone" &&
+              basic_file<posix_strategy>("~root/x").expanduser(given_homes).fspath() == "/root/x" &&
+              basic_file<posix_strategy>("x/~").expanduser(given_homes).fspath() == "x/~" &&
+              basic_file<posix_strategy>("/~x").expanduser(given_homes).fspath() == "/~x");
+static_assert(basic_file<windows_strategy>("~\\a").expanduser([](std::string_view) -> std::optional<std::string> {
+                  return std::string("C:\\Users\\someone");
+              }).fspath() == "C:\\Users\\someone\\a" &&
+              basic_file<windows_strategy>("C:~x").expanduser(given_homes).fspath() == "C:~x");   // a drive: not expanded
 
 // Two spellings of one value are one row; two values are two rows; a shared
 // prefix is shared.
