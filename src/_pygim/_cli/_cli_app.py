@@ -5,11 +5,11 @@ Command-Line Interface Application for Python Gimmicks.
 
 from __future__ import annotations  # `str | None` in signatures on Python 3.9
 
-from subprocess import Popen, DEVNULL
 import fnmatch
 import os
 import sys
 import shutil
+import subprocess
 import functools
 from pathlib import Path
 from dataclasses import dataclass
@@ -97,13 +97,14 @@ class GimmicksCliApp:
             _echo(f"Removed {len(targets)} items.", quiet)
 
     def show_test_coverage(self):
-        # TODO: Make this nicer
-        Popen(
-            "python -m coverage run -m pytest".split(" "),
-            stdout=DEVNULL,
-            stderr=DEVNULL,
-        ).wait()
-        Popen("python -m coverage report -m".split(" ")).wait()
+        """Run the tests here under coverage, by the interpreter running this, then print the report.
+
+        The tests' own output is left out, their errors are not; the command fails with the tests'
+        status, or the report's, after the report is shown."""
+        tests = subprocess.run([sys.executable, "-m", "coverage", "run", "-m", "pytest"], stdout=subprocess.DEVNULL)
+        report = subprocess.run([sys.executable, "-m", "coverage", "report", "-m"])
+        if tests.returncode or report.returncode:
+            raise SystemExit(tests.returncode or report.returncode)
 
     def docs_serve(self, *, port: int = 8000, directory: str | None = None,
                    host: str | None = None, index: str | None = None,
