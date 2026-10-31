@@ -3,20 +3,16 @@
 Python Gimmicks Command-Line Interface.
 """
 
+import sys
+
 import click
+from _pygim._cli._banner import BannerGroup
 from _pygim._cli._cli_app import GimmicksCliApp, flag_opt
 
 
-@click.group()
+@click.group(cls=BannerGroup, tagline="Python Gimmicks")
 def cli():
-    r"""\b
-     ___        ___ _
-    | _ \_  _  / __(_)\_ __
-    |  _/ || || (_ | | '  \ \b
-    |_|  \_, / \___|_|_|_|_|
-        |_/Python Gimmicks
-
-    """
+    pass
 
 
 @cli.command()
@@ -53,37 +49,80 @@ def stubs(check):
     GimmicksCliApp().stubs(check=check)
 
 
-class _OoGroup(click.Group):
-    """`oo <verb> ...` runs a verb (``docs serve``); anything else is free text
-    for the assistant; nothing at all shows the help."""
+@cli.command()
+@click.argument("paths", nargs=-1, type=click.Path(exists=True))
+@click.option("-t", "--threshold", type=click.FloatRange(0.0, 1.0), default=0.9, show_default=True,
+              help="Report pairs scoring at least this (1.0: identical up to local names).")
+@click.option("-k", "--kind", type=click.Choice(["function", "class"]), default="function", show_default=True,
+              help="Compare functions (methods included) or classes.")
+@click.option("-m", "--min-size", type=click.IntRange(min=0), default=20, show_default=True,
+              help="Leave out units of fewer syntax-tree nodes (trivial accessors are identical, not duplicates).")
+@click.option("-n", "--limit", type=click.IntRange(min=1), default=None,
+              help="Show at most this many pairs per language.")
+@click.option("-x", "--exclude", multiple=True,
+              help="Glob matched against each file path and its components (repeatable), e.g. -x 'third_party'.")
+@flag_opt("--check", help="Exit 1 when any pair is shown, as a gate in CI.")
+def similar(paths, threshold, kind, min_size, limit, exclude, check):
+    """Find similar functions or classes under PATHS (default: the current directory).
 
-    def parse_args(self, ctx, args):
-        if args and not args[0].startswith("-") and args[0] not in self.commands:
-            ctx.meta["free_text"] = " ".join(args)
-            ctx.args = []
-            return []
-        return super().parse_args(ctx, args)
-
-    def invoke(self, ctx):
-        text = ctx.meta.get("free_text")
-        if text is not None:
-            return GimmicksCliApp().ai(text)
-        return super().invoke(ctx)
+    Every unit of the kind is compared with every other of the same language
+    (Python with Python, C++ with C++, never across): a deterministic
+    Dice score over normalised syntax subtrees."""
+    shown = GimmicksCliApp().similar(paths=paths, threshold=threshold, kind=kind, min_size=min_size, limit=limit,
+                                     exclude=exclude)
+    if check and shown:
+        sys.exit(1)
 
 
-@click.group(cls=_OoGroup, invoke_without_command=True)
+class _OoGroup(BannerGroup):
+    """`oo <verb> ...` runs a verb; nothing at all shows the help; anything else is an error.
+
+    An unknown word used to be taken as free text for an assistant that was never built, which
+    printed a sentence and exited 0, so a mistyped or renamed command reported success and did
+    nothing. A command that does not exist has to say so, and say it with a status a script can see."""
+
+    def resolve_command(self, ctx, args):
+        name = click.utils.make_str(args[0]) if args else ""
+        if args and not name.startswith("-") and self.get_command(ctx, name) is None:
+            import difflib
+
+            near = difflib.get_close_matches(name, self.list_commands(ctx), n=1, cutoff=0.6)
+            ctx.fail(f"No such command {name!r}." + (f" Did you mean {near[0]!r}?" if near else "")
+                     + " Run `oo --help` for the list.")
+        return super().resolve_command(ctx, args)
+
+
+@click.group(cls=_OoGroup, invoke_without_command=True, tagline="AI powered Python Gimmicks")
+@flag_opt("--no-color", "no_color", help="Never colour the output. Colour is already off when the output is "
+                                         "not a terminal, when NO_COLOR is set, or when TERM is dumb.")
 @click.pass_context
-def cli_oo(ctx):
-    r"""\b
-     ___        ___ _
-    | _ \_  _  / __(_)\_ __
-    |  _/ || || (_ | | '  \ \b
-    |_|  \_, / \___|_|_|_|_|
-        |_/ AI powered Python Gimmicks
+def cli_oo(ctx, no_color):
+    """The composition root for the commands: the environment is read once, here, and every command
+    is handed the result. Nothing below reads it again (see `_pygim._config`)."""
+    from _pygim import _config
+    from _pygim._cli import _style
 
-    """
-    if ctx.invoked_subcommand is None and ctx.meta.get("free_text") is None:
+    ctx.obj = _config.from_process(colour=False if no_color else None)
+    _style.use(ctx.obj.colour)
+    if ctx.invoked_subcommand is None:
         click.echo(ctx.get_help())
+
+
+@cli_oo.command("inventory")
+@click.option("--path", default=None, type=click.Path(exists=True, file_okay=False),
+              help="The project to survey (default: the current directory).")
+@flag_opt("--map", "brief", help="Print the project map instead: what the project is, its layout, what it "
+                                 "ships and leaves idle, how it runs, what changed last.")
+@click.pass_obj
+def inventory(where, path, brief):
+    """What a project already has, against what its code reaches for.
+
+    A component you already have is invisible where you would have used it: an import of the
+    standard library reads as correct whether or not the project, or something it depends on,
+    already ships an answer. This prints the join — what is shipped, declared and installed
+    against what is actually imported — and nothing else can show it.
+    """
+    GimmicksCliApp().inventory(where=where, path=path, brief=brief)
 
 
 @cli_oo.group()
@@ -102,8 +141,16 @@ def docs():
                    "site/, docs/, build/html/, docs/_build/html/ that has one).")
 @click.option("--rebuild", default=None,
               help="A shell command run in the served directory before serving; a non-zero exit aborts.")
-def docs_serve(port, directory, host, index, rebuild):
+@click.option("--reload/--no-reload", default=True, show_default=True,
+              help="Restart when the server's own code changes; open pages reload with it.")
+def docs_serve(port, directory, host, index, rebuild, reload):
     """Serve a docs directory with the review layer: every HTML page gets the
     commenter (comments land in __notes__/site-comments.jsonl under the served
     root) and images dropped on a page are written under images/."""
-    GimmicksCliApp().docs_serve(port=port, directory=directory, host=host, index=index, rebuild=rebuild)
+    GimmicksCliApp().docs_serve(port=port, directory=directory, host=host, index=index, rebuild=rebuild,
+                                reload=reload)
+
+
+if __name__ == "__main__":
+    # `python -m pygim` runs what the `pygim` script runs; `oo` is the other entry point.
+    cli()

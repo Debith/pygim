@@ -308,6 +308,7 @@ def test_acquire_datastore_invalid_format():
         acquire_datastore("conn", format="arrow")
 
 
+@pytest.mark.outside_service   # a live SQL Server: its first login after idling took 1.1 s
 def test_acquire_datastore_live_round_trip():
     pyodbc = pytest.importorskip("pyodbc")
     conn_str = _integration_conn_str(pyodbc)   # first: no server is a skip, whatever else is missing

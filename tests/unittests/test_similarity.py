@@ -18,8 +18,11 @@ import warnings
 import pyarrow as pa
 import pyarrow.compute as pc
 import pytest
+from click.testing import CliRunner
+from tabulate import tabulate
 
 from pygim import similarity
+from pygim.__main__ import cli
 from stub_parity import Stub
 
 try:
@@ -1109,6 +1112,114 @@ class TestImports:
                 for r in ix.pairs(columns=["a_qualname", "b_qualname", "exact"]).to_pylist()}
         assert rows[("a", "b")] and rows[("a", "c")] and rows[("b", "c")]
         assert not rows[("a", "d")]                    # `using namespace` cannot be followed statically
+
+
+class TestCli:
+    def test_threshold_zero_needs_a_limit(self, tmp_path):
+        """-t 0 would rank every pair of every unit, n(n-1)/2 lines held in memory before the first is
+        printed: refused before any file is read, unless -n caps it."""
+        (tmp_path / "m.py").write_text("def f(a):\n    return a\n\ndef g(b):\n    return b\n")
+        refused = CliRunner().invoke(cli, ["similar", str(tmp_path), "-t", "0"])
+        assert refused.exit_code == 2 and "-n N" in refused.output
+        capped = CliRunner().invoke(cli, ["similar", str(tmp_path), "-t", "0", "-n", "1", "-m", "0"])
+        assert capped.exit_code == 0 and "the best 1 function pair(s)" in capped.output
+
+    def test_one_index_per_language(self, tmp_path):
+        (tmp_path / "a.py").write_text("def f(a):\n    return a + 1\n\ndef g(b):\n    return b + 1\n")
+        (tmp_path / "b.cpp").write_text("int f(int a) { return a + 1; }\nint g(int b) { return b + 1; }\n")
+        (tmp_path / "bad.hpp").write_text("void f() {\n")
+        hidden = tmp_path / ".hidden"
+        hidden.mkdir()
+        (hidden / "c.py").write_text("def h(c):\n    return c + 1\n")
+        result = CliRunner().invoke(cli, ["similar", str(tmp_path), "-t", "1.0", "-m", "0"])
+        assert result.exit_code == 0, result.output
+        assert "python: 1 function pair(s)" in result.output     # f ~ g; the hidden h never read
+        assert "cpp: 1 function pair(s)" in result.output        # never a Python-C++ pair
+        assert "bad.hpp:1: unclosed '{'" in result.output       # reported and skipped
+
+    def test_reported_line_is_where_the_function_starts(self, tmp_path):
+        """Seen on CPython: a docstring spliced over lines (bisect), and a macro writing '"' (_json's
+        ENCODE_OUTPUT), left every later C function reported too early."""
+        (tmp_path / "m.c").write_text('PyDoc_STRVAR(doc, "one\\n\\\ntwo\\n\\\nthree");\n'
+                                      "#define ENCODE(o) o = '\"'; \\\n    o = '\"'; \\\n    o = 0\n"
+                                      "int f(int a) { return a + 1; }\nint g(int b) { return b + 1; }\n")
+        pygim = [sys.executable, "-c", "import sys; from pygim.__main__ import cli; sys.exit(cli())"]   # the console script
+        result = subprocess.run([*pygim, "similar", str(tmp_path), "-t", "1.0", "-m", "0"],
+                                capture_output=True, text=True, check=True)
+        assert "m.c:7" in result.stdout and "m.c:8" in result.stdout, result.stdout
+
+    @pytest.mark.parametrize("relative", [False, True])
+    def test_the_printed_table_is_tabulates_layout_of_the_pairs(self, tmp_path, monkeypatch, relative):
+        """similar prints each pair as its score (three decimals, ` =` when exact) and each side's
+        `qualname  file:line`, in tabulate's plain layout — which it writes itself, a line at a time
+        (tabulate took 0.5 s for 23,000 rows). It reads the files in pathlib's order, by their parts
+        (two/deep before two/m.py, two-x after both), spelled from the root as given: an absolute
+        path or `.`; names past ASCII, ties and several directories included."""
+        for d in ("one", "two", "two/deep", "two-x"):
+            (tmp_path / d).mkdir(parents=True, exist_ok=True)
+            src = "".join(f"def f{i}_{d.replace('/', '_').replace('-', '_')}(a):\n    return a * {i % 3} + {i % 2}\n\n" for i in range(12))
+            (tmp_path / d / "m.py").write_text(src + "def ñandú(b):\n    return b * 2 + 1\n", encoding="utf-8")
+        root = tmp_path
+        if relative:
+            monkeypatch.chdir(tmp_path)
+            root = pathlib.Path(".")
+        result = CliRunner().invoke(cli, ["similar", str(root), "-t", "0.5", "-m", "0"])
+        assert result.exit_code == 0, result.output
+        ix = similarity.Index("python")
+        ix.add_files([str(root / d / "m.py") for d in ("one", "two/deep", "two", "two-x")])
+        pairs = ix.pairs(threshold=0.5).to_pylist()
+        table = tabulate([(f"{r['score']:.3f}" + (" =" if r["exact"] else ""),
+                           f"{r['a_qualname']}  {r['a_origin']}:{r['a_line']}",
+                           f"{r['b_qualname']}  {r['b_origin']}:{r['b_line']}") for r in pairs],
+                         headers=("score", "a", "b"), disable_numparse=True)
+        assert len(pairs) > 100 and result.output == f"\npython: {len(pairs)} function pair(s) scoring >= 0.5\n{table}\n"
+
+    @staticmethod
+    def _twins(root):
+        root.mkdir(parents=True, exist_ok=True)
+        (root / "m.py").write_text("def f(a):\n    return a * 2 + 1\n\ndef g(b):\n    return b * 2 + 1\n")
+
+    def test_one_tree_named_twice_is_read_once(self, tmp_path, monkeypatch):
+        """Roots that overlap — one tree as an absolute path and as a relative one — read each file
+        once, by its first spelling: no function pairs with its own copy (2026-10-29)."""
+        self._twins(tmp_path / "proj")
+        monkeypatch.chdir(tmp_path)
+        result = CliRunner().invoke(cli, ["similar", str(tmp_path / "proj"), "proj", "-t", "1.0", "-m", "0"])
+        assert result.exit_code == 0, result.output
+        assert "python: 1 function pair(s) scoring >= 1.0" in result.output
+
+    def test_check_exits_1_when_pairs_are_shown(self, tmp_path):
+        """--check makes the command a gate: exit 1 when it shows pairs, 0 when it shows none."""
+        self._twins(tmp_path)
+        assert CliRunner().invoke(cli, ["similar", str(tmp_path), "-m", "0", "--check"]).exit_code == 1
+        assert CliRunner().invoke(cli, ["similar", str(tmp_path), "-m", "0"]).exit_code == 0
+        (tmp_path / "m.py").write_text("def f(a):\n    return a\n")
+        assert CliRunner().invoke(cli, ["similar", str(tmp_path), "-m", "0", "--check"]).exit_code == 0
+
+    def test_a_limit_says_it_shows_the_best(self, tmp_path):
+        """With -n the header says these are the best pairs, not how many there are."""
+        self._twins(tmp_path)
+        (tmp_path / "n.py").write_text("def h(c):\n    return c * 2 + 1\n")
+        result = CliRunner().invoke(cli, ["similar", str(tmp_path), "-m", "0", "-n", "1"])
+        assert "python: the best 1 function pair(s) scoring >= 0.9" in result.output
+
+    def test_an_excluded_file_named_on_the_command_line_is_left_out(self, tmp_path):
+        self._twins(tmp_path)
+        result = CliRunner().invoke(cli, ["similar", str(tmp_path / "m.py"), "-m", "0", "-x", "m.py"])
+        assert "No function pairs scoring >= 0.9." in result.output
+
+    @pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="FIFOs are POSIX")
+    def test_a_root_that_is_neither_file_nor_directory_is_named_as_such(self, tmp_path):
+        os.mkfifo(tmp_path / "pipe")
+        result = CliRunner().invoke(cli, ["similar", str(tmp_path / "pipe")])
+        assert result.exit_code != 0 and "is neither a file nor a directory" in result.output
+
+    def test_exclude_and_nothing_found(self, tmp_path):
+        (tmp_path / "vendor").mkdir()
+        (tmp_path / "vendor" / "a.py").write_text("def f(a):\n    return a\ndef g(b):\n    return b\n")
+        result = CliRunner().invoke(cli, ["similar", str(tmp_path), "-m", "0", "-x", "vendor"])
+        assert result.exit_code == 0, result.output
+        assert "No function pairs scoring >= 0.9." in result.output
 
 
 class TestStats:
