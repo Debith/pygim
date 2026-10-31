@@ -152,3 +152,51 @@ def test_get_schema_names_every_parameter_it_cannot_describe():
         " • variadic parameter 'rest' is not supported",
         " • variadic parameter 'options' is not supported",
     ]
+
+
+def test_get_schema_describes_an_optional_parameter_as_it_or_null():
+    def find(limit: t.Optional[int], name: str | None = None):
+        return None
+
+    assert get_schema(find)["properties"] == {
+        "limit": {"anyOf": [{"type": "integer"}, {"type": "null"}]},
+        "name": {"anyOf": [{"type": "string"}, {"type": "null"}]},
+    }
+
+
+def test_get_schema_describes_a_mapping_by_its_values():
+    def tally(scores: t.Dict[str, float], names: dict[str, list[str]], anything: dict):
+        return None
+
+    assert get_schema(tally)["properties"] == {
+        "scores": {"type": "object", "additionalProperties": {"type": "number"}},
+        "names": {"type": "object", "additionalProperties": {"type": "array", "items": {"type": "string"}}},
+        "anything": {"type": "object"},
+    }
+
+
+def test_get_schema_describes_any_value_as_any():
+    def store(value: t.Any, values: list):
+        return None
+
+    assert get_schema(store)["properties"] == {"value": {}, "values": {"type": "array", "items": {}}}
+
+
+def test_get_schema_refuses_a_type_it_has_no_form_for():
+    """Found 2026-10-31: a type it did not know was described as a string — a dict, an
+    Optional[int], a tuple alike (D79, Debith: refuse what it cannot describe)."""
+    class Point:
+        pass
+
+    def place(pair: tuple[int, int], point: Point, keyed: dict[int, str], either: int | str):
+        return None
+
+    with pytest.raises(TypeError) as refused:
+        get_schema(place)
+    assert str(refused.value).splitlines() == [
+        "place — schema generation failed:",
+        " • parameter 'pair' has type tuple[int, int], which JSON Schema has no form for here",
+        " • parameter 'point' has type Point, which JSON Schema has no form for here",
+        " • parameter 'keyed' has type dict[int, str], which JSON Schema has no form for here",
+        " • parameter 'either' has type int | str, which JSON Schema has no form for here",
+    ]
