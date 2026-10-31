@@ -72,13 +72,11 @@
 #include <utility>
 #include <vector>
 
-#if defined(__unix__) || defined(__APPLE__)
-#include <unistd.h>
-#endif
 
 #include <arrow/api.h>
 #include <arrow/array/concatenate.h>
 
+#include "../../platform/process.h"
 #include "../../utils/cpu.h"
 #include "../../utils/parallel.h"
 #include "../../utils/pieces.h"
@@ -146,13 +144,7 @@ protected:
     }
 
     /// Whether this is not the process that opened the stream: a fork's child, without its workers.
-    [[nodiscard]] bool forked() const noexcept {
-#if defined(__unix__) || defined(__APPLE__)
-        return ::getpid() != m_opened_in;
-#else
-        return false;
-#endif
-    }
+    [[nodiscard]] bool forked() const noexcept { return platform::process_id() != m_opened_in; }
 
     std::mutex m_mutex;
     std::condition_variable_any m_room;   // workers: room to claim, or they are asked to stop
@@ -160,9 +152,7 @@ protected:
     std::string m_error;                  // under m_mutex
 
 private:
-#if defined(__unix__) || defined(__APPLE__)
-    const pid_t m_opened_in = ::getpid();
-#endif
+    const long m_opened_in = platform::process_id();
 };
 
 }  // namespace detail

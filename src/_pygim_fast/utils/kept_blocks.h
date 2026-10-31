@@ -27,9 +27,8 @@
 #include <optional>
 #include <vector>
 
-#if defined(__unix__) || defined(__APPLE__)
-#include <pthread.h>
-#endif
+#include "../platform/process.h"
+
 
 namespace pygim {
 
@@ -162,11 +161,9 @@ public:
 
 private:
     kept_blocks() {
-#if defined(__unix__) || defined(__APPLE__)
         // held across the fork, released in both processes: a fork while another thread holds it
         // would leave the child's copy held forever
-        ::pthread_atfork([] { process().m_lock.lock(); }, [] { process().m_lock.unlock(); }, [] { process().m_lock.unlock(); });
-#endif
+        (void)platform::at_fork([] { process().m_lock.lock(); }, [] { process().m_lock.unlock(); }, [] { process().m_lock.unlock(); });
     }
 
     std::mutex m_lock;

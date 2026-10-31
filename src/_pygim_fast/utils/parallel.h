@@ -55,11 +55,8 @@
 #include <variant>
 #include <vector>
 
-#if defined(__unix__) || defined(__APPLE__)
-#include <pthread.h>
-#include <signal.h>
-#endif
 
+#include "../platform/process.h"
 #include "duration.h"
 #include "timestamp.h"
 
@@ -193,49 +190,9 @@ inline constexpr std::size_t max_workers = 64;
 
 // ── the threads the pools start ─────────────────────────────────────────
 
-/// Names the calling thread, as `top -H`, a debugger and /proc/<pid>/task/<tid>/comm show it (at
-/// most 15 characters on Linux): pygim-pool for a run's threads, joined when it ends, pygim-parked
-/// for the workers parallel::for_each keeps. Where threads have no names (Windows here), nothing.
-inline void name_this_thread(const char* name) noexcept {
-#if defined(__linux__)
-    pthread_setname_np(pthread_self(), name);
-#elif defined(__APPLE__)
-    pthread_setname_np(name);
-#else
-    (void)name;
-#endif
-}
-
-/// While it lives, the calling thread blocks every asynchronous signal, so the threads it starts
-/// inherit the mask (a thread starts with its creator's). A process's signal goes to a thread that
-/// does not block it: Ctrl-C then reaches the thread that can act on it — Python's main thread,
-/// whose blocking call it cuts short — never a pool's worker, which would take it and leave that
-/// call running (Linux offers it to the main thread first; macOS to any). A fault (SIGSEGV, SIGBUS,
-/// SIGFPE, SIGILL) stays the faulting thread's. Where there are no POSIX signals, nothing.
-class signals_blocked {
-public:
-    signals_blocked() noexcept {
-#if defined(__unix__) || defined(__APPLE__)
-        sigset_t all;
-        sigfillset(&all);   // unqualified: macOS defines sigfillset and sigdelset as macros
-        for (int fault : {SIGSEGV, SIGBUS, SIGFPE, SIGILL}) sigdelset(&all, fault);
-        m_restore = ::pthread_sigmask(SIG_BLOCK, &all, &m_before) == 0;
-#endif
-    }
-    ~signals_blocked() {
-#if defined(__unix__) || defined(__APPLE__)
-        if (m_restore) ::pthread_sigmask(SIG_SETMASK, &m_before, nullptr);
-#endif
-    }
-    signals_blocked(const signals_blocked&) = delete;
-    signals_blocked& operator=(const signals_blocked&) = delete;
-
-private:
-#if defined(__unix__) || defined(__APPLE__)
-    sigset_t m_before{};
-    bool m_restore = false;
-#endif
-};
+// The process's calls, from behind the platform boundary (platform/process.h).
+using platform::name_this_thread;
+using platform::signals_blocked;
 
 // ── the threads for_each borrows ─────────────────────────────────────────
 
@@ -338,18 +295,14 @@ private:
             for (std::size_t t = 0; t < threads; ++t) m_threads.emplace_back([this] { name_this_thread("pygim-parked"); serve(); });
         } catch (const std::system_error&) {
         }
-#if defined(__unix__) || defined(__APPLE__)
         // a fork while another thread creates the pool would leave the child's lock held: it is
         // held across the fork, and the child starts from no pool
-        static const bool reset_in_child = [] {
-            return ::pthread_atfork([] { creating().lock(); }, [] { creating().unlock(); },
-                                    [] {
-                                        creating().unlock();
-                                        current().store(nullptr, std::memory_order_relaxed);
-                                    }) == 0;
-        }();
+        static const bool reset_in_child = platform::at_fork([] { creating().lock(); }, [] { creating().unlock(); },
+                                                             [] {
+                                                                 creating().unlock();
+                                                                 current().store(nullptr, std::memory_order_relaxed);
+                                                             });
         (void)reset_in_child;
-#endif
     }
 
     [[nodiscard]] static std::atomic<parked_workers*>& current() noexcept {
