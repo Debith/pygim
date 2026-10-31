@@ -33,6 +33,8 @@
 #include <utility>
 #include <vector>
 
+#include "path_rules.h"
+
 #ifndef _WIN32
 #include <dirent.h>
 #include <fcntl.h>
@@ -156,57 +158,53 @@ public:
     using std::invalid_argument::invalid_argument;
 };
 
-/// A glob pattern as its segments, read as pathlib reads one: split on '/' (and a backslash on Windows),
-/// a `.` segment dropped, a run of `**` one segment, a trailing separator keeping directories only.
-/// Matched case-sensitively unless told otherwise — or, untold, on Windows. An empty pattern, or
+/// A glob pattern as its segments, read as pathlib reads one under Rules (path_rules.h): split on
+/// Rules' separators ('/', and a backslash under Windows'), a `.` segment dropped, a run of `**` one
+/// segment, a trailing separator keeping directories only. Matched case-sensitively unless told
+/// otherwise — or, untold, as Rules say (Windows' names do not differ by case). An empty pattern, or
 /// one of `.` alone, is std::invalid_argument; one that is not relative, glob_unsupported.
-class glob_pattern {
+template <class Rules>
+class basic_glob_pattern {
 public:
-#ifdef _WIN32
-    static constexpr bool platform_case_sensitive = false;
-#else
-    static constexpr bool platform_case_sensitive = true;
-#endif
-
-    explicit glob_pattern(std::string_view pattern, std::optional<bool> case_sensitive = std::nullopt)
-        : m_case_sensitive(case_sensitive.value_or(platform_case_sensitive)) {
+    constexpr explicit basic_glob_pattern(std::string_view pattern, std::optional<bool> case_sensitive = std::nullopt)
+        : m_case_sensitive(case_sensitive.value_or(Rules::case_sensitive)) {
         if (pattern.empty()) throw std::invalid_argument("Unacceptable pattern: ''");
-        // A leading '/' is refused explicitly: on Windows fs::path("/x") is not is_absolute() (no
-        // drive), yet the pattern is clearly not relative in the caller's intent.
-        if (separates(pattern.front()) || fs::path(pattern).is_absolute()) throw glob_unsupported("Non-relative patterns are unsupported");
+        // A leading separator is refused explicitly: under Windows' rules "/x" has no drive, so it
+        // is not absolute, yet the pattern is clearly not relative in the caller's intent.
+        if (Rules::is_sep(pattern.front()) || Rules::is_absolute(Rules::parse(pattern))) throw glob_unsupported("Non-relative patterns are unsupported");
         for (std::size_t start = 0; start <= pattern.size();) {
             std::size_t end = start;
-            while (end < pattern.size() && !separates(pattern[end])) ++end;
+            while (end < pattern.size() && !Rules::is_sep(pattern[end])) ++end;
             const std::string_view segment = pattern.substr(start, end - start);
             if (!segment.empty() && segment != "." && !(segment == "**" && !m_segments.empty() && m_segments.back() == "**")) {
                 m_segments.emplace_back(segment);
             }
             start = end + 1;
         }
-        m_dirs_only = separates(pattern.back());
+        m_dirs_only = Rules::is_sep(pattern.back());
         if (m_segments.empty()) throw std::invalid_argument("Unacceptable pattern: '" + std::string(pattern) + "'");
     }
 
-    [[nodiscard]] std::size_t size() const noexcept { return m_segments.size(); }
-    [[nodiscard]] bool is_last(std::size_t k) const noexcept { return k + 1 == m_segments.size(); }
+    [[nodiscard]] constexpr std::size_t size() const noexcept { return m_segments.size(); }
+    [[nodiscard]] constexpr bool is_last(std::size_t k) const noexcept { return k + 1 == m_segments.size(); }
     /// Whether segment k is `**`, any number of directories.
-    [[nodiscard]] bool spans_directories(std::size_t k) const noexcept { return m_segments[k] == "**"; }
+    [[nodiscard]] constexpr bool spans_directories(std::size_t k) const noexcept { return m_segments[k] == "**"; }
     /// Whether segment k is `..`: a step to the directory above, never a name in a listing.
-    [[nodiscard]] bool steps_up(std::size_t k) const noexcept { return m_segments[k] == ".."; }
+    [[nodiscard]] constexpr bool steps_up(std::size_t k) const noexcept { return m_segments[k] == ".."; }
     /// Whether segment k names one entry (no `*`, `?` or `[`): found by one stat, not a listing.
-    [[nodiscard]] bool is_literal(std::size_t k) const noexcept {
+    [[nodiscard]] constexpr bool is_literal(std::size_t k) const noexcept {
         return m_segments[k].find_first_of("*?[") == std::string::npos && !steps_up(k);
     }
     /// Whether the pattern ended in a separator: only directories match its last segment.
-    [[nodiscard]] bool dirs_only() const noexcept { return m_dirs_only; }
-    [[nodiscard]] bool case_sensitive() const noexcept { return m_case_sensitive; }
-    [[nodiscard]] const std::string& segment(std::size_t k) const noexcept { return m_segments[k]; }
+    [[nodiscard]] constexpr bool dirs_only() const noexcept { return m_dirs_only; }
+    [[nodiscard]] constexpr bool case_sensitive() const noexcept { return m_case_sensitive; }
+    [[nodiscard]] constexpr const std::string& segment(std::size_t k) const noexcept { return m_segments[k]; }
     /// Whether a name matches segment k.
-    [[nodiscard]] bool matches(std::size_t k, std::string_view name) const noexcept { return glob_match(m_segments[k], name, m_case_sensitive); }
+    [[nodiscard]] constexpr bool matches(std::size_t k, std::string_view name) const noexcept { return glob_match(m_segments[k], name, m_case_sensitive); }
     /// Whether the walk may list more than one directory, and so run long: a `**` anywhere, or a
     /// wildcard before the last segment (`*/*/*.py` lists every directory of each level). Literal
     /// directories and then any last segment list one directory at most.
-    [[nodiscard]] bool lists_many_directories() const noexcept {
+    [[nodiscard]] constexpr bool lists_many_directories() const noexcept {
         for (std::size_t k = 0; k < m_segments.size(); ++k) {
             if (spans_directories(k) || (!is_last(k) && !is_literal(k) && !steps_up(k))) return true;
         }
@@ -214,18 +212,13 @@ public:
     }
 
 private:
-    [[nodiscard]] static constexpr bool separates(char c) noexcept {
-#ifdef _WIN32
-        return c == '/' || c == '\\';
-#else
-        return c == '/';
-#endif
-    }
-
     std::vector<std::string> m_segments;
     bool m_dirs_only = false;
     bool m_case_sensitive;
 };
+
+/// A glob pattern under the running system's rules.
+using glob_pattern = basic_glob_pattern<native_strategy>;
 
 /// What an entry of a directory is, as its listing says (a link is not followed).
 enum class entry_kind { directory, link, other };

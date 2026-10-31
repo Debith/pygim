@@ -412,4 +412,18 @@ static_assert(!plain_component<posix_strategy>("") && !plain_component<posix_str
               !plain_component<posix_strategy>("/abs") && !plain_component<posix_strategy>("d:e") && !plain_component<posix_strategy>("C:"));
 static_assert(!plain_component<windows_strategy>("a\\b") && !plain_component<windows_strategy>("a/b") && plain_component<windows_strategy>("x.yaml"));
 
+// A glob pattern under each family's rules, on every system (docs/design/platform_boundary.md, D77):
+// Windows' separators and case are proven on Linux, where the glob's tests cannot reach them.
+static_assert([] {
+    const basic_glob_pattern<windows_strategy> w("pkg\\sub/*.PY");
+    return w.size() == 3 && w.segment(0) == "pkg" && w.segment(1) == "sub" && !w.case_sensitive() && w.matches(2, "a.py") &&
+           w.matches(2, "B.Py") && !w.matches(2, "a.pyc");
+}());
+static_assert([] {
+    const basic_glob_pattern<posix_strategy> p("pkg\\sub/*.PY");   // a backslash is part of a POSIX name
+    return p.size() == 2 && p.segment(0) == "pkg\\sub" && p.case_sensitive() && p.matches(1, "A.PY") && !p.matches(1, "a.py");
+}());
+static_assert(basic_glob_pattern<windows_strategy>("pkg\\").dirs_only() && !basic_glob_pattern<posix_strategy>("pkg\\").dirs_only());
+static_assert(basic_glob_pattern<windows_strategy>("*.py", true).case_sensitive() && !basic_glob_pattern<posix_strategy>("*.py", false).case_sensitive());
+
 }  // namespace
