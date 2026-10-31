@@ -108,9 +108,10 @@ import os, signal, sys
 from pygim import code
 for i in range(64):
     open(os.path.join(sys.argv[1], f"m{i}.py"), "w").write("def f(a):\n    return a\n" * 50)
-code.parse(sys.argv[1], threads=4)
 main = os.getpid()
-for tid in sorted(int(t) for t in os.listdir("/proc/self/task")):
+before = {int(t) for t in os.listdir("/proc/self/task")} - {main}   # threads other libraries started
+code.parse(sys.argv[1], threads=4)
+for tid in sorted({int(t) for t in os.listdir("/proc/self/task")} - before):
     status = open(f"/proc/self/task/{tid}/status").read()
     blocked = int(next(l for l in status.splitlines() if l.startswith("SigBlk:")).split()[1], 16)
     bit = lambda s: (blocked >> (s - 1)) & 1

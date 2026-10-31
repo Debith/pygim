@@ -222,7 +222,7 @@ def test_a_pattern_pathlib_refuses_is_refused_as_pathlib_refuses_it(temp_dir, pa
         pygim.path(temp_dir).glob(pattern)
 
 
-@pytest.mark.skipif(os.geteuid() == 0, reason="permission bits bind a non-root POSIX user")
+@pytest.mark.skipif(sys.platform == "win32" or os.geteuid() == 0, reason="permission bits bind a non-root POSIX user")
 @pytest.mark.parametrize("pattern", ["**/*.py", "*/*.py", "locked/*", "locked/in/z.py"])
 def test_an_unreadable_directory_is_passed_over(temp_dir, pattern):
     root = make_tree(temp_dir / "t")
@@ -270,7 +270,9 @@ import pygim
 root, pattern = pathlib.Path(sys.argv[1]), sys.argv[2]
 for d in range(3_000):
     (root / f"p{d % 30}" / f"m{d}").mkdir(parents=True)
-tasks = lambda: len(os.listdir("/proc/self/task")) if os.path.isdir("/proc/self/task") else 0
+# The threads alive, by id: those that appear during the interrupted glob and are still alive at
+# its end are the ones it left behind, whatever other threads end meanwhile.
+tasks = lambda: set(os.listdir("/proc/self/task")) if os.path.isdir("/proc/self/task") else set()
 t = time.perf_counter()
 pygim.path(root).glob(pattern)
 full = time.perf_counter() - t
@@ -289,7 +291,7 @@ except KeyboardInterrupt:
 took = time.perf_counter() - t
 helper.join()
 print("stopped early", took < full / 2, f"({took * 1000:.1f} of {full * 1000:.1f} ms)")
-print("threads left", tasks() - before)
+print("threads left", len(tasks() - before))
 """
 
 
