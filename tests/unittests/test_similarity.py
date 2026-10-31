@@ -1263,17 +1263,19 @@ class TestEdges:
             similarity.Index("python").add_files([], threads=0)
 
     def test_add_file_raises_what_open_would(self, tmp_path):
-        if os.geteuid() == 0:
-            pytest.skip("root reads every file")
+        folder = tmp_path / "pkg.py"
+        folder.mkdir()
+        with pytest.raises(OSError) as theirs:   # IsADirectoryError; PermissionError on Windows
+            open(folder, "rb")
+        with pytest.raises(type(theirs.value)):
+            similarity.Index("python").add_file(folder)
+        if sys.platform == "win32" or os.geteuid() == 0:
+            return   # permission bits bind a non-root POSIX user
         locked = tmp_path / "locked.py"
         locked.write_text("def f(a):\n    return a\n")
         locked.chmod(0)
         with pytest.raises(PermissionError):
             similarity.Index("python").add_file(locked)
-        folder = tmp_path / "pkg.py"
-        folder.mkdir()
-        with pytest.raises(IsADirectoryError):
-            similarity.Index("python").add_file(folder)
 
     def test_an_init_source_is_its_own_package(self):
         """`from . import util` in pkg/__init__.py is pkg.util: an added text's package is its module
@@ -1348,12 +1350,10 @@ if __name__ == "__main__":
 
 @pytest.mark.skipif(sys.platform == "win32", reason="a file name that is not UTF-8 is POSIX's")
 @pytest.mark.parametrize("as_bytes", [True, False], ids=["bytes", "str"])
-def test_a_file_name_the_filesystem_cannot_decode_is_refused_before_any_work(tmp_path, as_bytes):
+def test_a_file_name_the_filesystem_cannot_decode_is_refused_before_any_work(tmp_path, as_bytes, write_named_past_utf8):
     """Given as bytes or as the str os.fsdecode makes of it, a name that is no UTF-8 is a
     UnicodeEncodeError up front: the bytes form went through and put invalid UTF-8 in a utf8 column."""
-    name = os.path.join(os.fsencode(tmp_path), b"caf\xe9.py")
-    with open(name, "wb") as f:
-        f.write(b"def f(x):\n    return x\n")
+    name = write_named_past_utf8(os.path.join(os.fsencode(tmp_path), b"caf\xe9.py"), b"def f(x):\n    return x\n")
     ix = similarity.Index("python")
     with pytest.raises(UnicodeEncodeError):
         ix.add_files([name if as_bytes else os.fsdecode(name)])

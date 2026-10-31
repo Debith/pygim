@@ -221,7 +221,7 @@ public:
             py::gil_scoped_release nogil;   // the read and the parse touch only locals; the append is write()'s
             pathlike::read_result got = pathlike::native_reads{}.read(p);
             if (const auto* none = std::get_if<pathlike::not_a_file>(&got)) {
-                refused = none->why();
+                refused = none->open_error();
                 return;
             }
             if (const auto* failed = std::get_if<pathlike::read_failure>(&got)) {
