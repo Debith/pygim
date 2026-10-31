@@ -3,14 +3,14 @@
 Each run appends ONE record to ``results/<bench>.jsonl``: the raw measurements
 (numeric, full precision — formatting is the printer's job) plus the metadata
 needed to compare runs honestly later: commit, dirty flag, Python version,
-CPU model and hostname. Records from different machines or dirty trees are
+platform and CPU model. Records from different machines or dirty trees are
 still recorded — the metadata is what lets an analysis *filter* them, so a
-trend line never silently mixes incomparable environments.
+trend line never silently mixes incomparable environments. Never which
+machine it was: no hostname (Debith, 2026-10-31).
 """
 
 import json
 import platform
-import socket
 import subprocess
 import sys
 from datetime import datetime, timezone
@@ -69,7 +69,6 @@ def save(bench, sections, *, reps, in_tree=True):
         "impl": platform.python_implementation(),
         "platform": platform.platform(),
         "cpu": _cpu_model(),
-        "hostname": socket.gethostname(),
         "reps": reps,
         "sections": sections,
     }
