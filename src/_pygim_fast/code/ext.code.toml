@@ -1,0 +1,8 @@
+[extension]
+module = "code"
+# tests/static/code_proofs.cpp proves the tokens', the rows' and the tree's laws and the generated
+# tables at compile time; wired into the sources so every build proves them (an unwired static
+# test file tests nothing).
+sources = ["bindings.cpp", "../../../tests/static/code_proofs.cpp"]
+# The core reads files through pathlike's file_reads.h, whose path class is written against C++26.
+std = "c++26"
