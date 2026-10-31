@@ -384,10 +384,10 @@ def test_each_test_module_has_a_name_of_its_own():
 # errno translation did, 39 once the file system's writes did (platform/files.h), 37 once the reads
 # did (platform/reads.h), 25 once the process's calls did (platform/process.h), 18 once the signals
 # did (platform/signals.h), 7 once the machine did (platform/caches.h, memory.h, clocks.h), 3 once
-# the ODBC driver's loading did (platform/libraries.h). It may fall, as each part moves behind the
-# boundary; it may not rise. A compiler's own checks (_MSC_VER, __clang__) are build portability,
-# not the system's, and are not counted.
-OS_CONDITIONALS = 3
+# the ODBC driver's loading did (platform/libraries.h), 0 once the adapters' path text did. None is
+# left: a new one fails here, and belongs behind the boundary. A compiler's own checks (_MSC_VER,
+# __clang__) are build portability, not the system's, and are not counted.
+OS_CONDITIONALS = 0
 OS_MACRO = re.compile(r"^[ \t]*#[ \t]*(?:if|ifdef|ifndef|elif)\b.*\b(?:_WIN32|_WIN64|__APPLE__|__linux__|__unix__|__FreeBSD__)\b", re.M)
 
 

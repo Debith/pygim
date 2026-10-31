@@ -1,6 +1,6 @@
 # The operating system behind a boundary
 
-Status: decided 2026-10-31 (D77); steps 1–7 built, 8–9 to come (7 conditionals left) · Owner: Debith
+Status: decided and built 2026-10-31 (D77) · Owner: Debith
 
 The operating system is a model foreign to pygim's domain, as Python's object model is. The domain —
 pathlib's rules, the glob, the parser, similarity — states its rules once, the same on every system.
@@ -14,8 +14,10 @@ What differs between systems sits behind one boundary, in two kinds:
   disk, blocking signals, naming a thread, asking the caches' sizes. Infrastructure: one engine per
   system behind a concept; only the running system's is compiled.
 
-Both live in `src/_pygim_fast/platform/`, and the running system's are chosen once there. Nothing
-else asks which system it runs on: no `#if _WIN32`, `__APPLE__` or `__linux__` outside that folder.
+The calls live in `src/_pygim_fast/platform/`; a rule lives there too, or with the domain it is the
+rules of (pathlike's path strategies, the BCP driver's file names). The running system's are chosen
+once, by `platform::native`. Nothing else asks which system it runs on: no `#if _WIN32`, `__APPLE__`
+or `__linux__` outside that folder.
 
 ## Scenario
 
@@ -83,6 +85,25 @@ Each step a refactor under the tests as they are (#36), its own commit, the ratc
 7. The machine: caches, resident memory, huge pages, the clock.
 8. Loading a library: the ODBC driver (bcp_api.h, odbc_headers.h).
 9. The adapters' (path_text.h).
+
+## Built
+
+| Header | What it holds | Kind |
+| --- | --- | --- |
+| platform/native.h | `native`: the running system's family, the one place that asks the compiler | the choice |
+| pathlike/path_rules.h | `posix_strategy`, `windows_strategy`: separators, case, parsing; `native_strategy` | rules |
+| platform/errors.h | an errno's words; `open_error_for<F>`, `open()`'s error for a folder | rules and calls |
+| platform/files.h | a path's text (`path_text_is_utf8`), exclusive create, write, force, close, unlink | rules and calls |
+| platform/listing.h | a directory's listing, `entry_at`, `finds_a_name_by_stat` | calls |
+| platform/reads.h | `posix_reads`, `windows_reads` behind the `file_reads` concept | calls |
+| platform/process.h | a thread's name, the signal mask its threads inherit, `at_fork`, `process_id` | calls |
+| platform/signals.h | `interrupt_handlers` (Ctrl-C, SIGTERM), `wakeup` (a pipe; an event) | calls |
+| platform/caches.h | `system_caches`; the kernel's /sys list read by rules compiled everywhere | calls and rules |
+| platform/memory.h | `resident_bytes`, `peak_resident_bytes`, `advise_huge_pages` | calls |
+| platform/clocks.h | `thread_cpu_ns`, `counts_thread_cpu_time` | calls |
+| platform/libraries.h | `library`: `first_of`, `last_match`, `function<F>` | calls |
+| platform/windows_headers.h | `<windows.h>` lean and without `min` and `max`, for every header that calls it | — |
+| persistence/.../bcp_api.h | `driver_files<F>`: the ODBC driver's library as each system names it | rules |
 
 ## Open
 

@@ -11,15 +11,18 @@
 
 #include <pybind11/pybind11.h>
 
+#include "../../platform/files.h"
+
 namespace pygim::pathlike {
 
 namespace py = pybind11;
 
 // Python str / bytes / os.PathLike -> the internal path text, without the
-// fs::path round trip pybind11's caster would take: str is encoded with the
-// filesystem encoding on POSIX (os.fsencode, so non-UTF-8 names round-trip)
-// and as UTF-8 on Windows (what text_from_fs yields there); bytes are taken as
-// they are; anything else goes through os.fspath (TypeError when it cannot).
+// fs::path round trip pybind11's caster would take: str is encoded as the
+// internal text is (platform::path_text_is_utf8) — with the filesystem
+// encoding on POSIX (os.fsencode, so non-UTF-8 names round-trip), as UTF-8 on
+// Windows (what text_from_fs yields there); bytes are taken as they are;
+// anything else goes through os.fspath (TypeError when it cannot).
 // Whether the filesystem encoding is UTF-8 (set once at module init): then a
 // str's UTF-8 buffer IS os.fsencode(str) whenever it has no lone surrogates,
 // and the encode step (a bytes object per call) can be skipped.
@@ -39,15 +42,15 @@ private:
     std::string_view m_text;
 };
 inline text_arg text_view_of_arg(py::handle obj) {
-#ifndef _WIN32
-    if (filesystem_is_utf8() && PyUnicode_Check(obj.ptr())) {
-        py::ssize_t n = 0;
-        if (const char* s = PyUnicode_AsUTF8AndSize(obj.ptr(), &n)) {
-            return {py::reinterpret_borrow<py::object>(obj), std::string_view(s, static_cast<std::size_t>(n))};
+    if constexpr (!platform::path_text_is_utf8) {
+        if (filesystem_is_utf8() && PyUnicode_Check(obj.ptr())) {
+            py::ssize_t n = 0;
+            if (const char* s = PyUnicode_AsUTF8AndSize(obj.ptr(), &n)) {
+                return {py::reinterpret_borrow<py::object>(obj), std::string_view(s, static_cast<std::size_t>(n))};
+            }
+            PyErr_Clear();   // lone surrogates: os.fsencode's surrogateescape below is the answer
         }
-        PyErr_Clear();   // lone surrogates: os.fsencode's surrogateescape below is the answer
     }
-#endif
     py::object p = py::reinterpret_steal<py::object>(PyOS_FSPath(obj.ptr()));   // str or bytes
     if (!p) throw py::error_already_set();
     if (PyBytes_Check(p.ptr())) {
@@ -56,19 +59,19 @@ inline text_arg text_view_of_arg(py::handle obj) {
         if (PyBytes_AsStringAndSize(p.ptr(), &s, &n) < 0) throw py::error_already_set();
         return {std::move(p), std::string_view(s, static_cast<std::size_t>(n))};
     }
-#ifdef _WIN32
-    py::ssize_t n = 0;
-    const char* s = PyUnicode_AsUTF8AndSize(p.ptr(), &n);
-    if (!s) throw py::error_already_set();
-    return {std::move(p), std::string_view(s, static_cast<std::size_t>(n))};
-#else
-    py::object b = py::reinterpret_steal<py::object>(PyUnicode_EncodeFSDefault(p.ptr()));
-    if (!b) throw py::error_already_set();
-    char* s = nullptr;
-    py::ssize_t n = 0;
-    if (PyBytes_AsStringAndSize(b.ptr(), &s, &n) < 0) throw py::error_already_set();
-    return {std::move(b), std::string_view(s, static_cast<std::size_t>(n))};
-#endif
+    if constexpr (platform::path_text_is_utf8) {
+        py::ssize_t n = 0;
+        const char* s = PyUnicode_AsUTF8AndSize(p.ptr(), &n);
+        if (!s) throw py::error_already_set();
+        return {std::move(p), std::string_view(s, static_cast<std::size_t>(n))};
+    } else {
+        py::object b = py::reinterpret_steal<py::object>(PyUnicode_EncodeFSDefault(p.ptr()));
+        if (!b) throw py::error_already_set();
+        char* s = nullptr;
+        py::ssize_t n = 0;
+        if (PyBytes_AsStringAndSize(b.ptr(), &s, &n) < 0) throw py::error_already_set();
+        return {std::move(b), std::string_view(s, static_cast<std::size_t>(n))};
+    }
 }
 inline std::string text_from_arg(py::handle obj) {
     const text_arg t = text_view_of_arg(obj);
@@ -79,14 +82,14 @@ inline std::string text_from_arg(py::handle obj) {
 // filesystem encoding on POSIX (os.fsdecode, so non-UTF-8 names round-trip);
 // on Windows the internal text is UTF-8 already.
 inline py::str str_from_text(std::string_view text) {
-#ifdef _WIN32
-    return py::str(text.data(), text.size());
-#else
-    py::str decoded = py::reinterpret_steal<py::str>(
-        PyUnicode_DecodeFSDefaultAndSize(text.data(), static_cast<py::ssize_t>(text.size())));
-    if (!decoded) throw py::error_already_set();
-    return decoded;
-#endif
+    if constexpr (platform::path_text_is_utf8) {
+        return py::str(text.data(), text.size());
+    } else {
+        py::str decoded = py::reinterpret_steal<py::str>(
+            PyUnicode_DecodeFSDefaultAndSize(text.data(), static_cast<py::ssize_t>(text.size())));
+        if (!decoded) throw py::error_already_set();
+        return decoded;
+    }
 }
 
 // os.fspath(p) as UTF-8 text: a path as it is shown — an origin in results, a name in an error —

@@ -24,13 +24,18 @@
 #include <unistd.h>    // unlink, write, fsync, close
 #endif
 
+#include "native.h"
+
 namespace pygim::platform {
 
 namespace fs = std::filesystem;
 
-// The OS boundary: the internal text form is the NATIVE byte string on POSIX
-// (so non-UTF-8 file names round-trip) and UTF-8 on Windows (lossless from the
-// wide native form, and what Python's str carries). fs::path::string() would
+/// What a path's internal text is: the system's own bytes on POSIX (so a name that is not UTF-8
+/// round-trips), UTF-8 on Windows (lossless from the wide native form, and what Python's str
+/// carries). The Python boundary encodes a str by it (pathlike/adapter/path_text.h).
+inline constexpr bool path_text_is_utf8 = native == family::windows;
+
+// The OS boundary: the internal text form, as path_text_is_utf8 says. fs::path::string() would
 // narrow through the ACP on Windows and can mangle non-ASCII paths.
 [[nodiscard]] inline std::string text_from_fs(const fs::path& p) {
 #ifdef _WIN32
