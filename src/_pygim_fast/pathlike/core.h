@@ -41,19 +41,11 @@
 #include "../utils/chars.h"
 #include "../utils/hash.h"
 #include "../utils/string_list.h"
+#include "../platform/files.h"
 #include "glob_walk.h"
 #include "path_rules.h"
 #include "uri.h"
 
-#include <climits>
-#include <fcntl.h>
-#include <sys/stat.h>
-#ifdef _WIN32
-#include <io.h>        // _wunlink, _wsopen_s, _write, _commit, _close
-#include <share.h>
-#else
-#include <unistd.h>    // unlink, write, fsync, close
-#endif
 
 namespace pygim::pathlike {
 
@@ -91,44 +83,14 @@ namespace detail {
     return out;
 }
 
-// The operating system calls an atomic write needs, one spelling per platform. Each returns what the
-// call returns and leaves errno as the call left it.
-#ifdef _WIN32
-[[nodiscard]] inline int open_exclusive(const fs::path& p) {
-    int fd = -1;
-    const errno_t err = ::_wsopen_s(&fd, p.c_str(), _O_WRONLY | _O_CREAT | _O_EXCL | _O_BINARY | _O_NOINHERIT,
-                                    _SH_DENYNO, _S_IREAD | _S_IWRITE);
-    if (err != 0) errno = err;
-    return err == 0 ? fd : -1;
-}
-[[nodiscard]] inline long long write_some(int fd, const char* data, std::size_t size) {
-    return ::_write(fd, data, static_cast<unsigned>(std::min<std::size_t>(size, INT_MAX)));
-}
-inline int force_fd(int fd) { return ::_commit(fd); }
-inline int close_fd(int fd) { return ::_close(fd); }
-inline int force_folder(const fs::path&) { return 0; }   // Windows has no folder to force; see pathlike_writes.md, Open
-#else
-[[nodiscard]] inline int open_exclusive(const fs::path& p) {
-    return ::open(p.c_str(), O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, 0666);
-}
-[[nodiscard]] inline long long write_some(int fd, const char* data, std::size_t size) { return ::write(fd, data, size); }
-inline int force_fd(int fd) {
-#ifdef __APPLE__
-    if (::fcntl(fd, F_FULLFSYNC) == 0) return 0;   // macOS's fsync stops at the drive's cache
-#endif
-    return ::fsync(fd);
-}
-inline int close_fd(int fd) { return ::close(fd); }
-inline int force_folder(const fs::path& folder) {
-    const int fd = ::open(folder.c_str(), O_RDONLY | O_DIRECTORY | O_CLOEXEC);
-    if (fd < 0) return -1;
-    const int forced = force_fd(fd);
-    const int err = errno;
-    ::close(fd);
-    errno = err;
-    return forced;
-}
-#endif
+// The system's calls, from behind the platform boundary (platform/files.h).
+using platform::close_fd;
+using platform::force_fd;
+using platform::force_folder;
+using platform::fs_from_text;
+using platform::open_exclusive;
+using platform::text_from_fs;
+using platform::write_some;
 
 }  // namespace detail
 
@@ -176,27 +138,6 @@ using pygim::hash::fnv1a;
 using pygim::hash::fnv_basis;
 using pygim::hash::fnv_prime;
 using pygim::hash::mix_string;
-
-// The OS boundary: the internal text form is the NATIVE byte string on POSIX
-// (so non-UTF-8 file names round-trip) and UTF-8 on Windows (lossless from the
-// wide native form, and what Python's str carries). fs::path::string() would
-// narrow through the ACP on Windows and can mangle non-ASCII paths.
-[[nodiscard]] inline std::string text_from_fs(const fs::path& p) {
-#ifdef _WIN32
-    const std::u8string u = p.u8string();
-    return std::string(u.begin(), u.end());
-#else
-    return p.native();
-#endif
-}
-
-[[nodiscard]] inline fs::path fs_from_text(std::string_view text) {
-#ifdef _WIN32
-    return fs::path(std::u8string(text.begin(), text.end()));
-#else
-    return fs::path(std::string(text));
-#endif
-}
 
 }  // namespace detail
 
@@ -540,12 +481,7 @@ public:
     // system's own errno, as os.unlink refuses it (EISDIR on Linux, EPERM on macOS, EACCES on Windows).
     void unlink(bool missing_ok = false) const {
         const fs::path p = to_fs();
-#ifdef _WIN32
-        const int failed = ::_wunlink(p.c_str());
-#else
-        const int failed = ::unlink(p.c_str());
-#endif
-        if (failed == 0) return;
+        if (platform::unlink_file(p) == 0) return;
         const int err = errno;
         if (err == ENOENT && missing_ok) return;
         throw file_error(err, fspath(), "cannot remove file");
