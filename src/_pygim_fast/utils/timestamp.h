@@ -26,9 +26,9 @@
 #include <chrono>
 #include <concepts>
 #include <cstdint>
-#include <ctime>
 #include <limits>
 
+#include "../platform/clocks.h"
 #include "duration.h"
 
 namespace pygim {
@@ -64,13 +64,8 @@ public:
 class thread_cpu_clock {
 public:
     [[nodiscard]] std::int64_t now_ns() const noexcept {
-#ifdef _WIN32
-        return monotonic_clock{}.now_ns();
-#else
-        timespec ts{};
-        ::clock_gettime(CLOCK_THREAD_CPUTIME_ID, &ts);
-        return static_cast<std::int64_t>(ts.tv_sec) * 1'000'000'000 + ts.tv_nsec;
-#endif
+        if constexpr (platform::counts_thread_cpu_time) return platform::thread_cpu_ns();
+        else return monotonic_clock{}.now_ns();
     }
 };
 

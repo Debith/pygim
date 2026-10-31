@@ -22,9 +22,7 @@
 #include <cstddef>
 #include <cstdint>
 
-#if defined(__linux__)
-#include <sys/mman.h>
-#endif
+#include "../platform/memory.h"
 
 namespace pygim {
 
@@ -33,16 +31,11 @@ inline constexpr std::size_t huge_page_threshold = std::size_t{4} << 20;
 
 /// Advises [p, p + bytes) to be backed by huge pages when first written; see the file comment.
 inline void prefer_huge_pages(const void* p, std::size_t bytes) noexcept {
-#if defined(__linux__) && defined(MADV_HUGEPAGE)
-    if (p == nullptr || bytes < huge_page_threshold) return;
+    if (!platform::advises_huge_pages || p == nullptr || bytes < huge_page_threshold) return;
     constexpr std::uintptr_t huge = std::uintptr_t{2} << 20;
     const auto start = reinterpret_cast<std::uintptr_t>(p);
     const std::uintptr_t begin = (start + huge - 1) & ~(huge - 1), end = (start + bytes) & ~(huge - 1);
-    if (end > begin) ::madvise(reinterpret_cast<void*>(begin), end - begin, MADV_HUGEPAGE);
-#else
-    (void)p;
-    (void)bytes;
-#endif
+    if (end > begin) platform::advise_huge_pages(reinterpret_cast<void*>(begin), end - begin);
 }
 
 }  // namespace pygim

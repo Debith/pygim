@@ -99,11 +99,11 @@ index's counts.
 A loop that writes more than it computes is limited by where its bytes go, and no vector width
 changes that. The rules, each measured:
 
-- **Know the caches.** `utils/cpu.h` reads them once from the system (Linux sysconf, then
-  /sys; macOS sysctl; Windows GetLogicalProcessorInformationEx), with typical sizes where a
-  system says nothing; Python sees them as `pygim.utils.cpu()`. On the x86-64 desktops measured
-  here the L1 and L2 are a core's own (its two hardware threads share them) and the L3 every
-  core's; elsewhere an L2 may be a cluster's (Apple, Intel's E-cores) and an L3 one chiplet's
+- **Know the caches.** `utils/cpu.h` reads them once from the system (`platform/caches.h`: Linux
+  sysconf, then /sys; macOS sysctl; Windows GetLogicalProcessorInformationEx), with typical sizes
+  where a system says nothing; Python sees them as `pygim.utils.cpu()`. On the x86-64 desktops
+  measured here the L1 and L2 are a core's own (its two hardware threads share them) and the L3
+  every core's; elsewhere an L2 may be a cluster's (Apple, Intel's E-cores) and an L3 one chiplet's
   (AMD with several CCDs). The sizes read are what one core sees.
 - **A worker's unit of work fits three quarters of its L2** (`tile_pairs`), so what it wrote
   is still there when it hands it over.
