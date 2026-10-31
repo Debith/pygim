@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import os
 import sys
-import time
 import click
 
 sys.path.insert(0, os.path.dirname(__file__))
@@ -21,6 +20,7 @@ from bcp_throughput import (
     default_connection_string,
 )
 import pygim
+from _bench import elapsed as seconds_of, stopwatch
 
 
 # ── Table DDLs ───────────────────────────────────────────────────────────────
@@ -81,7 +81,7 @@ def _run_write_with_hint(
     """Write using specific table_hint."""
     from pygim.persistence import acquire_datastore
 
-    _ = acquire_datastore(
+    store = acquire_datastore(
         conn_str,
         format="polars",
         batch_size=batch_size,
@@ -92,8 +92,11 @@ def _run_write_with_hint(
     payload_bytes = estimate_size_bytes(df)
     nrows = len(df)
 
-    t0 = time.perf_counter()
-    elapsed = time.perf_counter() - t0
+    # Found 2026-10-31: the store was made and never written to, so this timed an empty interval
+    # and every result it reported measured nothing.
+    with stopwatch() as t:
+        store.save(df, table)
+    elapsed = seconds_of(t)
 
     mb_s = (payload_bytes / 1_048_576) / elapsed if elapsed > 0 else 0.0
     return {

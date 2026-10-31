@@ -27,13 +27,14 @@ import math
 import os
 import platform
 import sys
-import time
+import time  # time.sleep between runs; the timing is pygim's (_bench.stopwatch)
 from datetime import date as py_date
 from datetime import datetime, timezone
 from decimal import Decimal
 
 import click
 import pygim
+from _bench import elapsed as seconds_of, stopwatch, timed
 
 print(f"PID: {os.getpid()}")
 
@@ -287,9 +288,9 @@ def run_write(
     payload_bytes = estimate_size_bytes(df)
     nrows = len(df)
 
-    t0 = time.perf_counter()
-    metrics = store.save(df, table)
-    elapsed = time.perf_counter() - t0
+    with stopwatch() as t:
+        metrics = store.save(df, table)
+    elapsed = seconds_of(t)
 
     mb_s = (payload_bytes / 1_048_576) / elapsed if elapsed > 0 else 0.0
 
@@ -321,9 +322,9 @@ def run_load(
         conn_str, format="polars", block_size=block_size, packet_size=packet_size
     )
 
-    t0 = time.perf_counter()
-    df = store.load(table, load_workers=load_workers)
-    elapsed = time.perf_counter() - t0
+    with stopwatch() as t:
+        df = store.load(table, load_workers=load_workers)
+    elapsed = seconds_of(t)
 
     nrows = len(df)
     try:
@@ -972,9 +973,7 @@ def bench(
             click.echo(
                 f"Generating {rows:,} rows for [{pname}] ({profile['columns']} cols) …"
             )
-            t0 = time.perf_counter()
-            df = pygim.create_df(profile["schema"], rows=rows, format="arrow")
-            gen_s = time.perf_counter() - t0
+            gen_s, df = timed(pygim.create_df, profile["schema"], rows=rows, format="arrow")
             size_mb = estimate_size_bytes(df) / 1_048_576
             click.echo(f"  → {size_mb:.1f} MB in {gen_s:.2f}s")
             data[pname] = df

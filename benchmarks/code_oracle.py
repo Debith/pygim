@@ -24,10 +24,10 @@ import re
 import subprocess
 import sys
 import tempfile
-import time
 
 from pygim import code, path, pathlike
 from _results import save, wants_save
+from _bench import timed
 
 # What python3.14 runs: for each path on stdin, one JSON line {"ok": bool, "dump"|"error": ...};
 # with --verdicts, only whether each source is Python; with --time, the seconds ast.parse took.
@@ -65,9 +65,7 @@ def first_difference(a, b):
 
 
 def section_files(root):
-    t = time.perf_counter()
-    corpus = code.parse(root)
-    took = time.perf_counter() - t
+    took, corpus = timed(code.parse, root)
     paths = corpus.files
     theirs, cpython_seconds = cpython(paths, "dump")
     counts = {"same": 0, "differ": 0, "only pygim refuses": 0, "only cpython refuses": 0, "both refuse": 0}

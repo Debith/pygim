@@ -20,6 +20,7 @@ OWN = {
     "tomllib": "path(...).read()",
     "tomli": "path(...).read()",
     "ast": "pygim.code",
+    "time": "pygim.utils.QuickTimer, on the monotonic clock (D83, Debith: \"I trust our tools are unbiased\")",
 }
 
 ROOT = path(__file__).resolve().parent.parent.parent

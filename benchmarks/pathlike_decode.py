@@ -19,25 +19,20 @@ followed across commits; ``--no-save`` measures without recording.
 
 import json  # the reference decoder for .json, raced against pygim's engine
 import tempfile
-import time
 from concurrent.futures import ThreadPoolExecutor
 
 from tabulate import tabulate
 
 import pygim
 from _results import save, wants_save
+from _bench import timed
 
 REPS = 7
 
 
 def best(fn, *args):
     """Best-of-REPS wall time in seconds (min is the least noisy estimator)."""
-    times = []
-    for _ in range(REPS):
-        t0 = time.perf_counter()
-        fn(*args)
-        times.append(time.perf_counter() - t0)
-    return min(times)
+    return min(timed(fn, *args)[0] for _ in range(REPS))
 
 
 # ── Workloads ────────────────────────────────────────────────────────────────

@@ -6,11 +6,29 @@ Import from a benchmark next to this file (``from _bench import best, corpus``).
 
 import gc
 import random
-import time
 
+from pygim import utils
 from pygim.utils import rss_mb  # the benchmarks import it from here: one syscall, every platform
 
 REPS = 3
+
+
+def stopwatch(name="benchmark"):
+    """pygim's own timer, silent: utils.QuickTimer on the monotonic clock (D83). Time a block with
+    ``with stopwatch() as t:``, then read ``elapsed(t)``."""
+    return utils.QuickTimer(name, report=utils.Report.silent())
+
+
+def elapsed(timer):
+    """How long a stopwatch's block took, in seconds."""
+    return timer.snapshot().total.seconds
+
+
+def timed(fn, *args, **kwargs):
+    """(seconds, fn(*args, **kwargs)), timed by a stopwatch."""
+    with stopwatch() as t:
+        result = fn(*args, **kwargs)
+    return elapsed(t), result
 
 
 def best(fn, reps=REPS):
@@ -20,9 +38,8 @@ def best(fn, reps=REPS):
     for _ in range(reps):
         gc.collect()
         gc.disable()
-        t0 = time.perf_counter()
-        r = fn()
-        t_best = min(t_best, time.perf_counter() - t0)
+        t, r = timed(fn)
+        t_best = min(t_best, t)
         gc.enable()
     return t_best, r
 
@@ -35,9 +52,8 @@ def best_fresh(fn, reps=REPS):
         r = None
         gc.collect()
         gc.disable()
-        t0 = time.perf_counter()
-        r = fn()
-        t_best = min(t_best, time.perf_counter() - t0)
+        t, r = timed(fn)
+        t_best = min(t_best, t)
         gc.enable()
     return t_best, r
 

@@ -21,7 +21,6 @@ with add_file() in a loop, so the same script measures an older build.
 import collections
 import subprocess
 import sys
-import time
 
 import pyarrow.compute as pc
 from tabulate import tabulate
@@ -29,6 +28,7 @@ from tabulate import tabulate
 from pygim import similarity
 from pygim.pathlike import path
 from _results import corpus, save, wants_save
+from _bench import elapsed, stopwatch
 
 THRESHOLD = 0.8
 MIN_SIZE = 30
@@ -55,17 +55,17 @@ def cause(message):
 def build(language, files):
     ix = similarity.Index(language)
     rejected = collections.Counter()
-    t = time.perf_counter()
-    if hasattr(ix, "add_files"):
-        for _, message in ix.add_files(files):
-            rejected[cause(message)] += 1
-    else:
-        for f in files:
-            try:
-                ix.add_file(f)
-            except (ValueError, OSError) as e:
-                rejected[cause(str(e))] += 1
-    return ix, time.perf_counter() - t, rejected
+    with stopwatch() as t:
+        if hasattr(ix, "add_files"):
+            for _, message in ix.add_files(files):
+                rejected[cause(message)] += 1
+        else:
+            for f in files:
+                try:
+                    ix.add_file(f)
+                except (ValueError, OSError) as e:
+                    rejected[cause(str(e))] += 1
+    return ix, elapsed(t), rejected
 
 
 def main():
@@ -95,18 +95,18 @@ def main():
             for c, n in rejected.most_common(4):
                 parse_rows.append(["", "", f"{n} x", c, "", "", ""])
 
-            t = time.perf_counter()
-            tb = ix.pairs(threshold=THRESHOLD, min_size=MIN_SIZE, columns=["a", "b", "a_origin", "b_origin", "score", "exact"])
-            seconds = time.perf_counter() - t
+            with stopwatch() as t:
+                tb = ix.pairs(threshold=THRESHOLD, min_size=MIN_SIZE, columns=["a", "b", "a_origin", "b_origin", "score", "exact"])
+            seconds = elapsed(t)
             exact = pc.sum(tb["exact"]).as_py() or 0
             near = tb.filter(pc.invert(tb["exact"]))
             cross = pc.sum(pc.not_equal(pc.cast(near["a_origin"], "string"), pc.cast(near["b_origin"], "string"))).as_py() or 0
             raw[f"ranked/{key}"] = {"rows": tb.num_rows, "exact": exact, "near": near.num_rows, "near_cross_file": cross, "seconds": seconds}
             ranked_rows.append([key, f"{exact:,}", f"{near.num_rows:,}", f"{cross:,}", f"{seconds:.2f}"])
 
-            t = time.perf_counter()
-            top = ix.pairs(limit=TOP, columns=["a", "b", "score"])
-            seconds = time.perf_counter() - t
+            with stopwatch() as t:
+                top = ix.pairs(limit=TOP, columns=["a", "b", "score"])
+            seconds = elapsed(t)
             raw[f"top/{key}"] = {"rows": top.num_rows, "lowest": top["score"][-1].as_py() if top.num_rows else None, "seconds": seconds}
             top_rows.append([key, f"{top.num_rows:,}", f"{raw[f'top/{key}']['lowest']:.3f}" if top.num_rows else "-", f"{seconds:.2f}"])
 

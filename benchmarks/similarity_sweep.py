@@ -73,7 +73,7 @@ SOURCES = {
 
 LARGE_RUN = textwrap.dedent("""
     import sys, threading, time
-    from pygim import pathlike, similarity
+    from pygim import pathlike, similarity, utils
     from pygim.utils import rss_bytes
     ix = similarity.Index("python")
     ix.add("\\n".join(f"def f{i}(a):\\n    return a + {i % 3}\\n" for i in range(int(sys.argv[2]))))
@@ -85,16 +85,16 @@ LARGE_RUN = textwrap.dedent("""
             time.sleep(0.002)
     sampler = threading.Thread(target=sample)
     sampler.start()
-    t = time.perf_counter()
     mode = sys.argv[1]
     slim = ["a", "b", "score"] if mode.endswith("_slim") else None
-    if mode.startswith("stream"):
-        rows = sum(b.num_rows for b in ix.stream_pairs(columns=slim))
-    elif mode == "top1000":
-        rows = ix.pairs(limit=1000).num_rows
-    else:
-        rows = ix.pairs(columns=slim).num_rows
-    seconds = time.perf_counter() - t
+    with utils.QuickTimer(mode, report=utils.Report.silent()) as timer:   # pygim's own timer (D83)
+        if mode.startswith("stream"):
+            rows = sum(b.num_rows for b in ix.stream_pairs(columns=slim))
+        elif mode == "top1000":
+            rows = ix.pairs(limit=1000).num_rows
+        else:
+            rows = ix.pairs(columns=slim).num_rows
+    seconds = timer.snapshot().total.seconds
     done.set()
     sampler.join()
     print(pathlike.encode({"seconds": seconds, "rows": rows, "peak_rss_delta": max(top[0], rss_bytes()) - base}, engine="json"))

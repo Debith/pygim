@@ -30,7 +30,7 @@ import collections
 import subprocess
 import sys
 import threading
-import time
+import time  # time.sleep: the RSS sampler's pause; the timing is pygim's (_bench.stopwatch)
 
 import pyarrow.compute as pc
 import pyarrow.parquet as pq
@@ -39,6 +39,7 @@ from tabulate import tabulate
 from pygim import path as pygim_path, similarity   # `path` names a file below
 from pygim.utils import rss_bytes
 from _results import corpus, save, wants_save
+from _bench import elapsed, stopwatch
 
 THRESHOLD = 0.8
 MIN_SIZE = 30
@@ -81,13 +82,13 @@ def build(language, files, root):
     ix = similarity.Index(language)
     rejected = collections.Counter()
     examples = {}
-    t = time.perf_counter()
-    for path, message in ix.add_files(files):
-        f = pygim_path(path)
-        c = cause(message, f, root)
-        rejected[c] += 1
-        examples.setdefault(c, str(f.relative_to(root)))
-    return ix, time.perf_counter() - t, rejected, examples
+    with stopwatch() as t:
+        for path, message in ix.add_files(files):
+            f = pygim_path(path)
+            c = cause(message, f, root)
+            rejected[c] += 1
+            examples.setdefault(c, str(f.relative_to(root)))
+    return ix, elapsed(t), rejected, examples
 
 
 def score_bins(scores, bins):
@@ -154,13 +155,12 @@ def main():
     rows = []
     for name in ("stdlib", "c"):
         hist, n = [0] * 20, 0
-        t = time.perf_counter()
-        with PeakRss() as rss:
+        with stopwatch() as t, PeakRss() as rss:
             for b in indexes[name].stream_pairs(columns=["score"]):
                 for v in pc.value_counts(score_bins(b.column(0), 20)).to_pylist():
                     hist[v["values"]] += v["counts"]
                 n += b.num_rows
-        seconds = time.perf_counter() - t
+        seconds = elapsed(t)
         raw[f"sweep/{name}"] = {"rows": n, "seconds": seconds, "peak_rss_mib": rss.mib, "hist": hist}
         rows.append([name, f"{n:,}", f"{seconds:.1f}", f"{rss.mib:,.0f}", " ".join(f"{x:,}" for x in hist[15:])])
     print("\n2. sweep (every pair, streamed)")
@@ -169,10 +169,9 @@ def main():
     # 3. ranked
     rows, ranked = [], {}
     for name, ix in indexes.items():
-        t = time.perf_counter()
-        with PeakRss() as rss:
+        with stopwatch() as t, PeakRss() as rss:
             tb = ix.pairs(threshold=THRESHOLD, min_size=MIN_SIZE)
-        seconds = time.perf_counter() - t
+        seconds = elapsed(t)
         pq.write_table(tb, str(out / f"{name}.parquet"))
         ranked[name] = tb
         exact = pc.sum(tb["exact"]).as_py() or 0

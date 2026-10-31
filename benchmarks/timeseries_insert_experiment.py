@@ -14,7 +14,6 @@ from __future__ import annotations
 
 import os
 import sys
-import time
 import click
 import statistics
 
@@ -25,6 +24,7 @@ from bcp_throughput import (
     default_connection_string,
 )
 import pygim
+from _bench import elapsed as seconds_of, stopwatch
 
 
 DDL = """
@@ -74,20 +74,19 @@ def insert_via_executemany(conn_str, table, df_arrow, batch_size):
     # Convert Arrow to list of tuples in batches
     nrows = len(df_arrow)
     total_sent = 0
-    t0 = time.perf_counter()
+    with stopwatch() as t:
+        for offset in range(0, nrows, batch_size):
+            end = min(offset + batch_size, nrows)
+            chunk = df_arrow.slice(offset, end - offset)
+            # Convert to Python tuples
+            ts_col = chunk.column("ts")
+            data_col = chunk.column("data")
+            rows = [(ts_col[i].as_py(), data_col[i].as_py()) for i in range(len(chunk))]
+            cursor.executemany(sql, rows)
+            total_sent += len(rows)
 
-    for offset in range(0, nrows, batch_size):
-        end = min(offset + batch_size, nrows)
-        chunk = df_arrow.slice(offset, end - offset)
-        # Convert to Python tuples
-        ts_col = chunk.column("ts")
-        data_col = chunk.column("data")
-        rows = [(ts_col[i].as_py(), data_col[i].as_py()) for i in range(len(chunk))]
-        cursor.executemany(sql, rows)
-        total_sent += len(rows)
-
-    cn.commit()
-    elapsed = time.perf_counter() - t0
+        cn.commit()
+    elapsed = seconds_of(t)
     cursor.close()
     cn.close()
 
@@ -116,25 +115,24 @@ def insert_via_executemany_numpy(conn_str, table, df_arrow, batch_size):
 
     nrows = len(df_arrow)
     total_sent = 0
-    t0 = time.perf_counter()
+    with stopwatch() as t:
+        for offset in range(0, nrows, batch_size):
+            end = min(offset + batch_size, nrows)
+            ts_batch = ts_np[offset:end]
+            data_batch = data_np[offset:end]
+            # Convert timestamps to Python datetime for pyodbc
+            rows = [
+                (
+                    ts_batch[i].astype("datetime64[us]").astype(datetime),
+                    float(data_batch[i]),
+                )
+                for i in range(len(ts_batch))
+            ]
+            cursor.executemany(sql, rows)
+            total_sent += len(rows)
 
-    for offset in range(0, nrows, batch_size):
-        end = min(offset + batch_size, nrows)
-        ts_batch = ts_np[offset:end]
-        data_batch = data_np[offset:end]
-        # Convert timestamps to Python datetime for pyodbc
-        rows = [
-            (
-                ts_batch[i].astype("datetime64[us]").astype(datetime),
-                float(data_batch[i]),
-            )
-            for i in range(len(ts_batch))
-        ]
-        cursor.executemany(sql, rows)
-        total_sent += len(rows)
-
-    cn.commit()
-    elapsed = time.perf_counter() - t0
+        cn.commit()
+    elapsed = seconds_of(t)
     cursor.close()
     cn.close()
 
