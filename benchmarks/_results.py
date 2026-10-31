@@ -28,7 +28,7 @@ SCHEMA = 1
 def _git(*args, cwd=None):
     try:
         return subprocess.run(
-            ["git", *args], cwd=str(cwd or HERE),
+            ["git", *args], cwd=cwd or HERE,
             capture_output=True, text=True, check=True,
         ).stdout.strip()
     except (OSError, subprocess.CalledProcessError):

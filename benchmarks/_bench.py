@@ -8,7 +8,7 @@ import gc
 import random
 import time
 
-from pygim import utils
+from pygim.utils import rss_mb  # the benchmarks import it from here: one syscall, every platform
 
 REPS = 3
 
@@ -46,9 +46,6 @@ def ns(seconds, n):
     return seconds / n * 1e9
 
 
-# The process's resident set size in MiB: pygim's own probe, one syscall on every platform. A
-# procfs fallback for "an unbuilt tree" stood here until 2026-10-31; every benchmark imports pygim.
-rss_mb = utils.rss_mb
 
 
 def corpus(n, seed=1):
