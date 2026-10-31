@@ -14,6 +14,7 @@
 
 #include <algorithm>
 #include <array>
+#include <optional>
 #include <string>
 #include <string_view>
 
@@ -33,27 +34,28 @@ namespace pygim::pathlike::detail {
     return 1 + static_cast<std::size_t>(std::count(text.begin(), text.begin() + end, '\n'));
 }
 
-[[nodiscard]] inline py::object load_jsonl(const file& f, KeyCache& keys) {
-    simdjson::dom::parser parser;   // must outlive the elements it returns
-    std::string padded;   // the file, simdjson's padding past it: the documents point into it
+/// The documents of `source` (padded for simdjson) as a list, parsed in batches of `batch` bytes;
+/// nullopt when a document is larger than a batch (simdjson's CAPACITY), so the caller parses again.
+[[nodiscard]] inline std::optional<py::list> jsonl_rows(std::string_view source, std::string_view origin, std::size_t batch,
+                                                        KeyCache& keys) {
+    simdjson::dom::parser parser;   // must outlive the elements it returns; the documents point into `source`
     simdjson::dom::document_stream docs;
     {
         py::gil_scoped_release nogil;
-        padded = read_padded_for_simdjson(f);
-        require_utf8(padded, f.fspath());
         // parse_many() skips a UTF-8 BOM and yields zero documents for empty
         // input (both documented), so there is nothing to special-case here.
-        if (auto err = parser.parse_many(padded).get(docs); err) {
-            throw std::invalid_argument("JSONL parse error (" + f.fspath() + "): " +
+        if (auto err = parser.parse_many(source.data(), source.size(), batch).get(docs); err) {
+            if (err == simdjson::CAPACITY) return std::nullopt;
+            throw std::invalid_argument("JSONL parse error (" + std::string(origin) + "): " +
                                         simdjson::error_message(err));
         }
     }
     py::list out;
-    const std::string_view source(padded.data(), padded.size());
     for (auto it = docs.begin(); it != docs.end(); ++it) {
         simdjson::dom::element el;
         if (auto err = (*it).get(el); err) {
-            throw std::invalid_argument("JSONL parse error (" + f.fspath() + ", line " +
+            if (err == simdjson::CAPACITY) return std::nullopt;
+            throw std::invalid_argument("JSONL parse error (" + std::string(origin) + ", line " +
                                         std::to_string(line_of(source, it.current_index())) + "): " +
                                         simdjson::error_message(err));
         }
@@ -69,7 +71,7 @@ namespace pygim::pathlike::detail {
         if (const std::size_t cut = docs.truncated_bytes(); cut > 0 && cut <= source.size()) {
             const std::size_t at = source.find_first_not_of(blank, source.size() - cut);
             if (at != std::string_view::npos) {
-                throw std::invalid_argument("JSONL parse error (" + f.fspath() + ", line " +
+                throw std::invalid_argument("JSONL parse error (" + std::string(origin) + ", line " +
                                             std::to_string(line_of(source, at)) + "): the last document is incomplete");
             }
         }
@@ -77,9 +79,29 @@ namespace pygim::pathlike::detail {
     return out;
 }
 
+/// JSON Lines text as a list, one item per document; `origin` names it in an error (a file's path,
+/// or "<text>"). Parsed in simdjson's batch first, its sweet spot; a document larger than a batch
+/// has the input parsed again in one batch its size, which holds any document in it. Found
+/// 2026-10-31 decoding code_oracle's answers: a line over 1 MB was a CAPACITY error.
+[[nodiscard]] inline py::object decode_jsonl(std::string padded, std::string_view origin, KeyCache& keys) {
+    {
+        py::gil_scoped_release nogil;
+        require_utf8(padded, origin);
+        pad_for_simdjson(padded);
+    }
+    const std::string_view source(padded.data(), padded.size());
+    const std::size_t batch = simdjson::dom::DEFAULT_BATCH_SIZE;
+    if (std::optional<py::list> rows = jsonl_rows(source, origin, batch, keys)) return std::move(*rows);
+    if (source.size() > batch) {
+        if (std::optional<py::list> rows = jsonl_rows(source, origin, source.size(), keys)) return std::move(*rows);
+    }
+    throw std::invalid_argument("JSONL parse error (" + std::string(origin) + "): " + simdjson::error_message(simdjson::CAPACITY));
+}
+
 // One compact JSON document per line. The root must be a list/tuple — JSONL
 // *is* a sequence — and each item may be any JSON value.
-inline void write_jsonl(const file& f, py::handle obj) {
+/// `obj` — a list or tuple — as JSON Lines text, one document a line, each ended by "\n".
+[[nodiscard]] inline std::string encode_jsonl(py::handle obj) {
     if (!py::isinstance<py::list>(obj) && !py::isinstance<py::tuple>(obj)) {
         throw std::invalid_argument("jsonl: the root must be a list or tuple (one document per line), got " +
                                     py::str(py::type::of(obj)).cast<std::string>());
@@ -96,8 +118,7 @@ inline void write_jsonl(const file& f, py::handle obj) {
         text += line;
         text += '\n';
     }
-    py::gil_scoped_release nogil;
-    write_text_file(f, text);
+    return text;
 }
 
 }  // namespace pygim::pathlike::detail
@@ -117,8 +138,12 @@ struct jsonl {
         .aliases = aliases,
     };
 
-    static py::object load(const file& f, detail::KeyCache& keys) { return detail::load_jsonl(f, keys); }
-    static void write(const file& f, py::handle obj) { detail::write_jsonl(f, obj); }
+    static py::object decode(std::string bytes, std::string_view origin, detail::KeyCache& keys) {
+        return detail::decode_jsonl(std::move(bytes), origin, keys);
+    }
+    static std::string encode(py::handle obj) { return detail::encode_jsonl(obj); }
+    /// Its documents are lines: write(..., append=True) adds them to a file's end.
+    static constexpr bool appends = true;
 };
 
 }  // namespace pygim::pathlike::engines

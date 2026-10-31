@@ -20,19 +20,6 @@
 
 namespace pygim::pathlike::detail {
 
-/// The file's bytes with simdjson's padding past them, unfilled: room the parser may read into, so
-/// it parses them where they were read. Found 2026-10-31: each read was copied into a
-/// padded_string, a second buffer as large as the file.
-[[nodiscard]] inline std::string read_padded_for_simdjson(const file& f) {
-    std::string bytes;
-    const std::size_t got = f.read_bytes_into([&bytes](std::size_t n) {
-        bytes.resize_and_overwrite(n + simdjson::SIMDJSON_PADDING, [](char*, std::size_t m) noexcept { return m; });
-        return bytes.data();
-    });
-    bytes.resize(got);   // shorter: the capacity, and the padding in it, stay
-    return bytes;
-}
-
 // Recursively materialise a simdjson DOM element as a native Python object.
 // JSON semantics are exact: object keys are strings, numbers arrive already
 // typed by the parser (int64 / uint64 / double).
@@ -63,19 +50,20 @@ namespace pygim::pathlike::detail {
     throw std::runtime_error("json: unhandled element type");
 }
 
-[[nodiscard]] inline py::object load_json(const file& f, KeyCache& keys) {
+/// JSON text as Python objects; `origin` names it in an error (a file's path, or "<text>").
+[[nodiscard]] inline py::object decode_json(std::string bytes, std::string_view origin, KeyCache& keys) {
     simdjson::dom::parser parser;   // must outlive the element it returns
     simdjson::dom::element doc;
     {
         py::gil_scoped_release nogil;
-        const std::string bytes = read_padded_for_simdjson(f);
         // Same encoding gate as YAML: UTF-16 input otherwise dies with a
         // misleading UNESCAPED_CHARS parse error instead of naming the cause.
-        require_utf8(bytes, f.fspath());
+        require_utf8(bytes, origin);
+        pad_for_simdjson(bytes);
         try {
-            doc = parser.parse(bytes);   // padded already: parsed in place, not copied
+            doc = parser.parse(bytes);   // padded: parsed in place, not copied
         } catch (const simdjson::simdjson_error& e) {
-            throw std::invalid_argument("JSON parse error (" + f.fspath() + "): " + e.what());
+            throw std::invalid_argument("JSON parse error (" + std::string(origin) + "): " + e.what());
         }
     }
     return json_to_py(doc, keys);
@@ -97,8 +85,10 @@ struct json {
         .aliases = aliases,
     };
 
-    static py::object load(const file& f, detail::KeyCache& keys) { return detail::load_json(f, keys); }
-    static void write(const file& f, py::handle obj) { detail::write_ryml(f, obj, /*json_mode=*/true); }
+    static py::object decode(std::string bytes, std::string_view origin, detail::KeyCache& keys) {
+        return detail::decode_json(std::move(bytes), origin, keys);
+    }
+    static std::string encode(py::handle obj) { return detail::emit_ryml(obj, /*json_mode=*/true); }
 };
 
 }  // namespace pygim::pathlike::engines

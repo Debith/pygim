@@ -460,6 +460,12 @@ public:
         return bytes;
     }
 
+    // Append `text` to the file as lines, the file made when it is not there: a "\n" first when
+    // its last line has none (platform::append_lines). file_error with the errno of what failed.
+    void append_lines(std::string_view text) const {
+        if (const int err = platform::append_lines(to_fs(), text); err != 0) throw file_error(err, fspath(), "cannot append to file");
+    }
+
     // Replace the file's contents with `data`, byte for byte: in place by default (pathlib parity),
     // or atomically (basic_atomic_write: a reader sees the old contents or the new, never part of
     // either). Closed before it returns, so a failure the close reports — a full disk — is raised.

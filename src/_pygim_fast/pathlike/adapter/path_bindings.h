@@ -466,15 +466,16 @@ py::class_<pathview> bind_path(engine_list<Es...> es, py::module_& m, const path
                 const std::size_t cap = key_cache < 0 ? std::numeric_limits<std::size_t>::max() : static_cast<std::size_t>(key_cache);
                 return load(L{}, L::resolve(f, requested_of(engine)), f, cap);
             }, py::arg("engine") = py::none(), py::arg("key_cache") = 256, py::doc(docs.read.c_str()))
-        .def("write", [](const pathview& v, py::handle obj, const std::optional<std::string>& engine, bool atomic) {
+        .def("write", [](const pathview& v, py::handle obj, const std::optional<std::string>& engine, bool atomic, bool append,
+                         bool parents) {
+                if (append && atomic) {
+                    throw py::value_error("append and atomic cannot both be asked: an append adds to the file where it is");
+                }
                 const file f = v.value();
-                const auto* chosen = L::resolve(f, requested_of(engine));
-                if (!atomic) return write(L{}, chosen, f, obj);
-                atomic_write replacement(f);
-                write(L{}, chosen, replacement.temporary(), obj);   // the engine writes the temporary by its path
-                replacement.commit();
-            }, py::arg("obj"), py::arg("engine") = py::none(), py::kw_only(), py::arg("atomic") = false,
-            py::doc(docs.write.c_str()))
+                write(L{}, L::resolve(f, requested_of(engine)), f, obj, atomic ? write_mode::atomic : write_mode::in_place, append,
+                      parents);
+            }, py::arg("obj"), py::arg("engine") = py::none(), py::kw_only(), py::arg("atomic") = false, py::arg("append") = false,
+            py::arg("parents") = false, py::doc(docs.write.c_str()))
         // -- traversal: results are rows of the same table and inherit the pin --
         .def("iterdir", [es](const pathview& v) { return wrap_all(es, v, v.value().iterdir()); },
              "The directory's children, sorted.")

@@ -10,7 +10,6 @@ machine it was (Debith, 2026-10-31): no hostname, and no path on it — a
 corpus is named by ``corpus()``, and ``save`` refuses a record holding a path.
 """
 
-import json  # one record appended as a line: pygim's JSONL engine writes a whole file
 import os
 import platform
 import re
@@ -104,10 +103,8 @@ def save(bench, sections, *, reps, in_tree=True):
         "reps": reps,
         "sections": sections,
     }
-    RESULTS_DIR.mkdir(exist_ok=True)
-    out = RESULTS_DIR / f"{bench}.jsonl"
-    with open(str(out), "a", encoding="utf-8") as f:
-        f.write(json.dumps(record, ensure_ascii=False) + "\n")
+    out = path(RESULTS_DIR) / f"{bench}.jsonl"
+    out.write([record], append=True, parents=True)   # one line added: pygim's JSONL engine
     return out
 
 

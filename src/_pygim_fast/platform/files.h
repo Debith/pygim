@@ -85,6 +85,17 @@ static_assert(line_separator == "\n" || line_separator == "\r\n");
     struct ::_stat64 st {};
     return ::_fstat64(fd, &st) == 0 && st.st_size > 0 ? static_cast<std::size_t>(st.st_size) : 0;
 }
+[[nodiscard]] inline int open_appending(const fs::path& p) {
+    int fd = -1;
+    const errno_t err = ::_wsopen_s(&fd, p.c_str(), _O_RDWR | _O_APPEND | _O_CREAT | _O_BINARY | _O_NOINHERIT, _SH_DENYNO,
+                                    _S_IREAD | _S_IWRITE);
+    if (err != 0) errno = err;
+    return err == 0 ? fd : -1;
+}
+[[nodiscard]] inline int last_byte(int fd, std::size_t size) {
+    unsigned char c = 0;
+    return size != 0 && ::_lseeki64(fd, static_cast<__int64>(size - 1), SEEK_SET) >= 0 && ::_read(fd, &c, 1) == 1 ? c : -1;
+}
 inline int force_fd(int fd) { return ::_commit(fd); }
 inline int close_fd(int fd) { return ::_close(fd); }
 inline int force_folder(const fs::path&) { return 0; }   // Windows has no folder to force; see pathlike_writes.md, Open
@@ -98,6 +109,11 @@ inline int force_folder(const fs::path&) { return 0; }   // Windows has no folde
 [[nodiscard]] inline std::size_t told_size(int fd) {
     struct ::stat st {};
     return ::fstat(fd, &st) == 0 && st.st_size > 0 ? static_cast<std::size_t>(st.st_size) : 0;
+}
+[[nodiscard]] inline int open_appending(const fs::path& p) { return ::open(p.c_str(), O_RDWR | O_APPEND | O_CREAT | O_CLOEXEC, 0666); }
+[[nodiscard]] inline int last_byte(int fd, std::size_t size) {
+    unsigned char c = 0;
+    return size != 0 && ::pread(fd, &c, 1, static_cast<off_t>(size - 1)) == 1 ? c : -1;
 }
 inline int force_fd(int fd) {
 #ifdef __APPLE__
@@ -160,6 +176,36 @@ template <class Grow>
         }
     }
     return have;
+}
+
+/// Appends `text` to the file at `p`, made when it is not there, as lines: a "\n" first when the
+/// file's last byte is none (a last line written by hand), so a line is never joined to another.
+/// 0, or the errno of what failed.
+[[nodiscard]] inline int append_lines(const fs::path& p, std::string_view text) {
+    const int fd = open_appending(p);
+    if (fd < 0) return errno;
+    std::string broken;
+    std::string_view rest = text;
+    if (const std::size_t size = told_size(fd); size != 0 && last_byte(fd, size) != '\n') {
+        broken.reserve(text.size() + 1);
+        broken += '\n';
+        broken += text;
+        rest = broken;
+    }
+    int failed = 0;
+    while (!rest.empty()) {
+        const long long put = write_some(fd, rest.data(), rest.size());
+        if (put > 0) {
+            rest.remove_prefix(static_cast<std::size_t>(put));
+        } else if (put < 0 && errno == EINTR) {
+            continue;
+        } else {
+            failed = put < 0 ? errno : EIO;
+            break;
+        }
+    }
+    if (close_fd(fd) != 0 && failed == 0) failed = errno;
+    return failed;
 }
 
 }  // namespace pygim::platform

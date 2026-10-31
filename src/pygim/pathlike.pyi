@@ -30,15 +30,19 @@ class path(os.PathLike[str]):
     def read(self, engine: Engine | None = None, key_cache: int = 256) -> Any:
         """Decode the file to native Python objects (GIL released during I/O
         and parsing). ``key_cache`` bounds key interning: 0 off, -1 unbounded."""
-    def write(self, obj: Any, engine: Engine | None = None, *, atomic: bool = False) -> None:
+    def write(self, obj: Any, engine: Engine | None = None, *, atomic: bool = False, append: bool = False,
+              parents: bool = False) -> None:
         """Serialise ``obj`` with the resolved engine. Strings that would read
         back typed are quoted, so write/read round-trips. ``atomic=True`` writes a
         hidden temporary sibling, forces it to the disk and renames it over the
         file: a reader sees the old contents or the new, never part of either,
         and after a power cut one of them is there whole. The file is then a new
         one (a second hard link keeps the old contents; a symlink is written
-        through). Format constraints are the engine's own (see each
-        ``<name>path`` docstring)."""
+        through). ``append=True`` adds obj's documents to the file's end, the
+        file made when it is not there, for an engine whose documents are lines
+        (jsonl); the others refuse it, and so does ``atomic``. ``parents=True``
+        makes the folders the file needs first. Format constraints are the
+        engine's own (see each ``<name>path`` docstring)."""
     def read_bytes(self) -> bytes: ...
     def write_bytes(self, data: bytes, *, atomic: bool = False) -> None:
         """Replace the file's contents with *data*, byte for byte; ``atomic=True``
@@ -237,6 +241,14 @@ class PathStore:
 
 def default_store() -> PathStore:
     """The module's default PathStore: what path(text) without store= interns into."""
+
+
+def decode(text: str | bytes, *, engine: Engine, key_cache: int = 256) -> Any:
+    """An engine's text (str, or bytes as they are) as native Python objects, as read() makes of a file holding it: engine= names the engine (no file name tells it); key_cache as for read()."""
+
+
+def encode(obj: Any, *, engine: Engine) -> str:
+    """obj as an engine's text, the text write() puts in a file: engine= names the engine."""
 
 
 # --- generated: engines (regenerate with `pygim stubs`) ---

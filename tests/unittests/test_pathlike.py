@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 """Tests for ``pygim.path`` — the self-reading, self-decoding PathLike."""
 
+import json
 import operator
 import os
 import sys
@@ -1711,3 +1712,120 @@ def test_a_newline_that_is_none_of_pythons_is_a_value_error(temp_dir):
         pygim.path(f).read_text(newline="\t")
     with pytest.raises(ValueError, match="illegal newline value"):
         pygim.path(f).write_text("x", newline="\t")
+
+
+# --------------------------------------------------------------------------- #
+# decode / encode: an engine's text in memory (D88)
+# --------------------------------------------------------------------------- #
+DOCUMENTS = {
+    "yaml": {"name": "pygim", "tags": ["a", "b"], "nested": {"x": 1, "y": [1.5, None, True]}},
+    "json": {"name": "pygim", "tags": ["a", "b"], "nested": {"x": 1, "y": [1.5, None, True]}},
+    "toml": {"name": "pygim", "tags": ["a", "b"], "nested": {"x": 1, "y": [1.5, 2.5]}},
+    "jsonl": [{"id": 1, "ok": True}, {"id": 2, "tags": ["x"]}, [1, 2], "text", 3],
+}
+SUFFIX = {"yaml": ".yaml", "json": ".json", "toml": ".toml", "jsonl": ".jsonl"}
+
+
+@pytest.mark.parametrize("engine", sorted(DOCUMENTS))
+def test_encode_is_the_text_write_puts_in_a_file(temp_dir, engine):
+    f = pygim.path(temp_dir / f"doc{SUFFIX[engine]}")
+    f.write(DOCUMENTS[engine])
+    assert pathlike.encode(DOCUMENTS[engine], engine=engine) == f.read_text(newline="")
+
+
+@pytest.mark.parametrize("engine", sorted(DOCUMENTS))
+def test_decode_is_what_read_makes_of_a_file(temp_dir, engine):
+    f = pygim.path(temp_dir / f"doc{SUFFIX[engine]}")
+    f.write(DOCUMENTS[engine])
+    text = f.read_text(newline="")
+    assert pathlike.decode(text, engine=engine) == f.read() == DOCUMENTS[engine]
+    assert pathlike.decode(text.encode("utf-8"), engine=engine) == DOCUMENTS[engine]   # bytes as they are
+
+
+@pytest.mark.parametrize("text", ['{"a": [1, 2.5, null, true], "b": "\\u00e9"}', "[]", "3", '"s"', '  {"k": {}}  '])
+def test_decode_of_json_is_pythons(text):
+    assert pathlike.decode(text, engine="json") == json.loads(text)
+
+
+def test_decode_of_a_child_processs_jsonl_is_its_lines():
+    lines = '{"seconds": 1.5}\n{"rows": 3}\n'
+    assert pathlike.decode(lines, engine="jsonl") == [json.loads(line) for line in lines.splitlines()]
+
+
+def test_decode_of_text_that_does_not_parse_says_so():
+    with pytest.raises(ValueError, match="JSON parse error"):
+        pathlike.decode("{not json", engine="json")
+
+
+def test_decode_and_encode_need_an_engine_they_know():
+    with pytest.raises(ValueError, match="unknown engine"):
+        pathlike.decode("a: 1", engine="xml")
+    with pytest.raises(ValueError, match="unknown engine"):
+        pathlike.encode({"a": 1}, engine="xml")
+    with pytest.raises(TypeError):
+        pathlike.decode(3, engine="json")
+
+
+def test_decode_takes_a_key_cache_as_read_does():
+    text = json.dumps([{"same_key": i} for i in range(10)])
+    assert pathlike.decode(text, engine="json", key_cache=0) == pathlike.decode(text, engine="json", key_cache=-1)
+
+
+# --------------------------------------------------------------------------- #
+# write(append=, parents=) (D87)
+# --------------------------------------------------------------------------- #
+def test_write_appends_to_a_jsonl_file(temp_dir):
+    f = pygim.path(temp_dir / "runs.jsonl")
+    f.write([{"run": 1}], append=True)            # nothing there: made
+    f.write([{"run": 2}, {"run": 3}], append=True)
+    assert f.read() == [{"run": 1}, {"run": 2}, {"run": 3}]
+
+
+def test_write_appends_after_a_last_line_with_no_line_break(temp_dir):
+    f = pygim.path(temp_dir / "runs.jsonl")
+    f.write_bytes(b'{"run": 1}')                   # written by hand, its last line unbroken
+    f.write([{"run": 2}], append=True)
+    assert f.read() == [{"run": 1}, {"run": 2}]
+
+
+@pytest.mark.parametrize("engine", ["yaml", "json", "toml"])
+def test_write_will_not_append_to_a_one_document_file(temp_dir, engine):
+    f = pygim.path(temp_dir / f"doc{SUFFIX[engine]}")
+    f.write(DOCUMENTS[engine])
+    with pytest.raises(ValueError, match="cannot append"):
+        f.write(DOCUMENTS[engine], append=True)
+    assert f.read() == DOCUMENTS[engine]           # the file as it was
+
+
+def test_write_will_not_append_atomically(temp_dir):
+    with pytest.raises(ValueError, match="append and atomic"):
+        pygim.path(temp_dir / "runs.jsonl").write([{"run": 1}], append=True, atomic=True)
+
+
+def test_write_with_parents_makes_the_folders_it_needs(temp_dir):
+    f = pygim.path(temp_dir / "results" / "deep" / "runs.jsonl")
+    f.write([{"run": 1}], append=True, parents=True)
+    f.write([{"run": 2}], append=True, parents=True)   # the folders there now: no error
+    assert f.read() == [{"run": 1}, {"run": 2}]
+
+
+def test_write_without_parents_fails_as_pathlibs_does(temp_dir):
+    with pytest.raises(FileNotFoundError):
+        pygim.path(temp_dir / "missing" / "doc.yaml").write({"a": 1})
+
+
+@pytest.mark.parametrize("atomic", [False, True], ids=["in_place", "atomic"])
+def test_write_with_parents_makes_them_for_any_engine(temp_dir, atomic):
+    f = pygim.path(temp_dir / "made" / "doc.yaml")
+    f.write({"a": 1}, parents=True, atomic=atomic)
+    assert f.read() == {"a": 1}
+
+
+def test_a_jsonl_document_larger_than_simdjsons_batch_is_read(temp_dir):
+    """Found 2026-10-31 decoding code_oracle's answers: parse_many's batch (1 MB) must hold the
+    largest document, so a longer line was a CAPACITY error where Python's json reads it."""
+    rows = [{"small": 1}, {"big": "x" * (3 << 20)}, {"after": [1, 2]}]
+    f = pygim.path(temp_dir / "big.jsonl")
+    f.write(rows)
+    assert f.read() == rows
+    assert pathlike.decode(f.read_text(), engine="jsonl") == rows

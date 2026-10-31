@@ -30,7 +30,7 @@ import textwrap
 
 from tabulate import tabulate
 
-from pygim import similarity
+from pygim import pathlike, similarity
 from _results import save, wants_save
 
 from _bench import REPS, best
@@ -72,8 +72,8 @@ SOURCES = {
 
 
 LARGE_RUN = textwrap.dedent("""
-    import json, sys, threading, time
-    from pygim import similarity
+    import sys, threading, time
+    from pygim import pathlike, similarity
     from pygim.utils import rss_bytes
     ix = similarity.Index("python")
     ix.add("\\n".join(f"def f{i}(a):\\n    return a + {i % 3}\\n" for i in range(int(sys.argv[2]))))
@@ -97,18 +97,17 @@ LARGE_RUN = textwrap.dedent("""
     seconds = time.perf_counter() - t
     done.set()
     sampler.join()
-    print(json.dumps({"seconds": seconds, "rows": rows, "peak_rss_delta": max(top[0], rss_bytes()) - base}))
+    print(pathlike.encode({"seconds": seconds, "rows": rows, "peak_rss_delta": max(top[0], rss_bytes()) - base}, engine="json"))
 """)
 
 
 def large():
-    import json  # the child's one result, a line on its stdout: pygim reads JSON from files
 
     out = {}
     for mode in ("ranked", "ranked_slim", "top1000", "stream", "stream_slim"):
         res = subprocess.run([sys.executable, "-c", LARGE_RUN, mode, str(LARGE)],
                              capture_output=True, text=True, check=True)
-        out[mode] = json.loads(res.stdout)
+        out[mode] = pathlike.decode(res.stdout, engine="json")
     return out
 
 

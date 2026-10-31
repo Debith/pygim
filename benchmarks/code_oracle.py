@@ -19,7 +19,6 @@ differ (2 hold identifiers NFKC changes, 2 only in repr's Unicode version), 4 re
 """
 
 import argparse
-import json  # the oracle's answers, one line each on its stdout: pygim reads JSON from files
 import random
 import re
 import subprocess
@@ -27,7 +26,7 @@ import sys
 import tempfile
 import time
 
-from pygim import code, path
+from pygim import code, path, pathlike
 from _results import save, wants_save
 
 # What python3.14 runs: for each path on stdin, one JSON line {"ok": bool, "dump"|"error": ...};
@@ -56,7 +55,7 @@ def cpython(paths, mode):
     """python3.14's answer for each path, and the seconds its ast.parse took in all."""
     done = subprocess.run(["python3.14", "-c", CPYTHON, mode], input="\n".join(map(str, paths)) + "\n",
                           capture_output=True, text=True, check=True)
-    lines = [json.loads(line) for line in done.stdout.splitlines()]
+    lines = pathlike.decode(done.stdout, engine="jsonl")
     return lines[:-1], lines[-1]["seconds"]
 
 

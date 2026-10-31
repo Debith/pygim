@@ -88,17 +88,17 @@ inline py::object node_to_py(ryml::ConstNodeRef node, KeyCache& keys) {
 // File I/O and parsing run with the GIL RELEASED (pure C++; the throwing ryml
 // callback is GIL-free too), so reads scale across Python threads. Only the
 // materialisation into Python objects reacquires the GIL.
-[[nodiscard]] inline py::object load_yaml(const file& f, KeyCache& keys) {
+/// YAML text as Python objects; `origin` names it in an error (a file's path, or "<text>").
+[[nodiscard]] inline py::object decode_yaml(std::string bytes, std::string_view origin, KeyCache& keys) {
     ryml::Tree tree;
     {
         py::gil_scoped_release nogil;
         ensure_throwing_callbacks();
-        const std::string bytes = f.read_bytes();
-        require_utf8(bytes, f.fspath());
+        require_utf8(bytes, origin);
         try {
             tree = ryml::parse_in_arena(ryml::csubstr(bytes.data(), bytes.size()));
         } catch (const std::invalid_argument& e) {
-            throw std::invalid_argument(std::string(e.what()) + " in " + f.fspath());
+            throw std::invalid_argument(std::string(e.what()) + " in " + std::string(origin));
         }
         tree.resolve();                             // expand anchors / *aliases
     }
@@ -182,20 +182,19 @@ inline void py_to_node(ryml::Tree& tree, ryml::NodeRef node, py::handle obj, boo
 
 // The document model is built under the GIL (it reads Python objects); emit
 // and the file write run with the GIL released.
-inline void write_ryml(const file& f, py::handle obj, bool json_mode) {
+/// `obj` as YAML text, or JSON with `json_mode`: the tree built with the GIL, emitted without it.
+[[nodiscard]] inline std::string emit_ryml(py::handle obj, bool json_mode) {
     ryml::Tree tree;
     ryml::NodeRef root = tree.rootref();
     py_to_node(tree, root, obj, json_mode);
-    {
-        py::gil_scoped_release nogil;
-        std::string text;
-        if (json_mode) {
-            ryml::emitrs_json(tree, tree.root_id(), &text);
-        } else {
-            ryml::emitrs_yaml(tree, tree.root_id(), &text);
-        }
-        write_text_file(f, text);
+    py::gil_scoped_release nogil;
+    std::string text;
+    if (json_mode) {
+        ryml::emitrs_json(tree, tree.root_id(), &text);
+    } else {
+        ryml::emitrs_yaml(tree, tree.root_id(), &text);
     }
+    return text;
 }
 
 }  // namespace pygim::pathlike::detail
@@ -219,8 +218,10 @@ struct yaml {
         .aliases = aliases,
     };
 
-    static py::object load(const file& f, detail::KeyCache& keys) { return detail::load_yaml(f, keys); }
-    static void write(const file& f, py::handle obj) { detail::write_ryml(f, obj, /*json_mode=*/false); }
+    static py::object decode(std::string bytes, std::string_view origin, detail::KeyCache& keys) {
+        return detail::decode_yaml(std::move(bytes), origin, keys);
+    }
+    static std::string encode(py::handle obj) { return detail::emit_ryml(obj, /*json_mode=*/false); }
 };
 
 }  // namespace pygim::pathlike::engines

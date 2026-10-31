@@ -81,15 +81,15 @@ inline void import_datetime_api() {
     throw std::runtime_error("toml: unhandled node type");
 }
 
-[[nodiscard]] inline py::object load_toml(const file& f, KeyCache& keys) {
-    toml::parse_result result = [&f] {
+/// TOML text as Python objects; `origin` names it in an error (a file's path, or "<text>").
+[[nodiscard]] inline py::object decode_toml(std::string bytes, std::string_view origin, KeyCache& keys) {
+    toml::parse_result result = [&] {
         py::gil_scoped_release nogil;
-        const std::string bytes = f.read_bytes();
-        return toml::parse(std::string_view(bytes), std::string_view(f.fspath()));
+        return toml::parse(std::string_view(bytes), origin);
     }();
     if (!result) {
         const auto& err = result.error();
-        throw std::invalid_argument("TOML parse error (" + f.fspath() + ", line " +
+        throw std::invalid_argument("TOML parse error (" + std::string(origin) + ", line " +
                                  std::to_string(err.source().begin.line) +
                                  "): " + std::string(err.description()));
     }
@@ -175,7 +175,8 @@ inline void py_to_toml_value(py::handle obj, Insert&& ins) {
     return out;
 }
 
-inline void write_toml(const file& f, py::handle obj) {
+/// `obj` as TOML text: a mapping, the table built with the GIL, written out without it.
+[[nodiscard]] inline std::string encode_toml(py::handle obj) {
     if (!py::isinstance<py::dict>(obj)) {
         throw std::invalid_argument(
             "toml write: content must be a mapping (TOML documents are tables)");
@@ -184,7 +185,7 @@ inline void write_toml(const file& f, py::handle obj) {
     py::gil_scoped_release nogil;
     std::stringstream ss;
     ss << root << '\n';
-    write_text_file(f, ss.str());
+    return std::move(ss).str();
 }
 
 }  // namespace pygim::pathlike::detail
@@ -205,8 +206,10 @@ struct toml {
     };
 
     static void on_load() { detail::import_datetime_api(); }
-    static py::object load(const file& f, detail::KeyCache& keys) { return detail::load_toml(f, keys); }
-    static void write(const file& f, py::handle obj) { detail::write_toml(f, obj); }
+    static py::object decode(std::string bytes, std::string_view origin, detail::KeyCache& keys) {
+        return detail::decode_toml(std::move(bytes), origin, keys);
+    }
+    static std::string encode(py::handle obj) { return detail::encode_toml(obj); }
 };
 
 }  // namespace pygim::pathlike::engines
