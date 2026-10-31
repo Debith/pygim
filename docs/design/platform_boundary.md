@@ -1,6 +1,6 @@
 # The operating system behind a boundary
 
-Status: decided 2026-10-31 (D77); not built yet · Owner: Debith
+Status: decided 2026-10-31 (D77); steps 1–6 built, 7–9 to come (18 conditionals left) · Owner: Debith
 
 The operating system is a model foreign to pygim's domain, as Python's object model is. The domain —
 pathlib's rules, the glob, the parser, similarity — states its rules once, the same on every system.
