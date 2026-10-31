@@ -26,6 +26,7 @@
 #include <vector>
 
 #include "../utils/chars.h"
+#include "../utils/hash.h"
 
 namespace pygim::datagen {
 
@@ -47,14 +48,10 @@ namespace pygim::datagen {
 
 // ── Fast PRNG (xorshift64*) ────────────────────────────────────────────────
 
-/// SplitMix64's finaliser: a bijection on 64 bits that spreads one changed bit of its input over
-/// all of its output, so neighbouring seeds start far apart.
-[[nodiscard]] constexpr uint64_t mix_seed(uint64_t x) noexcept {
-    x += 0x9E3779B97F4A7C15ull;
-    x = (x ^ (x >> 30)) * 0xBF58476D1CE4E5B9ull;
-    x = (x ^ (x >> 27)) * 0x94D049BB133111EBull;
-    return x ^ (x >> 31);
-}
+/// A seed as SplitMix64's first step makes it: its golden gamma added, then the finaliser
+/// (hash::mix64), a bijection that spreads one changed bit over all 64, so neighbouring seeds start
+/// far apart.
+[[nodiscard]] constexpr uint64_t mix_seed(uint64_t seed) noexcept { return hash::mix64(seed + 0x9E3779B97F4A7C15ull); }
 static_assert(mix_seed(42) != mix_seed(43) && mix_seed(0) != 0);
 
 struct Xorshift64 {
