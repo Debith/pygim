@@ -687,6 +687,7 @@ def test_ctrl_c_stops_a_parse(temp_dir):
 
 # ── the generated tables ────────────────────────────────────────────────────
 @pytest.mark.skipif(shutil.which("python3.14") is None, reason="the tables describe Python 3.14's ast module")
+@pytest.mark.skipif(not SRC.is_dir(), reason="source tree not present (testing the installed package)")
 @pytest.mark.parametrize("generator, header", [("gen_ast_tables.py", "ast_tables.gen.h"), ("gen_unicode_tables.py", "unicode_tables.gen.h"),
                                                ("gen_codec_tables.py", "codec_tables.gen.h")])
 def test_the_generated_tables_are_python_3_14s(generator, header):

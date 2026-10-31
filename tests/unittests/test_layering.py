@@ -35,7 +35,8 @@ def _declares_core(header):
 # Every header that says it is a core one: the marker is the list, so a core header is never left
 # off it by hand (pathlike/scalars.h and utils/pieces.h were, until 2026-10-30).
 CORE = [h for h in _headers("**/*.h") if "third_party" not in h.parts and _declares_core(h)]
-assert len(CORE) >= 54, f"only {len(CORE)} headers say they are CORE: the marker is the list"
+# Where the source tree is (CI tests the installed package without it, and skips this module).
+assert not ROOT.is_dir() or len(CORE) >= 54, f"only {len(CORE)} headers say they are CORE: the marker is the list"
 
 
 PYBIND = re.compile(r'#\s*include\s*[<"]pybind11/')
