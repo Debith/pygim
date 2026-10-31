@@ -24,6 +24,7 @@ Two more were found while probing these, errors that never reach Python at all: 
 directory, and a JSONL file whose last document is cut short.
 """
 
+import os
 import pathlib
 import re
 
@@ -256,6 +257,19 @@ def test_one_extension_cannot_rename_another_extensions_errors(tmp_path):
 
 
 # ─── 4. The type follows the meaning ─────────────────────────────────────────
+
+def test_an_except_clause_naming_the_subclass_catches_it(tmp_path):
+    """`except FileNotFoundError` catches pathlike's, worded as os.strerror words it. Set as
+    PyErr_SetObject(OSError, args), the error was a FileNotFoundError raised as type OSError: an
+    except clause on Python 3.10 and older compares that type, and caught nothing (PR #39's 3.9 and
+    3.10 jobs; pytest.raises compares the instance, and passed). And MSVC's words were lowercase."""
+    try:
+        path(str(tmp_path / "missing")).read_bytes()
+    except FileNotFoundError as caught:
+        assert caught.strerror == os.strerror(caught.errno) and caught.filename == str(tmp_path / "missing")
+    else:
+        pytest.fail("nothing raised")
+
 
 # name: (the call on pathlib, the same call on pygim, the target under the test's folder)
 FILE_ERRORS = {

@@ -18,6 +18,7 @@
 // materialize.h (scalars -> Python values, KeyCache) and common.h (UTF-8 gate,
 // file output). core.h and engine_list.h stay free of pybind11 and every parser.
 
+#include <cerrno>
 #include <concepts>
 #include <cstddef>
 #include <stdexcept>
@@ -93,18 +94,21 @@ void write(engine_list<Es...>, const engine_info* e, const file& f, py::handle o
 }
 
 // A file operation the OS refused (the core's file_error) raises the OSError pathlib raises for the
-// same call. OSError(errno, strerror, filename) is how Python picks the subclass itself —
-// FileNotFoundError, IsADirectoryError, FileExistsError, PermissionError — so nothing here names
-// them. Local to this module: only its own functions throw file_error.
+// same call, made by Python's own PyErr_SetFromErrnoWithFilenameObject: it picks the subclass by
+// errno — FileNotFoundError, IsADirectoryError, FileExistsError, PermissionError — so nothing here
+// names them, raises the error as that subclass, and words it as os.strerror does. Set as
+// PyErr_SetObject(OSError, (errno, words, filename)), the error was a PermissionError whose raised
+// type was OSError, which an `except PermissionError` on Python 3.10 and older does not match, and
+// MSVC's words were lowercase. Local to this module: only its own functions throw file_error.
 inline void register_file_errors() {
     py::register_local_exception_translator([](std::exception_ptr p) {
         if (!p) return;
         try {
             std::rethrow_exception(p);
         } catch (const file_error& e) {
-            const int err = e.code().value();
-            const py::tuple args = py::make_tuple(err, std::generic_category().message(err), str_from_text(e.path));
-            PyErr_SetObject(PyExc_OSError, args.ptr());
+            const py::object name = str_from_text(e.path);
+            errno = e.code().value();   // set last: making the name may change errno
+            PyErr_SetFromErrnoWithFilenameObject(PyExc_OSError, name.ptr());
         } catch (const glob_unsupported& e) {   // a pattern that is not relative, as pathlib refuses it
             PyErr_SetString(PyExc_NotImplementedError, e.what());
         }
