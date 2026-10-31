@@ -462,6 +462,91 @@ template <class Weight>
 }
 static_assert(reach(10, 0, 3, 0.6, [](std::size_t j) { return std::uint64_t{10} + 10 * j; }) == 2);   // ceilings 1, 0.67, 0.5
 
+namespace detail {
+
+// Defined at namespace scope, before the solver whose members are made of it: nested in the
+// solver, its member functions' bodies were parsed only once the solver was complete, after
+// its members had instantiated it, and clang then found costs() undefined in the proofs'
+// constant evaluation (PR #39, macOS).
+/// Shortest augmenting paths, the rows added one at a time (Kuhn-Munkres in e-maxx.ru's form),
+/// on the costs -w (k x K, row-major). Every column a row's search reaches is matched but the
+/// last, and some column is always free (k ≤ K), its potential still 0; so, for weights under
+/// `top`, the potentials of the rows added stay in [-top, 0], the columns' in [-top, 0], and
+/// every reduced cost in [-top, 2·top] (the first step of a row's search, from its potential 0,
+/// reads costs from -top): I may be 32 bits wide while 2·top < 2^31. assignment_solver's
+/// narrow_top, 2^28, keeps a factor of four from that edge; no class's methods share that many
+/// subtrees. The scan branches past a reached column; the update of the reduced costs masks it
+/// instead: on the 744,955 matrices of CPython's stdlib that reach the algorithm, one thread, 32
+/// bits, columns from 0 and the masked update took 416-432 ms where 64 bits, a column 0 standing
+/// for the row being added and branches took 472-479 (a branch to skip a reached column's
+/// subtraction alone cost 15%; 2026-10-28).
+template <class I>
+class hungarian {
+public:
+    [[nodiscard]] constexpr std::vector<I>& costs() noexcept { return m_cost; }
+
+    constexpr std::uint64_t solve(std::size_t n, std::size_t m) {
+        constexpr std::uint32_t none = std::numeric_limits<std::uint32_t>::max();
+        constexpr I unreached = std::numeric_limits<I>::max();
+        m_u.assign(n, 0);
+        m_v.assign(m, 0);
+        m_row_of.assign(m, none);
+        m_reduced.resize(m);
+        m_from.resize(m);
+        for (std::uint32_t added = 0; added < n; ++added) {
+            std::fill(m_reduced.begin(), m_reduced.end(), unreached);   // each column's least reduced cost from the rows reached
+            m_reached.assign(m, 0);                                       // all ones once reached
+            m_tree.clear();
+            std::uint32_t i = added, from = none, to = none;   // the row searched from, the column that reached it
+            for (;;) {
+                const I* row = m_cost.data() + std::size_t{i} * m;
+                const I ui = m_u[i];
+                I delta = unreached;
+                for (std::uint32_t j = 0; j < m; ++j) {
+                    if (m_reached[j]) continue;
+                    const I reduced = row[j] - ui - m_v[j];
+                    if (reduced < m_reduced[j]) {
+                        m_reduced[j] = reduced;
+                        m_from[j] = from;
+                    }
+                    if (m_reduced[j] < delta) {
+                        delta = m_reduced[j];
+                        to = j;
+                    }
+                }
+                // the potentials: the rows reached up by delta, their columns down; the rest's reduced costs down
+                m_u[added] += delta;
+                for (std::uint32_t j : m_tree) {
+                    m_u[m_row_of[j]] += delta;
+                    m_v[j] -= delta;
+                }
+                for (std::uint32_t j = 0; j < m; ++j) m_reduced[j] -= delta & ~m_reached[j];
+                m_reached[to] = ~I{0};
+                m_tree.push_back(to);
+                if (m_row_of[to] == none) break;   // a free column: the path ends
+                i = m_row_of[to];
+                from = to;
+            }
+            for (std::uint32_t j = to; j != none;) {   // along the path, each column takes the row of the one before it
+                const std::uint32_t before = m_from[j];
+                m_row_of[j] = before == none ? added : m_row_of[before];
+                j = before;
+            }
+        }
+        std::uint64_t total = 0;
+        for (std::size_t j = 0; j < m; ++j) {
+            if (m_row_of[j] != none) total += static_cast<std::uint64_t>(-m_cost[std::size_t{m_row_of[j]} * m + j]);
+        }
+        return total;
+    }
+
+private:
+    std::vector<I> m_cost, m_u, m_v, m_reduced, m_reached;
+    std::vector<std::uint32_t> m_row_of, m_from, m_tree;
+};
+
+}  // namespace detail
+
 /// The maximum-weight assignment of `rows` to `cols` (w is row-major,
 /// rows x cols): pairs every element of the smaller side with a distinct one
 /// of the larger, maximising Σ w, and returns that sum. The Hungarian
@@ -547,88 +632,11 @@ public:
     }
 
 private:
-    /// Shortest augmenting paths, the rows added one at a time (Kuhn-Munkres in e-maxx.ru's form),
-    /// on the costs -w (k x K, row-major). Every column a row's search reaches is matched but the
-    /// last, and some column is always free (k ≤ K), its potential still 0; so, for weights under
-    /// `top`, the potentials of the rows added stay in [-top, 0], the columns' in [-top, 0], and
-    /// every reduced cost in [-top, 2·top] (the first step of a row's search, from its potential 0,
-    /// reads costs from -top): I may be 32 bits wide while 2·top < 2^31. narrow_top, 2^28, keeps a
-    /// factor of four from that edge; no class's methods share that many subtrees. The scan
-    /// branches past a reached column; the update of the reduced costs masks it instead: on the
-    /// 744,955 matrices of CPython's stdlib that reach the algorithm, one thread, 32 bits, columns
-    /// from 0 and the masked update took 416-432 ms where 64 bits, a column 0 standing for the row
-    /// being added and branches took 472-479 (a branch to skip a reached column's subtraction alone
-    /// cost 15%; 2026-10-28).
-    template <class I>
-    class hungarian {
-    public:
-        [[nodiscard]] constexpr std::vector<I>& costs() noexcept { return m_cost; }
-
-        constexpr std::uint64_t solve(std::size_t n, std::size_t m) {
-            constexpr std::uint32_t none = std::numeric_limits<std::uint32_t>::max();
-            constexpr I unreached = std::numeric_limits<I>::max();
-            m_u.assign(n, 0);
-            m_v.assign(m, 0);
-            m_row_of.assign(m, none);
-            m_reduced.resize(m);
-            m_from.resize(m);
-            for (std::uint32_t added = 0; added < n; ++added) {
-                std::fill(m_reduced.begin(), m_reduced.end(), unreached);   // each column's least reduced cost from the rows reached
-                m_reached.assign(m, 0);                                       // all ones once reached
-                m_tree.clear();
-                std::uint32_t i = added, from = none, to = none;   // the row searched from, the column that reached it
-                for (;;) {
-                    const I* row = m_cost.data() + std::size_t{i} * m;
-                    const I ui = m_u[i];
-                    I delta = unreached;
-                    for (std::uint32_t j = 0; j < m; ++j) {
-                        if (m_reached[j]) continue;
-                        const I reduced = row[j] - ui - m_v[j];
-                        if (reduced < m_reduced[j]) {
-                            m_reduced[j] = reduced;
-                            m_from[j] = from;
-                        }
-                        if (m_reduced[j] < delta) {
-                            delta = m_reduced[j];
-                            to = j;
-                        }
-                    }
-                    // the potentials: the rows reached up by delta, their columns down; the rest's reduced costs down
-                    m_u[added] += delta;
-                    for (std::uint32_t j : m_tree) {
-                        m_u[m_row_of[j]] += delta;
-                        m_v[j] -= delta;
-                    }
-                    for (std::uint32_t j = 0; j < m; ++j) m_reduced[j] -= delta & ~m_reached[j];
-                    m_reached[to] = ~I{0};
-                    m_tree.push_back(to);
-                    if (m_row_of[to] == none) break;   // a free column: the path ends
-                    i = m_row_of[to];
-                    from = to;
-                }
-                for (std::uint32_t j = to; j != none;) {   // along the path, each column takes the row of the one before it
-                    const std::uint32_t before = m_from[j];
-                    m_row_of[j] = before == none ? added : m_row_of[before];
-                    j = before;
-                }
-            }
-            std::uint64_t total = 0;
-            for (std::size_t j = 0; j < m; ++j) {
-                if (m_row_of[j] != none) total += static_cast<std::uint64_t>(-m_cost[std::size_t{m_row_of[j]} * m + j]);
-            }
-            return total;
-        }
-
-    private:
-        std::vector<I> m_cost, m_u, m_v, m_reduced, m_reached;
-        std::vector<std::uint32_t> m_row_of, m_from, m_tree;
-    };
-
     static constexpr std::uint64_t narrow_top = std::uint64_t{1} << 28;
 
     std::vector<std::uint8_t> m_taken;
-    hungarian<std::int32_t> m_narrow;
-    hungarian<std::int64_t> m_wide;
+    detail::hungarian<std::int32_t> m_narrow;
+    detail::hungarian<std::int64_t> m_wide;
 };
 
 static_assert([] {   // the example above: its bound is 9, and the algorithm finds 8
