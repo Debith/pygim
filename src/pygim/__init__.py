@@ -70,11 +70,19 @@ def create_df(
     polars.DataFrame or pyarrow.Table
         Polars DataFrame by default, PyArrow Table when ``format="arrow"``.
 
+    Raises
+    ------
+    ValueError
+        A format other than ``"polars"`` or ``"arrow"``, a type it does not know, ``rows`` below
+        1, or a ``null_fraction`` outside [0.0, 1.0].
+
     Examples
     --------
     >>> import pygim
     >>> df = pygim.create_df({"id": "int32", "name": "string"}, rows=10)  # doctest: +SKIP
     """
+    if format not in ("polars", "arrow"):
+        raise ValueError(f"format must be 'polars' or 'arrow', not {format!r}")
     import pyarrow as pa  # before the extension: it links against Arrow's libs
 
     from pygim.datagen import generate as _generate  # C++ extension
