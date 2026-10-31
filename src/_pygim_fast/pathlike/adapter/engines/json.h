@@ -20,6 +20,19 @@
 
 namespace pygim::pathlike::detail {
 
+/// The file's bytes with simdjson's padding past them, unfilled: room the parser may read into, so
+/// it parses them where they were read. Found 2026-10-31: each read was copied into a
+/// padded_string, a second buffer as large as the file.
+[[nodiscard]] inline std::string read_padded_for_simdjson(const file& f) {
+    std::string bytes;
+    const std::size_t got = f.read_bytes_into([&bytes](std::size_t n) {
+        bytes.resize_and_overwrite(n + simdjson::SIMDJSON_PADDING, [](char*, std::size_t m) noexcept { return m; });
+        return bytes.data();
+    });
+    bytes.resize(got);   // shorter: the capacity, and the padding in it, stay
+    return bytes;
+}
+
 // Recursively materialise a simdjson DOM element as a native Python object.
 // JSON semantics are exact: object keys are strings, numbers arrive already
 // typed by the parser (int64 / uint64 / double).
@@ -55,12 +68,12 @@ namespace pygim::pathlike::detail {
     simdjson::dom::element doc;
     {
         py::gil_scoped_release nogil;
-        const std::string bytes = f.read_bytes();
+        const std::string bytes = read_padded_for_simdjson(f);
         // Same encoding gate as YAML: UTF-16 input otherwise dies with a
         // misleading UNESCAPED_CHARS parse error instead of naming the cause.
         require_utf8(bytes, f.fspath());
         try {
-            doc = parser.parse(simdjson::padded_string(bytes));
+            doc = parser.parse(bytes);   // padded already: parsed in place, not copied
         } catch (const simdjson::simdjson_error& e) {
             throw std::invalid_argument("JSON parse error (" + f.fspath() + "): " + e.what());
         }

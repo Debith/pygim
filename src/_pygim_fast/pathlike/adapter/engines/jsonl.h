@@ -35,13 +35,12 @@ namespace pygim::pathlike::detail {
 
 [[nodiscard]] inline py::object load_jsonl(const file& f, KeyCache& keys) {
     simdjson::dom::parser parser;   // must outlive the elements it returns
-    simdjson::padded_string padded;
+    std::string padded;   // the file, simdjson's padding past it: the documents point into it
     simdjson::dom::document_stream docs;
     {
         py::gil_scoped_release nogil;
-        const std::string bytes = f.read_bytes();
-        require_utf8(bytes, f.fspath());
-        padded = simdjson::padded_string(bytes);
+        padded = read_padded_for_simdjson(f);
+        require_utf8(padded, f.fspath());
         // parse_many() skips a UTF-8 BOM and yields zero documents for empty
         // input (both documented), so there is nothing to special-case here.
         if (auto err = parser.parse_many(padded).get(docs); err) {
