@@ -383,10 +383,11 @@ def test_each_test_module_has_a_name_of_its_own():
 # 2026-10-31 (59), 56 once the path rules moved (path_rules.h), 47 once the listing did, 45 once the
 # errno translation did, 39 once the file system's writes did (platform/files.h), 37 once the reads
 # did (platform/reads.h), 25 once the process's calls did (platform/process.h), 18 once the signals
-# did (platform/signals.h), 7 once the machine did (platform/caches.h, memory.h, clocks.h). It may
-# fall, as each part moves behind the boundary; it may not rise. A compiler's own checks (_MSC_VER,
-# __clang__) are build portability, not the system's, and are not counted.
-OS_CONDITIONALS = 7
+# did (platform/signals.h), 7 once the machine did (platform/caches.h, memory.h, clocks.h), 3 once
+# the ODBC driver's loading did (platform/libraries.h). It may fall, as each part moves behind the
+# boundary; it may not rise. A compiler's own checks (_MSC_VER, __clang__) are build portability,
+# not the system's, and are not counted.
+OS_CONDITIONALS = 3
 OS_MACRO = re.compile(r"^[ \t]*#[ \t]*(?:if|ifdef|ifndef|elif)\b.*\b(?:_WIN32|_WIN64|__APPLE__|__linux__|__unix__|__FreeBSD__)\b", re.M)
 
 

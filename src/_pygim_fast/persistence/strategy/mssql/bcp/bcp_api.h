@@ -11,15 +11,14 @@
 // that header is only present when the driver SDK is installed, so relying on
 // it would make the build environment-dependent.  Instead the small set of BCP
 // constants/types is declared here and the entry points are resolved from the
-// driver library at runtime on every platform (dlopen on POSIX, LoadLibrary on
-// Windows).
+// driver library at runtime on every platform (platform/libraries.h: dlopen on
+// POSIX, LoadLibrary on Windows).
+
+#include <array>
 
 #include "../../../odbc_headers.h"  // windows.h-before-sql.h on Windows
-
-#if !defined(_WIN32) && !defined(_WIN64)
-#include <dlfcn.h>
-#include <glob.h>
-#endif
+#include "../../../../platform/libraries.h"
+#include "../../../../platform/native.h"
 
 // BCP-specific constants not provided by the ODBC driver-manager headers.
 #ifndef SQL_COPT_SS_BCP
@@ -33,17 +32,14 @@
 #define DB_IN 1
 #endif
 
-// Type aliases used by BCP.  On Windows BYTE/LPCWSTR already exist with these
-// exact underlying types (SQLWCHAR is wchar_t there), and redeclaring an alias
-// to the same type is well-formed; DBINT/LPCBYTE exist only in the driver SDK.
+// Type aliases used by BCP.  On Windows BYTE already exists with this exact
+// underlying type, and redeclaring an alias to the same type is well-formed;
+// DBINT/LPCBYTE exist only in the driver SDK.
 #ifndef PYGIM_BCP_TYPES_DEFINED
 #define PYGIM_BCP_TYPES_DEFINED
 using DBINT   = int;
 using BYTE    = unsigned char;
 using LPCBYTE = const BYTE*;
-#if !defined(_WIN32) && !defined(_WIN64)
-using LPCWSTR = const SQLWCHAR*;
-#endif
 #endif
 
 #include "../../../odbc_compat.h"
@@ -79,12 +75,28 @@ namespace sql_type {
     inline constexpr int varlen_data = -10;  // variable-length marker
 } // namespace sql_type
 
+/// A name as bcp_initW takes it: UTF-16 (SQLWCHAR is 16 bits wide on every system's ODBC; on
+/// Windows it is wchar_t, so this is the SDK's LPCWSTR).
+using wide_text = const SQLWCHAR*;
+
+// The driver's library as each system names it, newest first, and where POSIX installs its
+// versioned files when the loader's search path has none.
+template <platform::family F> struct driver_files;
+template <> struct driver_files<platform::family::windows> {
+    static constexpr std::array<const char*, 2> names{"msodbcsql18.dll", "msodbcsql17.dll"};
+    static constexpr const char* installed = nullptr;
+};
+template <> struct driver_files<platform::family::posix> {
+    static constexpr std::array<const char*, 1> names{"libmsodbcsql-18.so"};   // the SONAME: survives driver updates
+    static constexpr const char* installed = "/opt/microsoft/msodbcsql*/lib64/libmsodbcsql-*.so.*";
+};
+
 inline constexpr int kSucceed  = 1;
 inline constexpr int kFail     = 0;
 inline constexpr int kBcpHints = 6;
 
 // ── Function pointer types ──────────────────────────────────────────────────
-using bcp_initW_fn   = RETCODE(*)(SQLHDBC, LPCWSTR, LPCWSTR, LPCWSTR, int);
+using bcp_initW_fn   = RETCODE(*)(SQLHDBC, wide_text, wide_text, wide_text, int);
 using bcp_bind_fn    = RETCODE(*)(SQLHDBC, LPCBYTE, int, DBINT, LPCBYTE, int, int, int);
 using bcp_sendrow_fn = RETCODE(*)(SQLHDBC);
 using bcp_batch_fn   = DBINT(*)(SQLHDBC);
@@ -116,56 +128,17 @@ struct BcpApi {
 [[nodiscard]] inline const BcpApi& ensure_bcp_api() {
     static const BcpApi api = [] {
         BcpApi a;
-#if defined(_WIN32) || defined(_WIN64)
-        HMODULE handle = LoadLibraryW(L"msodbcsql18.dll");
-        if (!handle) handle = LoadLibraryW(L"msodbcsql17.dll");
-
-        if (handle) {
-            const auto sym = [handle](const char* name) {
-                return GetProcAddress(handle, name);
-            };
-            a.init    = reinterpret_cast<bcp_initW_fn>(sym("bcp_initW"));
-            a.bind    = reinterpret_cast<bcp_bind_fn>(sym("bcp_bind"));
-            a.sendrow = reinterpret_cast<bcp_sendrow_fn>(sym("bcp_sendrow"));
-            a.batch   = reinterpret_cast<bcp_batch_fn>(sym("bcp_batch"));
-            a.done    = reinterpret_cast<bcp_done_fn>(sym("bcp_done"));
-            a.collen  = reinterpret_cast<bcp_collen_fn>(sym("bcp_collen"));
-            a.colptr  = reinterpret_cast<bcp_colptr_fn>(sym("bcp_colptr"));
-            a.control = reinterpret_cast<bcp_control_fn>(sym("bcp_control"));
-        }
-#else
-        // Try the SONAME symlink first (survives driver updates),
-        // then glob for the versioned .so.
-        static constexpr const char* soname = "libmsodbcsql-18.so";
-        static constexpr const char* glob_pattern =
-            "/opt/microsoft/msodbcsql*/lib64/libmsodbcsql-*.so.*";
-
-        void* handle = nullptr;
-
-        // Pass 1: SONAME (ld.so resolves if in ldconfig)
-        handle = dlopen(soname, RTLD_NOW | RTLD_GLOBAL);
-
-        // Pass 2: glob for any installed versioned .so
-        if (!handle) {
-            glob_t g{};
-            if (glob(glob_pattern, 0, nullptr, &g) == 0 && g.gl_pathc > 0) {
-                // Take the last match (highest version in sorted glob output)
-                handle = dlopen(g.gl_pathv[g.gl_pathc - 1], RTLD_NOW | RTLD_GLOBAL);
-            }
-            globfree(&g);
-        }
-
-        if (handle) {
-            a.init    = reinterpret_cast<bcp_initW_fn>(dlsym(handle, "bcp_initW"));
-            a.bind    = reinterpret_cast<bcp_bind_fn>(dlsym(handle, "bcp_bind"));
-            a.sendrow = reinterpret_cast<bcp_sendrow_fn>(dlsym(handle, "bcp_sendrow"));
-            a.batch   = reinterpret_cast<bcp_batch_fn>(dlsym(handle, "bcp_batch"));
-            a.done    = reinterpret_cast<bcp_done_fn>(dlsym(handle, "bcp_done"));
-            a.collen  = reinterpret_cast<bcp_collen_fn>(dlsym(handle, "bcp_collen"));
-            a.colptr  = reinterpret_cast<bcp_colptr_fn>(dlsym(handle, "bcp_colptr"));
-            a.control = reinterpret_cast<bcp_control_fn>(dlsym(handle, "bcp_control"));
-        }
-#endif
+        using files = driver_files<platform::native>;
+        platform::library lib = platform::library::first_of(files::names);
+        if (!lib && files::installed != nullptr) lib = platform::library::last_match(files::installed);
+        a.init    = lib.function<bcp_initW_fn>("bcp_initW");
+        a.bind    = lib.function<bcp_bind_fn>("bcp_bind");
+        a.sendrow = lib.function<bcp_sendrow_fn>("bcp_sendrow");
+        a.batch   = lib.function<bcp_batch_fn>("bcp_batch");
+        a.done    = lib.function<bcp_done_fn>("bcp_done");
+        a.collen  = lib.function<bcp_collen_fn>("bcp_collen");
+        a.colptr  = lib.function<bcp_colptr_fn>("bcp_colptr");
+        a.control = lib.function<bcp_control_fn>("bcp_control");
         return a;
     }();
 
