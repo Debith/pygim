@@ -1592,3 +1592,102 @@ def test_expanduser_keeps_a_typed_paths_engine(a_home):
     expanded = pathlike.yamlpath("~/a.yaml").expanduser()
     assert type(expanded) is pathlike.yamlpath
     assert str(expanded) == str(pathlib.Path("~/a.yaml").expanduser())
+
+
+# --------------------------------------------------------------------------- #
+# read_text / write_text (pathlib parity, D86)
+# --------------------------------------------------------------------------- #
+TEXTS = {"plain": "a plain line\n", "unicode": "hé € \U0001F600\n", "empty": "",
+         "crlf": "one\r\ntwo\r\n", "cr": "one\rtwo\r", "mixed": "a\nb\r\nc\rd"}
+
+
+def _reference_read(file, encoding="utf-8", errors=None, newline=None):
+    """What pathlib's read_text answers on 3.13+: open() in text mode, read whole."""
+    with open(file, encoding=encoding, errors=errors, newline=newline) as f:
+        return f.read()
+
+
+@pytest.mark.parametrize("name", sorted(TEXTS))
+@pytest.mark.parametrize("newline", [None, "", "\n", "\r", "\r\n"], ids=["none", "empty", "lf", "cr", "crlf"])
+def test_read_text_is_what_python_reads(temp_dir, name, newline):
+    f = temp_dir / "t.txt"
+    f.write_bytes(TEXTS[name].encode("utf-8"))
+    assert pygim.path(f).read_text(newline=newline) == _reference_read(f, newline=newline)
+
+
+def test_read_text_reads_utf8_by_default_whatever_the_locale(temp_dir):
+    """As Python 3.15 does everywhere (PEP 686): pathlib's encoding=None before it is the locale's."""
+    f = temp_dir / "t.txt"
+    f.write_bytes(TEXTS["unicode"].encode("utf-8"))
+    assert pygim.path(f).read_text() == TEXTS["unicode"]
+
+
+@pytest.mark.parametrize("encoding", ["latin-1", "utf-16", "cp1252", "utf-8-sig"])
+def test_read_text_decodes_as_its_encoding_says(temp_dir, encoding):
+    f = temp_dir / "t.txt"
+    f.write_bytes("café au lait\n".encode(encoding))
+    assert pygim.path(f).read_text(encoding=encoding) == pathlib.Path(f).read_text(encoding=encoding)
+
+
+@pytest.mark.parametrize("errors", ["replace", "ignore", "surrogateescape", "backslashreplace"])
+def test_read_text_handles_a_bad_byte_as_its_errors_say(temp_dir, errors):
+    f = temp_dir / "t.txt"
+    f.write_bytes(b"ok \xff\xfe bad\n")
+    assert pygim.path(f).read_text(errors=errors) == pathlib.Path(f).read_text(encoding="utf-8", errors=errors)
+
+
+def test_read_text_of_a_bad_byte_is_a_unicode_decode_error(temp_dir):
+    f = temp_dir / "t.txt"
+    f.write_bytes(b"ok \xff\n")
+    with pytest.raises(UnicodeDecodeError):
+        pathlib.Path(f).read_text(encoding="utf-8")
+    with pytest.raises(UnicodeDecodeError):
+        pygim.path(f).read_text()
+
+
+def test_read_text_of_nothing_there_fails_as_pathlibs_does(temp_dir):
+    missing = temp_dir / "missing.txt"
+    assert _refusal(pygim.path(missing).read_text) == _refusal(lambda: missing.read_text(encoding="utf-8"))
+
+
+@pytest.mark.parametrize("name", sorted(TEXTS))
+@pytest.mark.parametrize("newline", [None, "", "\n", "\r", "\r\n"], ids=["none", "empty", "lf", "cr", "crlf"])
+def test_write_text_writes_what_pathlib_writes(temp_dir, name, newline):
+    ours, theirs = temp_dir / "ours.txt", temp_dir / "theirs.txt"
+    written = pygim.path(ours).write_text(TEXTS[name], newline=newline)
+    assert written == theirs.write_text(TEXTS[name], encoding="utf-8", newline=newline)
+    assert ours.read_bytes() == theirs.read_bytes()
+
+
+@pytest.mark.parametrize("encoding", ["latin-1", "utf-16", "utf-8-sig"])
+def test_write_text_encodes_as_its_encoding_says(temp_dir, encoding):
+    ours, theirs = temp_dir / "ours.txt", temp_dir / "theirs.txt"
+    pygim.path(ours).write_text("café\n", encoding=encoding)
+    theirs.write_text("café\n", encoding=encoding)
+    assert ours.read_bytes() == theirs.read_bytes()
+
+
+def test_write_text_of_what_its_encoding_cannot_hold_follows_errors(temp_dir):
+    ours, theirs = temp_dir / "ours.txt", temp_dir / "theirs.txt"
+    with pytest.raises(UnicodeEncodeError):
+        pygim.path(ours).write_text("€", encoding="latin-1")
+    pygim.path(ours).write_text("€!", encoding="latin-1", errors="replace")
+    theirs.write_text("€!", encoding="latin-1", errors="replace")
+    assert ours.read_bytes() == theirs.read_bytes() == b"?!"
+
+
+@pytest.mark.parametrize("data", [b"bytes", 3, None], ids=["bytes", "int", "none"])
+def test_write_text_of_what_is_no_str_is_a_type_error(temp_dir, data):
+    with pytest.raises(TypeError):
+        (temp_dir / "theirs.txt").write_text(data, encoding="utf-8")
+    with pytest.raises(TypeError):
+        pygim.path(temp_dir / "ours.txt").write_text(data)
+
+
+def test_a_newline_that_is_none_of_pythons_is_a_value_error(temp_dir):
+    f = temp_dir / "t.txt"
+    f.write_bytes(b"x")
+    with pytest.raises(ValueError, match="illegal newline value"):
+        pygim.path(f).read_text(newline="\t")
+    with pytest.raises(ValueError, match="illegal newline value"):
+        pygim.path(f).write_text("x", newline="\t")

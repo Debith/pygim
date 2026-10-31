@@ -63,7 +63,7 @@ def _local_paths(value, where):
 def _cpu_model():
     if platform.system() == "Linux":
         try:
-            for line in path("/proc/cpuinfo").read_bytes().decode().splitlines():
+            for line in path("/proc/cpuinfo").read_text().splitlines():
                 if line.startswith("model name"):
                     return line.split(":", 1)[1].strip()
         except OSError:

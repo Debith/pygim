@@ -101,6 +101,11 @@ class path(os.PathLike[str]):
     def is_relative_to(self, other: str | bytes | os.PathLike[str], /) -> bool: ...
     def absolute(self) -> path: ...
     def resolve(self) -> path: ...
+    def read_text(self, encoding: str = ..., errors: str | None = ..., newline: str | None = ...) -> str:
+        """pathlib's read_text(): the file decoded (UTF-8 unless encoding says, whatever the locale, as Python 3.15 does), every line ending read as \\n unless newline is given."""
+    def write_text(self, data: str, encoding: str = ..., errors: str | None = ..., newline: str | None = ...,
+                   *, atomic: bool = ...) -> int:
+        """pathlib's write_text(): data encoded (UTF-8 unless encoding says), each \\n written as os.linesep unless newline is given; the characters written. atomic=True as for write()."""
     def expanduser(self) -> path:
         """pathlib's expanduser(): a leading ~ or ~user replaced by that user's home; RuntimeError when no home is known."""
 

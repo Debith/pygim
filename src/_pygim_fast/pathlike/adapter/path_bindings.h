@@ -77,6 +77,24 @@ inline char* resized_bytes(py::object& bytes, std::size_t n) {
     return PyBytes_AS_STRING(raw);
 }
 
+/// open()'s newline argument: None (universal newlines), "", "\n", "\r" or "\r\n"; any other a
+/// ValueError, as open() raises, and a non-str a TypeError.
+inline std::optional<std::string> newline_of(py::handle newline) {
+    if (newline.is_none()) return std::nullopt;
+    if (!PyUnicode_Check(newline.ptr())) throw py::type_error("newline must be str or None");
+    const std::string n = py::cast<std::string>(newline);
+    if (n != "" && n != "\n" && n != "\r" && n != "\r\n") throw py::value_error("illegal newline value: " + py::repr(newline).cast<std::string>());
+    return n;
+}
+
+/// `text` with each `from` replaced by `to` (str.replace through the C API).
+inline py::object replaced(const py::object& text, const char* from, std::string_view to) {
+    py::object out = py::reinterpret_steal<py::object>(
+        PyUnicode_Replace(text.ptr(), py::str(from).ptr(), py::str(std::string(to)).ptr(), -1));
+    if (!out) throw py::error_already_set();
+    return out;
+}
+
 /// Two paths in pathlib's order: their texts as str() gives them, rendered into this thread's two
 /// strings, whose room a sort reuses comparison after comparison (each rendered into a new string
 /// made sorting 100,000 paths 790 ms, pathlib's 434). One row of one table is itself.
@@ -391,6 +409,45 @@ py::class_<pathview> bind_path(engine_list<Es...> es, py::module_& m, const path
                 resized_bytes(bytes, got);
                 return bytes;
             }, "The raw file bytes, undecoded.")
+        .def("read_text", [](const pathview& v, const std::string& encoding, const std::optional<std::string>& errors, py::handle newline) {
+                const std::optional<std::string> nl = newline_of(newline);   // checked before the read, as open() does
+                const file f = v.value();
+                std::string bytes;
+                {
+                    py::gil_scoped_release nogil;
+                    bytes = f.read_bytes();
+                }
+                py::object text = py::reinterpret_steal<py::object>(PyUnicode_Decode(
+                    bytes.data(), static_cast<Py_ssize_t>(bytes.size()), encoding.c_str(), errors ? errors->c_str() : nullptr));
+                if (!text) throw py::error_already_set();
+                if (!nl && PyUnicode_FindChar(text.ptr(), '\r', 0, PyUnicode_GetLength(text.ptr()), 1) >= 0) {
+                    text = replaced(replaced(text, "\r\n", "\n"), "\r", "\n");   // universal newlines
+                }
+                return text;
+            }, py::arg("encoding") = "utf-8", py::arg("errors") = py::none(), py::arg("newline") = py::none(),
+            "pathlib's read_text(): the file decoded (UTF-8 unless encoding says, whatever the locale, as Python 3.15 "
+            "does), every line ending read as \\n unless newline is given.")
+        .def("write_text", [](const pathview& v, py::handle data, const std::string& encoding, const std::optional<std::string>& errors,
+                              py::handle newline, bool atomic) {
+                if (!PyUnicode_Check(data.ptr())) throw py::type_error(std::string("data must be str, not ") + Py_TYPE(data.ptr())->tp_name);
+                const std::optional<std::string> nl = newline_of(newline);
+                const std::string_view ending = nl ? std::string_view(*nl) : platform::line_separator;
+                py::object text = py::reinterpret_borrow<py::object>(data);
+                if (!ending.empty() && ending != "\n") text = replaced(text, "\n", ending);
+                py::object encoded = py::reinterpret_steal<py::object>(
+                    PyUnicode_AsEncodedString(text.ptr(), encoding.c_str(), errors ? errors->c_str() : nullptr));
+                if (!encoded) throw py::error_already_set();
+                const std::string_view bytes(PyBytes_AS_STRING(encoded.ptr()), static_cast<std::size_t>(PyBytes_GET_SIZE(encoded.ptr())));
+                const file f = v.value();
+                {
+                    py::gil_scoped_release nogil;   // `encoded` stays alive, and so its bytes
+                    f.write_bytes(bytes, atomic ? write_mode::atomic : write_mode::in_place);
+                }
+                return PyUnicode_GetLength(data.ptr());   // characters, as pathlib's write_text answers
+            }, py::arg("data"), py::arg("encoding") = "utf-8", py::arg("errors") = py::none(), py::arg("newline") = py::none(),
+            py::kw_only(), py::arg("atomic") = false,
+            "pathlib's write_text(): data encoded (UTF-8 unless encoding says), each \\n written as os.linesep unless "
+            "newline is given; the characters written. atomic=True as for write().")
         .def("write_bytes", [](const pathview& v, py::bytes data, bool atomic) {
                 const std::string_view sv = data;
                 const file f = v.value();

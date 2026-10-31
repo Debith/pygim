@@ -43,14 +43,14 @@ def generated(root):
     for k in range(SMALL_FILES):
         folder = root / f"pkg{k // 200:03d}"
         folder.mkdir(exist_ok=True)
-        (folder / f"m{k:05d}.py").write_bytes(SMALL_TEXT.encode("utf-8"))
+        (folder / f"m{k:05d}.py").write_text(SMALL_TEXT)
     return root
 
 
 def utf8(file):
     """Whether the file's bytes are UTF-8: every contender here makes a str of each."""
     try:
-        path(file).read_bytes().decode("utf-8")
+        path(file).read_text()
         return True
     except UnicodeDecodeError:
         return False

@@ -36,6 +36,10 @@ namespace fs = std::filesystem;
 /// carries). The Python boundary encodes a str by it (pathlike/adapter/path_text.h).
 inline constexpr bool path_text_is_utf8 = native == family::windows;
 
+/// What text mode writes for "\n" when no newline is asked: os.linesep.
+inline constexpr std::string_view line_separator = native == family::windows ? "\r\n" : "\n";
+static_assert(line_separator == "\n" || line_separator == "\r\n");
+
 // The OS boundary: the internal text form, as path_text_is_utf8 says. fs::path::string() would
 // narrow through the ACP on Windows and can mangle non-ASCII paths.
 [[nodiscard]] inline std::string text_from_fs(const fs::path& p) {

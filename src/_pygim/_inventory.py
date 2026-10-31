@@ -567,7 +567,7 @@ def environments(root: Path, home: Path) -> List[Host]:
     named = ""
     environment = here / "environment.yml"
     if environment.is_file():
-        for line in environment.read_bytes().decode("utf-8", "replace").splitlines():
+        for line in environment.read_text(errors="replace").splitlines():
             if line.startswith("name:"):
                 named = line.split(":", 1)[1].strip()
 
@@ -592,7 +592,7 @@ def environments(root: Path, home: Path) -> List[Host]:
                     and path(url2pathname(url.path)).resolve() == here:
                 installs.append(_dist(real.parent.name))
                 record = real.parent / "RECORD"
-                owned.append({line.split(",", 1)[0] for line in record.read_bytes().decode("utf-8").splitlines()
+                owned.append({line.split(",", 1)[0] for line in record.read_text().splitlines()
                               if line and "dist-info" not in line.split(",", 1)[0]} if record.is_file() else set())
         inside = kind == "venv"
         if not (installs or inside or (named and name == named)):
@@ -619,7 +619,7 @@ def _python_version(prefix: Path) -> str:
         return linked[len("python"):]
     config = env / "pyvenv.cfg"
     if config.is_file():
-        for line in config.read_bytes().decode("utf-8", "replace").splitlines():
+        for line in config.read_text(errors="replace").splitlines():
             key, _, value = line.partition("=")
             if key.strip() in ("version", "version_info"):
                 return ".".join(value.strip().split(".")[:2])
@@ -667,7 +667,7 @@ def project_map(root: Path, *, home: Optional[Path] = None, recent: int = 3) -> 
     title, about = root.name, ""
     for readme in ("README.md", "README.rst", "README.txt", "README"):
         if (here / readme).is_file():
-            text = (here / readme).read_bytes().decode("utf-8", "replace")
+            text = (here / readme).read_text(errors="replace")
             heads = [ln.strip("#= ").strip() for ln in text.splitlines() if ln.startswith("#")]
             heads = [h for h in heads if h and not h.startswith(("!", "<", "["))]
             title = heads[0] if heads else title

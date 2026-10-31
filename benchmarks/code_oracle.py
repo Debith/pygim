@@ -126,9 +126,9 @@ def section_mutants(root, count, seed):
     with tempfile.TemporaryDirectory() as tmp:
         paths = []
         for n in range(count):
-            text = rng.choice(small).read_bytes().decode("utf-8", "surrogateescape")   # bytes kept as they are
+            text = rng.choice(small).read_text(errors="surrogateescape", newline="")   # bytes kept as they are
             p = path(tmp) / f"m{n:06d}.py"
-            p.write_bytes(mutant_of(text, rng).encode("utf-8", "surrogateescape"))
+            p.write_text(mutant_of(text, rng), errors="surrogateescape", newline="")
             paths.append(p)
         theirs, _ = cpython(paths, "verdicts")
         agree, shown = 0, []

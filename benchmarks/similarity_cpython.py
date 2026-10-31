@@ -68,7 +68,7 @@ def cause(message, path, root):
     if line == 0:
         return f"other: {what}"
     try:
-        src = path.read_bytes().decode(errors="replace").splitlines()[line - 1].strip()
+        src = path.read_text(errors="replace").splitlines()[line - 1].strip()
     except (IndexError, ValueError):
         src = ""
     if src.startswith("lazy "):   # 3.15's: pygim.code reads 3.14, which has t-strings and `except A, B` already
