@@ -1494,23 +1494,43 @@ def test_a_pathset_with_a_member_outside_the_base_names_it(tmp_path):
 ORDER = ["a", "a/b", "a-b", "a.b", "ab", "a/b/c", "a b", "/b", "/a/b", "/a-b", "/", "b", ".", "x/ä", "x/z", "x/y/z"]
 
 
+def pathlibs_order(text):
+    """pathlib's order from Python 3.12 on (PurePath._parts_normcase, unchanged to 3.14): str(path)
+    split at its separator. 3.10 and 3.11 compared their parts list, the root as "/", so "." sorted
+    first and "/b" after ".x" (CI, 2026-10-31): pygim keeps 3.12's on every Python, as its glob
+    keeps 3.14's."""
+    return str(pathlib.PurePath(text)).split(os.sep)
+
+
+def sorted_as_pathlib(texts):
+    return [str(pathlib.PurePath(s)) for s in sorted(texts, key=pathlibs_order)]
+
+
+@pytest.mark.skipif(sys.version_info < (3, 12), reason="the rule is pathlib's own from 3.12; 3.10 and 3.11 had another")
+@pytest.mark.skipif(os.name == "nt", reason="PureWindowsPath folds case too; the corpus has no case to fold, POSIX checks the rule")
+def test_the_order_is_pathlibs_own():
+    assert [str(p) for p in sorted(pathlib.PurePath(s) for s in ORDER)] == sorted_as_pathlib(ORDER)
+    pairs = [(a, b) for a in ORDER for b in ORDER]
+    assert all((pathlib.PurePath(a) < pathlib.PurePath(b)) == (pathlibs_order(a) < pathlibs_order(b)) for a, b in pairs)
+
+
 def test_paths_sort_as_pathlib_sorts_them():
     """Found 2026-10-31 dogfooding the benchmarks (Debith: "We should support sorting same way"):
     sorted() of paths raised TypeError, where pathlib's sort."""
-    assert [str(p) for p in sorted(pygim.path(s) for s in ORDER)] == [str(p) for p in sorted(pathlib.PurePath(s) for s in ORDER)]
+    assert [str(p) for p in sorted(pygim.path(s) for s in ORDER)] == sorted_as_pathlib(ORDER)
 
 
 @pytest.mark.skipif(os.name == "nt", reason="PureWindowsPath orders case-insensitively; ours is case-sensitive, as its == is (by decision)")
 def test_paths_differing_in_case_sort_as_pathlib_sorts_them_on_posix():
     names = ["b", "B", "a/B", "a/b", "A", "a"]
-    assert [str(p) for p in sorted(pygim.path(s) for s in names)] == [str(p) for p in sorted(pathlib.PurePath(s) for s in names)]
+    assert [str(p) for p in sorted(pygim.path(s) for s in names)] == sorted_as_pathlib(names)
 
 
 @pytest.mark.parametrize("compare", [operator.lt, operator.le, operator.gt, operator.ge], ids=lambda f: f.__name__)
 def test_each_comparison_answers_as_pathlibs_does(compare):
     pairs = [(a, b) for a in ORDER for b in ORDER]
     ours = [compare(pygim.path(a), pygim.path(b)) for a, b in pairs]
-    theirs = [compare(pathlib.PurePath(a), pathlib.PurePath(b)) for a, b in pairs]
+    theirs = [compare(pathlibs_order(a), pathlibs_order(b)) for a, b in pairs]
     assert [f"{a!r} {b!r}" for (a, b), x, y in zip(pairs, ours, theirs) if x != y] == []
 
 
