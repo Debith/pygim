@@ -137,6 +137,7 @@ Fixed
 
 Removed
 ~~~~~~~
+- Python 3.9 (end of life since October 2025; Debith, 2026-10-31): pygim needs 3.10 or later (``requires-python = ">=3.10"``, which no release told pip before), CI tests 3.10–3.14 on every system and a release builds 15 wheels. ``tests/unittests/test_supported_pythons.py`` holds the floor, the classifiers, the CI matrix and the release's wheels to one list. What was there for 3.9 went with it: the inventory's standard library read off its folders where ``sys.stdlib_module_names`` was missing, and the tests' skips for 3.9's ``ast`` and ``fnmatch``.
 - Persistence: the test-only extension ``pygim._persistence_test`` no longer ships in the wheel. Its ``Query``, ``MssqlDialect`` and ``Format`` are the public ones, and its ``DataStore(...)`` constructor is ``acquire_datastore(...)``, which takes the same arguments.
 
 Performance

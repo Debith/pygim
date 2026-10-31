@@ -24,7 +24,6 @@ import csv
 import re
 import subprocess
 import sys
-import sysconfig
 from dataclasses import dataclass, field
 from importlib import metadata
 from pathlib import Path
@@ -410,7 +409,7 @@ def places_a_program(dist) -> bool:
 def manifest_of(root: Path) -> dict:
     """The project's pyproject.toml as data, or {} when it has none or it is not TOML.
 
-    Read by pygim's own TOML engine, not `tomllib`: that arrived in Python 3.11, and on 3.9 and 3.10
+    Read by pygim's own TOML engine, not `tomllib`: that arrived in Python 3.11, and on 3.10
     importing it crashed the inventory and the project map every session starts with."""
 
     manifest = path(str(root)) / "pyproject.toml"
@@ -467,28 +466,9 @@ def from_machine(root: Path, distributions=None, stdlib: Optional[Collection[str
 
 
 def standard_library() -> Collection[str]:
-    """The top-level names the running Python's standard library provides. From Python 3.10 it lists
-    them (`sys.stdlib_module_names`); before that they are read off the library's own folders — its
-    modules and packages, its compiled extensions (lib-dynload, or DLLs on Windows), and the modules
-    built into the interpreter. Part of what `from_machine` looks at, so called only from there."""
-
-    listed = getattr(sys, "stdlib_module_names", None)
-    if listed is not None:
-        return frozenset(listed)
-    names = set(sys.builtin_module_names)
-    lib = {sysconfig.get_paths()["stdlib"], sysconfig.get_paths()["platstdlib"]}
-    folders = {str(path(f) / below) for f in lib for below in (".", "lib-dynload")} | {str(path(sys.base_prefix) / "DLLs")}
-    for folder in sorted(folders):
-        here = path(folder)
-        if not here.is_dir():
-            continue
-        for entry in here.iterdir():
-            name = entry.name
-            head = name.split(".", 1)[0]
-            module = name.endswith((".py", ".so", ".pyd")) or (entry / "__init__.py").is_file()
-            if module and head.isidentifier() and name != "site-packages":
-                names.add(head)
-    return frozenset(names)
+    """The top-level names the running Python's standard library provides, as it lists them
+    (`sys.stdlib_module_names`). Part of what `from_machine` looks at, so called only from there."""
+    return frozenset(sys.stdlib_module_names)
 
 
 TEXT = (".py", ".pyi", ".h", ".hpp", ".cpp", ".c", ".md", ".rst", ".toml", ".yaml", ".yml", ".json",

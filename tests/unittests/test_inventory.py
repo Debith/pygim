@@ -314,7 +314,7 @@ class TestGatheringFromADirectory:
         assert _inventory.declared_in(project) == []
 
     def test_a_manifest_is_read_on_a_python_without_tomllib(self, project, monkeypatch):
-        """`tomllib` arrived in Python 3.11; a None in sys.modules is what an import finds on 3.9 and 3.10."""
+        """`tomllib` arrived in Python 3.11; a None in sys.modules is what an import finds on 3.10."""
         (project / "pyproject.toml").write_text(
             '[project]\nname = "lib"\ndependencies = ["click>=8"]\n\n'
             '[project.optional-dependencies]\ntest = ["pytest", "tomli; python_version < \'3.11\'"]\n',
@@ -352,10 +352,10 @@ class TestGatheringFromADirectory:
 
 class TestTheCommandAHumanRuns:
     def test_a_manifest_is_read_where_python_has_no_tomllib(self, tmp_path, monkeypatch):
-        """`tomllib` arrived in Python 3.11. On 3.9 and 3.10 reading a pyproject.toml crashed both the
-        inventory and the map every session starts with — found 2026-10-02 by running it under this
-        machine's py39 environment, while CI's 3.9 and 3.10 jobs stayed green: no test read a real
-        manifest. None in sys.modules stands in for those Pythons: an import of tomllib fails. Asked
+        """`tomllib` arrived in Python 3.11. On 3.10 (and 3.9, supported then) reading a
+        pyproject.toml crashed the inventory and the map every session starts with — found
+        2026-10-02 by running it under this machine's py39 environment, while CI's 3.9 and 3.10 jobs
+        stayed green: no test read a real manifest. None in sys.modules stands in for such a Python: an import of tomllib fails. Asked
         through the application, as `oo inventory` and `oo inventory --map` pass it on: two `oo`
         processes took 0.6 s, and their PYTHONPATH ran an installed pygim, not the one under test."""
         from _pygim import _config
@@ -461,16 +461,6 @@ class TestTheCommandAHumanRuns:
         done = subprocess.run([str(OO), "inventory", "--path", str(tmp_path)],
                               capture_output=True, text=True, env=env, timeout=120)
         assert done.returncode == 0
-
-
-def test_the_standard_library_is_known_on_a_python_that_does_not_list_it(tmp_path, monkeypatch):
-    """`sys.stdlib_module_names` arrived in Python 3.10. On 3.9 the inventory crashed on it before it
-    looked at anything, so `oo inventory` and the project map both lost what it says
-    (every 3.9 job of the first CI run of core/memory, 2026-09-28)."""
-    (tmp_path / "run.py").write_text("import json\nimport os.path\nimport collections.abc\n", encoding="utf-8")
-    monkeypatch.delattr(sys, "stdlib_module_names", raising=False)
-    found = _inventory.from_machine(tmp_path)
-    assert {"json", "os", "collections"} <= set(found.standard) and not found.unresolved
 
 
 @pytest.mark.skipif(not (Path(__file__).resolve().parents[2] / "src").is_dir(),

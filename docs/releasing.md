@@ -66,7 +66,7 @@ flowchart LR
     main["Run on main"] --> cut["Cut release/&lt;version&gt;<br/>and start its release"]
     cut -.-> prepare
     push["Push to release/&lt;version&gt;"] --> prepare
-    prepare["Resolve version<br/>(refuse if released)"] --> wheels["18 wheels<br/>Linux x86_64, macOS arm64, Windows AMD64<br/>× CPython 3.9–3.14<br/>each tested with pytest"]
+    prepare["Resolve version<br/>(refuse if released)"] --> wheels["15 wheels<br/>Linux x86_64, macOS arm64, Windows AMD64<br/>× CPython 3.10–3.14<br/>each tested with pytest"]
     prepare --> sdist["sdist<br/>twine check"]
     wheels --> publish["PyPI<br/>(environment: pypi)"]
     sdist --> publish

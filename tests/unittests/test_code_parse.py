@@ -22,8 +22,8 @@ from pool_threads import POOL_THREADS
 SRC = Path(__file__).resolve().parents[2] / "src" / "_pygim_fast" / "code" / "python"
 
 
-# The nodes whose `value` the dump keeps when it is None: MatchSingleton is Python 3.10's.
-KEEPS_NONE = tuple(getattr(ast, name) for name in ("Constant", "MatchSingleton") if hasattr(ast, name))
+# The nodes whose `value` the dump keeps when it is None.
+KEEPS_NONE = (ast.Constant, ast.MatchSingleton)
 
 
 def dump314(node, attributes=False):

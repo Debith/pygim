@@ -27,10 +27,7 @@ PROJECT = {"pygim", "_pygim"}
 # The standard library's on a later Python than this one may be: tomllib from 3.11, the [test]
 # extra's tomli standing in before it.
 LATER_STDLIB = {"tomllib"}
-pytestmark = [
-    pytest.mark.skipif(not BENCHMARKS, reason="benchmarks/ not present (testing the installed package)"),
-    pytest.mark.skipif(sys.version_info < (3, 10), reason="sys.stdlib_module_names is 3.10's"),
-]
+pytestmark = pytest.mark.skipif(not BENCHMARKS, reason="benchmarks/ not present (testing the installed package)")
 
 
 def _normal(distribution):
