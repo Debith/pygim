@@ -1,9 +1,26 @@
+import errno
 import os
 import pytest
 import tempfile
 import pathlib
 
 ROOT = pathlib.Path(__file__).parents[3]
+
+
+@pytest.fixture
+def write_named_past_utf8():
+    """Writes bytes to a file whose name (bytes) is no UTF-8, as a POSIX name may be; skips where
+    the file system refuses such a name, as macOS's do (EILSEQ)."""
+    def write(name, data):
+        try:
+            with open(name, "wb") as f:
+                f.write(data)
+        except OSError as e:
+            if e.errno != errno.EILSEQ:
+                raise
+            pytest.skip("this file system refuses a name that is not UTF-8 (macOS)")
+        return name
+    return write
 
 
 @pytest.fixture

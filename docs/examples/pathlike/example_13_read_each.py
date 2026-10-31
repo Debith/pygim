@@ -40,7 +40,7 @@ checksum = 0
 first_lines = []
 for content in PathSet(members).read_each():       # threads read the next files meanwhile
     checksum = zlib.crc32(content, checksum)         # a buffer: zlib reads it in place
-    first_lines.append(content.text().split("\n", 1)[0])
+    first_lines.append(content.text().splitlines()[0])   # written as text: \r\n on Windows
 assert first_lines == [f"part {i}" for i in range(300)]          # member order, every run
 assert checksum == zlib.crc32(b"".join(m.read_bytes() for m in members))
 

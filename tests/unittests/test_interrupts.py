@@ -115,10 +115,11 @@ for tid in sorted({int(t) for t in os.listdir("/proc/self/task")} - before):
     status = open(f"/proc/self/task/{tid}/status").read()
     blocked = int(next(l for l in status.splitlines() if l.startswith("SigBlk:")).split()[1], 16)
     bit = lambda s: (blocked >> (s - 1)) & 1
-    print("main" if tid == main else "worker", bit(signal.SIGINT), bit(signal.SIGTERM), bit(signal.SIGSEGV))
+    name = open(f"/proc/self/task/{tid}/comm").read().strip()
+    print("main" if tid == main else "worker", bit(signal.SIGINT), bit(signal.SIGTERM), bit(signal.SIGSEGV), name)
 """
     done = subprocess.run([sys.executable, "-c", child, str(temp_dir)], capture_output=True, text=True, timeout=60)
-    rows = done.stdout.split("\n")[:-1]
+    rows = [row.rsplit(" ", 1)[0] for row in done.stdout.split("\n")[:-1]]   # each thread's name, for the message only
     assert rows[0] == "main 0 0 0", done.stdout + done.stderr
     workers = rows[1:]
     assert workers and set(workers) == {"worker 1 1 0"}, done.stdout

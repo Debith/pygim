@@ -214,7 +214,9 @@ def test_only_a_hooks_report_takes_hooks():
 def test_the_monotonic_clock_is_the_default():
     """A real clock: a timer given no clock measures a sleep (a manual clock would say nothing passed)."""
     with utils.QuickTimer("job", report=utils.Report.silent()) as timer:
-        time_module.sleep(0.002)
+        start = time_module.perf_counter()
+        while time_module.perf_counter() - start < 0.002:   # not sleep: Windows may wake a 2 ms sleep early
+            pass
     assert timer.snapshot().total >= utils.Duration(msecs=2)
 
 

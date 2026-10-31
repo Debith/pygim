@@ -27,6 +27,8 @@ def make_tree(root):
     (root / "pkg" / "sub" / "loop").symlink_to(root / "pkg")        # a link back up the tree
     for name in ("empty", "a", "b"):
         (root / name).mkdir()
+    if (root / "A.PY").samefile(root / "a.py"):
+        pytest.skip("this file system folds case (macOS): the expectations are pathlib's on one that does not")
     return root
 
 

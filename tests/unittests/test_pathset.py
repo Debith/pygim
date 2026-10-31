@@ -7,6 +7,8 @@ Filter / Query algebra (ext, name, absolute; & | ~; ps & f)."""
 import fnmatch
 import gc
 import os
+import re
+import sys
 
 import pytest
 
@@ -159,6 +161,11 @@ FNMATCH_NAMES = ["a.py", "é.py", "ab.py", "a", "b", "-", "]", "[ab", "x[!]", "[
 @pytest.mark.parametrize("pattern", FNMATCH_PATTERNS)
 def test_match_pattern_reads_a_segment_as_fnmatch_does(pattern):
     """`[seq]` as fnmatch reads it, `?` one character (D49): pathlib's glob matches a name so."""
+    try:
+        fnmatch.fnmatchcase("", pattern)
+    except re.error as refused:   # Python 3.9's fnmatch made a reversed range, [c-a], a bad regex
+        assert sys.version_info < (3, 10), refused
+        pytest.skip("this Python's fnmatch cannot read it")
     assert [n for n in FNMATCH_NAMES if match_pattern(pattern, n)] == [n for n in FNMATCH_NAMES if fnmatch.fnmatchcase(n, pattern)]
 
 

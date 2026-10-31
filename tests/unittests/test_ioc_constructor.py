@@ -297,6 +297,7 @@ def test_autowire_reads_each_constructor_as_inspect_does(cls):
     assert outcome(wired(cls)) == outcome(expected(cls))
 
 
+@pytest.mark.skipif(sys.version_info < (3, 11), reason="before 3.11 get_type_hints made `x: T = None` Optional, so it is always asked")
 def test_a_plain_constructor_is_read_without_inspect_or_typing(monkeypatch):
     """The common shape — a Python __init__ annotated with classes — never reaches inspect or typing:
     autowiring is what imports inspect in a program that does not (6 ms), and inspect.signature(cls)

@@ -21,6 +21,10 @@ from stub_parity import Stub
 SRC = Path(__file__).resolve().parents[2] / "src" / "_pygim_fast" / "code" / "python"
 
 
+# The nodes whose `value` the dump keeps when it is None: MatchSingleton is Python 3.10's.
+KEEPS_NONE = tuple(getattr(ast, name) for name in ("Constant", "MatchSingleton") if hasattr(ast, name))
+
+
 def dump314(node, attributes=False):
     """ast.dump as Python 3.14 writes it (None and [] left out but for Constant's and MatchSingleton's
     value), from the running Python's tree — 3.12's ast.dump prints empty lists."""
@@ -28,7 +32,7 @@ def dump314(node, attributes=False):
         parts = []
         for name in node._fields:
             value = getattr(node, name, None)
-            keep = isinstance(node, (ast.Constant, ast.MatchSingleton)) and name == "value"
+            keep = isinstance(node, KEEPS_NONE) and name == "value"
             if (value is None or value == []) and not keep:
                 continue
             parts.append(f"{name}={dump314(value, attributes)}")
@@ -146,7 +150,18 @@ SAME_AS_CPYTHON = {
 @pytest.mark.filterwarnings("ignore::SyntaxWarning")   # '\\q' is an invalid escape: CPython warns, and keeps it
 @pytest.mark.parametrize("source", list(SAME_AS_CPYTHON.values()), ids=list(SAME_AS_CPYTHON))
 def test_the_tree_is_cpythons(source):
-    assert code.parse_source(source).dump(include_attributes=True) == dump314(ast.parse(source), True)
+    assert code.parse_source(source).dump(include_attributes=True) == dump314(cpython_tree(source), True)
+
+
+def cpython_tree(source):
+    """The running Python's tree of `source`; a skip where it is older than 3.14 and its ast cannot
+    read 3.14's syntax (f-strings inside f-strings before 3.12)."""
+    try:
+        return ast.parse(source)
+    except SyntaxError as refused:
+        if sys.version_info >= (3, 14):
+            raise
+        pytest.skip(f"Python {sys.version_info[0]}.{sys.version_info[1]}'s ast cannot read it: {refused.msg}")
 
 
 # Syntax the running Python may not have: what python3.14's ast.dump gives, pinned 2026-10-25.
@@ -234,8 +249,11 @@ def test_the_buffer_scans_agree_with_cpython_at_every_offset_around_their_steps(
 
 @pytest.mark.parametrize("source, line", list(NOT_PYTHON.values()), ids=list(NOT_PYTHON))
 def test_what_cpython_refuses_is_refused(source, line):
-    with pytest.raises(SyntaxError) as theirs:
+    with pytest.raises((SyntaxError, ValueError)) as theirs:
         ast.parse(source)
+    if isinstance(theirs.value, ValueError):   # a NUL, before 3.12: refused with no line to compare
+        assert sys.version_info < (3, 12), theirs.value
+        pytest.skip("this Python's ast refuses a NUL as a ValueError, with no line")
     with pytest.raises(SyntaxError) as raised:
         code.parse_source(source)
     assert (theirs.value.lineno, raised.value.lineno) == (line, line)
@@ -438,16 +456,13 @@ def test_a_node_compared_with_anything_else_is_not_equal(tree):
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX names are bytes")
-def test_a_file_named_past_utf8_is_named_as_os_fsdecode_names_it(temp_dir):
+def test_a_file_named_past_utf8_is_named_as_os_fsdecode_names_it(temp_dir, write_named_past_utf8):
     """A POSIX file name need not be UTF-8: the corpus names it as os.fsdecode does (surrogate
     escapes), its files, its errors and its trees, and finds it by that name. Found 2026-10-29: the
     path was handed back as strict UTF-8, and reading it raised UnicodeDecodeError."""
     root = os.fsencode(temp_dir)
-    good, bad = os.path.join(root, b"\xff.py"), os.path.join(root, b"\xfe.py")
-    with open(good, "wb") as f:
-        f.write(b"x = 1\n")
-    with open(bad, "wb") as f:
-        f.write(b"x = (\n")
+    good = write_named_past_utf8(os.path.join(root, b"\xff.py"), b"x = 1\n")
+    bad = write_named_past_utf8(os.path.join(root, b"\xfe.py"), b"x = (\n")
     corpus = code.parse(os.fsdecode(root))
     assert sorted(corpus.files) == sorted([os.fsdecode(good), os.fsdecode(bad)])
     assert [e[0] for e in corpus.errors] == [os.fsdecode(bad)]
@@ -527,12 +542,12 @@ def project(temp_dir):
 
 def test_a_corpus_holds_every_match_sorted(project):
     corpus = code.parse(project)
-    assert [os.path.relpath(p, project) for p in corpus.files] == ["a.py", "pkg/b.py", "pkg/c.py", "pkg/e.py/f.py", "pkg/sub/d.py"]
+    assert [Path(os.path.relpath(p, project)).as_posix() for p in corpus.files] == ["a.py", "pkg/b.py", "pkg/c.py", "pkg/e.py/f.py", "pkg/sub/d.py"]
 
 
 def test_a_file_that_is_not_python_is_listed_with_its_place(project):
     (path, message, line, column), = code.parse(project).errors
-    assert (os.path.relpath(path, project), line) == ("pkg/c.py", 1)
+    assert (Path(os.path.relpath(path, project)).as_posix(), line) == ("pkg/c.py", 1)
 
 
 def test_a_failed_file_raises_its_syntax_error_on_request(project):

@@ -84,12 +84,10 @@ def test_more_threads_than_members_starts_one_a_member(temp_dir):
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX names are bytes")
-def test_a_member_named_past_utf8_is_named_in_the_value_error(temp_dir):
+def test_a_member_named_past_utf8_is_named_in_the_value_error(temp_dir, write_named_past_utf8):
     """A file whose name is no UTF-8 (POSIX names are bytes) and whose bytes are no UTF-8 either is
     the ValueError naming it, not a UnicodeDecodeError raised while building that message."""
-    bad = os.path.join(os.fsencode(temp_dir), b"\xff.txt")
-    with open(bad, "wb") as f:
-        f.write(b"\xff\xfe")
+    bad = write_named_past_utf8(os.path.join(os.fsencode(temp_dir), b"\xff.txt"), b"\xff\xfe")
     with pytest.raises(ValueError, match="is not valid UTF-8") as raised:
         PathSet([os.fsdecode(bad)]).read_all_files()
     assert type(raised.value) is ValueError

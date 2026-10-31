@@ -12,7 +12,10 @@ from pygim import utils
 # the ABC itself carries to be one is left out.
 CONTRACT = sorted({n for c in MutableMapping.__mro__[:-1] for n in vars(c)}
                   - {"__abstractmethods__", "__class_getitem__", "__doc__", "__module__", "__slots__",
-                     "__subclasshook__", "_abc_impl", "_MutableMapping__marker"})
+                     "__subclasshook__", "_abc_impl", "_MutableMapping__marker"}
+                  # what Python gives a class itself, not the contract: its source line and its
+                  # attributes (3.13), its annotations (3.14)
+                  - {"__firstlineno__", "__static_attributes__", "__annotate_func__", "__annotations_cache__"})
 
 
 def test_gimdict_is_mutable_mapping():

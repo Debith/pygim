@@ -13,6 +13,7 @@ import sys
 
 import pytest
 
+from _pygim._inventory import installed
 from pygim.pathlike import path
 
 try:
@@ -25,7 +26,7 @@ BENCHMARKS = sorted(pathlib.Path(str(p)) for p in path(str(ROOT / "benchmarks"))
 PROJECT = {"pygim", "_pygim"}
 pytestmark = [
     pytest.mark.skipif(not BENCHMARKS, reason="benchmarks/ not present (testing the installed package)"),
-    pytest.mark.skipif(sys.version_info < (3, 10), reason="sys.stdlib_module_names and packages_distributions are 3.10+"),
+    pytest.mark.skipif(sys.version_info < (3, 10), reason="sys.stdlib_module_names is 3.10's"),
 ]
 
 
@@ -54,8 +55,10 @@ def _imported(script):
 
 @functools.cache
 def _providers():
-    """Each importable module's distributions: one scan of every installed distribution, for all."""
-    return importlib.metadata.packages_distributions()
+    """Each importable module's distribution, by pygim's inventory: one scan of every installed
+    distribution, for all. It reads a distribution's RECORD where it has no top_level.txt, which
+    importlib's packages_distributions() reads alone before 3.11 (click and pyarrow, on 3.10)."""
+    return installed(importlib.metadata.distributions())
 
 
 def _undeclared(script):
@@ -64,7 +67,7 @@ def _undeclared(script):
     third_party = _imported(script) - set(sys.stdlib_module_names) - PROJECT - siblings
     declared = _declared()
     providers = _providers()
-    return sorted(m for m in third_party if not any(_normal(d) in declared for d in providers.get(m, [])))
+    return sorted(m for m in third_party if _normal(providers.get(m, "")) not in declared)
 
 
 @pytest.mark.parametrize("benchmark", BENCHMARKS or [ROOT], ids=lambda p: p.name)
