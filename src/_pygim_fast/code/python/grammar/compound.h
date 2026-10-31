@@ -144,7 +144,7 @@ public:
         if (handlers && eat(token_kind::kw_else)) end = parser().suite(slot::Try::orelse);
         if (eat(token_kind::kw_finally)) end = parser().suite(slot::Try::finalbody);
         else if (!handlers) fail_here("expected 'except' or 'finally' block");
-        return rows().close(star == 1 ? kind::TryStar : kind::Try, first, t.start(), end);
+        return rows().close(star.value_or(false) ? kind::TryStar : kind::Try, first, t.start(), end);
     }
 
     std::uint32_t async_statement(std::uint32_t first) {
