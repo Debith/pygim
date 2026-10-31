@@ -6,6 +6,7 @@ fewer (PR #39's CI). Used by the Ctrl-C tests' child scripts."""
 
 POOL_THREADS = r'''
 import os
+import time
 
 def _pool_threads_now():
     alive = 0
@@ -18,13 +19,14 @@ def _pool_threads_now():
 
 def pool_threads():
     """How many of a run's pool threads are alive: none, once the run has ended (0 without /proc).
-    A thread just started bears its creator's name until its first instruction names it, so a parked
-    worker a pool thread started reads as pygim-pool for a moment: read until two reads agree."""
-    last = None
-    for _ in range(1000):
-        now = _pool_threads_now()
-        if now == last:
-            break
-        last = now
-    return last
+    Two moments read wrong, both brief: a joined thread stays in /proc until the kernel lets it go
+    (join returns once its id is cleared, before that), and a thread just started bears its
+    creator's name until its first instruction names it. Read until none is left, for at most a
+    second: a thread a run truly left behind is still there then."""
+    deadline = time.monotonic() + 1.0
+    while True:
+        alive = _pool_threads_now()
+        if alive == 0 or time.monotonic() > deadline:
+            return alive
+        time.sleep(0.001)
 '''
