@@ -378,6 +378,29 @@ def test_each_test_module_has_a_name_of_its_own():
     assert sorted({n for n in names if names.count(n) > 1}) == []
 
 
+# Every conditional on the operating system outside src/_pygim_fast/platform/, the boundary the
+# system's rules and calls belong behind (docs/design/platform_boundary.md, D77): counted on
+# 2026-10-31 (59). It may fall, as each part moves behind the boundary; it may not rise. A compiler's
+# own checks (_MSC_VER, __clang__) are build portability, not the system's, and are not counted.
+OS_CONDITIONALS = 59
+OS_MACRO = re.compile(r"^[ \t]*#[ \t]*(?:if|ifdef|ifndef|elif)\b.*\b(?:_WIN32|_WIN64|__APPLE__|__linux__|__unix__|__FreeBSD__)\b", re.M)
+
+
+def test_the_operating_system_is_asked_only_behind_the_platform_boundary():
+    found = []
+    for pattern in ("*.h", "*.cpp"):
+        for file, text in sources(ROOT, pattern):
+            relative = file.relative_to(ROOT).as_posix()
+            if "third_party" in file.parts or relative.startswith("platform/"):
+                continue
+            found += [f"{relative}:{text.count(chr(10), 0, m.start()) + 1}" for m in OS_MACRO.finditer(text)]
+    assert len(found) <= OS_CONDITIONALS, (
+        f"{len(found)} conditionals on the operating system outside platform/, up from {OS_CONDITIONALS}: put the "
+        "system's rules and calls behind the boundary:\n" + "\n".join(found))
+    assert len(found) >= OS_CONDITIONALS - 2, (
+        f"only {len(found)} are left, and OS_CONDITIONALS still says {OS_CONDITIONALS}: lower it")
+
+
 # Every place the C++ imports a Python module, and why. #248: reach Python through the C API, never
 # import while running; where no C API answers, say so and ask. A new import fails here until it is
 # listed with its reason.
