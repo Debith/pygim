@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 """Tests for ``pygim.path`` — the self-reading, self-decoding PathLike."""
 
+import operator
 import os
 import sys
 
@@ -1483,3 +1484,44 @@ def test_a_pathset_with_a_member_outside_the_base_names_it(tmp_path):
     members = pathlike.PathSet([str(tmp_path / "in.py"), str(tmp_path.parent / "out.py")])
     with pytest.raises(ValueError, match="out.py"):
         members.relative_to(tmp_path)
+
+
+# --------------------------------------------------------------------------- #
+# ordering (pathlib parity, D84)
+# --------------------------------------------------------------------------- #
+# Prefixes, a separator against characters below and above it, absolute against relative, the
+# root, "." and a name past ASCII: where an order by text and pathlib's order by parts part ways.
+ORDER = ["a", "a/b", "a-b", "a.b", "ab", "a/b/c", "a b", "/b", "/a/b", "/a-b", "/", "b", ".", "x/ä", "x/z", "x/y/z"]
+
+
+def test_paths_sort_as_pathlib_sorts_them():
+    """Found 2026-10-31 dogfooding the benchmarks (Debith: "We should support sorting same way"):
+    sorted() of paths raised TypeError, where pathlib's sort."""
+    assert [str(p) for p in sorted(pygim.path(s) for s in ORDER)] == [str(p) for p in sorted(pathlib.PurePath(s) for s in ORDER)]
+
+
+@pytest.mark.skipif(os.name == "nt", reason="PureWindowsPath orders case-insensitively; ours is case-sensitive, as its == is (by decision)")
+def test_paths_differing_in_case_sort_as_pathlib_sorts_them_on_posix():
+    names = ["b", "B", "a/B", "a/b", "A", "a"]
+    assert [str(p) for p in sorted(pygim.path(s) for s in names)] == [str(p) for p in sorted(pathlib.PurePath(s) for s in names)]
+
+
+@pytest.mark.parametrize("compare", [operator.lt, operator.le, operator.gt, operator.ge], ids=lambda f: f.__name__)
+def test_each_comparison_answers_as_pathlibs_does(compare):
+    pairs = [(a, b) for a in ORDER for b in ORDER]
+    ours = [compare(pygim.path(a), pygim.path(b)) for a, b in pairs]
+    theirs = [compare(pathlib.PurePath(a), pathlib.PurePath(b)) for a, b in pairs]
+    assert [f"{a!r} {b!r}" for (a, b), x, y in zip(pairs, ours, theirs) if x != y] == []
+
+
+def test_a_typed_path_is_ordered_with_any_path():
+    assert pathlike.yamlpath("a.yaml") < pygim.path("b") < pathlike.jsonpath("c.json")
+
+
+@pytest.mark.parametrize("other", ["a", pathlib.PurePath("a"), 1], ids=["str", "pathlib", "int"])
+def test_a_path_is_not_ordered_against_another_type(other):
+    """As pathlib's: PurePath('a') < 'a' is a TypeError, not an order of their texts."""
+    with pytest.raises(TypeError):
+        pygim.path("a") < other
+    with pytest.raises(TypeError):
+        other < pygim.path("a")

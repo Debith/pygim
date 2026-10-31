@@ -77,6 +77,17 @@ inline char* resized_bytes(py::object& bytes, std::size_t n) {
     return PyBytes_AS_STRING(raw);
 }
 
+/// Two paths in pathlib's order: their texts as str() gives them, rendered into this thread's two
+/// strings, whose room a sort reuses comparison after comparison (each rendered into a new string
+/// made sorting 100,000 paths 790 ms, pathlib's 434). One row of one table is itself.
+inline std::strong_ordering order_of(const pathview& a, const pathview& b) {
+    if (a.table() == b.table() && a.row() == b.row()) return std::strong_ordering::equal;
+    thread_local std::string a_text, b_text;
+    a.fspath_into(a_text);
+    b.fspath_into(b_text);
+    return native_strategy::text_order(a_text, b_text);
+}
+
 /// What glob(pattern) finds under `root`, walked with the GIL released, touching only its own values.
 /// One that lists one directory at most (`src/*.py`) walks here. One that may list many — a `**`, or
 /// a wildcard before its last segment (`*/*/*.py`) — walks its first glob_head_start directories
@@ -267,6 +278,12 @@ py::class_<pathview> bind_path(engine_list<Es...> es, py::module_& m, const path
         .def("__str__", [](const pathview& v) { return str_from_text(v.fspath()); })
         .def("__repr__", [](const pathview& v) { return v.value().repr(); })
         .def("__eq__", [](const pathview& a, const pathview& b) { return a.equals(b); }, py::is_operator())
+        // pathlib's order (path_rules.h's text_order); against another type NotImplemented, so a
+        // TypeError, as pathlib's is.
+        .def("__lt__", [](const pathview& a, const pathview& b) { return order_of(a, b) < 0; }, py::is_operator())
+        .def("__le__", [](const pathview& a, const pathview& b) { return order_of(a, b) <= 0; }, py::is_operator())
+        .def("__gt__", [](const pathview& a, const pathview& b) { return order_of(a, b) > 0; }, py::is_operator())
+        .def("__ge__", [](const pathview& a, const pathview& b) { return order_of(a, b) >= 0; }, py::is_operator())
         .def("__hash__", [](const pathview& v) {
                 const auto h = static_cast<py::ssize_t>(v.table()->hash(v.row()));   // == the value's hash
                 return h == -1 ? py::ssize_t(-2) : h;

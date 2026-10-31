@@ -373,6 +373,9 @@ consteval bool table_agrees_with_file(std::string_view text) {
     const basic_file<Strategy> f(text);
     bool ok = t.value(r) == f.value() && t.hash(r) == f.hash_value();
     ok = ok && t.template render<Strategy>(r) == f.fspath();
+    std::string reused = "a row rendered before, longer than most";   // render_into replaces what it held
+    t.template render_into<Strategy>(r, reused);
+    ok = ok && reused == f.fspath();
     ok = ok && t.template find<Strategy>(text) == r && t.template insert<Strategy>(f.value()) == r;
     ok = ok && t.template find<Strategy>(f.value()) == r && t.size() >= 1;
     const std::uint32_t p = t.parent(r);

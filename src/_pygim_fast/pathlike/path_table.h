@@ -400,7 +400,18 @@ public:
     /// the to_list row), 35% under the two-string version it replaced.
     template <class Strategy>
     [[nodiscard]] constexpr std::string render(std::uint32_t r) const {
-        return m_trie.with_chain(r, [&](const std::uint32_t* rows, std::size_t n) {
+        std::string out;
+        render_into<Strategy>(r, out);
+        return out;
+    }
+
+    /// The same text written into `out`, replacing what it held: a caller that renders many rows in
+    /// turn reuses one string's room (two of them order a sort's paths without allocating).
+    ///
+    ///     std::string s;  t.render_into<posix_strategy>(6, s);   // s == "/x"
+    template <class Strategy>
+    constexpr void render_into(std::uint32_t r, std::string& out) const {
+        m_trie.with_chain(r, [&](const std::uint32_t* rows, std::size_t n) {
             const anchor_info a = anchor_at(rows[n - 1]);
             // The common shape — no authority, no anchor-part segments — is
             // rendered in one pass into a string sized up front; its anchor
@@ -413,10 +424,9 @@ public:
                 if (f & anchor_bit) plain = false;
                 else tail_len += m_segments[f].size() + 1;
             }
-            std::string out;
             if (plain) {
                 if (std::is_constant_evaluated()) out = plain_anchor<Strategy>(a.absolute);
-                else out = cached_plain_anchor<Strategy>(a.absolute);
+                else out.assign(cached_plain_anchor<Strategy>(a.absolute));
                 out.reserve(out.size() + tail_len);
             } else {
                 uri head;
@@ -439,7 +449,6 @@ public:
                 out += m_segments[f];
             }
             if (out.empty()) out = ".";
-            return out;
         });
     }
 

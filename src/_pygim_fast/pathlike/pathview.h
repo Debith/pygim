@@ -47,6 +47,8 @@ public:
     [[nodiscard]] file value() const { return file(m_table->value(m_row), m_pin); }
     /// pathlib's str() of the row (path_table::render).      p.fspath() -> "a/b/c.yaml"
     [[nodiscard]] std::string fspath() const { return m_table->render<native_strategy>(m_row); }
+    /// The same written into `out`, reusing its room.
+    void fspath_into(std::string& out) const { m_table->render_into<native_strategy>(m_row, out); }
     /// The final component (a view into the arena).          p.name() -> "c.yaml"
     [[nodiscard]] std::string_view name() const noexcept { return m_table->name(m_row); }
     /// The lower-cased final suffix: the registry's dispatch key.   p.ext_key() -> ".yaml"

@@ -43,7 +43,7 @@ def sources(root, dirs):
         for f in (root / d).rglob("*"):   # sorted already, in pathlib's order
             if f.is_file() and (language := similarity.language_of(f)):
                 found[language].append(f)
-    return {language: sorted(files, key=lambda f: f.parts) for language, files in found.items()}   # pathlib's order, across folders
+    return {language: sorted(files) for language, files in found.items()}   # pathlib's order, across folders
 
 
 def cause(message):

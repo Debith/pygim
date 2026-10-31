@@ -7,6 +7,7 @@
 //
 // CORE layer: pybind-free.
 
+#include <compare>
 #include <cstddef>
 #include <string>
 #include <string_view>
@@ -85,6 +86,21 @@ struct strategy_base {
         std::string out = Strategy::anchor(u);
         u.append_segments(out, Strategy::anchor_segments(u), Strategy::sep, false);
         return out.empty() ? std::string(".") : out;
+    }
+
+    // pathlib's order of two paths' texts, as render() writes them: PurePath.__lt__ compares
+    // str(path).split(sep), part by part, so a separator sorts before any character of a part and
+    // the shorter of two equal runs comes first. "/b" < "a" (an absolute path's first part is
+    // empty), "a/b" < "a-b" ('/' is no '-'), "a" < "a/b". Bytes compare as code points do, UTF-8
+    // keeping their order. Case counts, as it does for == (PureWindowsPath folds it: not here).
+    [[nodiscard]] static constexpr std::strong_ordering text_order(std::string_view a, std::string_view b) noexcept {
+        const std::size_t shorter = a.size() < b.size() ? a.size() : b.size();
+        for (std::size_t i = 0; i < shorter; ++i) {
+            const bool a_sep = a[i] == Strategy::sep, b_sep = b[i] == Strategy::sep;
+            if (a_sep != b_sep) return a_sep ? std::strong_ordering::less : std::strong_ordering::greater;
+            if (a[i] != b[i]) return static_cast<unsigned char>(a[i]) <=> static_cast<unsigned char>(b[i]);
+        }
+        return a.size() <=> b.size();
     }
 
     // The RFC form of an absolute path, in place: file:///a/b — an authority is
@@ -309,5 +325,12 @@ struct windows_strategy : strategy_base<windows_strategy> {
 /// The running system's rules.
 using native_strategy = std::conditional_t<platform::native == platform::family::windows, windows_strategy, posix_strategy>;
 static_assert(std::is_same_v<native_strategy, windows_strategy> || std::is_same_v<native_strategy, posix_strategy>);
+
+// pathlib's order, as sorted([PurePosixPath(s) ...]) and PureWindowsPath give it.
+static_assert(posix_strategy::text_order("/b", "a") < 0 && posix_strategy::text_order("a/b", "a-b") < 0 &&
+              posix_strategy::text_order("a", "a/b") < 0 && posix_strategy::text_order("a.b", "a/b") > 0 &&
+              posix_strategy::text_order("/", "/a") < 0 && posix_strategy::text_order("x/\xc3\xa4", "x/z") > 0 &&
+              posix_strategy::text_order("a/b", "a/b") == 0 && posix_strategy::text_order("B", "a") < 0);
+static_assert(windows_strategy::text_order("C:\\a\\b", "C:\\a-b") < 0 && windows_strategy::text_order("\\b", "a") < 0);
 
 }  // namespace pygim::pathlike
