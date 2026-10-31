@@ -1,59 +1,21 @@
 #pragma once
-// pathlike/adapter/path_store.h — a PathStore is a path_table with a Python face.
-//
-// Every path object (pathview.h) is a handle on a row of some table. Which
-// table is chosen ONCE, at construction — `path(text)` uses the module's
-// default table, `path(text, store=s)` uses s's — and inherited by every path
-// derived from it, so a program picks a lifetime by argument and never through
-// global state. A table lives as long as any handle or set over it: a server
-// that makes its own store and passes it to every request drops the whole
-// table, rows and all, when it stops and the last handle is gone.
-//
-// Rows are never freed within a table (docs/design/pathset_storage.md), which
-// is the whole reason a store is a plain object with an owner rather than a
-// hidden global. Inserts happen under the GIL (the single writer); a store
-// shared between threads is safe to read and to insert into from any thread
-// that holds it.
+// pathlike/adapter/path_store_bindings.h — Python's PathStore: a path_store (../path_store.h) with
+// a Python face, and the module's default store.
 //
 //     store = PathStore()
 //     p = path("a/b.yaml", store=store)     rows in store's table; p.store is store's table
 //     store.stats()                          -> rows, segments, bytes
 //     default_store()                        -> the module's default (what path(text) uses)
 
-#include <cstddef>
-#include <memory>
+#include <cstdint>
 #include <string>
-#include <utility>
 
 #include <pybind11/pybind11.h>
 
-#include "../path_table.h"
+#include "../path_store.h"
 
 namespace pygim::pathlike {
 
-using table_ptr = std::shared_ptr<path_table>;
-
-/// A table holder. `PathStore()` makes a fresh table; the module's default
-/// store wraps the default table.
-class path_store {
-public:
-    path_store() : m_table(std::make_shared<path_table>()) {}
-    explicit path_store(table_ptr t) : m_table(std::move(t)) {}
-
-    [[nodiscard]] const table_ptr& table() const noexcept { return m_table; }
-    /// Room for `n` more paths (~3 rows and ~1 distinct segment per path).
-    void reserve(std::size_t n) { m_table->reserve(m_table->size() + 3 * n, m_table->segments().size() + n); }
-
-private:
-    table_ptr m_table;
-};
-
-/// The module's default table: what `path(text)` without a store interns into.
-/// A plain C++ static (no Python reference), so its destruction at exit is safe.
-[[nodiscard]] inline const table_ptr& default_table() {
-    static const table_ptr t = std::make_shared<path_table>();
-    return t;
-}
 /// `obj` as a store, or a TypeError naming both types.
 [[nodiscard]] inline path_store& as_store(py::handle obj) {
     if (!py::isinstance<path_store>(obj)) {

@@ -32,13 +32,13 @@ namespace pygim::pathlike::detail {
     return s.len ? std::string_view(s.str, s.len) : std::string_view{};
 }
 
-// rapidyaml calls this instead of aborting; rethrow as a std::exception so pybind11
-// converts it to a Python RuntimeError.
+// rapidyaml calls this instead of aborting; a document that does not parse is a bad value, so
+// std::invalid_argument, which pybind11 raises as ValueError.
 [[noreturn]] inline void throw_on_error(const char* msg, size_t len, ryml::Location loc,
                                         void* /*user_data*/) {
     std::string where;
     if (loc.line) where = " (line " + std::to_string(loc.line) + ")";
-    throw std::runtime_error("YAML parse error" + where + ": " + std::string(msg, len));
+    throw std::invalid_argument("YAML parse error" + where + ": " + std::string(msg, len));
 }
 
 // Install the throwing error callback exactly once, process-wide.
@@ -97,8 +97,8 @@ inline py::object node_to_py(ryml::ConstNodeRef node, KeyCache& keys) {
         require_utf8(bytes, f.fspath());
         try {
             tree = ryml::parse_in_arena(ryml::csubstr(bytes.data(), bytes.size()));
-        } catch (const std::runtime_error& e) {
-            throw std::runtime_error(std::string(e.what()) + " in " + f.fspath());
+        } catch (const std::invalid_argument& e) {
+            throw std::invalid_argument(std::string(e.what()) + " in " + f.fspath());
         }
         tree.resolve();                             // expand anchors / *aliases
     }

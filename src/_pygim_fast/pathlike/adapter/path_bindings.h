@@ -1,5 +1,5 @@
 #pragma once
-// pathlike/adapter/pathview.h — the path object: a handle on a row of a path_table.
+// pathlike/adapter/path_bindings.h — Python's `pygim.path`: the handle of ../pathview.h, bound.
 //
 // Python's `pygim.path` IS this struct: (table, row, pin). An object carries no
 // parsed value of its own — its name, parent, suffix, equality and hash are
@@ -7,7 +7,7 @@
 // on demand for the few operations whose rules live there (with_suffix, joins
 // with complex text, URIs, filesystem calls), then interned back into the same
 // table. The constructor interns: `path(text)` tokenises straight into the
-// module's default table (path_store.h), `path(text, store=s)` into s's, and
+// module's default table (../path_store.h), `path(text, store=s)` into s's, and
 // every derived object inherits the table of the object it came from — so a
 // program chooses a lifetime once, by argument, and a subtree of work follows
 // it, with no global state.
@@ -19,8 +19,9 @@
 //
 // Threading: a table is append-only with a single writer — every insert
 // happens on the thread holding the GIL (a constructor, a derived-path
-// operation, a set being built) — and reads never lock. Filesystem calls
-// (read/write/glob) release the GIL around the I/O only.
+// operation, a set being built) — and reads never lock. A read of many files (PathSet's
+// read_all_files, read_each) and every glob release the GIL around their I/O (a glob that may list
+// many directories owning Ctrl-C too); a single file's read or write and iterdir hold it.
 //
 // Typed classes: `path("x.yaml")` is a `yamlpath`, `path("x.json")` a
 // `jsonpath` — one subclass per engine the build discovered (adapter.h's
@@ -47,62 +48,42 @@
 #include <optional>
 #include <string>
 #include <string_view>
-#include <unordered_map>
 #include <utility>
 #include <vector>
 
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 
+#include "../../utils/interrupted.h"
+#include "../../wiring/registry/core.h"
+#include "../../utils/parallel.h"
+#include "../parallel_glob.h"
 #include "../path_table.h"
+#include "../pathview.h"
 #include "adapter.h"
-#include "path_store.h"
+#include "path_store_bindings.h"
 
 namespace pygim::pathlike {
 
-/// The handle. Copies nothing; keeps the table alive.
-struct pathview {
-    table_ptr table;
-    std::uint32_t row = 0;
-    const engine_info* pin = nullptr;   // the engine pinned at construction (inherited by derived paths)
-
-    /// The core value of the row, with the pin: what the engines' load/write
-    /// and the value-route operations take.
-    [[nodiscard]] file value() const { return file(table->value(row), pin); }
-    /// pathlib's str() of the row (path_table::render).      p.fspath() -> "a/b/c.yaml"
-    [[nodiscard]] std::string fspath() const { return table->render<native_strategy>(row); }
-    /// The final component (a view into the arena).          p.name() -> "c.yaml"
-    [[nodiscard]] std::string_view name() const noexcept { return table->name(row); }
-    /// The lower-cased final suffix: the registry's dispatch key.   p.ext_key() -> ".yaml"
-    [[nodiscard]] std::string ext_key() const { return uri::ascii_lower(detail::suffix_of(name())); }
-    /// The same into a caller's buffer, no allocation for suffixes up to 31 bytes (all real ones).
-    [[nodiscard]] std::string_view ext_key_into(char (&buf)[32]) const noexcept {
-        const std::string_view sfx = detail::suffix_of(name());
-        if (sfx.size() > sizeof(buf)) return sfx;   // dispatch will miss; a suffix this long has no engine
-        for (std::size_t i = 0; i < sfx.size(); ++i) {
-            const char c = sfx[i];
-            buf[i] = (c >= 'A' && c <= 'Z') ? static_cast<char>(c + ('a' - 'A')) : c;
-        }
-        return {buf, sfx.size()};
+/// What glob(pattern) finds under `root`, walked with the GIL released, touching only its own values.
+/// One that lists one directory at most (`src/*.py`) walks here. One that may list many — a `**`, or
+/// a wildcard before its last segment (`*/*/*.py`) — walks its first glob_head_start directories
+/// here too, and if it is still going, the rest on worker threads, owning Ctrl-C and SIGTERM (#272).
+[[nodiscard]] inline std::vector<file> glob_of(const file& root, std::string_view pattern, std::optional<bool> case_sensitive = std::nullopt) {
+    glob_pattern parsed(pattern, case_sensitive);   // a bad pattern raises before any thread starts; parsed once
+    if (!parsed.lists_many_directories()) {
+        const py::gil_scoped_release nogil;
+        return root.glob(parsed);
     }
-    /// Same path? Same table: same row. Different tables: `o`'s chain looked up here.
-    [[nodiscard]] bool equals(const pathview& o) const {
-        if (table.get() == o.table.get()) return row == o.row;
-        return table->find(*o.table, o.row) == row;
+    glob_walk started(parsed, root.to_fs());
+    {
+        const py::gil_scoped_release nogil;
+        if (started.walk(parsed, glob_head_start)) return root.found_by_glob(std::move(started).found());
     }
-    /// Another row of the same table, the same pin.           p.at(2) -> p.parent
-    [[nodiscard]] pathview at(std::uint32_t r) const { return {table, r, pin}; }
-    /// A value interned into this handle's table, the same pin: the tail of
-    /// every value-route operation.
-    [[nodiscard]] pathview intern(const file& f) const { return {table, table->insert<native_strategy>(f.value()), pin}; }
-};
-
-/// The row for path TEXT in a table: native text (no scheme) is tokenised
-/// straight in; a file:// URI goes through the core constructor, which owns
-/// the URI rules (and raises for a remote host or a relative URI).
-[[nodiscard]] inline std::uint32_t intern_text(path_table& t, std::string_view text) {
-    if (uri::scheme_of(text).empty()) return t.insert<native_strategy>(text);
-    return t.insert<native_strategy>(file(text).value());
+    const std::size_t cores = parallel::this_machines_cores();
+    parallel::chosen_width width(parallel::elastic_width(cores, parallel::elastic_cap(cores)));
+    return run_interruptible("glob", [&] { return parallel_glob(root, std::move(parsed), std::move(width), std::move(started)); },
+                             [](parallel_glob& walk) { return walk.results(); });
 }
 
 // ── typed classes ───────────────────────────────────────────────────────────
@@ -115,10 +96,11 @@ struct typed_view : pathview {
 };
 
 /// The Python type of each typed class -> its engine: what the metaclass
-/// consults to pin `yamlpath("x")`.
-inline std::unordered_map<PyTypeObject*, const engine_info*>& typed_types() {
-    static auto* m = new std::unordered_map<PyTypeObject*, const engine_info*>();
-    return *m;
+/// consults to pin `yamlpath("x")`. A registry (#131): a class registered twice is an error.
+using typed_registry = core::DynamicRegistryCore<PyTypeObject*, const engine_info*>;
+inline typed_registry& typed_types() {
+    static auto* r = new typed_registry();   // never destroyed: classes are registered once, read to the end
+    return *r;
 }
 
 template <Engine E>
@@ -133,8 +115,8 @@ bool wrap_if(const engine_info* e, pathview& v, py::object& out) {
 ///     wrap(es, {T, 3, nullptr})   -> yamlpath      wrap(es, {T, 2, nullptr}) -> path
 template <Engine... Es>
 [[nodiscard]] py::object wrap(engine_list<Es...>, pathview v) {
-    char buf[32];
-    const engine_info* e = v.pin ? v.pin : engine_list<Es...>::for_ext_at_runtime(v.ext_key_into(buf));
+    char buf[pathview::ext_key_room];
+    const engine_info* e = v.pin() ? v.pin() : engine_list<Es...>::for_ext_at_runtime(v.ext_key_into(buf));
     py::object out;
     const bool hit = (wrap_if<Es>(e, v, out) || ...);
     return hit ? out : py::cast(std::move(v));
@@ -165,7 +147,7 @@ template <Engine... Es>
 [[nodiscard]] inline pathview make_view(py::handle text, const engine_info* pin, py::handle store) {
     table_ptr table = store.is_none() ? default_table() : as_store(store).table();
     const text_arg t = text_view_of_arg(text);
-    const std::uint32_t r = intern_text(*table, t.view);
+    const std::uint32_t r = intern_text(*table, t.view());
     return {std::move(table), r, pin};
 }
 
@@ -175,7 +157,7 @@ template <Engine... Es>
 /// components, "." and "" — takes the core's joined() and is interned.
 template <Engine... Es>
 [[nodiscard]] py::object joined(engine_list<Es...> es, const pathview& v, std::string_view other) {
-    if (detail::plain_component<native_strategy>(other)) return wrap(es, v.at(v.table->child_of(v.row, other)));
+    if (detail::plain_component<native_strategy>(other)) return wrap(es, v.at(v.table()->child_of(v.row(), other)));
     return wrap(es, v.intern(v.value().joined(other)));
 }
 
@@ -199,11 +181,11 @@ void bind_typed_one(py::module_& m, py::handle meta) {
     py::class_<typed_view<E>, pathview> cls(m, name.c_str(), py::metaclass(meta), doc.c_str());
     cls.def(py::init([](py::handle p, py::object store) { return typed_view<E>(make_view(p, &E::info, store)); }),
             py::arg("path"), py::kw_only(), py::arg("store") = py::none());
-    typed_types()[reinterpret_cast<PyTypeObject*>(cls.ptr())] = &E::info;
+    typed_types().register_or_override(reinterpret_cast<PyTypeObject*>(cls.ptr()), &E::info, false);
 }
 
 /// Binds `path` (the handle) and its typed subclasses. Returns the class so
-/// pathset.h can add `pathset()` to it.
+/// pathset_bindings.h can add `pathset()` to it.
 template <Engine... Es>
 py::class_<pathview> bind_path(engine_list<Es...> es, py::module_& m, const path_docs& docs) {
     using L = engine_list<Es...>;
@@ -219,9 +201,13 @@ py::class_<pathview> bind_path(engine_list<Es...> es, py::module_& m, const path
         static PyTypeObject* const base_type = reinterpret_cast<PyTypeObject*>(py::type::of<pathview>().ptr());
         auto* tp = reinterpret_cast<PyTypeObject*>(cls.ptr());
         const bool is_base = tp == base_type;
-        const auto typed = is_base ? typed_types().end() : typed_types().find(tp);
-        if (!is_base && typed == typed_types().end()) {
-            return py::reinterpret_steal<py::object>(PyType_Type.tp_call(cls.ptr(), args.ptr(), kwargs.ptr()));
+        const engine_info* typed = is_base ? nullptr : typed_types().value_or(tp, nullptr);
+        if (!is_base && typed == nullptr) {
+            // A user's subclass: a NULL here means its __new__ or __init__ raised. Hand that error
+            // on as itself; returned as an empty object, pybind11 would replace it with a TypeError.
+            py::object built = py::reinterpret_steal<py::object>(PyType_Type.tp_call(cls.ptr(), args.ptr(), kwargs.ptr()));
+            if (!built) throw py::error_already_set();
+            return built;
         }
         // One pass over the keywords (a dict of 0-3 entries), compared as C strings:
         // no Python string is built per lookup.
@@ -244,7 +230,7 @@ py::class_<pathview> bind_path(engine_list<Es...> es, py::module_& m, const path
             pin = engine ? engine_from_arg(es, engine) : nullptr;
         } else {
             if (n > 1 || engine) throw py::type_error("a typed path pins its own engine");
-            pin = typed->second;
+            pin = typed;
         }
         return wrap(es, make_view(text, pin, store ? store : py::handle(py::none().ptr())));
     }, py::is_method(base_meta));   // a method descriptor, so Python binds `cls` as the first argument
@@ -257,11 +243,11 @@ py::class_<pathview> bind_path(engine_list<Es...> es, py::module_& m, const path
                 return make_view(p, engine_from_arg(es, engine), store);
             }), py::arg("path"), py::arg("engine") = py::none(), py::kw_only(), py::arg("store") = py::none())
         .def_property_readonly("engine", [](const pathview& v) -> py::object {
-                const engine_info* e = v.pin ? v.pin : L::for_ext_at_runtime(v.ext_key());
+                const engine_info* e = v.pin() ? v.pin() : L::for_ext_at_runtime(v.ext_key());
                 if (!e) return py::none();
                 return py::str(std::string(e->label));
             }, py::doc(docs.engine.c_str()))
-        .def_property_readonly("store", [](const pathview& v) { return path_store(v.table); },
+        .def_property_readonly("store", [](const pathview& v) { return path_store(v.table()); },
                                "A PathStore over this path's table (the one derived paths share).")
         // -- text, identity --
         .def("__fspath__", [](const pathview& v) { return str_from_text(v.fspath()); },
@@ -270,7 +256,7 @@ py::class_<pathview> bind_path(engine_list<Es...> es, py::module_& m, const path
         .def("__repr__", [](const pathview& v) { return v.value().repr(); })
         .def("__eq__", [](const pathview& a, const pathview& b) { return a.equals(b); }, py::is_operator())
         .def("__hash__", [](const pathview& v) {
-                const auto h = static_cast<py::ssize_t>(v.table->hash(v.row));   // == the value's hash
+                const auto h = static_cast<py::ssize_t>(v.table()->hash(v.row()));   // == the value's hash
                 return h == -1 ? py::ssize_t(-2) : h;
             })
         .def_property_readonly("uri", [](const pathview& v) { return v.value().as_uri(); },
@@ -293,32 +279,46 @@ py::class_<pathview> bind_path(engine_list<Es...> es, py::module_& m, const path
                 for (const std::string& s : v.value().parts()) out.append(str_from_text(s));
                 return out;
             }, "The path components as a list.")
-        .def_property_readonly("depth", [](const pathview& v) { return v.table->depth(v.row); },
+        .def_property_readonly("depth", [](const pathview& v) { return v.table()->depth(v.row()); },
                                "Named components below the anchor.")
         // -- composition: by row when one component, by value otherwise --
         .def("__truediv__", [es](const pathview& v, py::handle other) {
                 const text_arg t = text_view_of_arg(other);
-                return joined(es, v, t.view);
+                return joined(es, v, t.view());
             }, py::is_operator())
         .def("__rtruediv__", [es](const pathview& v, py::handle other) {
                 const text_arg t = text_view_of_arg(other);
-                return wrap(es, v.intern(v.value().rjoined(t.view)));
+                return wrap(es, v.intern(v.value().rjoined(t.view())));
             }, py::is_operator())
         .def("joinpath", [es](py::object self, const py::args& parts) {
                 py::object cur = std::move(self);
                 for (const py::handle& part : parts) {
                     const text_arg t = text_view_of_arg(part);
-                    cur = joined(es, py::cast<const pathview&>(cur), t.view);
+                    cur = joined(es, py::cast<const pathview&>(cur), t.view());
                 }
                 return cur;
             }, "Append one or more path components, like pathlib's joinpath().")
-        .def_property_readonly("parent", [es](const pathview& v) { return wrap(es, v.at(v.table->parent(v.row))); },
+        .def_property_readonly("parent", [es](const pathview& v) { return wrap(es, v.at(v.table()->parent(v.row()))); },
                                "The parent directory (pathlib's rule: the anchor is its own parent).")
         .def_property_readonly("parents", [es](const pathview& v) {
                 py::list out;
-                for (const std::uint32_t r : v.table->parents(v.row)) out.append(wrap(es, v.at(r)));
+                for (const std::uint32_t r : v.table()->parents(v.row())) out.append(wrap(es, v.at(r)));
                 return out;
             }, "Ancestor directories, closest first.")
+        .def("relative_to", [es](const pathview& v, py::handle other) {
+                const text_arg t = text_view_of_arg(other);
+                const file base(t.view());
+                if (const auto rest = v.value().relative_to(base)) return wrap(es, v.intern(*rest));
+                throw py::value_error("'" + v.fspath() + "' is not in the subpath of '" + base.fspath() + "'");
+            }, py::arg("other"),
+             "This path with *other* taken off its front, like pathlib's relative_to(): `path('/a/b/c')`\n"
+             "relative to '/a' is `b/c`, and a path relative to itself is '.'. *other* is text, an\n"
+             "os.PathLike or a path. Raises ValueError when this path is neither *other* nor beneath it.\n"
+             "Compared as written, as == compares: on Windows letter case is not folded.")
+        .def("is_relative_to", [](const pathview& v, py::handle other) {
+                const text_arg t = text_view_of_arg(other);
+                return v.value().is_relative_to(file(t.view()));
+            }, py::arg("other"), "Whether relative_to(other) would succeed: this path is *other* or beneath it.")
         // -- derived paths whose rules live in the core value --
         .def("with_suffix", [es](const pathview& v, const std::string& s) { return wrap(es, v.intern(v.value().with_suffix(s))); },
              py::arg("suffix"), "A copy with the final suffix replaced.")
@@ -331,7 +331,7 @@ py::class_<pathview> bind_path(engine_list<Es...> es, py::module_& m, const path
         .def("resolve", [es](const pathview& v) { return wrap(es, v.intern(v.value().resolve())); },
              "A canonical, absolute copy (resolves symlinks/..).")
         // -- filesystem --
-        .def("is_absolute", [](const pathview& v) { return v.table->is_absolute<native_strategy>(v.row); },
+        .def("is_absolute", [](const pathview& v) { return v.table()->is_absolute<native_strategy>(v.row()); },
              "Whether the path is absolute.")
         .def("exists", [](const pathview& v) { return v.value().exists(); }, "Whether the path exists on disk.")
         .def("is_file", [](const pathview& v) { return v.value().is_file(); }, "Whether it is a regular file.")
@@ -339,33 +339,47 @@ py::class_<pathview> bind_path(engine_list<Es...> es, py::module_& m, const path
         .def("is_symlink", [](const pathview& v) { return v.value().is_symlink(); }, "Whether it is a symbolic link.")
         .def("size", [](const pathview& v) { return v.value().size(); }, "File size in bytes (raises if it does not exist).")
         .def("read_bytes", [](const pathview& v) { return py::bytes(v.value().read_bytes()); }, "The raw file bytes, undecoded.")
-        .def("write_bytes", [](const pathview& v, py::bytes data) {
+        .def("write_bytes", [](const pathview& v, py::bytes data, bool atomic) {
                 const std::string_view sv = data;
                 const file f = v.value();
                 py::gil_scoped_release nogil;
-                f.write_bytes(sv);
-            }, py::arg("data"), "Replace the file's contents with the given bytes.")
+                f.write_bytes(sv, atomic ? write_mode::atomic : write_mode::in_place);
+            }, py::arg("data"), py::kw_only(), py::arg("atomic") = false,
+            "Replace the file's contents with the given bytes; atomic=True as for write().")
         .def("mkdir", [](const pathview& v, bool parents, bool exist_ok) { v.value().mkdir(parents, exist_ok); },
              py::arg("parents") = false, py::arg("exist_ok") = false,
              "Create this directory, like pathlib: parents= creates missing ancestors, exist_ok= tolerates an existing directory.")
+        .def("unlink", [](const pathview& v, bool missing_ok) { v.value().unlink(missing_ok); },
+             py::arg("missing_ok") = false,
+             "Remove this file or symbolic link, like pathlib: missing_ok= tolerates nothing being there.")
         .def("read", [](const pathview& v, const std::optional<std::string>& engine, py::ssize_t key_cache) {
                 const file f = v.value();
                 const std::size_t cap = key_cache < 0 ? std::numeric_limits<std::size_t>::max() : static_cast<std::size_t>(key_cache);
                 return load(L{}, L::resolve(f, requested_of(engine)), f, cap);
             }, py::arg("engine") = py::none(), py::arg("key_cache") = 256, py::doc(docs.read.c_str()))
-        .def("write", [](const pathview& v, py::handle obj, const std::optional<std::string>& engine) {
+        .def("write", [](const pathview& v, py::handle obj, const std::optional<std::string>& engine, bool atomic) {
                 const file f = v.value();
-                write(L{}, L::resolve(f, requested_of(engine)), f, obj);
-            }, py::arg("obj"), py::arg("engine") = py::none(), py::doc(docs.write.c_str()))
+                const auto* chosen = L::resolve(f, requested_of(engine));
+                if (!atomic) return write(L{}, chosen, f, obj);
+                atomic_write replacement(f);
+                write(L{}, chosen, replacement.temporary(), obj);   // the engine writes the temporary by its path
+                replacement.commit();
+            }, py::arg("obj"), py::arg("engine") = py::none(), py::kw_only(), py::arg("atomic") = false,
+            py::doc(docs.write.c_str()))
         // -- traversal: results are rows of the same table and inherit the pin --
         .def("iterdir", [es](const pathview& v) { return wrap_all(es, v, v.value().iterdir()); },
              "The directory's children, sorted.")
-        .def("glob", [es](const pathview& v, std::string_view p) { return wrap_all(es, v, v.value().glob(p)); },
-             py::arg("pattern"),
-             "Relative glob: * and ? within a component, ** across directories. "
-             "Sorted and deduplicated; results inherit the engine pin.")
-        .def("rglob", [es](const pathview& v, std::string_view p) { return wrap_all(es, v, v.value().rglob(p)); },
-             py::arg("pattern"), "glob('**/' + pattern): the pattern anywhere under this directory.");
+        .def("glob", [es](const pathview& v, std::string_view p, std::optional<bool> case_sensitive) {
+                 return wrap_all(es, v, glob_of(v.value(), p, case_sensitive));
+             }, py::arg("pattern"), py::kw_only(), py::arg("case_sensitive") = py::none(),
+             "What pathlib's glob finds (recurse_symlinks=False): * ? and [seq] within a name (dot names too), "
+             "** across directories, yielding the one it starts in and never going through a link; a trailing "
+             "'/' keeps directories; '.' is dropped, '..' a step up. case_sensitive: None as the system "
+             "(any case on Windows), False any case. Sorted and deduplicated; results inherit the engine pin.")
+        .def("rglob", [es](const pathview& v, std::string_view p, std::optional<bool> case_sensitive) {
+                 return wrap_all(es, v, glob_of(v.value(), "**/" + std::string(p), case_sensitive));
+             }, py::arg("pattern"), py::kw_only(), py::arg("case_sensitive") = py::none(),
+             "glob('**/' + pattern): the pattern anywhere under this directory.");
 
     (bind_typed_one<Es>(m, meta), ...);
     return cls;

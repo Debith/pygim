@@ -18,50 +18,138 @@
 // This header carries no pybind11 and no parser library, so it stays fast to
 // compile and trivially testable; the engine glue that must speak Python lives
 // in adapter/.
+//
+// CORE layer: pybind-free.
 
 #include <algorithm>
 #include <array>
+#include <cerrno>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
+#include <optional>
+#include <random>
 #include <sstream>
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <system_error>
 #include <tuple>
 #include <utility>
 #include <vector>
 
+#include "../utils/chars.h"
 #include "../utils/hash.h"
+#include "../utils/string_list.h"
+#include "glob_walk.h"
 #include "uri.h"
+
+#include <climits>
+#include <fcntl.h>
+#include <sys/stat.h>
+#ifdef _WIN32
+#include <io.h>        // _wunlink, _wsopen_s, _write, _commit, _close
+#include <share.h>
+#else
+#include <unistd.h>    // unlink, write, fsync, close
+#endif
 
 namespace pygim::pathlike {
 
 namespace fs = std::filesystem;
 
-// A borrowed view over an engine's constexpr string list — a deliberately
-// minimal stand-in for std::span that is usable in constant expressions on
-// every compiler in the build matrix.
-struct sv_list {
-    const std::string_view* first = nullptr;
-    std::size_t count = 0;
+// A file operation the operating system refused, as errno and the path it was about — what
+// Python's OSError carries, so the adapter raises the subclass pathlib raises for the same call:
+//   path("missing").read_bytes()  ->  file_error{ENOENT, "missing"}  ->  FileNotFoundError
+//   path("a_dir").mkdir()         ->  file_error{EEXIST, "a_dir"}    ->  FileExistsError
+// Derives from std::runtime_error (through std::system_error), so C++ that catches that keeps working.
+struct file_error : std::system_error {
+    std::string path;   // as fspath() spells it
 
-    constexpr sv_list() = default;
-    template <std::size_t N>
-    constexpr sv_list(const std::array<std::string_view, N>& items) noexcept  // implicit by design
-        : first(items.data()), count(N) {}
+    file_error(int err, std::string where, const std::string& what)
+        : std::system_error(err, std::generic_category(), what + " '" + where + "'"), path(std::move(where)) {}
+};
 
-    [[nodiscard]] constexpr const std::string_view* begin() const noexcept { return first; }
-    [[nodiscard]] constexpr const std::string_view* end() const noexcept { return first + count; }
-    [[nodiscard]] constexpr std::size_t size() const noexcept { return count; }
-    [[nodiscard]] constexpr bool empty() const noexcept { return count == 0; }
-    [[nodiscard]] constexpr bool contains(std::string_view s) const noexcept {
-        for (std::string_view x : *this) {
-            if (x == s) return true;
-        }
-        return false;
+namespace detail {
+
+// errno as the failed open left it. A library that failed without setting it gets the nearest
+// answer the file system gives: nothing there is ENOENT, anything else EACCES.
+[[nodiscard]] inline int open_errno(const fs::path& p) noexcept {
+    const int err = errno;
+    if (err != 0) return err;
+    std::error_code ec;
+    return fs::exists(p, ec) ? EACCES : ENOENT;
+}
+
+// Sixteen hex digits from the system's entropy: what tells one writer's temporary file from another's.
+[[nodiscard]] inline std::string random_tag() {
+    std::random_device entropy;
+    const std::uint64_t bits = (std::uint64_t{entropy()} << 32) ^ std::uint64_t{entropy()};
+    std::string out(16, '0');
+    for (std::size_t i = 0; i < out.size(); ++i) out[out.size() - 1 - i] = "0123456789abcdef"[(bits >> (4 * i)) & 0xF];
+    return out;
+}
+
+// The operating system calls an atomic write needs, one spelling per platform. Each returns what the
+// call returns and leaves errno as the call left it.
+#ifdef _WIN32
+[[nodiscard]] inline int open_exclusive(const fs::path& p) {
+    int fd = -1;
+    const errno_t err = ::_wsopen_s(&fd, p.c_str(), _O_WRONLY | _O_CREAT | _O_EXCL | _O_BINARY | _O_NOINHERIT,
+                                    _SH_DENYNO, _S_IREAD | _S_IWRITE);
+    if (err != 0) errno = err;
+    return err == 0 ? fd : -1;
+}
+[[nodiscard]] inline long long write_some(int fd, const char* data, std::size_t size) {
+    return ::_write(fd, data, static_cast<unsigned>(std::min<std::size_t>(size, INT_MAX)));
+}
+inline int force_fd(int fd) { return ::_commit(fd); }
+inline int close_fd(int fd) { return ::_close(fd); }
+inline int force_folder(const fs::path&) { return 0; }   // Windows has no folder to force; see pathlike_writes.md, Open
+#else
+[[nodiscard]] inline int open_exclusive(const fs::path& p) {
+    return ::open(p.c_str(), O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, 0666);
+}
+[[nodiscard]] inline long long write_some(int fd, const char* data, std::size_t size) { return ::write(fd, data, size); }
+inline int force_fd(int fd) {
+#ifdef __APPLE__
+    if (::fcntl(fd, F_FULLFSYNC) == 0) return 0;   // macOS's fsync stops at the drive's cache
+#endif
+    return ::fsync(fd);
+}
+inline int close_fd(int fd) { return ::close(fd); }
+inline int force_folder(const fs::path& folder) {
+    const int fd = ::open(folder.c_str(), O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+    if (fd < 0) return -1;
+    const int forced = force_fd(fd);
+    const int err = errno;
+    ::close(fd);
+    errno = err;
+    return forced;
+}
+#endif
+
+}  // namespace detail
+
+/// Whether a write replaces the file in place (pathlib's write) or atomically (a temporary renamed
+/// over it). Example: f.write_bytes("{}", write_mode::atomic).
+enum class write_mode { in_place, atomic };
+
+/// How an atomic write forces bytes to the disk: the operating system's own calls. A policy, so a
+/// test can record the order of forcing instead (docs/design/pathlike_writes.md, step 4). A folder
+/// on a file system that cannot force one (EINVAL, ENOTSUP) is let be: the rename has been made.
+struct disk_sync {
+    static void file(int fd, const std::string& where) {
+        if (detail::force_fd(fd) != 0) throw file_error(errno, where, "cannot force to the disk");
+    }
+    static void folder(const fs::path& folder, const std::string& where) {
+        if (detail::force_folder(folder) == 0 || errno == EINVAL || errno == ENOTSUP) return;
+        throw file_error(errno, where, "cannot force its folder to the disk");
     }
 };
+
+template <class File, class Sync = disk_sync>
+class basic_atomic_write;
 
 // The pybind-free face of one engine: everything the registry, the proofs and
 // `file` need to know. Every engine header declares one as `static constexpr
@@ -71,8 +159,8 @@ struct engine_info {
     std::string_view name;     // format name: engine="json"; the Python class is "<name>path"
     std::string_view label;    // LIBRARY label reported by .engine: "simdjson"
     std::string_view doc;      // one sentence, used by every derived docstring
-    sv_list exts;              // auto-dispatch extensions: lower-case, leading dot
-    sv_list aliases;           // extra engine= spellings: "yml", "ndjson", "tomlplusplus"
+    string_list exts;          // auto-dispatch extensions: lower-case, leading dot
+    string_list aliases;       // extra engine= spellings: "yml", "ndjson", "tomlplusplus"
 
     // engine= selectors: the format name, the library label and the aliases.
     [[nodiscard]] constexpr bool selects(std::string_view n) const noexcept {
@@ -114,28 +202,6 @@ template <class Strategy>
     if (dot == std::string_view::npos || dot == 0 || dot == n.size() - 1) return n;
     return n.substr(0, dot);
 }
-// One glob *segment* against one path component: `*` and `?`, never crossing
-// a directory separator (the walk in file::glob() handles `/` and `**`).
-[[nodiscard]] constexpr bool glob_match(std::string_view pattern, std::string_view name) noexcept {
-    std::size_t p = 0, n = 0;
-    std::size_t star_p = std::string_view::npos, star_n = 0;
-    while (n < name.size()) {
-        if (p < pattern.size() && (pattern[p] == '?' || pattern[p] == name[n])) {
-            ++p; ++n;
-        } else if (p < pattern.size() && pattern[p] == '*') {
-            star_p = p++;
-            star_n = n;
-        } else if (star_p != std::string_view::npos) {
-            p = star_p + 1;
-            n = ++star_n;
-        } else {
-            return false;
-        }
-    }
-    while (p < pattern.size() && pattern[p] == '*') ++p;
-    return p == pattern.size();
-}
-
 // The OS boundary: the internal text form is the NATIVE byte string on POSIX
 // (so non-UTF-8 file names round-trip) and UTF-8 on Windows (lossless from the
 // wide native form, and what Python's str carries). fs::path::string() would
@@ -312,7 +378,7 @@ struct windows_strategy : strategy_base<windows_strategy> {
     static constexpr bool remote_hosts = true;   // file://host/share/x is the UNC path \\host\share\x
     [[nodiscard]] static constexpr bool is_sep(char c) noexcept { return c == '\\' || c == '/'; }
     [[nodiscard]] static constexpr bool is_drive(std::string_view seg) noexcept {
-        return seg.size() == 2 && uri::is_alpha(seg[0]) && seg[1] == ':';
+        return seg.size() == 2 && chars::is_alpha(seg[0]) && seg[1] == ':';
     }
 
     static constexpr void parse_into(uri& u, std::string_view s) {
@@ -340,7 +406,7 @@ struct windows_strategy : strategy_base<windows_strategy> {
             detail::append_components(u, s, is_sep);
             return;
         }
-        if (s.size() >= 2 && uri::is_alpha(s[0]) && s[1] == ':') {   // drive
+        if (s.size() >= 2 && chars::is_alpha(s[0]) && s[1] == ':') {   // drive
             u.segments.emplace_back(s.substr(0, 2));
             s.remove_prefix(2);
         }
@@ -375,7 +441,7 @@ struct windows_strategy : strategy_base<windows_strategy> {
 
     [[nodiscard]] static constexpr bool same_drive(const uri& a, const uri& b) noexcept {
         if (!has_drive(a) || !has_drive(b)) return false;
-        return uri::to_lower(a.segments.front()[0]) == uri::to_lower(b.segments.front()[0]);
+        return chars::to_lower(a.segments.front()[0]) == chars::to_lower(b.segments.front()[0]);
     }
 
     // pathlib's join, in place: a UNC or foreign-drive `other` replaces; a
@@ -408,7 +474,7 @@ struct windows_strategy : strategy_base<windows_strategy> {
         std::string text;
         if (const std::string_view host = detail::remote_host(u); !host.empty()) text = "\\\\" + std::string(host);
         std::string p = u.path();
-        if (text.empty() && p.size() >= 3 && p[0] == '/' && uri::is_alpha(p[1]) && (p[2] == ':' || p[2] == '|')) {
+        if (text.empty() && p.size() >= 3 && p[0] == '/' && chars::is_alpha(p[1]) && (p[2] == ':' || p[2] == '|')) {
             p = p.substr(1);
             p[1] = ':';
         }
@@ -445,7 +511,7 @@ public:
 
     // ── construction rules (constexpr, so provable) ────────────────────────
     [[nodiscard]] static constexpr bool is_file_scheme(std::string_view sch) noexcept {
-        return uri::ascii_lower(sch) == "file";
+        return chars::lower(sch) == "file";
     }
 
     // Parse path text or a file URI (RFC 8089) into `u`, in ONE pass: "" on
@@ -550,7 +616,7 @@ public:
     }
 
     // The lower-cased extension the registry dispatches on (".yaml").
-    [[nodiscard]] constexpr std::string ext_key() const { return uri::ascii_lower(suffix()); }
+    [[nodiscard]] constexpr std::string ext_key() const { return chars::lower(suffix()); }
 
     // pathlib's parts: the anchor ("/", "C:\", "\\server\share\"), then the components.
     [[nodiscard]] constexpr std::vector<std::string> parts() const {
@@ -618,6 +684,28 @@ public:
         return out;
     }
 
+    // pathlib's relative_to: this path with `base` taken off its front, or nullopt when this path is
+    // neither `base` nor beneath it. Same anchor (root, drive, share) and every segment of `base` a
+    // leading segment of this one, compared as written — the equality `==` uses, so unlike
+    // PureWindowsPath it does not fold case. Lexical, as pathlib's is: ".." is a segment like any
+    // other. "/a/b" relative to "/a/" -> "b"; "/ab/c" relative to "/a" -> nullopt; a path relative to
+    // itself -> ".".
+    [[nodiscard]] constexpr std::optional<basic_file> relative_to(const basic_file& base) const {
+        const uri& a = m_uri;
+        const uri& b = base.m_uri;
+        if (a.scheme != b.scheme || a.has_authority != b.has_authority || a.authority != b.authority ||
+            a.absolute != b.absolute || b.segments.size() > a.segments.size()) {
+            return std::nullopt;
+        }
+        for (std::size_t i = 0; i < b.segments.size(); ++i) {
+            if (a.segments[i] != b.segments[i]) return std::nullopt;
+        }
+        uri rest;   // relative: no scheme, no authority, no root
+        rest.segments.assign(a.segments.begin() + static_cast<std::ptrdiff_t>(b.segments.size()), a.segments.end());
+        return basic_file(std::move(rest), m_pin);
+    }
+    [[nodiscard]] constexpr bool is_relative_to(const basic_file& base) const { return relative_to(base).has_value(); }
+
     // pathlib's rule: a name is any non-empty component without a separator
     // that is not "." (".." is allowed, as in pathlib).
     [[nodiscard]] constexpr basic_file with_name(std::string_view n) const {
@@ -658,28 +746,17 @@ public:
         return out;
     }
 
-    // Relative glob: `*` and `?` within a component, `/` separates components,
-    // `**` matches any number of directories (and, as the final component,
-    // every descendant). Sorted, deduplicated.
-    [[nodiscard]] std::vector<basic_file> glob(std::string_view pattern) const {
-        if (pattern.empty()) throw std::invalid_argument("glob: empty pattern");
-        std::vector<std::string> segs;
-        for (std::size_t start = 0; start <= pattern.size();) {
-            const std::size_t slash = pattern.find('/', start);
-            const std::size_t end = (slash == std::string_view::npos) ? pattern.size() : slash;
-            if (end > start) segs.emplace_back(pattern.substr(start, end - start));
-            if (slash == std::string_view::npos) break;
-            start = slash + 1;
-        }
-        // A leading '/' is rejected explicitly: on Windows fs::path("/x") is
-        // NOT is_absolute() (no drive), yet the pattern is clearly not
-        // relative in the caller's intent.
-        if (segs.empty() || pattern.front() == '/' || fs::path(pattern).is_absolute()) {
-            throw std::invalid_argument("glob: pattern must be relative, got '" +
-                                        std::string(pattern) + "'");
-        }
+    // What pathlib's glob finds under this directory, sorted and deduplicated. The rules are
+    // glob_walk.h's; this runs them on the calling thread (parallel_glob.h runs the same on a pool).
+    [[nodiscard]] std::vector<basic_file> glob(std::string_view pattern) const { return glob(glob_pattern(pattern)); }
+    /// The same with the pattern parsed already (a caller that checked it first parses it once).
+    [[nodiscard]] std::vector<basic_file> glob(const glob_pattern& pattern) const { return found_by_glob(glob_walk_here(pattern, to_fs())); }
+
+    // What a walk found, as files with this one's pin: sorted and deduplicated, as glob() returns them.
+    [[nodiscard]] std::vector<basic_file> found_by_glob(const std::vector<fs::path>& found) const {
         std::vector<basic_file> out;
-        glob_walk(to_fs(), segs, 0, out);
+        out.reserve(found.size());
+        for (const fs::path& p : found) out.push_back(from_fs(p));
         std::sort(out.begin(), out.end());
         out.erase(std::unique(out.begin(), out.end()), out.end());
         return out;
@@ -690,42 +767,78 @@ public:
         return glob("**/" + std::string(pattern));
     }
 
-    // The raw bytes of the file, undecoded (binary, no newline translation).
+    // The raw bytes of the file, undecoded (binary, no newline translation). Fails as pathlib
+    // does: file_error with the errno of the open, and EISDIR for a directory, which POSIX lets
+    // open and then reads as nothing — checked only when nothing was read, so a file with
+    // content pays no extra stat.
     [[nodiscard]] std::string read_bytes() const {
-        std::ifstream ifs(to_fs(), std::ios::binary);
-        if (!ifs) throw std::runtime_error("cannot open file: " + fspath());
+        const fs::path p = to_fs();
+        errno = 0;
+        std::ifstream ifs(p, std::ios::binary);
+        if (!ifs) throw file_error(detail::open_errno(p), fspath(), "cannot open file");
         std::ostringstream buffer;
         buffer << ifs.rdbuf();
-        return buffer.str();
+        std::string bytes = std::move(buffer).str();
+        if (std::error_code ec; bytes.empty() && fs::is_directory(p, ec)) {
+            throw file_error(EISDIR, fspath(), "is a directory");
+        }
+        return bytes;
     }
 
-    // Replace the file's contents with `data`, byte for byte (pathlib parity).
-    void write_bytes(std::string_view data) const {
-        std::ofstream ofs(to_fs(), std::ios::binary | std::ios::trunc);
-        if (!ofs) throw std::runtime_error("cannot open file for writing: " + fspath());
+    // Replace the file's contents with `data`, byte for byte: in place by default (pathlib parity),
+    // or atomically (basic_atomic_write: a reader sees the old contents or the new, never part of
+    // either). Closed before it returns, so a failure the close reports — a full disk — is raised.
+    void write_bytes(std::string_view data, write_mode mode = write_mode::in_place) const {
+        if (mode == write_mode::atomic) {
+            basic_atomic_write<basic_file> replacement(*this);
+            replacement.write(data);
+            replacement.commit();
+            return;
+        }
+        const fs::path p = to_fs();
+        errno = 0;
+        std::ofstream ofs(p, std::ios::binary | std::ios::trunc);
+        if (!ofs) throw file_error(detail::open_errno(p), fspath(), "cannot open file for writing");
         ofs.write(data.data(), static_cast<std::streamsize>(data.size()));
-        if (!ofs) throw std::runtime_error("write failed: " + fspath());
+        ofs.close();
+        if (!ofs) throw file_error(errno != 0 ? errno : EIO, fspath(), "write failed");
     }
 
     // Create this directory (pathlib parity): `parents` creates missing
     // ancestors, `exist_ok` tolerates an existing directory. A non-directory
-    // in the way always fails.
+    // in the way always fails, as FileExistsError; a missing parent is ENOENT.
     void mkdir(bool parents = false, bool exist_ok = false) const {
         const fs::path p = to_fs();
         std::error_code ec;
         if (fs::is_directory(p, ec)) {
             if (exist_ok) return;
-            throw std::runtime_error("directory exists: " + fspath());
+            throw file_error(EEXIST, fspath(), "directory exists");
         }
         if (fs::exists(p, ec)) {
-            throw std::runtime_error("not a directory: " + fspath());
+            throw file_error(EEXIST, fspath(), "not a directory");
         }
         const bool made = parents ? fs::create_directories(p, ec) : fs::create_directory(p, ec);
-        if (ec || !made) {
-            throw std::runtime_error("cannot create directory " + fspath() +
-                                     (ec ? ": " + ec.message() : std::string{}));
-        }
+        // The condition maps a platform's own code (a Win32 error) to the errno Python expects.
+        if (ec) throw file_error(ec.default_error_condition().value(), fspath(), "cannot create directory");
+        if (!made) throw file_error(EEXIST, fspath(), "cannot create directory");
     }
+
+    // Remove this file or symbolic link (pathlib parity): a symlink goes, not what it points to;
+    // nothing there is ENOENT unless `missing_ok`. A directory is refused with the operating
+    // system's own errno, as os.unlink refuses it (EISDIR on Linux, EPERM on macOS, EACCES on Windows).
+    void unlink(bool missing_ok = false) const {
+        const fs::path p = to_fs();
+#ifdef _WIN32
+        const int failed = ::_wunlink(p.c_str());
+#else
+        const int failed = ::unlink(p.c_str());
+#endif
+        if (failed == 0) return;
+        const int err = errno;
+        if (err == ENOENT && missing_ok) return;
+        throw file_error(err, fspath(), "cannot remove file");
+    }
+
 
 private:
     [[nodiscard]] constexpr std::size_t anchor_count() const noexcept { return Strategy::anchor_segments(m_uri); }
@@ -737,44 +850,98 @@ private:
         return out;
     }
 
-    // Walk one pattern segment at `base`. Iteration errors (permissions,
-    // races) are skipped rather than thrown — matching pathlib's tolerance.
-    void glob_walk(const fs::path& base, const std::vector<std::string>& segs,
-                   std::size_t idx, std::vector<basic_file>& out) const {
-        const std::string& seg = segs[idx];
-        const bool last = idx + 1 == segs.size();
-        std::error_code ec;
-        if (seg == "**") {
-            if (last) {   // final `**`: every descendant, files and directories
-                for (fs::recursive_directory_iterator it(base, ec), end; !ec && it != end;
-                     it.increment(ec)) {
-                    out.push_back(from_fs(it->path()));
-                }
-                return;
-            }
-            glob_walk(base, segs, idx + 1, out);   // `**` matching zero directories
-            for (fs::recursive_directory_iterator it(base, ec), end; !ec && it != end;
-                 it.increment(ec)) {
-                std::error_code dec;
-                if (it->is_directory(dec) && !dec) glob_walk(it->path(), segs, idx + 1, out);
-            }
-            return;
-        }
-        for (fs::directory_iterator it(base, ec), end; !ec && it != end; it.increment(ec)) {
-            if (!detail::glob_match(seg, detail::text_from_fs(it->path().filename()))) continue;
-            if (last) {
-                out.push_back(from_fs(it->path()));
-            } else {
-                std::error_code dec;
-                if (it->is_directory(dec) && !dec) glob_walk(it->path(), segs, idx + 1, out);
-            }
-        }
-    }
-
     uri m_uri;
     const engine_info* m_pin{nullptr};   // pinned at construction; nullptr = auto by extension
 };
 
 using file = basic_file<native_strategy>;
+
+// The OS boundary for a caller that holds an fs::path (a walk's match): its text as pathlike holds
+// it — native bytes on POSIX, UTF-8 on Windows — and back.
+using detail::fs_from_text;
+using detail::text_from_fs;
+
+/// One atomic replacement of a file, owning its temporary from creation to rename or removal
+/// (docs/design/pathlike_writes.md). Example:
+///   atomic_write replacement(file("notes.json")); replacement.write("{}"); replacement.commit();
+/// The temporary is a hidden sibling, `.notes.json.<16 hex digits>.tmp`, created exclusively, so two
+/// writers never share one. commit() forces it to the disk, gives it the file's permission bits,
+/// renames it over the file and forces the folder: a reader sees the old contents or the new, and
+/// after a power cut one of them is there whole. Destroyed without commit(), it removes the
+/// temporary. A symbolic link is written through: the file it names is replaced, the link stays. The
+/// file is still a new one — a second hard link keeps the old contents, the owner is the writer's.
+template <class File, class Sync>
+class basic_atomic_write {
+public:
+    explicit basic_atomic_write(const File& target) : m_where(target.fspath()), m_destination(destination_of(target.to_fs())) {
+        fs::path folder = m_destination.parent_path();
+        for (int attempt = 0; attempt < 8; ++attempt) {   // two writers drawing one tag is 1 in 2^64: retried, not assumed away
+            fs::path name(".");
+            name += m_destination.filename();
+            name += "." + detail::random_tag() + ".tmp";
+            m_temporary = folder / name;
+            m_fd = detail::open_exclusive(m_temporary);
+            if (m_fd >= 0) return;
+            if (errno != EEXIST) break;
+        }
+        throw file_error(errno, m_where, "cannot create a temporary file beside");
+    }
+    basic_atomic_write(const basic_atomic_write&) = delete;
+    basic_atomic_write& operator=(const basic_atomic_write&) = delete;
+    ~basic_atomic_write() { abandon(); }
+
+    /// The temporary, for a writer that writes by path (an engine): what it holds at commit() is what
+    /// replaces the file.
+    [[nodiscard]] File temporary() const { return File(detail::text_from_fs(m_temporary)); }
+
+    /// Add `part` to the temporary.
+    void write(std::string_view part) {
+        while (!part.empty()) {
+            const long long written = detail::write_some(m_fd, part.data(), part.size());
+            if (written < 0) {
+                if (errno == EINTR) continue;
+                throw file_error(errno, m_where, "write failed");
+            }
+            part.remove_prefix(static_cast<std::size_t>(written));
+        }
+    }
+
+    /// Force the temporary to the disk, rename it over the file, force the folder.
+    void commit() {
+        Sync::file(m_fd, m_where);
+        if (detail::close_fd(std::exchange(m_fd, -1)) != 0) throw file_error(errno, m_where, "write failed");
+        std::error_code ec;
+        if (const fs::file_status status = fs::status(m_destination, ec); !ec && fs::exists(status))
+            fs::permissions(m_temporary, status.permissions(), ec);   // best effort: the contents are the point
+        fs::rename(m_temporary, m_destination, ec);
+        if (ec) throw file_error(ec.default_error_condition().value(), m_where, "cannot replace file");
+        m_committed = true;
+        const fs::path folder = m_destination.parent_path();
+        Sync::folder(folder.empty() ? fs::path(".") : folder, m_where);
+    }
+
+private:
+    // The file a write replaces: a symbolic link's target, so the link survives the rename.
+    [[nodiscard]] static fs::path destination_of(const fs::path& p) {
+        std::error_code ec;
+        return fs::is_symlink(p, ec) ? fs::weakly_canonical(p) : p;
+    }
+
+    void abandon() noexcept {
+        if (m_fd >= 0) detail::close_fd(std::exchange(m_fd, -1));
+        if (!m_committed) {
+            std::error_code ignored;
+            fs::remove(m_temporary, ignored);
+        }
+    }
+
+    std::string m_where;        // the path as the caller spelt it, for errors
+    fs::path m_destination;
+    fs::path m_temporary;
+    int m_fd = -1;
+    bool m_committed = false;
+};
+
+using atomic_write = basic_atomic_write<file>;
 
 }  // namespace pygim::pathlike

@@ -38,6 +38,8 @@
 // the proof TU (tests/static/pathlike_core_proofs.cpp) exercises the registry
 // on synthetic packs — positively AND negatively — without any parser or
 // Python header. adapter/adapter.h adds the load/write half of the contract.
+//
+// CORE layer: pybind-free.
 
 #include <array>
 #include <concepts>
@@ -359,7 +361,7 @@ struct engine_list {
     }
 
     // ".yaml": leading dot, one dot only, lower-case, no blanks or separators —
-    // exactly what ext_key() can produce, so ascii_lower is a no-op on keys.
+    // exactly what ext_key() can produce, so chars::lower is a no-op on keys.
     [[nodiscard]] static constexpr bool ext_ok(std::string_view x) noexcept {
         if (x.size() < 2 || x.front() != '.') return false;
         for (std::size_t i = 1; i < x.size(); ++i) {
@@ -465,13 +467,13 @@ struct engine_list {
     [[nodiscard]] static constexpr bool case_folding_is_exact(detail::report* r = nullptr) {
         for (const engine_info* e : infos) {
             for (std::string_view x : e->exts) {
-                const bool exact = for_ext(uri::ascii_lower(uri::ascii_upper(x))) == e &&
-                                   (uri::ascii_upper(x) == x || for_ext(uri::ascii_upper(x)) == nullptr) &&
+                const bool exact = for_ext(chars::lower(chars::upper(x))) == e &&
+                                   (chars::upper(x) == x || for_ext(chars::upper(x)) == nullptr) &&
                                    for_ext(x.substr(1)) == nullptr &&                  // "yaml"
                                    for_ext(std::string(x) + " ") == nullptr;           // ".yaml "
                 if (!exact) return fail(r, "extension '", x, "' of engine '", e->name, "' is not matched exactly (case-folded, undotted or padded forms leak)");
             }
-            const bool exact = (uri::ascii_upper(e->name) == e->name || from_name(uri::ascii_upper(e->name)) == nullptr) &&
+            const bool exact = (chars::upper(e->name) == e->name || from_name(chars::upper(e->name)) == nullptr) &&
                                from_name("." + std::string(e->name)) == nullptr;       // ".yaml" is not a selector
             if (!exact) return fail(r, "engine '", e->name, "' is selected by a spelling other than its exact name");
         }

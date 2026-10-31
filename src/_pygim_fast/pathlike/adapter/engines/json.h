@@ -62,7 +62,7 @@ namespace pygim::pathlike::detail {
         try {
             doc = parser.parse(simdjson::padded_string(bytes));
         } catch (const simdjson::simdjson_error& e) {
-            throw std::runtime_error("JSON parse error (" + f.fspath() + "): " + e.what());
+            throw std::invalid_argument("JSON parse error (" + f.fspath() + "): " + e.what());
         }
     }
     return json_to_py(doc, keys);

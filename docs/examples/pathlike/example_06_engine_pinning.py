@@ -28,9 +28,9 @@ legacy.write_text("name: imported\nversion: 3\n")
 # ----------------------------------------------------------------------------
 # 1. Pin the engine when the extension says nothing
 # ----------------------------------------------------------------------------
-#                            ┌─ engine: pin the decoder for this object and
-#                            │  everything derived from it (None = by extension)
-#                            ▼
+#                      ┌─ engine: pin the decoder for this object and
+#                      │  everything derived from it (None = by extension)
+#                      ▼
 p = pygim.path(legacy, engine="yaml")
 assert p.engine == "rapidyaml"
 assert p.read() == {"name": "imported", "version": 3}

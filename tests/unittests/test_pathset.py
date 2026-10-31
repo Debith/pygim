@@ -4,6 +4,7 @@ offered, now over one table: construction from one path or many, bool/==/in,
 + and - with paths or sets, clone, cwd, read_all_files, match_pattern, and the
 Filter / Query algebra (ext, name, absolute; & | ~; ps & f)."""
 
+import fnmatch
 import gc
 import os
 
@@ -148,6 +149,17 @@ def test_read_all_files(temp_dir, temp_files):
     (temp_dir / "readme.rst").write_text("world")
     texts = PathSet([temp_dir / "readme.txt", temp_dir / "readme.rst", temp_dir]).read_all_files()
     assert texts == ["hello", "world"]                            # the directory is skipped
+
+
+FNMATCH_PATTERNS = ["*.py", "?.py", "[ab]", "[!a]*", "[a-c]?", "[]a]", "[!]a]", "[a-]", "[-a]", "[c-a]", "[ab", "x[!]", "[[]",
+                    "*[!.]*", "[é]", "[à-ê]x", "??", "*?é", "a*b*c"]
+FNMATCH_NAMES = ["a.py", "é.py", "ab.py", "a", "b", "-", "]", "[ab", "x[!]", "[", "bx", "éx", "é", "aé", "abc", "a.b.c", ".x", ""]
+
+
+@pytest.mark.parametrize("pattern", FNMATCH_PATTERNS)
+def test_match_pattern_reads_a_segment_as_fnmatch_does(pattern):
+    """`[seq]` as fnmatch reads it, `?` one character (D49): pathlib's glob matches a name so."""
+    assert [n for n in FNMATCH_NAMES if match_pattern(pattern, n)] == [n for n in FNMATCH_NAMES if fnmatch.fnmatchcase(n, pattern)]
 
 
 def test_match_pattern():

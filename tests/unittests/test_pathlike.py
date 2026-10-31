@@ -133,7 +133,7 @@ def test_malformed_yaml_raises_not_aborts(temp_dir):
     # An undefined alias is a resolve error; the throwing callback must turn it into
     # a Python exception rather than aborting the process.
     f = _write(temp_dir, "bad.yaml", "ref: *missing\n")
-    with pytest.raises(RuntimeError):
+    with pytest.raises(ValueError):
         pygim.path(f).read()
 
 
@@ -301,7 +301,7 @@ def test_json_engine_is_strict_not_yaml(temp_dir):
     # {a: 1} is valid YAML but invalid JSON: proves .json is NOT routed to the
     # YAML engine, and that the engine override still rescues the read.
     f = _write(temp_dir, "notjson.json", "{a: 1}")
-    with pytest.raises(RuntimeError, match="JSON parse error"):
+    with pytest.raises(ValueError, match="JSON parse error"):
         pygim.path(f).read()
     assert pygim.path(f).read(engine="yaml") == {"a": 1}
 
@@ -373,6 +373,8 @@ TOML_CORPUS = [
     'day = 2024-01-15\ntea = 10:30:15\nstamp = 2024-01-15T10:30:00+02:00\nlocal = 2024-01-15T10:30:00\n',
     '[[points]]\nx = 1\n[[points]]\nx = 2\n',
     'inline = { a = 1, b = "two" }\nunicode = "hätä"\nneg = -17\nbig_f = 1e10\n',
+    'utc = 1979-05-27T07:32:00Z\nwest = 1979-05-27T00:32:00.999999-07:00\nhalf = 1979-05-27T07:32:00+05:30\n'
+    'frac = 07:32:00.5\nleap_day = 2024-02-29\n',
 ]
 
 
@@ -408,6 +410,10 @@ def test_toml_write_read_roundtrip(temp_dir, obj):
     assert _toml_oracle().loads((temp_dir / "rt.toml").read_text(encoding="utf-8")) == obj
 
 
+class Stamp(__import__("datetime").datetime):
+    """A datetime subclass, as pandas' Timestamp is one."""
+
+
 def test_toml_write_datetimes_roundtrip(temp_dir):
     import datetime as dt
 
@@ -417,10 +423,17 @@ def test_toml_write_datetimes_roundtrip(temp_dir):
         "stamp": dt.datetime(2024, 1, 15, 10, 30,
                              tzinfo=dt.timezone(dt.timedelta(hours=2))),
         "naive": dt.datetime(2024, 1, 15, 10, 30),
+        "west": dt.datetime(1979, 5, 27, 0, 32, 0, 999999, tzinfo=dt.timezone(-dt.timedelta(hours=7))),
+        "half": dt.datetime(1979, 5, 27, 7, 32, tzinfo=dt.timezone(dt.timedelta(hours=5, minutes=30))),
+        "utc": dt.datetime(1979, 5, 27, 7, 32, tzinfo=dt.timezone.utc),
+        "subclass": Stamp(2024, 1, 15, 10, 30),   # read as the datetime it is
     }
     p = pygim.path(temp_dir / "dt.toml")
     p.write(obj)
-    assert p.read() == obj
+    back = p.read()
+    assert back == obj
+    offsets = lambda d: {k: v.utcoffset() for k, v in d.items() if isinstance(v, dt.datetime)}
+    assert offsets(back) == offsets(obj)   # the same instant at the same offset, not only the same instant
     assert _toml_oracle().loads((temp_dir / "dt.toml").read_text(encoding="utf-8")) == obj
 
 
@@ -436,7 +449,7 @@ def test_toml_write_rejections_are_loud(temp_dir):
 
 def test_toml_parse_error_has_filename_and_line(temp_dir):
     f = _write(temp_dir, "broken.toml", "a = \n")
-    with pytest.raises(RuntimeError, match="TOML parse error.*broken.toml.*line"):
+    with pytest.raises(ValueError, match="TOML parse error.*broken.toml.*line"):
         pygim.path(f).read()
 
 
@@ -591,9 +604,11 @@ def test_iterdir_sorted_children(tree):
 
 
 def test_glob_rejects_bad_patterns(tree):
+    """As pathlib refuses them (D49): an empty pattern is a ValueError, one that is not relative a
+    NotImplementedError — it was a ValueError until 2026-10-30."""
     with pytest.raises(ValueError):
         pygim.path(tree).glob("")
-    with pytest.raises(ValueError):
+    with pytest.raises(NotImplementedError):
         pygim.path(tree).glob("/abs/*.yaml")
 
 
@@ -628,7 +643,7 @@ def test_merge_keys_are_expanded(temp_dir):
 
 def test_yaml_parse_error_includes_filename(temp_dir):
     f = _write(temp_dir, "broken.yaml", "a: [1, 2\n")
-    with pytest.raises(RuntimeError, match="broken.yaml"):
+    with pytest.raises(ValueError, match="broken.yaml"):
         pygim.path(f).read()
 
 
@@ -654,7 +669,7 @@ def test_json_bigint_limitation_is_loud(temp_dir):
     p = pygim.path(temp_dir / "big.json")
     p.write({"big": 12345678901234567890123})
     assert json.loads(open(str(p)).read()) == {"big": 12345678901234567890123}
-    with pytest.raises(RuntimeError, match="BIGINT"):
+    with pytest.raises(ValueError, match="BIGINT"):
         p.read()
 
 
@@ -732,7 +747,7 @@ def test_utf16_fails_loudly(temp_dir, name, doc):
     # YAML engine parsed this into NUL-riddled garbage strings — found by
     # this corpus. Garbage-out is never acceptable; a clear error is.
     f = _write_bytes(temp_dir, name, doc.encode("utf-16"))
-    with pytest.raises(RuntimeError, match="UTF-16|UTF8|utf-8|invalid"):
+    with pytest.raises(ValueError, match="UTF-16|UTF8|utf-8|invalid"):
         pygim.path(f).read()
 
 
@@ -746,13 +761,13 @@ def test_invalid_utf8_fails_loudly_with_filename(temp_dir, name, doc):
     # UnicodeDecodeError at materialisation time — or NOTHING when the bad
     # byte sat in a comment; now every engine rejects up front, naming the file.
     f = _write_bytes(temp_dir, name, doc)
-    with pytest.raises(RuntimeError, match=name.split(".")[0]):
+    with pytest.raises(ValueError, match=name.split(".")[0]):
         pygim.path(f).read()
 
 
 def test_invalid_utf8_in_comment_still_fails(temp_dir):
     f = _write_bytes(temp_dir, "cmt.yaml", b"k: 1  # h\xe4t\xe4\n")
-    with pytest.raises(RuntimeError, match="not valid UTF-8"):
+    with pytest.raises(ValueError, match="not valid UTF-8"):
         pygim.path(f).read()
 
 
@@ -772,7 +787,7 @@ def test_concurrent_parse_errors_propagate_cleanly(temp_dir):
         f = bad if i % 2 else good
         try:
             return f.read()
-        except RuntimeError as e:
+        except ValueError as e:
             return f"error:{'bad.yaml' in str(e)}"
 
     with ThreadPoolExecutor(max_workers=8) as ex:
@@ -884,13 +899,13 @@ def test_jsonl_bom_tolerated_and_utf16_refused(temp_dir):
     f = _write_bytes(temp_dir, "bom.jsonl", b"\xef\xbb\xbf" + b'{"k": 1}\n')
     assert pygim.path(f).read() == [{"k": 1}]
     g = _write_bytes(temp_dir, "u16.jsonl", '{"k": 1}\n'.encode("utf-16"))
-    with pytest.raises(RuntimeError, match="UTF-8"):
+    with pytest.raises(ValueError, match="UTF-8"):
         pygim.path(g).read()
 
 
 def test_jsonl_parse_error_names_file_and_line(temp_dir):
     f = _write(temp_dir, "bad.jsonl", '{"a": 1}\n{"b": 2}\nnot json\n{"c": 3}\n')
-    with pytest.raises(RuntimeError, match=r"bad\.jsonl, line 3"):
+    with pytest.raises(ValueError, match=r"bad\.jsonl, line 3"):
         pygim.path(f).read()
 
 
@@ -947,23 +962,119 @@ def test_write_bytes_roundtrips_raw(temp_dir):
 
 
 def test_write_bytes_into_missing_directory_fails_loudly(temp_dir):
-    with pytest.raises(RuntimeError, match="cannot open file for writing"):
+    with pytest.raises(FileNotFoundError):
         pygim.path(temp_dir / "missing" / "blob.bin").write_bytes(b"x")
 
 
 def test_mkdir_semantics_match_pathlib(temp_dir):
     d = pygim.path(temp_dir / "a" / "b")
-    with pytest.raises(RuntimeError):
+    with pytest.raises(FileNotFoundError):
         d.mkdir()                                            # parent missing
     d.mkdir(parents=True)
     assert d.is_dir()
-    with pytest.raises(RuntimeError, match="exists"):
+    with pytest.raises(FileExistsError):
         d.mkdir()
     d.mkdir(exist_ok=True)                                   # idempotent
     d.mkdir(parents=True, exist_ok=True)
     (temp_dir / "file").write_text("x")
-    with pytest.raises(RuntimeError, match="not a directory"):
+    with pytest.raises(FileExistsError):
         pygim.path(temp_dir / "file").mkdir(exist_ok=True)
+
+
+def test_unlink_semantics_match_pathlib(temp_dir):
+    f = temp_dir / "f.txt"
+    f.write_text("x")
+    pygim.path(f).unlink()
+    assert not f.exists()
+    with pytest.raises(FileNotFoundError):
+        pygim.path(f).unlink()
+    pygim.path(f).unlink(missing_ok=True)                    # nothing there, and that is fine
+    d = temp_dir / "d"
+    d.mkdir()
+    with pytest.raises(OSError) as by_pathlib:
+        d.unlink()                                           # pathlib's own answer on this platform
+    with pytest.raises(type(by_pathlib.value)):
+        pygim.path(d).unlink(missing_ok=True)                # a directory is not missing
+    assert d.is_dir()
+
+
+def test_unlink_removes_a_symlink_not_its_target(temp_dir):
+    target = temp_dir / "target.txt"
+    target.write_text("x")
+    link = temp_dir / "link.txt"
+    try:
+        link.symlink_to(target)
+    except OSError:
+        pytest.skip("this platform does not let the test make a symlink")
+    pygim.path(link).unlink()
+    assert not link.is_symlink() and target.read_text() == "x"
+
+
+def test_an_atomic_write_replaces_the_file_whole(temp_dir):
+    """write(obj, atomic=True) writes a temporary sibling and renames it over the file, so a reader
+    sees the old contents or the new, never part of either: the file is a new one afterwards."""
+    target = temp_dir / "notes.json"
+    pygim.path(target).write({"a": "1"})
+    if os.name == "posix":
+        os.chmod(target, 0o640)
+    before = os.stat(target)
+    pygim.path(target).write({"b": "2"}, atomic=True)
+    assert pygim.path(target).read() == {"b": "2"}
+    after = os.stat(target)
+    assert after.st_ino != before.st_ino                     # renamed over, not rewritten in place
+    if os.name == "posix":
+        assert after.st_mode == before.st_mode               # the file's permissions are kept
+    assert [p.name for p in temp_dir.iterdir()] == ["notes.json"]   # no temporary left behind
+
+
+def test_an_atomic_write_creates_a_file_that_is_not_there(temp_dir):
+    target = temp_dir / "new.yaml"
+    pygim.path(target).write({"a": 1}, atomic=True)
+    assert pygim.path(target).read() == {"a": 1}
+    assert [p.name for p in temp_dir.iterdir()] == ["new.yaml"]
+
+
+def test_an_atomic_write_that_fails_leaves_the_file_and_no_temporary(temp_dir):
+    target = temp_dir / "notes.json"
+    pygim.path(target).write({"a": "1"})
+    with pytest.raises(ValueError, match="unsupported type"):
+        pygim.path(target).write({"a": object()}, atomic=True)   # the engine cannot write an object()
+    assert pygim.path(target).read() == {"a": "1"}
+    assert [p.name for p in temp_dir.iterdir()] == ["notes.json"]
+
+
+def test_an_atomic_write_writes_through_a_symlink(temp_dir):
+    """The file a symlink names is replaced; the link stays a link (docs/design/pathlike_writes.md)."""
+    real = temp_dir / "real.json"
+    pygim.path(real).write({"a": "1"})
+    link = temp_dir / "link.json"
+    try:
+        link.symlink_to(real)
+    except OSError:
+        pytest.skip("this platform does not let the test make a symlink")
+    pygim.path(link).write({"b": "2"}, atomic=True)
+    assert link.is_symlink() and pygim.path(real).read() == {"b": "2"}
+    assert sorted(p.name for p in temp_dir.iterdir()) == ["link.json", "real.json"]
+
+
+def test_write_bytes_can_be_atomic_too(temp_dir):
+    target = temp_dir / "data.bin"
+    target.write_bytes(b"old")
+    before = os.stat(target).st_ino
+    pygim.path(target).write_bytes(b"new", atomic=True)
+    assert target.read_bytes() == b"new"
+    assert os.stat(target).st_ino != before
+    assert [p.name for p in temp_dir.iterdir()] == ["data.bin"]
+
+
+def test_a_plain_write_stays_in_place(temp_dir):
+    """Atomic is opt-in: a plain write keeps pathlib's semantics, writing into the file itself (so a
+    hard link or a symlink is written through)."""
+    target = temp_dir / "notes.json"
+    pygim.path(target).write({"a": "1"})
+    before = os.stat(target)
+    pygim.path(target).write({"b": "2"})
+    assert os.stat(target).st_ino == before.st_ino
 
 
 # --------------------------------------------------------------------------- #
@@ -1272,3 +1383,57 @@ def test_relative_file_uri_rejection_matches_pathlib(bad):
         pathlib.Path.from_uri(bad)
     with pytest.raises(ValueError):
         pygim.path(bad)
+
+
+# --------------------------------------------------------------------------- #
+# relative_to — a path, and every member of a PathSet, with a base taken off
+# --------------------------------------------------------------------------- #
+# Debith, 2026-10-02: "Both pathset and pathlike should have relative_to methods." Until then callers
+# cut the base's text off the front (project memory #25), which a trailing separator, another spelling
+# of the base or a sibling sharing its prefix turned into nonsense without a word.
+
+@pytest.mark.parametrize("p,base", [
+    ("/a/b/c.yaml", "/a"), ("/a/b", "/a/"), ("/a/b", "/a//"), ("a/b/c", "a"), ("a/b", "a/b"), ("/a", "/"),
+    ("a/../b", "a"), ("a/b", ""), ("a/b", "."),
+])
+def test_relative_to_matches_pathlib(p, base):
+    assert os.fspath(pygim.path(p).relative_to(base)) == str(pathlib.PurePath(p).relative_to(base))
+    assert pygim.path(p).is_relative_to(base)
+
+
+@pytest.mark.parametrize("p,base", [("/ab/c", "/a"), ("/a/b", "a"), ("a/b", "/a"), ("a", "a/b"), ("x/y", "a")])
+def test_relative_to_refuses_a_path_outside_the_base(p, base):
+    with pytest.raises(ValueError):
+        pathlib.PurePath(p).relative_to(base)            # the oracle refuses too
+    with pytest.raises(ValueError, match="not in the subpath of"):
+        pygim.path(p).relative_to(base)
+    assert not pygim.path(p).is_relative_to(base)
+
+
+def test_relative_to_takes_text_a_pathlike_or_a_path_and_keeps_the_pin(tmp_path):
+    from pygim.pathlike import yamlpath
+
+    target = tmp_path / "sub" / "doc.txt"
+    for base in (str(tmp_path), tmp_path, pygim.path(str(tmp_path))):
+        got = pygim.path(str(target)).relative_to(base)
+        assert got.parts == ["sub", "doc.txt"]
+    pinned = yamlpath(str(target)).relative_to(tmp_path)
+    assert isinstance(pinned, yamlpath)                       # the pin travels, as with with_name
+
+
+def test_a_pathset_is_relative_to_a_base_member_by_member_in_order(tmp_path):
+    (tmp_path / "pkg").mkdir()
+    (tmp_path / "a.py").write_text("", encoding="utf-8")
+    (tmp_path / "pkg" / "c.py").write_text("", encoding="utf-8")
+    walked = pygim.path(str(tmp_path)).pathset("**/*")
+    relative = walked.relative_to(tmp_path)
+    assert isinstance(relative, pathlike.PathSet) and len(relative) == len(walked)
+    want = [str(pathlib.PurePath(m).relative_to(tmp_path)) for m in walked.to_list()]
+    assert relative.to_list() == want                         # the same members, the same order
+    assert sorted(relative.to_list()) == sorted(str(p.relative_to(tmp_path)) for p in tmp_path.rglob("*"))
+
+
+def test_a_pathset_with_a_member_outside_the_base_names_it(tmp_path):
+    members = pathlike.PathSet([str(tmp_path / "in.py"), str(tmp_path.parent / "out.py")])
+    with pytest.raises(ValueError, match="out.py"):
+        members.relative_to(tmp_path)

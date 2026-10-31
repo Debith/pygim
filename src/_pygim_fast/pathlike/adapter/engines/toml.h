@@ -7,8 +7,10 @@
 // would hide the toml++ namespace, so the descriptor only forwards. Dates and times
 // materialise as datetime.date / time / datetime — matching what the stdlib's
 // tomllib produces, so the two are drop-in comparable — and convert back on
-// write. TOML's own constraints are enforced loudly: documents are tables
-// (mapping root), there is no null, integers are int64.
+// write, both through datetime's C API, whose table on_load() takes while the
+// module loads: nothing is imported while reading or writing (#248). TOML's own
+// constraints are enforced loudly: documents are tables (mapping root), there is
+// no null, integers are int64.
 
 #include <sstream>
 #include <array>
@@ -16,6 +18,7 @@
 #include <string_view>
 
 #include <pybind11/pybind11.h>
+#include <datetime.h>   // CPython's datetime C API: PyDateTimeAPI, one per translation unit
 
 #define TOML_EXCEPTIONS 0   // error-code API (toml::parse_result), no throw across nogil
 #include "../third_party/tomlplusplus/toml.hpp"
@@ -25,28 +28,36 @@
 
 namespace pygim::pathlike::detail {
 
+// datetime's C API table, taken while the module loads (engines::toml::on_load).
+inline void import_datetime_api() {
+    PyDateTime_IMPORT;
+    if (PyDateTimeAPI == nullptr) throw py::error_already_set();
+}
+
+// What a datetime C API call made, owned; its error raised.
+[[nodiscard]] inline py::object made(PyObject* object) {
+    if (object == nullptr) throw py::error_already_set();
+    return py::reinterpret_steal<py::object>(object);
+}
+
 // ── Read side ──────────────────────────────────────────────────────────────
 
 [[nodiscard]] inline py::object toml_date_to_py(const toml::date& d) {
-    static py::object cls = py::module_::import("datetime").attr("date");
-    return cls(d.year, d.month, d.day);
+    return made(PyDate_FromDate(d.year, d.month, d.day));
 }
 
 [[nodiscard]] inline py::object toml_time_to_py(const toml::time& t) {
-    static py::object cls = py::module_::import("datetime").attr("time");
-    return cls(t.hour, t.minute, t.second, t.nanosecond / 1000);
+    return made(PyTime_FromTime(t.hour, t.minute, t.second, static_cast<int>(t.nanosecond / 1000)));
 }
 
+// A datetime at its offset — timezone(timedelta(minutes=offset)), which for 0 is timezone.utc, as
+// tomllib's — or naive without one.
 [[nodiscard]] inline py::object toml_datetime_to_py(const toml::date_time& dt) {
-    static py::object dt_cls = py::module_::import("datetime").attr("datetime");
-    static py::object tz_cls = py::module_::import("datetime").attr("timezone");
-    static py::object td_cls = py::module_::import("datetime").attr("timedelta");
     py::object tz = py::none();
-    if (dt.offset) {
-        tz = tz_cls(td_cls(py::arg("minutes") = dt.offset->minutes));
-    }
-    return dt_cls(dt.date.year, dt.date.month, dt.date.day, dt.time.hour, dt.time.minute,
-                  dt.time.second, dt.time.nanosecond / 1000, tz);
+    if (dt.offset) tz = made(PyTimeZone_FromOffset(made(PyDelta_FromDSU(0, dt.offset->minutes * 60, 0)).ptr()));
+    return made(PyDateTimeAPI->DateTime_FromDateAndTime(dt.date.year, dt.date.month, dt.date.day, dt.time.hour, dt.time.minute,
+                                                         dt.time.second, static_cast<int>(dt.time.nanosecond / 1000), tz.ptr(),
+                                                         PyDateTimeAPI->DateTimeType));
 }
 
 [[nodiscard]] inline py::object toml_to_py(const toml::node& n, KeyCache& keys) {
@@ -78,7 +89,7 @@ namespace pygim::pathlike::detail {
     }();
     if (!result) {
         const auto& err = result.error();
-        throw std::runtime_error("TOML parse error (" + f.fspath() + ", line " +
+        throw std::invalid_argument("TOML parse error (" + f.fspath() + ", line " +
                                  std::to_string(err.source().begin.line) +
                                  "): " + std::string(err.description()));
     }
@@ -96,10 +107,6 @@ namespace pygim::pathlike::detail {
 
 template <typename Insert>
 inline void py_to_toml_value(py::handle obj, Insert&& ins) {
-    static py::object date_cls = py::module_::import("datetime").attr("date");
-    static py::object time_cls = py::module_::import("datetime").attr("time");
-    static py::object datetime_cls = py::module_::import("datetime").attr("datetime");
-
     if (obj.is_none()) {
         throw std::invalid_argument("toml cannot represent None (TOML has no null)");
     }
@@ -114,30 +121,28 @@ inline void py_to_toml_value(py::handle obj, Insert&& ins) {
     }
     if (py::isinstance<py::float_>(obj)) return ins(obj.cast<double>());
     if (py::isinstance<py::str>(obj)) return ins(obj.cast<std::string>());
-    if (py::isinstance(obj, datetime_cls)) {        // before date: datetime IS a date
+    PyObject* const o = obj.ptr();
+    const auto day_of = [o] {
+        return toml::date{static_cast<uint16_t>(PyDateTime_GET_YEAR(o)), static_cast<uint8_t>(PyDateTime_GET_MONTH(o)),
+                          static_cast<uint8_t>(PyDateTime_GET_DAY(o))};
+    };
+    if (PyDateTime_Check(o)) {        // before date: a datetime IS a date
         toml::date_time dt;
-        dt.date = {obj.attr("year").cast<uint16_t>(), obj.attr("month").cast<uint8_t>(),
-                   obj.attr("day").cast<uint8_t>()};
-        dt.time = {obj.attr("hour").cast<uint8_t>(), obj.attr("minute").cast<uint8_t>(),
-                   obj.attr("second").cast<uint8_t>(),
-                   obj.attr("microsecond").cast<uint32_t>() * 1000u};
-        py::object off = obj.attr("utcoffset")();
+        dt.date = day_of();
+        dt.time = {static_cast<uint8_t>(PyDateTime_DATE_GET_HOUR(o)), static_cast<uint8_t>(PyDateTime_DATE_GET_MINUTE(o)),
+                   static_cast<uint8_t>(PyDateTime_DATE_GET_SECOND(o)), static_cast<uint32_t>(PyDateTime_DATE_GET_MICROSECOND(o)) * 1000u};
+        const py::object off = obj.attr("utcoffset")();   // its tzinfo's answer: any tzinfo, not only timezone
         if (!off.is_none()) {
-            dt.offset = toml::time_offset(0, static_cast<int16_t>(
-                off.attr("total_seconds")().cast<double>() / 60.0));
+            const int seconds = PyDateTime_DELTA_GET_DAYS(off.ptr()) * 86'400 + PyDateTime_DELTA_GET_SECONDS(off.ptr());
+            dt.offset = toml::time_offset(0, static_cast<int16_t>(seconds / 60));
         }
         return ins(dt);
     }
-    if (py::isinstance(obj, date_cls)) {
-        return ins(toml::date{obj.attr("year").cast<uint16_t>(),
-                              obj.attr("month").cast<uint8_t>(),
-                              obj.attr("day").cast<uint8_t>()});
-    }
-    if (py::isinstance(obj, time_cls)) {
-        return ins(toml::time{obj.attr("hour").cast<uint8_t>(),
-                              obj.attr("minute").cast<uint8_t>(),
-                              obj.attr("second").cast<uint8_t>(),
-                              obj.attr("microsecond").cast<uint32_t>() * 1000u});
+    if (PyDate_Check(o)) return ins(day_of());
+    if (PyTime_Check(o)) {
+        return ins(toml::time{static_cast<uint8_t>(PyDateTime_TIME_GET_HOUR(o)), static_cast<uint8_t>(PyDateTime_TIME_GET_MINUTE(o)),
+                              static_cast<uint8_t>(PyDateTime_TIME_GET_SECOND(o)),
+                              static_cast<uint32_t>(PyDateTime_TIME_GET_MICROSECOND(o)) * 1000u});
     }
     if (py::isinstance<py::dict>(obj)) return ins(py_to_toml_table(obj));
     if (py::isinstance<py::list>(obj) || py::isinstance<py::tuple>(obj)) {
@@ -199,6 +204,7 @@ struct toml {
         .aliases = aliases,
     };
 
+    static void on_load() { detail::import_datetime_api(); }
     static py::object load(const file& f, detail::KeyCache& keys) { return detail::load_toml(f, keys); }
     static void write(const file& f, py::handle obj) { detail::write_toml(f, obj); }
 };

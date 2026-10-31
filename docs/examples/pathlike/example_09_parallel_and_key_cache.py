@@ -43,9 +43,9 @@ assert all(results[i]["i"] == i for i in range(16))
 records = root / "records.json"
 records.write_text(json.dumps([{"id": i, "name": "x"} for i in range(100)]))
 
-#                                        ┌─ key_cache: max distinct interned
-#                                        │  keys (0 = off, -1 = unbounded)
-#                                        ▼
+#                                   ┌─ key_cache: max distinct interned
+#                                   │  keys (0 = off, -1 = unbounded)
+#                                   ▼
 interned = pygim.path(records).read(key_cache=-1)
 plain = pygim.path(records).read(key_cache=0)
 assert interned == plain

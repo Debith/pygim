@@ -46,7 +46,8 @@ assert s["binary_ish"] == "0b1"
 # 3. Floats: only the dot-forms are special; bare "inf" is a string
 # ----------------------------------------------------------------------------
 s = read("finite: 2.5\nexp: 1e3\ninfinity: .inf\nnot_special: inf\n")
-assert s["finite"] == 2.5 and s["exp"] == 1000.0
+assert s["finite"] == 2.5
+assert s["exp"] == 1000.0
 assert s["infinity"] == math.inf
 assert s["not_special"] == "inf"
 
@@ -54,7 +55,8 @@ assert s["not_special"] == "inf"
 # 4. Quoting always wins: a quoted scalar is a string, full stop
 # ----------------------------------------------------------------------------
 s = read("quoted: '123'\nplain: 123\n")
-assert s["quoted"] == "123" and s["plain"] == 123
+assert s["quoted"] == "123"
+assert s["plain"] == 123
 
 tmp.cleanup()
 print("pathlike YAML 1.2 scalars example OK")

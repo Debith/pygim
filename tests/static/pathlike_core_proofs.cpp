@@ -26,7 +26,6 @@
 namespace {
 
 using namespace pygim::pathlike;
-using pygim::pathlike::detail::glob_match;
 
 // ── Synthetic descriptors (metadata only: the registry never needs load/write) ──
 struct alpha {
@@ -185,7 +184,7 @@ static_assert(!engine_list<label_is_name>::no_duplicate_selectors());
 
 // ── The case-fold chain, generated from the table ──────────────────────────
 static_assert(Good::case_folding_is_exact());
-static_assert(Good::for_ext(uri::ascii_lower(".AA")) == &alpha::info && Good::for_ext(".AA") == nullptr &&
+static_assert(Good::for_ext(pygim::chars::lower(".AA")) == &alpha::info && Good::for_ext(".AA") == nullptr &&
               Good::for_ext("aa") == nullptr && Good::for_ext(".aa ") == nullptr &&
               Good::from_name("ALPHA") == nullptr && Good::from_name(".alpha") == nullptr);
 
@@ -325,8 +324,8 @@ static_assert(px_equal("a/b/", "a//b") && px_equal("./a/b", "a/b") && !px_equal(
 static_assert(px_parents("a/b/c") == 2 && px_parents("/a/b") == 2 && px_parents("a") == 0 && px_parents("/") == 0);
 
 // ── core.h helpers ─────────────────────────────────────────────────────────
-static_assert(uri::ascii_lower(".YAML") == ".yaml" && uri::ascii_upper(".yaml") == ".YAML" && uri::ascii_lower("") == "");
-static_assert(sv_list{}.empty() && !alpha::info.exts.empty() && alpha::info.exts.size() == 2 &&
+static_assert(pygim::chars::lower(".YAML") == ".yaml" && pygim::chars::upper(".yaml") == ".YAML" && pygim::chars::lower("") == "");
+static_assert(pygim::string_list{}.empty() && !alpha::info.exts.empty() && alpha::info.exts.size() == 2 &&
               alpha::info.owns(".aa") && !alpha::info.owns(".b") && alpha::info.selects("al") &&
               !alpha::info.selects("beta"));
 
@@ -336,6 +335,16 @@ static_assert(glob_match("*", "anything") && glob_match("*.yaml", "a.yaml") &&
               glob_match("*.tar.*", "x.tar.gz") && glob_match("**", "name"));
 static_assert(!glob_match("*.yaml", "a.yml") && !glob_match("a?c", "ac") &&
               !glob_match("", "x") && !glob_match("b*", "abc") && glob_match("", ""));
+// [seq] as fnmatch reads it (pathlib's glob, D49): a ']' first is a member, a '-' first or last is one,
+// a reversed range holds nothing, an unclosed '[' is a plain '[', '!' first negates; a character is a
+// UTF-8 code point for `?`, a class and a `*` alike; any case folds ASCII letters only.
+static_assert(glob_match("[]a]", "]") && glob_match("[]a]", "a") && !glob_match("[!]a]", "]") && glob_match("[!]a]", "b"));
+static_assert(glob_match("[a-]", "-") && glob_match("[-a]", "-") && !glob_match("[c-a]", "b") && !glob_match("[c-a]", "c"));
+static_assert(glob_match("[ab", "[ab") && !glob_match("[ab", "a") && glob_match("x[!]", "x[!]") && glob_match("[[]", "["));
+static_assert(glob_match("[é]", "é") && glob_match("[à-ê]", "é") && !glob_match("??", "é") && glob_match("*?", "é") &&
+              glob_match("*é", "aé") && !glob_match("*?é", "é"));
+static_assert(glob_match("[A-C]", "b", false) && !glob_match("[A-C]", "b") && glob_match("ä*", "ä.py", false) &&
+              !glob_match("Ä*", "ä.py", false));
 
 #if PYGIM_PATHLIKE_REFLECTION
 // ── Reflection helpers (P2996), on the synthetic descriptors ───────────────
@@ -355,7 +364,7 @@ static_assert(engine_list<>::size == 0 && names_match_identifiers(engine_list<>{
 // ── The path table's laws, in constant evaluation (over the flat interner) ──
 // value(row) is the uri file(text) holds, hash(row) is that file's hash,
 // render(row) is its fspath, text and value meet at ONE row, and the table's
-// parent is pathlib's parent — the facts adapter/pathset.h and adapter/pathview.h
+// parent is pathlib's parent — the facts adapter/pathset_bindings.h and adapter/path_bindings.h
 // rely on (docs/design/pathset_storage.md).
 template <class Strategy>
 consteval bool table_agrees_with_file(std::string_view text) {
@@ -395,7 +404,7 @@ consteval bool table_hash_conses() {
 }
 static_assert(table_hash_conses());
 
-// The rule for `p / other` taking the row route (adapter/pathview.h): one plain component.
+// The rule for `p / other` taking the row route (pathview.h's join, path_table.h's child): one plain component.
 using pygim::pathlike::detail::plain_component;
 static_assert(plain_component<posix_strategy>("c") && plain_component<posix_strategy>("..") && plain_component<posix_strategy>("x.yaml") &&
               plain_component<posix_strategy>("a b") && plain_component<posix_strategy>("a\\b"));   // a backslash is plain on POSIX

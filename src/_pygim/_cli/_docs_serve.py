@@ -167,7 +167,7 @@ def _make_handler(root, index: str | None):
             if page.suffix.lower() == ".html" and page.is_file():
                 try:
                     text = page.read_bytes().decode("utf-8")
-                except (RuntimeError, UnicodeDecodeError):
+                except (OSError, UnicodeDecodeError):
                     super().do_GET()
                     return
                 body = _commenter.inject(text).encode("utf-8")
@@ -181,10 +181,11 @@ def _make_handler(root, index: str | None):
 
         # ---- helpers ---------------------------------------------------
         def _guarded(self, action):
-            """Run *action*; a comments-file decode error becomes a 500 that names the file and line."""
+            """Run *action*; a comments file that will not read or decode becomes a 500 that names the
+            file and line (pathlike raises OSError and ValueError for those)."""
             try:
                 action()
-            except RuntimeError as exc:
+            except (ValueError, OSError) as exc:
                 self.send_error(500, str(exc))
 
         def _send_json(self, obj, status=200):

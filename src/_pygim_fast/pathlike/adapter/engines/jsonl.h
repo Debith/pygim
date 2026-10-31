@@ -45,8 +45,8 @@ namespace pygim::pathlike::detail {
         // parse_many() skips a UTF-8 BOM and yields zero documents for empty
         // input (both documented), so there is nothing to special-case here.
         if (auto err = parser.parse_many(padded).get(docs); err) {
-            throw std::runtime_error("JSONL parse error (" + f.fspath() + "): " +
-                                     simdjson::error_message(err));
+            throw std::invalid_argument("JSONL parse error (" + f.fspath() + "): " +
+                                        simdjson::error_message(err));
         }
     }
     py::list out;
@@ -54,11 +54,26 @@ namespace pygim::pathlike::detail {
     for (auto it = docs.begin(); it != docs.end(); ++it) {
         simdjson::dom::element el;
         if (auto err = (*it).get(el); err) {
-            throw std::runtime_error("JSONL parse error (" + f.fspath() + ", line " +
-                                     std::to_string(line_of(source, it.current_index())) + "): " +
-                                     simdjson::error_message(err));
+            throw std::invalid_argument("JSONL parse error (" + f.fspath() + ", line " +
+                                        std::to_string(line_of(source, it.current_index())) + "): " +
+                                        simdjson::error_message(err));
         }
         out.append(json_to_py(el, keys));
+    }
+    // parse_many leaves an incomplete last document out of the stream and reports it only through
+    // truncated_bytes(); without this, a file cut off mid-write reads back as its complete rows,
+    // silently. truncated_bytes() reads stage 1's indexes, which exist only once input with
+    // content was scanned — for an empty file they are uninitialised — so it is asked only then,
+    // and the bytes it names must hold more than whitespace.
+    static constexpr std::string_view blank = " \t\r\n\xEF\xBB\xBF";   // whitespace, and a BOM
+    if (source.find_first_not_of(blank) != std::string_view::npos) {
+        if (const std::size_t cut = docs.truncated_bytes(); cut > 0 && cut <= source.size()) {
+            const std::size_t at = source.find_first_not_of(blank, source.size() - cut);
+            if (at != std::string_view::npos) {
+                throw std::invalid_argument("JSONL parse error (" + f.fspath() + ", line " +
+                                            std::to_string(line_of(source, at)) + "): the last document is incomplete");
+            }
+        }
     }
     return out;
 }

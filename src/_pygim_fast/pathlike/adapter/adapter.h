@@ -3,8 +3,8 @@
 //
 // Nothing in this file names an engine. `Engine` completes the descriptor
 // contract with the Python-facing half (load/write); load(), write() and
-// engines_record() are folds over whatever engine_list the build discovered
-// (engine_list.h); the typed path classes are pathview.h's fold. Adding a format touches exactly one file:
+// load_engines() and engines_record() are folds over whatever engine_list the build discovered
+// (engine_list.h); the typed path classes are path_bindings.h's fold. Adding a format touches exactly one file:
 //
 //   adapter/engines/<name>.h — a struct `engines::<name>` with
 //       static constexpr std::array<std::string_view, K> exts{".<ext>", ...};
@@ -12,6 +12,7 @@
 //       static constexpr engine_info info{.name, .label, .doc, .exts = exts, .aliases = aliases};
 //       static py::object load(const file&, detail::KeyCache&);
 //       static void write(const file&, py::handle);
+//       static void on_load();   // optional: what it takes from Python while the module loads
 //
 // Shared machinery: scalars.h (the compile-time-proven YAML 1.2 scalar rules),
 // materialize.h (scalars -> Python values, KeyCache) and common.h (UTF-8 gate,
@@ -29,6 +30,7 @@
 #include "../core.h"
 #include "../engine_list.h"
 #include "materialize.h"
+#include "path_text.h"
 
 namespace pygim::pathlike {
 
@@ -90,71 +92,23 @@ void write(engine_list<Es...>, const engine_info* e, const file& f, py::handle o
     if (!hit) throw std::invalid_argument("no engine resolved for " + f.fspath());
 }
 
-// Python str / bytes / os.PathLike -> the internal path text, without the
-// fs::path round trip pybind11's caster would take: str is encoded with the
-// filesystem encoding on POSIX (os.fsencode, so non-UTF-8 names round-trip)
-// and as UTF-8 on Windows (what text_from_fs yields there); bytes are taken as
-// they are; anything else goes through os.fspath (TypeError when it cannot).
-// Whether the filesystem encoding is UTF-8 (set once at module init): then a
-// str's UTF-8 buffer IS os.fsencode(str) whenever it has no lone surrogates,
-// and the encode step (a bytes object per call) can be skipped.
-inline bool& filesystem_is_utf8() {
-    static bool utf8 = false;
-    return utf8;
-}
-
-// The argument's text as a view plus the object that keeps it alive.
-struct text_arg {
-    py::object keep;
-    std::string_view view;
-};
-inline text_arg text_view_of_arg(py::handle obj) {
-#ifndef _WIN32
-    if (filesystem_is_utf8() && PyUnicode_Check(obj.ptr())) {
-        py::ssize_t n = 0;
-        if (const char* s = PyUnicode_AsUTF8AndSize(obj.ptr(), &n)) {
-            return {py::reinterpret_borrow<py::object>(obj), std::string_view(s, static_cast<std::size_t>(n))};
+// A file operation the OS refused (the core's file_error) raises the OSError pathlib raises for the
+// same call. OSError(errno, strerror, filename) is how Python picks the subclass itself —
+// FileNotFoundError, IsADirectoryError, FileExistsError, PermissionError — so nothing here names
+// them. Local to this module: only its own functions throw file_error.
+inline void register_file_errors() {
+    py::register_local_exception_translator([](std::exception_ptr p) {
+        if (!p) return;
+        try {
+            std::rethrow_exception(p);
+        } catch (const file_error& e) {
+            const int err = e.code().value();
+            const py::tuple args = py::make_tuple(err, std::generic_category().message(err), str_from_text(e.path));
+            PyErr_SetObject(PyExc_OSError, args.ptr());
+        } catch (const glob_unsupported& e) {   // a pattern that is not relative, as pathlib refuses it
+            PyErr_SetString(PyExc_NotImplementedError, e.what());
         }
-        PyErr_Clear();   // lone surrogates: os.fsencode's surrogateescape below is the answer
-    }
-#endif
-    py::object p = py::reinterpret_steal<py::object>(PyOS_FSPath(obj.ptr()));   // str or bytes
-    if (!p) throw py::error_already_set();
-    if (PyBytes_Check(p.ptr())) {
-        char* s = nullptr;
-        py::ssize_t n = 0;
-        if (PyBytes_AsStringAndSize(p.ptr(), &s, &n) < 0) throw py::error_already_set();
-        return {std::move(p), std::string_view(s, static_cast<std::size_t>(n))};
-    }
-#ifdef _WIN32
-    py::ssize_t n = 0;
-    const char* s = PyUnicode_AsUTF8AndSize(p.ptr(), &n);
-    if (!s) throw py::error_already_set();
-    return {std::move(p), std::string_view(s, static_cast<std::size_t>(n))};
-#else
-    py::object b = py::reinterpret_steal<py::object>(PyUnicode_EncodeFSDefault(p.ptr()));
-    if (!b) throw py::error_already_set();
-    char* s = nullptr;
-    py::ssize_t n = 0;
-    if (PyBytes_AsStringAndSize(b.ptr(), &s, &n) < 0) throw py::error_already_set();
-    return {std::move(b), std::string_view(s, static_cast<std::size_t>(n))};
-#endif
-}
-inline std::string text_from_arg(py::handle obj) {
-    const text_arg t = text_view_of_arg(obj);
-    return std::string(t.view);
-}
-
-// Internal text -> Python str: the native byte string is decoded with the
-// filesystem encoding on POSIX (os.fsdecode, so non-UTF-8 names round-trip);
-// on Windows the internal text is UTF-8 already.
-inline py::str str_from_text(std::string_view text) {
-#ifdef _WIN32
-    return py::str(text.data(), text.size());
-#else
-    return py::reinterpret_steal<py::str>(
-        PyUnicode_DecodeFSDefaultAndSize(text.data(), static_cast<py::ssize_t>(text.size())));
-#endif
+    });
 }
 
 template <Engine E>
@@ -164,6 +118,15 @@ void record_one(const py::object& record, py::list& out) {
     for (std::string_view a : E::info.aliases) aliases.append(std::string(a));
     out.append(record(std::string(E::info.name), std::string(E::info.label), py::tuple(exts),
                       py::tuple(aliases), std::string(E::info.doc)));
+}
+
+// Each engine's on_load(), for an engine that has one: what it needs from Python before its first
+// read or write (toml's: datetime's C API), taken while the module loads, never while running (#248).
+template <Engine... Es>
+void load_engines(engine_list<Es...>) {
+    ([] {
+        if constexpr (requires { Es::on_load(); }) Es::on_load();
+    }(), ...);
 }
 
 // The module-level ENGINES record: an immutable, introspectable view of the

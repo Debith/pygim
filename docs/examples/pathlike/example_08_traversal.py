@@ -35,9 +35,9 @@ top = pygim.path(root)
 # ----------------------------------------------------------------------------
 # 1. glob: one directory level per pattern component
 # ----------------------------------------------------------------------------
-#                            ┌─ pattern: * and ? match within one component;
-#                            │  `/` descends into subdirectories
-#                            ▼
+#                                ┌─ pattern: * and ? match within one component;
+#                                │  `/` descends into subdirectories
+#                                ▼
 assert [f.name for f in top.glob("*.yaml")] == ["a.yaml"]
 assert [f.name for f in top.glob("*.y*")] == ["a.yaml", "b.yml"]
 assert [f.name for f in top.glob("sub/*.yaml")] == ["c.yaml"]
@@ -65,9 +65,12 @@ assert hits[0].read() == {"k": 4}
 from pygim.pathlike import PathSet, ext
 
 ps = top.pathset("**/*.yaml")
-assert isinstance(ps, PathSet) and len(ps) == 2
-assert top.glob("*.yaml")[0] in ps                                          # a file is found by value
-assert ps[0] == pygim.path(os.fspath(ps[0])) and ps[0].store == top.store   # the set is rows of top's table
+assert isinstance(ps, PathSet)
+assert len(ps) == 2
+assert top.glob("*.yaml")[0] in ps                  # a file is found by value
+# the set is rows of top's table
+assert ps[0] == pygim.path(os.fspath(ps[0]))
+assert ps[0].store == top.store
 assert len(ps & ext(".yaml")) == 2
 
 n_children = len(top.iterdir())

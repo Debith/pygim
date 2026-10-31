@@ -53,7 +53,8 @@ try:
     assert all(isinstance(os.fspath(v), str) and v.name for v in files)
 
     # It is a *set*: duplicates collapse, and equal members mean equal sets.
-    assert PathSet([workdir / "readme.txt", workdir / "readme.txt"]) == PathSet(workdir / "readme.txt")
+    readme = workdir / "readme.txt"
+    assert PathSet([readme, readme]) == PathSet(readme)
     assert not PathSet([])  # an empty set is falsy
 
     # Membership accepts strings, Path objects, files and views.
@@ -67,7 +68,8 @@ try:
     # A set is a value. `files -= x` computes a new set and rebinds the name,
     # so anything else holding the old set keeps seeing the old members.
     snapshot = files.clone()          # a distinct object, the same members
-    assert snapshot == files and snapshot is not files
+    assert snapshot == files
+    assert snapshot is not files
 
     files -= str(workdir / "logo.png")  # remove one path by string
     assert len(files) == 2
@@ -78,7 +80,8 @@ try:
     assert len(files) == 1
 
     # And + is the union, taking a PathSet or path(s).
-    assert len(files + snapshot) == 3 and len(files + [workdir / "logo.png"]) == 2
+    assert len(files + snapshot) == 3
+    assert len(files + [workdir / "logo.png"]) == 2
 
     # ------------------------------------------------------------------------
     # 3. Filters and lazy queries
@@ -87,7 +90,8 @@ try:
     # combine them. `ps & f` is a Query — nothing runs until eval(), len()
     # or iteration.
     txt = snapshot & ext(".txt")                 # a Query
-    assert len(txt) == 2 and all(v.suffix == ".txt" for v in txt)
+    assert len(txt) == 2
+    assert all(v.suffix == ".txt" for v in txt)
     assert (snapshot & ~ext(".txt")).eval().to_list() == [str(workdir / "logo.png")]
     assert len(snapshot & (ext(".txt") | ext(".png"))) == 3
     assert len(snapshot & name("read*")) == 1

@@ -31,7 +31,7 @@ sloppy = root / "sloppy.json"
 sloppy.write_text("{key: 1}")
 try:
     pygim.path(sloppy).read()
-except RuntimeError as e:
+except ValueError as e:  # a document that does not parse is a bad value, as json.loads says too
     assert "sloppy.json" in str(e)
 else:
     raise AssertionError("Expected strict JSON to reject a YAML-ism")

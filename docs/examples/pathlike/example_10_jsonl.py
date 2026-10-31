@@ -46,8 +46,9 @@ bad = root / "bad.jsonl"
 bad.write_text('{"id": 1}\n{oops}\n')
 try:
     pygim.path(bad).read()
-except RuntimeError as e:
-    assert "bad.jsonl" in str(e) and "line 2" in str(e)
+except ValueError as e:
+    assert "bad.jsonl" in str(e)
+    assert "line 2" in str(e)
 else:
     raise AssertionError("Expected the malformed line to be reported")
 

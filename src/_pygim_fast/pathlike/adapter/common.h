@@ -25,12 +25,12 @@ inline void require_utf8(const std::string& bytes, const std::string& fspath) {
     const std::string_view b(bytes);
     if (b.starts_with("\xFF\xFE") || b.starts_with("\xFE\xFF") ||
         b.find('\0') != std::string_view::npos) {
-        throw std::runtime_error("cannot decode " + fspath +
+        throw std::invalid_argument("cannot decode " + fspath +
                                  ": input looks like UTF-16/32 or binary — "
                                  "pathlike engines require UTF-8");
     }
     if (!simdjson::validate_utf8(bytes.data(), bytes.size())) {
-        throw std::runtime_error("cannot decode " + fspath +
+        throw std::invalid_argument("cannot decode " + fspath +
                                  ": input is not valid UTF-8");
     }
 }
