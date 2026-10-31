@@ -20,10 +20,10 @@ Each run appends its raw measurements + environment metadata to
 ``results/inventory.jsonl`` (see ``_results.py``).
 """
 
-import ast
+import ast  # the A of the imports A/B: imports_in as it read them until 2026-10-30
 import sys
 from importlib import metadata
-from pathlib import Path
+from pathlib import Path  # environment_as_it_was walks dist.files as that code did
 
 from tabulate import tabulate
 

@@ -19,9 +19,7 @@ differ (2 hold identifiers NFKC changes, 2 only in repr's Unicode version), 4 re
 """
 
 import argparse
-import json
-import os
-import pathlib
+import json  # the oracle's answers, one line each on its stdout: pygim reads JSON from files
 import random
 import re
 import subprocess
@@ -29,7 +27,7 @@ import sys
 import tempfile
 import time
 
-from pygim import code
+from pygim import code, path
 from _results import save, wants_save
 
 # What python3.14 runs: for each path on stdin, one JSON line {"ok": bool, "dump"|"error": ...};
@@ -124,12 +122,12 @@ def mutant_of(text, rng):
 
 def section_mutants(root, count, seed):
     rng = random.Random(seed)
-    small = [p for p in pathlib.Path(root).rglob("*.py") if 200 < p.stat().st_size < 6000]
+    small = [p for p in path(root).rglob("*.py") if 200 < p.size() < 6000]
     with tempfile.TemporaryDirectory() as tmp:
         paths = []
         for n in range(count):
             text = rng.choice(small).read_bytes().decode("utf-8", "surrogateescape")   # bytes kept as they are
-            p = pathlib.Path(tmp) / f"m{n:06d}.py"
+            p = path(tmp) / f"m{n:06d}.py"
             p.write_bytes(mutant_of(text, rng).encode("utf-8", "surrogateescape"))
             paths.append(p)
         theirs, _ = cpython(paths, "verdicts")

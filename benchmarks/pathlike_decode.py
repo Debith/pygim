@@ -17,11 +17,10 @@ Each run appends its raw measurements + environment metadata to
 followed across commits; ``--no-save`` measures without recording.
 """
 
-import json
+import json  # the reference decoder for .json, raced against pygim's engine
 import tempfile
 import time
 from concurrent.futures import ThreadPoolExecutor
-from pathlib import Path
 
 from tabulate import tabulate
 
@@ -56,10 +55,10 @@ def make_files(tmp):
     suffix), and that TOML roots must be mappings (TOML documents are tables).
     """
     try:
-        import tomllib
-    except ImportError:   # Python 3.10 and older: the [test] extra's backport
-        import tomli as tomllib
-    import yaml
+        import tomllib  # the reference decoder for .toml
+    except ImportError:   # Python 3.10: the [test] extra's backport
+        import tomli as tomllib  # the reference decoder for .toml, before 3.11
+    import yaml  # the reference decoder for .yaml (PyYAML's C loader)
 
     oracles = {
         ".yaml": lambda text: yaml.load(text, Loader=yaml.CSafeLoader),
@@ -88,7 +87,7 @@ def make_files(tmp):
         f.write(content)
         label = f"{name} ({f.size() / 1024:,.0f} KB)"
         oracle = oracles[f.suffix]
-        out[label] = (f, lambda fp, o=oracle: o(Path(fp).read_text()))
+        out[label] = (f, lambda fp, o=oracle: o(open(fp, encoding="utf-8").read()))   # the reference reads as Python does
     return out
 
 
@@ -117,8 +116,8 @@ def bench_threads(tmp):
     files = []
     for i in range(32):
         p = tmp / f"scale{i}.json"
-        p.write_text(json.dumps(rows_data))
-        files.append(pygim.path(p))
+        p.write(rows_data)
+        files.append(p)
 
     def read_all(workers):
         with ThreadPoolExecutor(max_workers=workers) as ex:
@@ -147,17 +146,17 @@ def bench_key_cache(tmp):
     paths = {}
     for label, mk in shapes.items():
         p = tmp / f"cache_{len(paths)}.json"
-        p.write_text(json.dumps(records(n, mk)))
+        p.write(records(n, mk))
         paths[label] = p
     # worst case: every key distinct -> the cache can only cost, never pay
     pd = tmp / "cache_distinct.json"
-    pd.write_text(json.dumps([{f"k{i}_{k}": i for k in range(8)} for i in range(n)]))
+    pd.write([{f"k{i}_{k}": i for k in range(8)} for i in range(n)])
     paths["distinct keys (160k)"] = pd
 
     sizes = [0, 8, 64, 256, 4096, -1]
     rows = []
     for label, p in paths.items():
-        f = pygim.path(p)
+        f = p
         rows.append({"workload": label,
                      "seconds_by_cache": {str(s): best(lambda: f.read(key_cache=s))
                                           for s in sizes}})
@@ -179,7 +178,7 @@ def bench_key_cache(tmp):
 
 if __name__ == "__main__":
     with tempfile.TemporaryDirectory() as td:
-        tmp = Path(td)
+        tmp = pygim.path(td)
         sections = {
             "throughput": bench_throughput(make_files(tmp)),
             "threads": bench_threads(tmp),

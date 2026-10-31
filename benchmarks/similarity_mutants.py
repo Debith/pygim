@@ -18,9 +18,8 @@ appends its raw measurements + environment metadata to
 ``results/similarity_mutants.jsonl`` (see ``_results.py``).
 """
 
-import ast
+import ast  # edits and unparses the stdlib's functions: pygim.code reads trees, writes no source
 import copy
-import pathlib
 import random
 import statistics
 import sys
@@ -29,7 +28,7 @@ import sysconfig
 import pyarrow.compute as pc
 from tabulate import tabulate
 
-from pygim import similarity
+from pygim import path, similarity
 from _results import corpus, save, wants_save
 
 SAMPLE = 600
@@ -39,7 +38,7 @@ EDITS = ("flip operator", "rename attribute", "drop statement", "duplicate state
 
 def functions(root):
     out = []
-    for p in sorted(root.rglob("*.py")):
+    for p in root.rglob("*.py"):   # sorted already, in pathlib's order
         if any(x in ("test", "tests", "idle_test") for x in p.parts):
             continue
         try:
@@ -94,7 +93,7 @@ def score(a, b):
 
 def main():
     args = [a for a in sys.argv[1:] if not a.startswith("--")]
-    root = pathlib.Path(args[0] if args else sysconfig.get_paths()["stdlib"])
+    root = path(args[0] if args else sysconfig.get_paths()["stdlib"])
     fns = functions(root)
     rnd = random.Random(7)
     unrelated = sorted(score(fns[i], fns[j]) for i, j in

@@ -10,23 +10,25 @@ machine it was (Debith, 2026-10-31): no hostname, and no path on it — a
 corpus is named by ``corpus()``, and ``save`` refuses a record holding a path.
 """
 
-import json
+import json  # one record appended as a line: pygim's JSONL engine writes a whole file
 import os
 import platform
 import re
 import subprocess
 import sys
 from datetime import datetime, timezone
-from pathlib import Path
 
-RESULTS_DIR = Path(__file__).resolve().parent / "results"
+from pygim import path
+
+HERE = path(__file__).resolve().parent
+RESULTS_DIR = HERE / "results"
 SCHEMA = 1
 
 
 def _git(*args, cwd=None):
     try:
         return subprocess.run(
-            ["git", *args], cwd=cwd or Path(__file__).resolve().parent,
+            ["git", *args], cwd=str(cwd or HERE),
             capture_output=True, text=True, check=True,
         ).stdout.strip()
     except (OSError, subprocess.CalledProcessError):
@@ -37,12 +39,12 @@ def corpus(folder):
     """A corpus as a record names it: its checkout's folder name and the path below it
     (``cpython/Lib``, ``llvm-project``), never where on this machine it lies; a folder outside any
     checkout by its own name."""
-    here = Path(folder).expanduser().resolve()
+    here = path(os.path.expanduser(str(folder))).resolve()
     top = _git("rev-parse", "--show-toplevel", cwd=here if here.is_dir() else here.parent)
     if not top:
         return here.name
-    below = here.relative_to(Path(top).resolve())
-    return (Path(Path(top).name) / below).as_posix() if below.parts else Path(top).name
+    checkout = path(top).resolve()
+    return "/".join([checkout.name, *here.relative_to(checkout).parts])
 
 
 def _local_paths(value, where):
@@ -61,7 +63,7 @@ def _local_paths(value, where):
 def _cpu_model():
     if platform.system() == "Linux":
         try:
-            for line in Path("/proc/cpuinfo").read_text().splitlines():
+            for line in path("/proc/cpuinfo").read_bytes().decode().splitlines():
                 if line.startswith("model name"):
                     return line.split(":", 1)[1].strip()
         except OSError:
@@ -104,7 +106,7 @@ def save(bench, sections, *, reps, in_tree=True):
     }
     RESULTS_DIR.mkdir(exist_ok=True)
     out = RESULTS_DIR / f"{bench}.jsonl"
-    with out.open("a", encoding="utf-8") as f:
+    with open(str(out), "a", encoding="utf-8") as f:
         f.write(json.dumps(record, ensure_ascii=False) + "\n")
     return out
 

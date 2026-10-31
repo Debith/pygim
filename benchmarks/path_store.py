@@ -16,7 +16,7 @@ Each run appends its raw measurements + environment metadata to
 
 import gc
 import os
-import pathlib
+import pathlib  # the reference: pathlib.PurePath's memory and speed against path()
 
 from tabulate import tabulate
 
@@ -108,7 +108,7 @@ def bench_memory():
     import subprocess
     import sys
 
-    bench_dir = str(pathlib.Path(__file__).resolve().parent)
+    bench_dir = str(pygim.path(__file__).resolve().parent)
 
     def probe(variant):
         out = subprocess.run([sys.executable, "-c", _MEM_PROBE.format(bench_dir=bench_dir, n=N, variant=variant)],

@@ -27,7 +27,6 @@ call per corpus, on worker threads.
 
 import argparse
 import collections
-import pathlib
 import subprocess
 import sys
 import threading
@@ -37,7 +36,7 @@ import pyarrow.compute as pc
 import pyarrow.parquet as pq
 from tabulate import tabulate
 
-from pygim import similarity
+from pygim import path as pygim_path, similarity   # `path` names a file below
 from pygim.utils import rss_bytes
 from _results import corpus, save, wants_save
 
@@ -48,13 +47,13 @@ C_DIRS = ("Objects", "Python", "Modules", "Parser", "Include")
 
 
 def corpora(root):
-    py = sorted((root / "Lib").rglob("*.py"))
+    py = (root / "Lib").rglob("*.py")   # sorted already
     is_test = lambda p: any(part in TESTDIRS for part in p.relative_to(root).parts)
     return {
         "stdlib": ("python", [p for p in py if not is_test(p)]),
         "tests": ("python", [p for p in py if is_test(p)]),
-        "c": ("cpp", sorted(p for d in C_DIRS for p in (root / d).rglob("*")
-                            if p.is_file() and similarity.language_of(p) == "cpp")),
+        "c": ("cpp", [p for d in C_DIRS for p in (root / d).rglob("*")
+                      if p.is_file() and similarity.language_of(p) == "cpp"]),
     }
 
 
@@ -69,7 +68,7 @@ def cause(message, path, root):
     if line == 0:
         return f"other: {what}"
     try:
-        src = path.read_text(errors="replace").splitlines()[line - 1].strip()
+        src = path.read_bytes().decode(errors="replace").splitlines()[line - 1].strip()
     except (IndexError, ValueError):
         src = ""
     if src.startswith("lazy "):   # 3.15's: pygim.code reads 3.14, which has t-strings and `except A, B` already
@@ -84,7 +83,7 @@ def build(language, files, root):
     examples = {}
     t = time.perf_counter()
     for path, message in ix.add_files(files):
-        f = pathlib.Path(path)
+        f = pygim_path(path)
         c = cause(message, f, root)
         rejected[c] += 1
         examples.setdefault(c, str(f.relative_to(root)))
@@ -122,8 +121,8 @@ def main():
     parser.add_argument("--out", default="similarity_cpython", help="where the ranked tables are written")
     parser.add_argument("--no-save", action="store_true", help="measure only: append no record (_results.wants_save)")
     args = parser.parse_args()
-    root = pathlib.Path(args.checkout).resolve()
-    out = pathlib.Path(args.out)
+    root = pygim_path(args.checkout).resolve()
+    out = pygim_path(args.out)
     out.mkdir(parents=True, exist_ok=True)
     try:
         commit = subprocess.run(["git", "-C", str(root), "log", "-1", "--format=%h %cd", "--date=short"],
@@ -174,7 +173,7 @@ def main():
         with PeakRss() as rss:
             tb = ix.pairs(threshold=THRESHOLD, min_size=MIN_SIZE)
         seconds = time.perf_counter() - t
-        pq.write_table(tb, out / f"{name}.parquet")
+        pq.write_table(tb, str(out / f"{name}.parquet"))
         ranked[name] = tb
         exact = pc.sum(tb["exact"]).as_py() or 0
         near = tb.filter(pc.invert(tb["exact"]))
@@ -196,7 +195,7 @@ def main():
         for lo, hi in ((0.95, 1.0), (0.9, 0.95), (0.85, 0.9), (THRESHOLD, 0.85)):
             r = next((r for r in rows if lo <= r["score"] < hi), None)
             if r:
-                rel = lambda o: str(pathlib.Path(o).resolve().relative_to(root)) if o.startswith(str(root)) else o
+                rel = lambda o: str(pygim_path(o).resolve().relative_to(root)) if o.startswith(str(root)) else o
                 print(f"   {name:6s} {r['score']:.2f}  {r['a_qualname']}  {rel(r['a_origin'])}:{r['a_line']}")
                 print(f"   {'':6s}       {r['b_qualname']}  {rel(r['b_origin'])}:{r['b_line']}")
 

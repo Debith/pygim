@@ -102,7 +102,7 @@ LARGE_RUN = textwrap.dedent("""
 
 
 def large():
-    import json
+    import json  # the child's one result, a line on its stdout: pygim reads JSON from files
 
     out = {}
     for mode in ("ranked", "ranked_slim", "top1000", "stream", "stream_slim"):

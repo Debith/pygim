@@ -18,9 +18,9 @@ Each run appends its raw measurements + environment metadata to
 ``results/pathlike_read.jsonl`` (see ``_results.py``).
 """
 
-import json
+import json  # the reference: Python's json, against the JSON and JSONL engines
 import os
-import pathlib
+import pathlib  # the reference: pathlib's read_bytes, against path.read_bytes
 import random
 import tempfile
 
@@ -57,10 +57,11 @@ def bench_bytes(root):
     for name, size, reads in (("100 B", 100, SMALL_READS), ("1 MB", 1 << 20, 1), ("50 MB", 50_000_000, 1)):
         f = root / f"blob_{size}.bin"
         f.write_bytes(os.urandom(size))
-        assert path(str(f)).read_bytes() == f.read_bytes()
+        reference = pathlib.Path(str(f))
+        assert f.read_bytes() == reference.read_bytes()
         label = f"{name} x {reads:,}" if reads > 1 else name
-        row, raw[label] = pair(label, lambda f=f, n=reads: [f.read_bytes() for _ in range(n)],
-                               lambda p=path(str(f)), n=reads: [p.read_bytes() for _ in range(n)])
+        row, raw[label] = pair(label, lambda r=reference, n=reads: [r.read_bytes() for _ in range(n)],
+                               lambda p=f, n=reads: [p.read_bytes() for _ in range(n)])
         rows.append(row)
     return rows, raw
 
@@ -68,24 +69,24 @@ def bench_bytes(root):
 def bench_json(root, rows_of_data):
     rows, raw = [], {}
     document = root / "records.json"
-    document.write_text(json.dumps(rows_of_data))
+    document.write(rows_of_data)    # pygim's own writers make the files both sides read
     lines = root / "records.jsonl"
-    lines.write_text("".join(json.dumps(r) + "\n" for r in rows_of_data))
+    lines.write(rows_of_data)
 
     def python_json():
-        with open(document, "rb") as fh:
+        with open(str(document), "rb") as fh:
             return json.load(fh)
 
     def python_jsonl():
-        with open(lines, "rb") as fh:
+        with open(str(lines), "rb") as fh:
             return [json.loads(line) for line in fh]
 
-    assert path(str(document)).read() == python_json()
-    assert path(str(lines)).read() == python_jsonl()
+    assert document.read() == python_json()
+    assert lines.read() == python_jsonl()
     for label, file, reference in (("json", document, python_json), ("jsonl", lines, python_jsonl)):
-        size = f"{label} ({file.stat().st_size / 2**20:,.0f} MB)"
-        row, raw[label] = pair(size, reference, lambda p=path(str(file)): p.read())
-        raw[label]["bytes"] = file.stat().st_size
+        size = f"{label} ({file.size() / 2**20:,.0f} MB)"
+        row, raw[label] = pair(size, reference, lambda p=file: p.read())
+        raw[label]["bytes"] = file.size()
         rows.append(row)
     return rows, raw
 
@@ -93,7 +94,7 @@ def bench_json(root, rows_of_data):
 def main():
     headers = ["", "reference ms", "pygim ms", "pygim faster by"]
     with tempfile.TemporaryDirectory() as scratch:
-        root = pathlib.Path(scratch)
+        root = path(scratch)
         print(f"best of {REPS}, interleaved; reference: pathlib for bytes, Python's json for JSON\n")
         sections = {}
         rows, sections["bytes"] = bench_bytes(root)

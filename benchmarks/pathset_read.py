@@ -18,7 +18,7 @@ Each run appends its raw measurements + environment metadata to
 """
 
 import os
-import pathlib
+import pathlib  # the reference: pathlib's rglob, against path.glob('**/...')
 import sys
 import tempfile
 
@@ -43,14 +43,14 @@ def generated(root):
     for k in range(SMALL_FILES):
         folder = root / f"pkg{k // 200:03d}"
         folder.mkdir(exist_ok=True)
-        (folder / f"m{k:05d}.py").write_text(SMALL_TEXT, encoding="utf-8")
+        (folder / f"m{k:05d}.py").write_bytes(SMALL_TEXT.encode("utf-8"))
     return root
 
 
 def utf8(file):
     """Whether the file's bytes are UTF-8: every contender here makes a str of each."""
     try:
-        pathlib.Path(file).read_bytes().decode("utf-8")
+        path(file).read_bytes().decode("utf-8")
         return True
     except UnicodeDecodeError:
         return False
@@ -125,10 +125,10 @@ def bench_glob(root):
 def main():
     given = argument("--root")
     with tempfile.TemporaryDirectory() as scratch:
-        root = pathlib.Path(given) if given else generated(pathlib.Path(scratch))
-        found = sorted(str(p) for p in path(str(root)).glob("**/*.py") if os.path.isfile(str(p)))
+        root = path(given) if given else generated(path(scratch))
+        found = [str(p) for p in root.glob("**/*.py") if p.is_file()]   # sorted already
         files = [f for f in found if utf8(f)]   # CPython's Lib holds a few that are not, on purpose
-        size = sum(os.path.getsize(f) for f in files)
+        size = sum(path(f).size() for f in files)
         print(f"{len(files):,} UTF-8 files ({len(found) - len(files)} others left out), {size / 2**20:,.1f} MB "
               f"under {root if given else 'a generated tree'}; best of {REPS}, ms\n")
         sections = {"corpus": {"root": corpus(root) if given else "generated", "files": len(files), "bytes": size}}

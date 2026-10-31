@@ -5,9 +5,10 @@ Import from a benchmark next to this file (``from _bench import best, corpus``).
 """
 
 import gc
-import os
 import random
 import time
+
+from pygim import utils
 
 REPS = 3
 
@@ -45,19 +46,9 @@ def ns(seconds, n):
     return seconds / n * 1e9
 
 
-def rss_mb():
-    """The process's resident set size in MiB: pygim.utils.rss_mb (one syscall,
-    every platform), with the procfs read as the fallback for an unbuilt tree."""
-    try:
-        from pygim.utils import rss_mb as _rss
-        return _rss()
-    except ImportError:
-        pass
-    try:
-        with open("/proc/self/statm") as f:
-            return int(f.read().split()[1]) * os.sysconf("SC_PAGE_SIZE") / 2**20
-    except OSError:
-        return float("nan")
+# The process's resident set size in MiB: pygim's own probe, one syscall on every platform. A
+# procfs fallback for "an unbuilt tree" stood here until 2026-10-31; every benchmark imports pygim.
+rss_mb = utils.rss_mb
 
 
 def corpus(n, seed=1):

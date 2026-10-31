@@ -22,7 +22,7 @@ Each run appends its raw measurements + environment metadata to
 
 import gc
 import os
-import pathlib
+import pathlib  # the reference: a list of pathlib.PurePath against one table
 import sys
 
 from tabulate import tabulate

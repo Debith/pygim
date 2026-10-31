@@ -19,7 +19,7 @@ with add_file() in a loop, so the same script measures an older build.
 """
 
 import collections
-import pathlib
+import os
 import subprocess
 import sys
 import time
@@ -40,11 +40,10 @@ def sources(root, dirs):
     """{language: [files]} under root/dir for each dir, through pygim's own walker."""
     found = collections.defaultdict(list)
     for d in dirs:
-        for p in path(str(root / d)).rglob("*"):
-            f = pathlib.Path(str(p))
+        for f in (root / d).rglob("*"):   # sorted already, in pathlib's order
             if f.is_file() and (language := similarity.language_of(f)):
                 found[language].append(f)
-    return {language: sorted(files) for language, files in found.items()}
+    return {language: sorted(files, key=lambda f: f.parts) for language, files in found.items()}   # pathlib's order, across folders
 
 
 def cause(message):
@@ -74,7 +73,7 @@ def main():
     args = [a for a in sys.argv[1:] if not a.startswith("--")]
     if len(args) < 2:
         sys.exit(__doc__)
-    root = pathlib.Path(args[0]).expanduser().resolve()
+    root = path(os.path.expanduser(args[0])).resolve()
     corpora = {name: dirs.split(",") for name, dirs in (a.split("=", 1) for a in args[1:])}
     try:
         commit = subprocess.run(["git", "-C", str(root), "log", "-1", "--format=%h %cd", "--date=short"],

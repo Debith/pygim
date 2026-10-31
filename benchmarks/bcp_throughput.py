@@ -23,7 +23,6 @@ Modes:
 
 from __future__ import annotations
 
-import json
 import math
 import os
 import platform
@@ -697,8 +696,7 @@ def _system_info() -> dict:
         "machine": platform.machine(),
         "cpu_count": os.cpu_count(),
         "python": platform.python_version(),
-        "node": platform.node(),
-    }
+    }   # never which machine it was: no hostname (Debith, 2026-10-31)
 
 
 def save_baseline(
@@ -739,8 +737,7 @@ def save_baseline(
         },
         "results": by_key,
     }
-    with open(path, "w") as f:
-        json.dump(baseline, f, indent=2)
+    pygim.path(path).write(baseline)   # pygim's own JSON engine
     click.echo(f"\nBaseline saved to {path} ({len(by_key)} entries)")
 
 
@@ -749,8 +746,7 @@ def check_regression(
     baseline_path: str,
     threshold_pct: float,
 ) -> bool:
-    with open(baseline_path) as f:
-        baseline = json.load(f)
+    baseline = pygim.path(baseline_path).read()
 
     base_results = baseline["results"]
     base_sys = baseline.get("system", {})
@@ -760,7 +756,7 @@ def check_regression(
     click.echo("Regression check against baseline")
     click.echo(f"  Baseline: {baseline_path}")
     click.echo(f"  Created:  {base_ts}")
-    click.echo(f"  Machine:  {base_sys.get('node', '?')} ({base_sys.get('os', '?')})")
+    click.echo(f"  Machine:  {base_sys.get('machine', '?')}, {base_sys.get('cpu_count', '?')} CPUs ({base_sys.get('os', '?')})")
     click.echo(f"  Threshold: {threshold_pct:.0f}%")
     click.echo(f"{'=' * 72}")
 
