@@ -33,13 +33,8 @@
 #include <utility>
 #include <vector>
 
+#include "../platform/listing.h"
 #include "path_rules.h"
-
-#ifndef _WIN32
-#include <dirent.h>
-#include <fcntl.h>
-#include <sys/stat.h>
-#endif
 
 namespace pygim::pathlike {
 
@@ -220,96 +215,9 @@ private:
 /// A glob pattern under the running system's rules.
 using glob_pattern = basic_glob_pattern<native_strategy>;
 
-/// What an entry of a directory is, as its listing says (a link is not followed).
-enum class entry_kind { directory, link, other };
-
-/// One entry of a directory listing: its name as UTF-8 text (what a pattern matches), its kind, and
-/// on Windows its native name too — the UTF-16 one, which is what a path below it is joined from:
-/// joined from the UTF-8 text, a name past ASCII came out in the ANSI code page (2026-10-29).
-class dir_entry {
-public:
-    dir_entry(std::string name, entry_kind kind) noexcept : m_name(std::move(name)), m_kind(kind) {}
-#ifdef _WIN32
-    dir_entry(fs::path native, entry_kind kind) : m_name(utf8_of(native)), m_native(std::move(native)), m_kind(kind) {}
-#endif
-    [[nodiscard]] const std::string& name() const noexcept { return m_name; }
-    [[nodiscard]] entry_kind kind() const noexcept { return m_kind; }
-    /// The entry's path in `dir`.
-    [[nodiscard]] fs::path under(const fs::path& dir) const {
-#ifdef _WIN32
-        return dir / m_native;
-#else
-        return dir / m_name;   // a POSIX name is its own native spelling
-#endif
-    }
-
-private:
-#ifdef _WIN32
-    [[nodiscard]] static std::string utf8_of(const fs::path& native) {
-        const std::u8string u = native.u8string();
-        return std::string(u.begin(), u.end());
-    }
-#endif
-
-    std::string m_name;
-#ifdef _WIN32
-    fs::path m_native;
-#endif
-    entry_kind m_kind;
-};
-
-#ifndef _WIN32
-/// What a POSIX listing says an entry is (its d_type; a link is not followed). Some file systems
-/// leave the kind out (DT_UNKNOWN): then lstat_mode() is asked — the entry's st_mode by lstat, or
-/// nothing when lstat fails, and an entry it cannot tell is `other`, matched but never gone into.
-template <class LstatMode>
-[[nodiscard]] constexpr entry_kind kind_from_listing(unsigned char d_type, const LstatMode& lstat_mode) {
-    if (d_type == DT_DIR) return entry_kind::directory;
-    if (d_type == DT_LNK) return entry_kind::link;
-    if (d_type != DT_UNKNOWN) return entry_kind::other;
-    const std::optional<mode_t> mode = lstat_mode();
-    if (!mode) return entry_kind::other;
-    return S_ISDIR(*mode) ? entry_kind::directory : S_ISLNK(*mode) ? entry_kind::link : entry_kind::other;
-}
-static_assert([] {
-    const auto never = []() -> std::optional<mode_t> { throw "a known kind asks no lstat"; };
-    const auto says = [](mode_t m) { return [m] { return std::optional<mode_t>(m); }; };
-    const auto fails = [] { return std::optional<mode_t>(); };
-    return kind_from_listing(DT_DIR, never) == entry_kind::directory && kind_from_listing(DT_LNK, never) == entry_kind::link &&
-           kind_from_listing(DT_REG, never) == entry_kind::other && kind_from_listing(DT_FIFO, never) == entry_kind::other &&
-           kind_from_listing(DT_UNKNOWN, says(S_IFDIR)) == entry_kind::directory &&
-           kind_from_listing(DT_UNKNOWN, says(S_IFLNK)) == entry_kind::link && kind_from_listing(DT_UNKNOWN, says(S_IFREG)) == entry_kind::other &&
-           kind_from_listing(DT_UNKNOWN, fails) == entry_kind::other;
-}());
-#endif
-
-/// The entries of a directory, without "." and ".."; none when it cannot be read.
-[[nodiscard]] inline std::vector<dir_entry> list_directory(const fs::path& dir) {
-    std::vector<dir_entry> out;
-#ifdef _WIN32
-    std::error_code ec;
-    for (fs::directory_iterator it(dir, ec), end; !ec && it != end; it.increment(ec)) {
-        std::error_code kc;
-        const entry_kind kind = it->is_symlink(kc) ? entry_kind::link : it->is_directory(kc) ? entry_kind::directory : entry_kind::other;
-        out.emplace_back(it->path().filename(), kind);
-    }
-#else
-    DIR* d = ::opendir(dir.c_str());
-    if (d == nullptr) return out;
-    while (const dirent* e = ::readdir(d)) {
-        const char* n = e->d_name;
-        if (n[0] == '.' && (n[1] == '\0' || (n[1] == '.' && n[2] == '\0'))) continue;
-        const entry_kind kind = kind_from_listing(e->d_type, [&]() -> std::optional<mode_t> {
-            struct ::stat st {};
-            if (::fstatat(::dirfd(d), n, &st, AT_SYMLINK_NOFOLLOW) != 0) return std::nullopt;
-            return st.st_mode;
-        });
-        out.emplace_back(n, kind);
-    }
-    ::closedir(d);
-#endif
-    return out;
-}
+using platform::dir_entry;
+using platform::entry_kind;
+using platform::list_directory;
 
 /// Whether a link at `path` leads to a directory (it is followed, as stat follows it).
 [[nodiscard]] inline bool leads_to_directory(const fs::path& path) {
@@ -372,24 +280,22 @@ void step_up(const glob_pattern& pattern, const fs::path& dir, std::size_t k, Em
     else go_on(glob_task::entering(pattern, std::move(up), k + 1));
 }
 
-#ifdef __linux__
-// Segment k names one entry: one lstat of `dir/name`, where a listing read the whole directory to
-// find it. Linux only, and matched case-sensitively: a file system there tells names apart by case,
-// so the stat finds exactly what the listing's match would (macOS's and Windows' default ones
-// would find `Src` for `src`).
+// Segment k names one entry: one stat of `dir/name`, where a listing read the whole directory to
+// find it. Only where the system's file systems tell names apart by case (platform::
+// finds_a_name_by_stat), and matched case-sensitively: there the stat finds exactly what the
+// listing's match would (macOS's and Windows' default ones would find `Src` for `src`).
 template <class Emit, class GoOn>
 void find_literal(const glob_pattern& pattern, const fs::path& dir, std::size_t k, Emit& emit, GoOn& go_on) {
     fs::path path = dir / pattern.segment(k);
-    struct ::stat st {};
-    if (::lstat(path.c_str(), &st) != 0) return;
-    const bool directory = S_ISDIR(st.st_mode) || (S_ISLNK(st.st_mode) && leads_to_directory(path));
+    const std::optional<entry_kind> kind = platform::entry_at(path);
+    if (!kind) return;
+    const bool directory = *kind == entry_kind::directory || (*kind == entry_kind::link && leads_to_directory(path));
     if (pattern.is_last(k)) {
         if (!pattern.dirs_only() || directory) emit(std::move(path));
     } else if (directory) {
         go_on(glob_task::entering(pattern, std::move(path), k + 1));
     }
 }
-#endif
 
 }  // namespace detail
 
@@ -400,11 +306,11 @@ template <class Emit, class GoOn>
 void glob_step(const glob_pattern& pattern, const glob_task& task, Emit&& emit, GoOn&& go_on) {
     const std::size_t k = task.segment();
     if (pattern.steps_up(k)) return detail::step_up(pattern, task.dir(), k, emit, go_on);
-#ifdef __linux__
-    if (!pattern.spans_directories(k) && pattern.is_literal(k) && pattern.case_sensitive()) {
-        return detail::find_literal(pattern, task.dir(), k, emit, go_on);
+    if constexpr (platform::finds_a_name_by_stat) {
+        if (!pattern.spans_directories(k) && pattern.is_literal(k) && pattern.case_sensitive()) {
+            return detail::find_literal(pattern, task.dir(), k, emit, go_on);
+        }
     }
-#endif
     const std::vector<dir_entry> entries = list_directory(task.dir());
     if (!pattern.spans_directories(k)) {
         detail::match_segment(pattern, task.dir(), entries, k, emit, go_on);
