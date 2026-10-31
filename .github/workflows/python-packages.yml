@@ -35,6 +35,15 @@ jobs:
       with:
         python-version: ${{ matrix.python-version }}
 
+    - name: Use GCC 14 (Ubuntu 24.04)
+      if: matrix.os == 'ubuntu-24.04'
+      # Its default GCC 13 has no explicit object parameters (C++23's deducing this), which
+      # mapping/storage.h uses; 26.04's GCC has them.
+      run: |
+        sudo apt-get install -y g++-14
+        echo "CC=gcc-14" >> "$GITHUB_ENV"
+        echo "CXX=g++-14" >> "$GITHUB_ENV"
+
     - name: Install MSSQL ODBC Driver 18 (Linux)
       if: startsWith(matrix.os, 'ubuntu')
       run: |
