@@ -29,7 +29,7 @@ from tabulate import tabulate
 
 from pygim import similarity
 from pygim.pathlike import path
-from _results import save, wants_save
+from _results import corpus, save, wants_save
 
 THRESHOLD = 0.8
 MIN_SIZE = 30
@@ -81,7 +81,7 @@ def main():
                                 capture_output=True, text=True).stdout.strip()
     except OSError:
         commit = "?"
-    raw = {"root": str(root), "commit": commit, "corpora": corpora, "threshold": THRESHOLD, "min_size": MIN_SIZE, "top": TOP}
+    raw = {"root": corpus(root), "commit": commit, "corpora": corpora, "threshold": THRESHOLD, "min_size": MIN_SIZE, "top": TOP}
     print(f"{root.name} {commit}; Python {sys.version.split()[0]}\n")
 
     parse_rows, ranked_rows, top_rows = [], [], []

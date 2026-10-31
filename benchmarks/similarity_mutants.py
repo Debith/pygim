@@ -30,7 +30,7 @@ import pyarrow.compute as pc
 from tabulate import tabulate
 
 from pygim import similarity
-from _results import save, wants_save
+from _results import corpus, save, wants_save
 
 SAMPLE = 600
 UNRELATED = 1_000
@@ -99,7 +99,7 @@ def main():
     rnd = random.Random(7)
     unrelated = sorted(score(fns[i], fns[j]) for i, j in
                        ((rnd.randrange(len(fns)), rnd.randrange(len(fns))) for _ in range(UNRELATED)) if i != j)
-    raw = {"stdlib": str(root), "functions": len(fns),
+    raw = {"stdlib": corpus(root), "functions": len(fns),
            "unrelated": {"median": statistics.median(unrelated), "p99": unrelated[int(0.99 * len(unrelated))]}}
     rows = [["unrelated pairs", len(unrelated), f"{raw['unrelated']['median']:.2f}", "", f"p99 {raw['unrelated']['p99']:.2f}"]]
     for k, how in enumerate(EDITS):

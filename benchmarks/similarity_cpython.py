@@ -39,7 +39,7 @@ from tabulate import tabulate
 
 from pygim import similarity
 from pygim.utils import rss_bytes
-from _results import save, wants_save
+from _results import corpus, save, wants_save
 
 THRESHOLD = 0.8
 MIN_SIZE = 30
@@ -130,7 +130,7 @@ def main():
                                 capture_output=True, text=True).stdout.strip()
     except OSError:
         commit = "?"
-    raw = {"checkout": str(root), "commit": commit, "python": sys.version.split()[0],
+    raw = {"checkout": corpus(root), "commit": commit, "python": sys.version.split()[0],
            "threshold": THRESHOLD, "min_size": MIN_SIZE}
     print(f"CPython {commit} at {root}; Python {raw['python']}\n")
 

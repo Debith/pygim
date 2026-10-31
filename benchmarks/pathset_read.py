@@ -25,7 +25,7 @@ import tempfile
 from tabulate import tabulate
 
 from pygim import PathSet, path
-from _results import save, wants_save
+from _results import corpus, save, wants_save
 
 from _bench import REPS, best_fresh
 
@@ -131,7 +131,7 @@ def main():
         size = sum(os.path.getsize(f) for f in files)
         print(f"{len(files):,} UTF-8 files ({len(found) - len(files)} others left out), {size / 2**20:,.1f} MB "
               f"under {root if given else 'a generated tree'}; best of {REPS}, ms\n")
-        sections = {"corpus": {"root": str(root) if given else "generated", "files": len(files), "bytes": size}}
+        sections = {"corpus": {"root": corpus(root) if given else "generated", "files": len(files), "bytes": size}}
 
         rows, sections["read"] = bench_reads(files, cold=False)
         print("read, warm\n" + tabulate(rows, headers=["", "ms"], disable_numparse=True) + "\n")

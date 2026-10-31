@@ -6,11 +6,14 @@ needed to compare runs honestly later: commit, dirty flag, Python version,
 platform and CPU model. Records from different machines or dirty trees are
 still recorded — the metadata is what lets an analysis *filter* them, so a
 trend line never silently mixes incomparable environments. Never which
-machine it was: no hostname (Debith, 2026-10-31).
+machine it was (Debith, 2026-10-31): no hostname, and no path on it — a
+corpus is named by ``corpus()``, and ``save`` refuses a record holding a path.
 """
 
 import json
+import os
 import platform
+import re
 import subprocess
 import sys
 from datetime import datetime, timezone
@@ -20,14 +23,39 @@ RESULTS_DIR = Path(__file__).resolve().parent / "results"
 SCHEMA = 1
 
 
-def _git(*args):
+def _git(*args, cwd=None):
     try:
         return subprocess.run(
-            ["git", *args], cwd=Path(__file__).resolve().parent,
+            ["git", *args], cwd=cwd or Path(__file__).resolve().parent,
             capture_output=True, text=True, check=True,
         ).stdout.strip()
     except (OSError, subprocess.CalledProcessError):
         return None
+
+
+def corpus(folder):
+    """A corpus as a record names it: its checkout's folder name and the path below it
+    (``cpython/Lib``, ``llvm-project``), never where on this machine it lies; a folder outside any
+    checkout by its own name."""
+    here = Path(folder).expanduser().resolve()
+    top = _git("rev-parse", "--show-toplevel", cwd=here if here.is_dir() else here.parent)
+    if not top:
+        return here.name
+    below = here.relative_to(Path(top).resolve())
+    return (Path(Path(top).name) / below).as_posix() if below.parts else Path(top).name
+
+
+def _local_paths(value, where):
+    """(where, text) of each text in *value* that is a path on this machine."""
+    if isinstance(value, dict):
+        for key, item in value.items():
+            yield from _local_paths(item, f"{where}.{key}")
+    elif isinstance(value, (list, tuple)):
+        for item in value:
+            yield from _local_paths(item, f"{where}[]")
+    elif isinstance(value, str) and (os.path.isabs(value) or value.startswith(("/", "~", "\\\\"))
+                                     or re.match(r"^[A-Za-z]:[\\/]", value)):
+        yield where, value
 
 
 def _cpu_model():
@@ -57,6 +85,8 @@ def save(bench, sections, *, reps, in_tree=True):
     omits the self-referential commit hash; pass ``in_tree=False`` for a
     record that stays outside history and names the commit it measured.
     """
+    for where, text in _local_paths(sections, "sections"):
+        raise ValueError(f"{where} holds {text}, a path on this machine: name the corpus with corpus()")
     record = {
         "schema": SCHEMA,
         "bench": bench,

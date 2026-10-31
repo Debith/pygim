@@ -30,7 +30,7 @@ from tabulate import tabulate
 from _pygim import _inventory
 from pygim import path
 from _bench import REPS, best_fresh
-from _results import save, wants_save
+from _results import corpus as corpus_name, save, wants_save
 
 
 def argument(name):
@@ -105,7 +105,7 @@ def main():
     sections, corpus = contenders(root)
     print(f"{corpus['files']} Python files ({corpus['bytes'] / 2**20:.1f} MB) under {root}, "
           f"{corpus['distributions']} distributions installed; best of {REPS}, ms\n")
-    raw = {"corpus": {"root": str(root), **corpus}}
+    raw = {"corpus": {"root": corpus_name(root), **corpus}}
     for section, calls in sections.items():
         rows, raw[section] = [], {}
         for label, call in calls.items():
