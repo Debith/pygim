@@ -380,10 +380,11 @@ def test_each_test_module_has_a_name_of_its_own():
 
 # Every conditional on the operating system outside src/_pygim_fast/platform/, the boundary the
 # system's rules and calls belong behind (docs/design/platform_boundary.md, D77): counted on
-# 2026-10-31 (59), 56 once the path rules moved (path_rules.h), 47 once the listing did. It may
-# fall, as each part moves behind the boundary; it may not rise. A compiler's own checks
-# (_MSC_VER, __clang__) are build portability, not the system's, and are not counted.
-OS_CONDITIONALS = 47
+# 2026-10-31 (59), 56 once the path rules moved (path_rules.h), 47 once the listing did, 45 once the
+# errno translation did. It may fall, as each part moves behind the boundary; it may not rise. A
+# compiler's own checks (_MSC_VER, __clang__) are build portability, not the system's, and are not
+# counted.
+OS_CONDITIONALS = 45
 OS_MACRO = re.compile(r"^[ \t]*#[ \t]*(?:if|ifdef|ifndef|elif)\b.*\b(?:_WIN32|_WIN64|__APPLE__|__linux__|__unix__|__FreeBSD__)\b", re.M)
 
 

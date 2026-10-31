@@ -27,7 +27,6 @@
 #include <cerrno>
 #include <concepts>
 #include <cstddef>
-#include <cstring>
 #include <expected>
 #include <optional>
 #include <stdexcept>
@@ -45,6 +44,7 @@
 #include <unistd.h>
 #endif
 
+#include "../platform/errors.h"
 #include "../utils/chunk_arena.h"
 #include "core.h"
 
@@ -105,17 +105,6 @@ static_assert([] {
     return l.size() == 3 && l.at(0).text() == "a.py" && l.at(1).text().empty() && l.at(2).text() == "b/c.py" && l.at(2).c_str()[6] == '\0';
 }());
 
-/// The OS's words for an errno, as Python's os.strerror gives them: the C runtime's strerror.
-/// std::generic_category() gives the same words with glibc and macOS's libc, and lowercases them
-/// with MSVC ("no such file or directory").
-[[nodiscard]] inline std::string os_words(int err) {
-#ifdef _WIN32
-    char words[128];
-    if (strerror_s(words, sizeof words, err) == 0) return words;
-#endif
-    return std::generic_category().message(err);
-}
-
 /// A member that is no regular file: missing (ENOENT, ENOTDIR), a link that loops (ELOOP), a
 /// directory (EISDIR), or another kind of node such as a FIFO or a device (ENODEV).
 class not_a_file {
@@ -125,15 +114,10 @@ public:
     /// Why, as a reader is told: the OS's words for a missing path or a directory ("No such file or
     /// directory", "Is a directory"), and "not a regular file" for a FIFO or a device, where the
     /// OS's ENODEV ("No such device") would mislead.
-    [[nodiscard]] std::string what() const { return m_why == ENODEV ? std::string("not a regular file") : os_words(m_why); }
+    [[nodiscard]] std::string what() const { return m_why == ENODEV ? std::string("not a regular file") : platform::errno_words(m_why); }
     /// The errno open() fails with on it, for a caller that raises what open() would: why it is no
     /// file — but a folder on Windows, which open() refuses as PermissionError (EACCES).
-    [[nodiscard]] constexpr int open_error() const noexcept {
-#ifdef _WIN32
-        if (m_why == EISDIR) return EACCES;
-#endif
-        return m_why;
-    }
+    [[nodiscard]] constexpr int open_error() const noexcept { return platform::open_error_for(m_why); }
 
 private:
     int m_why;
@@ -152,7 +136,7 @@ public:
     constexpr explicit read_failure(int error) noexcept : m_error(error) {}
     [[nodiscard]] constexpr int error() const noexcept { return m_error; }
     /// Why, in the OS's words: "Permission denied".
-    [[nodiscard]] std::string what() const { return os_words(m_error); }
+    [[nodiscard]] std::string what() const { return platform::errno_words(m_error); }
     [[noreturn]] void raise(os_path path) const { throw file_error(m_error, std::string(path.text()), "cannot read file"); }
 
 private:
