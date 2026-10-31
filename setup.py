@@ -460,6 +460,17 @@ ext_modules = []
 
 _require_compiler()
 
+# The compile-time proofs (tests/static/*_proofs.cpp, wired into the extensions' sources) may take
+# more steps in one static_assert than a compiler allows by default: clang's and MSVC's limit is
+# 1,048,576 (GCC counts operations, not steps, and allows 2^33). similarity_proofs.cpp's
+# token_index_build_law took more on MSVC (CI, 2026-10-31).
+CONSTEXPR_STEPS = 1 << 26
+if sys.platform == "win32":
+    extra_compile_args.append(f"/constexpr:steps{CONSTEXPR_STEPS}")
+else:
+    std_flag = next(a for a in extra_compile_args if a.startswith("-std="))
+    extra_compile_args.extend(_supported_flags([f"-fconstexpr-steps={CONSTEXPR_STEPS}"], std_flag))
+
 for ext_toml in sorted(FAST_ROOT.rglob("ext.*.toml")):
     ext_cfg = tomllib.loads(ext_toml.read_text(encoding="utf-8"))["extension"]
     module_name = f"pygim.{ext_cfg['module']}"
