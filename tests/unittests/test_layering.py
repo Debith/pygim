@@ -406,6 +406,27 @@ def test_the_operating_system_is_asked_only_behind_the_platform_boundary():
         f"only {len(found)} are left, and OS_CONDITIONALS still says {OS_CONDITIONALS}: lower it")
 
 
+LOCALE_CHARACTER_CALLS = re.compile(
+    r"\b(?:std::)?(?:isalnum|isalpha|isdigit|isxdigit|isspace|isblank|isupper|islower|ispunct|isprint|isgraph|iscntrl"
+    r"|tolower|toupper)\s*\(|#\s*include\s*<c?ctype(?:\.h)?>")
+
+
+def test_a_character_is_classed_by_ascii_never_by_the_locale():
+    """<cctype>'s calls ask the C locale, which Python sets from the environment: under a Latin-1 one
+    std::isalnum let the UTF-8 bytes of "tête" through a SQL identifier check, under a Turkish one
+    std::tolower may lower I to a dotless i (found 2026-10-31). utils/chars.h classes and folds by
+    ASCII, whatever the locale."""
+    found = []
+    for pattern in ("*.h", "*.cpp"):
+        for file, text in sources(ROOT, pattern):
+            if "third_party" in file.parts:
+                continue
+            code = _code(file)
+            found += [f"{file.relative_to(ROOT).as_posix()}:{code.count(chr(10), 0, m.start()) + 1}: {m.group(0)}"
+                      for m in LOCALE_CHARACTER_CALLS.finditer(code)]
+    assert found == [], "use utils/chars.h (is_digit, is_alnum, to_lower, lower, ...):\n" + "\n".join(found)
+
+
 # Every place the C++ imports a Python module, and why. #248: reach Python through the C API, never
 # import while running; where no C API answers, say so and ask. A new import fails here until it is
 # listed with its reason.
