@@ -191,7 +191,7 @@ private:
 inline void init_session(const BcpApi& api, SQLHDBC dbc,
                          const std::string& qualified_table,
                          const std::string& hint) {
-    // Convert ASCII table name to UTF-16 for bcp_initW
+    // The name as UTF-16 for bcp_initW: ASCII, as qualify_table admits no other, so each byte is its unit
     std::u16string w;
     w.reserve(qualified_table.size());
     for (char ch : qualified_table) w.push_back(static_cast<char16_t>(ch));

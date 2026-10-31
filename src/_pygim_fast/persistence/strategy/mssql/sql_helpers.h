@@ -3,24 +3,27 @@
 // BCP session setup and table qualification.
 
 #include "../../core/persistence_error.h"
+#include "../../../utils/chars.h"
 #include <algorithm>
 #include <format>
 #include <ranges>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 
 namespace pygim::strategy::mssql::sql {
 
 /// Return true when s is a safe, unquoted SQL identifier
-/// (letters, digits, underscore; does not start with digit).
-[[nodiscard]] inline bool is_valid_identifier(const std::string& s) {
-    if (s.empty()) return false;
-    if (std::isdigit(static_cast<unsigned char>(s[0]))) return false;
-    return std::ranges::all_of(s, [](char c) {
-        auto uc = static_cast<unsigned char>(c);
-        return std::isalnum(uc) || c == '_';
-    });
+/// (ASCII letters, digits, underscore; does not start with digit).
+/// Found 2026-10-31: std::isalnum asked the locale, so under a Latin-1 one
+/// the UTF-8 bytes of "t\xc3\xaate" passed as letters — and reached
+/// bcp_initW widened byte by byte. ASCII only, whatever the locale.
+[[nodiscard]] constexpr bool is_valid_identifier(std::string_view s) noexcept {
+    if (s.empty() || chars::is_digit(s[0])) return false;
+    return std::ranges::all_of(s, [](char c) { return chars::is_alnum(c) || c == '_'; });
 }
+static_assert(is_valid_identifier("orders") && is_valid_identifier("_t1") && !is_valid_identifier("1t") &&
+              !is_valid_identifier("a-b") && !is_valid_identifier("") && !is_valid_identifier("t\xc3\xaate"));
 
 /// Ensure table name is a valid identifier (possibly schema.table).
 /// Returns "dbo.table" if no schema part is present.
