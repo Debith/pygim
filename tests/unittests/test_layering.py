@@ -411,6 +411,19 @@ LOCALE_CHARACTER_CALLS = re.compile(
     r"|tolower|toupper)\s*\(|#\s*include\s*<c?ctype(?:\.h)?>")
 
 
+def test_every_package_that_ships_holds_something():
+    """A package of one empty __init__.py ships in every wheel and imports as if it offered
+    something: pygim.ai did from 2025-08-07 until Debith dropped it (D78, 2026-10-31)."""
+    empty = []
+    for package in ("pygim", "_pygim"):
+        for init in path(str(PY_ROOT)).glob(f"{package}/**/__init__.py"):
+            folder = path(str(init.parent))
+            others = [p for p in folder.iterdir() if p.name not in ("__init__.py", "__pycache__")]
+            if not _text(pathlib.Path(str(init))).strip() and not others:
+                empty.append(pathlib.Path(str(folder)).relative_to(PY_ROOT).as_posix())
+    assert empty == [], "a package holding nothing: give it its code, or remove it"
+
+
 def test_a_character_is_classed_by_ascii_never_by_the_locale():
     """<cctype>'s calls ask the C locale, which Python sets from the environment: under a Latin-1 one
     std::isalnum let the UTF-8 bytes of "tête" through a SQL identifier check, under a Turkish one
