@@ -1,44 +1,15 @@
 #pragma once
 
 #include "core.h"
+#include "../utils/arrow_stream.h"
 #include <pybind11/pybind11.h>
 
 namespace py = pybind11;
 
 namespace pygim::datagen {
 
-// ── Arrow PyCapsule protocol export ─────────────────────────────────────────
-// Returns an object implementing __arrow_c_stream__, compatible with
-// pyarrow.RecordBatchReader.from_stream() and polars.from_arrow().
-
-struct ArrowStreamExporter {
-    std::shared_ptr<arrow::RecordBatch> batch;
-
-    /// PyCapsule protocol: called by pyarrow / polars to consume the data.
-    py::capsule arrow_c_stream(py::object /*requested_schema*/ = py::none()) const {
-        auto reader_result = arrow::RecordBatchReader::Make({batch}, batch->schema());
-        if (!reader_result.ok())
-            throw std::runtime_error(reader_result.status().ToString());
-
-        auto* c_stream = new ArrowArrayStream;
-        std::memset(c_stream, 0, sizeof(*c_stream));
-
-        auto status = arrow::ExportRecordBatchReader(
-            std::move(*reader_result), c_stream);
-        if (!status.ok()) {
-            delete c_stream;
-            throw std::runtime_error(status.ToString());
-        }
-
-        return py::capsule(
-            static_cast<void*>(c_stream), "arrow_array_stream",
-            [](void* ptr) {
-                auto* s = static_cast<ArrowArrayStream*>(ptr);
-                if (s->release) s->release(s);
-                delete s;
-            });
-    }
-};
+// The Arrow PyCapsule exporter is shared with every Arrow-producing extension.
+using ArrowStreamExporter = pygim::arrow_stream::exporter;
 
 /// Top-level entry point called from Python.
 inline ArrowStreamExporter generate(
@@ -66,7 +37,7 @@ inline ArrowStreamExporter generate(
         throw std::invalid_argument("schema must have at least one column");
 
     auto batch = generate_batch(columns, rows, seed, null_fraction);
-    return ArrowStreamExporter{std::move(batch)};
+    return ArrowStreamExporter::of(std::move(batch));
 }
 
 } // namespace pygim::datagen

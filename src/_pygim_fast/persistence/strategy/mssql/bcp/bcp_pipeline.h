@@ -1,8 +1,9 @@
 #pragma once
 // BCP Pipeline: single-connection and parallel bulk insert orchestrator.
 // Combines archive's bcp_strategy.cpp, bcp_row_loop.h, bcp_entry.h into a
-// single header-only file with simplified timing (stage-level chrono only).
+// single header-only file; its stages are timed by a SilentTimer (utils/quick_timer.h).
 
+#include "../../../core/persistence_error.h"
 #include "bcp_helpers.h"
 #include "bcp_pool.h"
 #include "bcp_profiler.h"
@@ -116,46 +117,46 @@ struct ParallelWorkerResult {
 };
 
 /// Build metrics for single-connection insert path.
-inline BcpMetrics make_single_metrics(const pygim::QuickTimerT<BcpPhase>& timer,
+inline BcpMetrics make_single_metrics(const pygim::SilentTimer<BcpPhase>& timer,
                                       const BcpContext& ctx,
                                       const BcpProfiler& profiler) {
     const auto timing = timer.snapshot();
     BcpMetrics metrics;
     metrics.profiler = profiler;
-    metrics.row_loop_seconds = timing.sub_timer_seconds(BcpPhase::row_loop);
-    metrics.batch_flush_seconds = timing.sub_timer_seconds(BcpPhase::flush);
+    metrics.row_loop_seconds = timing.lap_seconds(BcpPhase::row_loop);
+    metrics.batch_flush_seconds = timing.lap_seconds(BcpPhase::flush);
     metrics.processed_rows = ctx.processed_rows;
     metrics.sent_rows = ctx.sent_rows;
     metrics.record_batches = ctx.record_batches;
-    metrics.total_seconds = timing.total_seconds;
+    metrics.total_seconds = timing.total_seconds();
     return metrics;
 }
 
 /// Build metrics for a parallel worker path.
-inline BcpMetrics make_worker_metrics(const pygim::QuickTimerT<BcpWorkerPhase>& timer,
+inline BcpMetrics make_worker_metrics(const pygim::SilentTimer<BcpWorkerPhase>& timer,
                                       const BcpContext& ctx,
                                       const BcpProfiler& profiler) {
     const auto timing = timer.snapshot();
     BcpMetrics metrics;
     metrics.profiler = profiler;
-    metrics.row_loop_seconds = timing.sub_timer_seconds(BcpWorkerPhase::row_loop);
-    metrics.batch_flush_seconds = timing.sub_timer_seconds(BcpWorkerPhase::flush);
+    metrics.row_loop_seconds = timing.lap_seconds(BcpWorkerPhase::row_loop);
+    metrics.batch_flush_seconds = timing.lap_seconds(BcpWorkerPhase::flush);
     metrics.processed_rows = ctx.processed_rows;
     metrics.sent_rows = ctx.sent_rows;
     metrics.record_batches = ctx.record_batches;
-    metrics.total_seconds = timing.total_seconds;
+    metrics.total_seconds = timing.total_seconds();
     return metrics;
 }
 
 /// Build final metrics for parallel orchestrator path.
-inline BcpMetrics make_parallel_metrics(const pygim::QuickTimerT<BcpParallelPhase>& timer,
+inline BcpMetrics make_parallel_metrics(const pygim::SilentTimer<BcpParallelPhase>& timer,
                                         const std::vector<ParallelWorkerResult>& results) {
     const auto timing = timer.snapshot();
     BcpMetrics merged{};
-    merged.connect_seconds = timing.sub_timer_seconds(BcpParallelPhase::connect);
+    merged.connect_seconds = timing.lap_seconds(BcpParallelPhase::connect);
     for (const auto& result : results)
         merged.merge_parallel(result.metrics);
-    merged.total_seconds = timing.total_seconds;
+    merged.total_seconds = timing.total_seconds();
     return merged;
 }
 
@@ -203,7 +204,7 @@ inline void init_session(const BcpApi& api, SQLHDBC dbc,
     }
     if (!hint.empty()) {
         if (!api.control) [[unlikely]]
-            throw std::runtime_error(
+            throw pygim::core::persistence_error(
                 "BCP hint '" + hint + "' requested but bcp_control not available; "
                 "ODBC Driver 17+ required");
         if (api.control(dbc, kBcpHints,
@@ -382,10 +383,10 @@ inline void finalize_bcp(BcpContext& ctx) {
     int64_t batch_size,
     const std::string& table_hint)
 {
-    pygim::QuickTimerT<BcpPhase> timer("bcp_insert", nullptr, false, false);
+    pygim::SilentTimer<BcpPhase> timer("bcp_insert");
 
     if (!table_data || table_data->num_rows() == 0)
-        throw std::runtime_error("Arrow BCP received zero rows from payload");
+        throw pygim::core::persistence_error("Arrow BCP received zero rows from payload");
 
     const auto& api = ensure_bcp_api();
     auto qualified = sql::qualify_table(table);
@@ -410,22 +411,22 @@ inline void finalize_bcp(BcpContext& ctx) {
             BCP_PROF_SCOPE(prof, reader_next);
             auto st = reader->ReadNext(&batch);
             if (!st.ok())
-                throw std::runtime_error("Failed reading Arrow batch: " + st.ToString());
+                throw pygim::core::persistence_error("Failed reading Arrow batch: " + st.ToString());
         }
         if (!batch) break;
 
-        timer.start_sub_timer(BcpPhase::row_loop, false);
+        timer.start_lap(BcpPhase::row_loop);
         process_batch(ctx, batch, binding_state, prof);
-        timer.stop_sub_timer(BcpPhase::row_loop, false);
+        timer.stop_lap(BcpPhase::row_loop);
     }
 
-    timer.start_sub_timer(BcpPhase::flush, false);
+    timer.start_lap(BcpPhase::flush);
     session_guard.dismiss();
     {
         BCP_PROF_SCOPE(prof, final_flush);
         finalize_bcp(ctx);
     }
-    timer.stop_sub_timer(BcpPhase::flush, false);
+    timer.stop_lap(BcpPhase::flush);
 
     BCP_PROF_DUMP(prof, 0);
     return make_single_metrics(timer, ctx, prof);
@@ -456,10 +457,10 @@ inline void finalize_bcp(BcpContext& ctx) {
     const std::string& table_hint,
     int num_workers)
 {
-    pygim::QuickTimerT<BcpParallelPhase> timer("bcp_parallel", nullptr, false, false);
+    pygim::SilentTimer<BcpParallelPhase> timer("bcp_parallel");
 
     if (!table_data || table_data->num_rows() == 0)
-        throw std::runtime_error("Arrow BCP received zero rows from payload");
+        throw pygim::core::persistence_error("Arrow BCP received zero rows from payload");
 
     const int64_t total_rows = table_data->num_rows();
 
@@ -491,9 +492,9 @@ inline void finalize_bcp(BcpContext& ctx) {
     }
 
     // 4. Create connection pool (parallel establishment)
-    timer.start_sub_timer(BcpParallelPhase::connect, false);
+    timer.start_lap(BcpParallelPhase::connect);
     BcpConnectionPool pool(conn_str, actual_workers);
-    timer.stop_sub_timer(BcpParallelPhase::connect, false);
+    timer.stop_lap(BcpParallelPhase::connect);
 
     const auto& api = ensure_bcp_api();
     auto qualified = sql::qualify_table(table);
@@ -511,7 +512,7 @@ inline void finalize_bcp(BcpContext& ctx) {
             auto& my_slice = slices[static_cast<size_t>(w)];
 
             try {
-                pygim::QuickTimerT<BcpWorkerPhase> wtimer("bcp_worker", nullptr, false, false);
+                pygim::SilentTimer<BcpWorkerPhase> wtimer("bcp_worker");
                 BCP_PROF_DECL(prof);
 
                 {
@@ -537,22 +538,22 @@ inline void finalize_bcp(BcpContext& ctx) {
                         BCP_PROF_SCOPE(prof, reader_next);
                         auto st = reader->ReadNext(&batch);
                         if (!st.ok())
-                            throw std::runtime_error("Failed reading Arrow batch: " + st.ToString());
+                            throw pygim::core::persistence_error("Failed reading Arrow batch: " + st.ToString());
                     }
                     if (!batch) break;
 
-                    wtimer.start_sub_timer(BcpWorkerPhase::row_loop, false);
+                    wtimer.start_lap(BcpWorkerPhase::row_loop);
                     process_batch(ctx, batch, state, prof);
-                    wtimer.stop_sub_timer(BcpWorkerPhase::row_loop, false);
+                    wtimer.stop_lap(BcpWorkerPhase::row_loop);
                 }
 
-                wtimer.start_sub_timer(BcpWorkerPhase::flush, false);
+                wtimer.start_lap(BcpWorkerPhase::flush);
                 guard.dismiss();
                 {
                     BCP_PROF_SCOPE(prof, final_flush);
                     finalize_bcp(ctx);
                 }
-                wtimer.stop_sub_timer(BcpWorkerPhase::flush, false);
+                wtimer.stop_lap(BcpWorkerPhase::flush);
 
                 BCP_PROF_DUMP(prof, w);
                 res.metrics = make_worker_metrics(wtimer, ctx, prof);
@@ -573,7 +574,7 @@ inline void finalize_bcp(BcpContext& ctx) {
                 std::rethrow_exception(results[static_cast<size_t>(w)].error);
             } catch (const std::exception& e) {
                 const auto& wm = results[static_cast<size_t>(w)].metrics;
-                throw std::runtime_error(
+                throw pygim::core::persistence_error(
                     std::string("Parallel BCP worker ") + std::to_string(w)
                     + "/" + std::to_string(actual_workers)
                     + " failed (sent " + std::to_string(wm.sent_rows)

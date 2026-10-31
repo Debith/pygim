@@ -1,0 +1,245 @@
+// Compile-time proofs for utils/duration.h, utils/timestamp.h, utils/quick_timer.h and utils/sorted_sets.h.
+//
+// This TU is part of the utils extension's SOURCES (ext.utils.toml): it is compiled by every
+// build, so a violated law fails the build instead of a test run. A manual_clock makes time
+// move only when told, so every measurement below is exact.
+
+#include <array>
+#include <chrono>
+#include <cstddef>
+#include <cstdint>
+#include <string_view>
+
+#include "../../src/_pygim_fast/utils/duration.h"
+#include "../../src/_pygim_fast/utils/quick_timer.h"
+#include "../../src/_pygim_fast/utils/sorted_sets.h"
+#include "../../src/_pygim_fast/utils/timestamp.h"
+
+namespace {
+
+using pygim::basic_timestamp;
+using pygim::manual_clock;
+using pygim::manual_time;
+using pygim::duration;
+using manual_timer = pygim::QuickTimerT<void, 8, manual_clock, pygim::silent>;
+using manual_moment = basic_timestamp<manual_clock>;
+
+// A moment read from a clock is that clock's count; the difference of two is the time between.
+consteval bool timestamps_read_their_clock() {
+    manual_time time(1'000);
+    const manual_moment a = manual_moment::now(time.clock());
+    time.advance(pygim::duration(2'500));
+    const manual_moment b = manual_moment::now(time.clock());
+    return a.nanoseconds() == 1'000 && b.nanoseconds() == 3'500 && b - a == pygim::duration(2'500) && a < b &&
+           b.seconds_since(a) == 2.5e-6;
+}
+static_assert(timestamps_read_their_clock());
+
+// The total runs from construction; each lap only while it runs; starting one stops the other.
+consteval bool quick_timer_measures_with_its_clock() {
+    manual_time time;
+    manual_timer timer("job", time.clock());
+    time.advance(pygim::duration(1'000));
+    timer.start_lap("read");
+    time.advance(pygim::duration(2'000));
+    timer.start_lap("parse");   // stops "read"
+    time.advance(pygim::duration(4'000));
+    timer.stop_lap("parse");
+    time.advance(pygim::duration(8'000));
+    return timer.total() == duration(15'000) && timer.lap("read") == duration(2'000) &&
+           timer.lap("parse") == duration(4'000) && timer.total_seconds() == 15e-6;
+}
+static_assert(quick_timer_measures_with_its_clock());
+
+// A running sub-timer reports up to now; stopping it again adds nothing.
+consteval bool a_running_sub_timer_reports_up_to_now() {
+    manual_time time;
+    manual_timer timer("job", time.clock());
+    timer.start_lap("wait");
+    time.advance(pygim::duration(3'000));
+    const bool running = timer.lap("wait") == duration(3'000);
+    timer.stop_lap("wait");
+    time.advance(pygim::duration(5'000));
+    return running && timer.stop_lap("wait") == duration(3'000);
+}
+static_assert(a_running_sub_timer_reports_up_to_now());
+
+// "Not running" is never(), not the clock's zero: a sub-timer started at time 0 is running.
+consteval bool a_sub_timer_started_at_zero_runs() {
+    manual_time time(0);
+    manual_timer timer("job", time.clock());
+    timer.start_lap("first");
+    time.advance(pygim::duration(1'000));
+    return timer.stop_lap("first") == duration(1'000);
+}
+static_assert(a_sub_timer_started_at_zero_runs());
+
+// Units are std::chrono's; whole amounts add exactly; fractions round to the nearest nanosecond,
+// ties to even, from the float's exact value (the cases a float product gets wrong included).
+consteval bool units_convert_exactly() {
+    using pygim::duration;
+    using pygim::time_unit;
+    const auto unit = [](std::string_view name) { return *time_unit::named(name); };
+    return unit("years").length() == std::chrono::years(1) && unit("weeks").length() == std::chrono::weeks(1) &&
+           unit("days").length() == std::chrono::days(1) && unit("usecs").length() == std::chrono::microseconds(1) &&
+           unit("mins").of(1) + unit("secs").of(90) == unit("mins").of(2) + unit("secs").of(30) &&
+           unit("secs").of(1.5) == duration(1'500'000'000) && unit("secs").of(-5) == duration(-5'000'000'000) &&
+           unit("nsecs").of(0.5) == duration(0) && unit("nsecs").of(1.5) == duration(2) &&
+           unit("nsecs").of(2.5) == duration(2) && unit("nsecs").of(-0.5) == duration(0) &&
+           unit("years").of(0.286) == duration(9'025'288'271'999'999) &&   // a float product gives ...272000000
+           unit("secs").of(5e-324) == duration(0);                           // the smallest subnormal
+}
+static_assert(units_convert_exactly());
+
+// A duration is spelt in whole units, longest first; the parts add back to it.
+consteval bool spelling_adds_back() {
+    using pygim::duration;
+    const duration year_and_7ns = std::chrono::years(1) + duration(7);
+    const pygim::spelt_in_units s(year_and_7ns);
+    const pygim::spelt_in_units negative(-std::chrono::seconds(150));
+    duration sum(0);
+    for (const auto& part : s) sum += pygim::time_unit::named(part.unit_name())->of(part.amount());
+    return s.size() == 2 && s.begin()[0].unit_name() == "years" && s.begin()[1].unit_name() == "nsecs" &&
+           sum == year_and_7ns && negative.size() == 2 && negative.begin()[0].amount() == -2 &&
+           negative.begin()[1].amount() == -30;
+}
+static_assert(spelling_adds_back());
+
+// What a report hears, kept outside it: a report is copied into its timer, so it writes through a pointer.
+class moment_log {
+public:
+    enum class kind : unsigned char { timer_started, lap_started, lap_stopped, timer_finished };
+    constexpr void note(kind k, std::string_view lap, duration took) {
+        m_kinds[m_size] = k;
+        m_laps[m_size] = lap;
+        m_took[m_size] = took;
+        ++m_size;
+    }
+    [[nodiscard]] constexpr std::size_t size() const { return m_size; }
+    [[nodiscard]] constexpr kind kind_at(std::size_t i) const { return m_kinds[i]; }
+    [[nodiscard]] constexpr std::string_view lap_at(std::size_t i) const { return m_laps[i]; }
+    [[nodiscard]] constexpr duration took_at(std::size_t i) const { return m_took[i]; }
+
+private:
+    std::array<kind, 16> m_kinds{};
+    std::array<std::string_view, 16> m_laps{};
+    std::array<duration, 16> m_took{};
+    std::size_t m_size = 0;
+};
+static_assert([] {
+    moment_log log;
+    log.note(moment_log::kind::lap_stopped, "read", duration(5));
+    return log.size() == 1 && log.lap_at(0) == "read" && log.took_at(0) == duration(5);
+}());
+
+// A report for proofs: it notes each moment in a moment_log (a timer_report, constexpr throughout).
+class logging_report {
+public:
+    constexpr explicit logging_report(moment_log& log) noexcept : m_log(&log) {}
+    template <class E, class... Args>
+    constexpr void run(const Args&... args) const { note(E{}, args...); }
+    template <class E>
+    [[nodiscard]] constexpr bool has() const noexcept { return true; }
+
+private:
+    using kind = moment_log::kind;
+    moment_log* m_log;
+    constexpr void note(pygim::timer_started, std::string_view) const { m_log->note(kind::timer_started, {}, duration(0)); }
+    constexpr void note(pygim::lap_started, std::string_view, std::string_view lap) const { m_log->note(kind::lap_started, lap, duration(0)); }
+    constexpr void note(pygim::lap_stopped, std::string_view, std::string_view lap, duration took) const { m_log->note(kind::lap_stopped, lap, took); }
+    constexpr void note(pygim::timer_finished, const pygim::timer_snapshot& s) const { m_log->note(kind::timer_finished, {}, s.total()); }
+};
+static_assert(pygim::timer_report<logging_report>);
+
+using logged_timer = pygim::QuickTimerT<void, 8, manual_clock, logging_report>;
+
+// The report hears the timer start, each lap start and stop (the next lap's start stops the one
+// running; the finish stops the last), and the finish with the total — the destructor finishing it.
+consteval bool the_report_hears_every_moment_in_order() {
+    using kind = moment_log::kind;
+    manual_time time;
+    moment_log log;
+    {
+        logged_timer timer("job", time.clock(), logging_report(log));
+        timer.start_lap("read");
+        time.advance(duration(2'000));
+        timer.start_lap("parse");
+        time.advance(duration(4'000));
+    }
+    return log.size() == 6 && log.kind_at(0) == kind::timer_started &&
+           log.kind_at(1) == kind::lap_started && log.lap_at(1) == "read" &&
+           log.kind_at(2) == kind::lap_stopped && log.lap_at(2) == "read" && log.took_at(2) == duration(2'000) &&
+           log.kind_at(3) == kind::lap_started && log.lap_at(3) == "parse" &&
+           log.kind_at(4) == kind::lap_stopped && log.took_at(4) == duration(4'000) &&
+           log.kind_at(5) == kind::timer_finished && log.took_at(5) == duration(6'000);
+}
+static_assert(the_report_hears_every_moment_in_order());
+
+// A finish is once: the second does nothing, the total no longer moves, the snapshot keeps the laps.
+consteval bool a_finish_is_once_and_freezes_the_total() {
+    using kind = moment_log::kind;
+    manual_time time;
+    moment_log log;
+    logged_timer timer("job", time.clock(), logging_report(log));
+    timer.start_lap("read");
+    time.advance(duration(2'000));
+    timer.finish();
+    timer.finish();
+    time.advance(duration(9'000));
+    const auto snapshot = timer.snapshot();
+    std::size_t finishes = 0;
+    for (std::size_t i = 0; i < log.size(); ++i) finishes += log.kind_at(i) == kind::timer_finished ? 1 : 0;
+    return finishes == 1 && timer.finished() && timer.total() == duration(2'000) &&
+           snapshot.lap("read") == duration(2'000) && snapshot.laps().size() == 1;
+}
+static_assert(a_finish_is_once_and_freezes_the_total());
+
+// A moved timer reports once: the one moved from is left finished.
+consteval bool a_moved_timer_reports_once() {
+    using kind = moment_log::kind;
+    manual_time time;
+    moment_log log;
+    {
+        logged_timer first("job", time.clock(), logging_report(log));
+        logged_timer second(std::move(first));
+        time.advance(duration(1'000));
+    }
+    std::size_t finishes = 0;
+    for (std::size_t i = 0; i < log.size(); ++i) finishes += log.kind_at(i) == kind::timer_finished ? 1 : 0;
+    return finishes == 1;
+}
+static_assert(a_moved_timer_reports_once());
+
+
+// The OS clocks and the silent report are empty: neither adds a byte to the timer.
+static_assert(sizeof(pygim::QuickTimerT<>) == sizeof(pygim::QuickTimerT<void, 8, pygim::wall_clock>));
+static_assert(sizeof(pygim::SilentTimer<>) < sizeof(pygim::QuickTimer));
+
+
+// sorted_sets: the merge, the gallop and intersection_size agree on every pair of sizes around
+// four values a step (the AVX2 blocks) and around 16 times (where the gallop takes over), every
+// overlap from none to all, either way round. The AVX2 path is checked at run time against the
+// counting path (test_similarity.py: test_shared_counts_agree_between_merging_and_counting).
+consteval bool intersection_laws() {
+    using namespace pygim::sorted_sets;
+    bool ok = true;
+    for (std::size_t na : {0, 1, 3, 4, 5, 8, 9, 16}) {
+        for (std::size_t nb : {0, 1, 3, 4, 7, 8, 12, 63, 64, 65, 129, 300}) {
+            for (std::uint64_t stride : {1, 2, 3}) {   // b every stride-th value: from all shared to a third
+                std::uint64_t a[16]{}, b[300]{};
+                for (std::size_t i = 0; i < na; ++i) a[i] = 10 + 3 * i;
+                for (std::size_t j = 0; j < nb; ++j) b[j] = 10 + stride * j;
+                std::size_t want = 0;
+                for (std::size_t i = 0; i < na; ++i) {
+                    for (std::size_t j = 0; j < nb; ++j) want += a[i] == b[j];
+                }
+                ok = ok && intersection_size(a, na, b, nb) == want && intersection_size(b, nb, a, na) == want &&
+                     detail::merged(a, na, b, nb) == want && detail::galloped(a, na, b, nb) == want && detail::galloped(b, nb, a, na) == want;
+            }
+        }
+    }
+    return ok;
+}
+static_assert(intersection_laws());
+
+}  // namespace

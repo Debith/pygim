@@ -12,6 +12,8 @@
 #include <utility>
 #include <vector>
 
+#include "../common/errors.h"
+
 namespace pygim::core {
 
 enum class Lifecycle { Transient = 0, Singleton = 1 };
@@ -27,7 +29,7 @@ enum class Lifecycle { Transient = 0, Singleton = 1 };
     if (lifecycle == "singleton") {
         return Lifecycle::Singleton;
     }
-    throw std::runtime_error("lifecycle must be 'transient' or 'singleton'");
+    throw std::invalid_argument("lifecycle must be 'transient' or 'singleton'");
 }
 
 static_assert(parse_lifecycle("transient") == Lifecycle::Transient);
@@ -88,7 +90,7 @@ template<class Key, class ContainsFn>
             if (param.has_default) {
                 continue;
             }
-            throw std::runtime_error(
+            throw missing_key(
                 "No provider registered for autowired dependency '" + param.name + "'");
         }
         injections.push_back({param.name, *param.annotation});
@@ -220,7 +222,7 @@ public:
             InstanceValidator&& validate_instance) {
         auto it = m_index_map.find(key);
         if (it == m_index_map.end()) {
-            throw std::runtime_error("No provider for key");
+            throw missing_key("No provider for key");
         }
         const std::size_t index = it->second;
 

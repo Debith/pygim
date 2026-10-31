@@ -115,7 +115,8 @@ inline constexpr std::uint64_t fnv_prime = 1099511628211ull;
 
 /// Two hashes into one — the boost::hash_combine recipe — for a key made of
 /// two parts hashed separately (a pointer and a name in the wiring
-/// registries: wiring/registry/adapter.h, wiring/ioc/adapter.h).
+/// registries: wiring/registry/adapter.h, wiring/ioc/adapter.h), or a node
+/// and its children in a Merkle hash (similarity/core.h).
 ///
 ///     combine(1, 2)   // 0x9e3779b97f4a7c56
 ///     combine(2, 1)   // 0x9e3779b97f4a7c94      (order matters)
@@ -133,9 +134,12 @@ inline constexpr std::uint64_t fnv_prime = 1099511628211ull;
 /// single flip on the other.
 ///
 /// Cost: two shifts, three adds, one xor.
-[[nodiscard]] constexpr std::size_t combine(std::size_t h1, std::size_t h2) noexcept {
+[[nodiscard]] constexpr std::uint64_t combine64(std::uint64_t h1, std::uint64_t h2) noexcept {
     return h1 ^ (h2 + 0x9e3779b97f4a7c15ull + (h1 << 6) + (h1 >> 2));
 }
+/// combine64 at the width of std::hash's values: the same on a 64-bit size_t.
+[[nodiscard]] constexpr std::size_t combine(std::size_t h1, std::size_t h2) noexcept { return static_cast<std::size_t>(combine64(h1, h2)); }
+static_assert(combine64(1, 2) == 0x9e3779b97f4a7c56ull && combine64(2, 1) == 0x9e3779b97f4a7c94ull && combine(0, 0) == static_cast<std::size_t>(0x9e3779b97f4a7c15ull));
 
 /// The power of two that keeps `n` keys in an open-addressing table at load
 /// factor <= 1/2, never below 64 slots — the size the interner and the trie

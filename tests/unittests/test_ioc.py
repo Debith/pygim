@@ -200,7 +200,7 @@ def test_invalid_inputs_raise(container):
     with pytest.raises(TypeError):
         container.register(IService, lambda: object(), autowire=True)
 
-    with pytest.raises(RuntimeError):
+    with pytest.raises(ValueError):
         container.register(IService, lambda: object(), lifecycle="scoped")
 
 
@@ -337,7 +337,7 @@ def test_resolve_missing_key_error_names_key(container):
     class IService:
         pass
 
-    with pytest.raises(RuntimeError, match="No provider for key.*IService"):
+    with pytest.raises(KeyError, match="No provider for key.*IService"):
         container.resolve(IService)
 
 
@@ -345,7 +345,7 @@ def test_describe_missing_key_error_names_key(container):
     class IService:
         pass
 
-    with pytest.raises(RuntimeError, match="No provider for key.*IService"):
+    with pytest.raises(KeyError, match="No provider for key.*IService"):
         container.describe(IService)
 
 
@@ -369,7 +369,7 @@ def test_autowire_missing_typed_dependency_raises(container):
 
     container.register(NeedsDatabase, NeedsDatabase, autowire=True)
 
-    with pytest.raises(RuntimeError, match="No provider registered for autowired dependency 'database'"):
+    with pytest.raises(KeyError, match="No provider registered for autowired dependency 'database'"):
         container.resolve(NeedsDatabase)
 
 
@@ -430,31 +430,31 @@ def test_autowire_dependency_registered_later_is_injected(container):
 
 
 def test_autowire_introspection_is_cached(container):
-    import inspect as inspect_module
-    from unittest.mock import patch
+    # Reading the constructor asks the class for its __init__ once, whichever way it is read (its
+    # code object, or inspect for other shapes); constructing an instance never asks (type_call
+    # takes the slot), so a metaclass counting the asks counts the readings.
+    asked = []
+
+    class Counting(type):
+        def __getattribute__(cls, name):
+            if name == "__init__":
+                asked.append(name)
+            return super().__getattribute__(name)
 
     class Dep:
         pass
 
-    class Service:
+    class Service(metaclass=Counting):
         def __init__(self, dep: Dep):
             self.dep = dep
 
     container.register(Dep, Dep)
     container.register(Service, Service, autowire=True)
 
-    real_signature = inspect_module.signature
-    calls = []
+    container.resolve(Service)
+    container.resolve(Service)
 
-    def counting_signature(*args, **kwargs):
-        calls.append(args)
-        return real_signature(*args, **kwargs)
-
-    with patch("inspect.signature", counting_signature):
-        container.resolve(Service)
-        container.resolve(Service)
-
-    assert len(calls) == 1  # reflection ran once; the plan replays from cache
+    assert len(asked) == 1  # reflection ran once; the plan replays from cache
 
 
 def test_registration_decorator_is_reusable():

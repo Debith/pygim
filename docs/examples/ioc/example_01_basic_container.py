@@ -52,16 +52,17 @@ class CachedRepository(Repository):
 # ----------------------------------------------------------------------------
 # A transient service is constructed anew on every resolve.
 #
-#                   ┌─ interface: what call sites ask for; also the lookup key
-#                   │           ┌─ provider: how to build it (a class or any
-#                   │           │  zero-arg callable returning an instance)
-#                   ▼           ▼
+#                  ┌─ interface: what call sites ask for; also the lookup key
+#                  │           ┌─ provider: how to build it (a class or any
+#                  │           │  zero-arg callable returning an instance)
+#                  ▼           ▼
 container.register(Repository, MemoryRepository)
 
 first = container.resolve(Repository)
 second = container[Repository]  # container[key] is shorthand for resolve()
 
-assert isinstance(first, Repository) and isinstance(second, Repository)
+assert isinstance(first, Repository)
+assert isinstance(second, Repository)
 assert first is not second, "transient => a fresh instance per resolve"
 
 # ----------------------------------------------------------------------------
@@ -76,10 +77,10 @@ container.register(Repository, CachedRepository,
 #                  └─ name: optional label to distinguish variants of the same
 #                     interface; it becomes part of the lookup key
 
-#                              ┌─ interface: the contract, as before
-#                              │           ┌─ name: the variant to fetch;
-#                              │           │  (interface, name) is the full key
-#                              ▼           ▼
+#                             ┌─ interface: the contract, as before
+#                             │           ┌─ name: the variant to fetch;
+#                             │           │  (interface, name) is the full key
+#                             ▼           ▼
 cached_a = container.resolve((Repository, "cached"))
 cached_b = container.resolve((Repository, "cached"))
 

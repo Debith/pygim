@@ -1,5 +1,6 @@
 #include <pybind11/pybind11.h>
 
+#include "../common/adapter_errors.h"
 #include "adapter.h"
 
 namespace py = pybind11;
@@ -8,6 +9,7 @@ PYBIND11_MODULE(ioc, m) {
     using Descriptor = pygim::Container::DescriptorType;
 
     m.doc() = "IoC container for provider registration and resolution.";
+    pygim::wiring::detail::register_wiring_errors();   // a missing key is KeyError
 
     py::class_<Descriptor>(m, "ServiceDescriptor",
         "Read-only snapshot of a registration; mutating it does not affect the container.")

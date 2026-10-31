@@ -293,7 +293,7 @@ def test_unicode_registration_names(container):
     container.register(IService, Service, name="サービス-🎁")
 
     assert isinstance(container.resolve((IService, "サービス-🎁")), IService)
-    with pytest.raises(RuntimeError, match="No provider"):
+    with pytest.raises(KeyError, match="No provider"):
         container.resolve((IService, "サービス"))
 
 
@@ -375,7 +375,7 @@ def test_missing_key_error_with_non_class_key(container):
     for arbitrary objects (here an int instance) instead of raising a
     secondary error while formatting the primary one.
     """
-    with pytest.raises(RuntimeError, match="No provider for key.*42"):
+    with pytest.raises(KeyError, match="No provider for key.*42"):
         container.resolve(42)
 
 
@@ -558,7 +558,7 @@ def test_error_chain_names_dependency_and_resolving_frame(container):
 
     container.register(Service, Service, autowire=True)
 
-    with pytest.raises(RuntimeError) as excinfo:
+    with pytest.raises(KeyError) as excinfo:
         container.resolve(Service)
 
     message = str(excinfo.value)

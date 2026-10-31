@@ -1,3 +1,6 @@
 [extension]
 module = "utils"
-sources = ["bindings.cpp"]
+# tests/static/utils_proofs.cpp proves duration.h's, timestamp.h's, quick_timer.h's and sorted_sets.h's
+# laws at compile time (a manual clock makes every measurement exact); wired into the sources so every
+# build proves them.
+sources = ["bindings.cpp", "../../../tests/static/utils_proofs.cpp"]

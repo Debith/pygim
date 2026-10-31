@@ -178,3 +178,93 @@ if __name__ == "__main__":
     from pygim.core.testing import run_tests
 
     run_tests(__file__, pytest_args=["-v", "--tb=short"])
+
+
+class _Group:
+    each = each()
+
+    def __init__(self, items):
+        self.items = items
+
+    def __iter__(self):
+        return iter(self.items)
+
+
+class _Slotted:
+    __slots__ = ("items",)   # no __weakref__: no entry can be kept for it
+    each = each()
+
+    def __init__(self, items):
+        self.items = items
+
+    def __iter__(self):
+        return iter(self.items)
+
+
+def test_the_descriptor_gives_one_proxy_per_live_instance(dummy_list):
+    group, other = _Group(dummy_list), _Group(dummy_list)
+    assert group.each is group.each
+    assert group.each is not other.each
+
+
+def test_an_instance_gone_takes_its_proxy_with_it(dummy_list):
+    import gc
+    import weakref
+
+    group = _Group(dummy_list)
+    proxy = weakref.ref(group.each)
+    del group
+    gc.collect()
+    assert proxy() is None
+
+
+def test_an_instance_no_weakref_can_reach_is_a_type_error(dummy_list):
+    with pytest.raises(TypeError):
+        _Slotted(dummy_list).each
+
+
+def test_a_proxy_kept_past_its_instance_says_the_instance_is_gone(dummy_list):
+    import gc
+
+    group = _Group(dummy_list)
+    proxy = group.each
+    del group
+    gc.collect()
+    with pytest.raises(ValueError, match="gone"):
+        proxy.value
+
+
+class _Raising:
+    """An element whose attribute raises something other than AttributeError when read."""
+
+    @property
+    def value(self):
+        raise ValueError("value is not ready")
+
+
+def test_an_attribute_that_raises_says_its_own_error():
+    """Python's hasattr lets an error other than AttributeError through; pybind11's swallowed it, so
+    each() said the element had no such attribute. It also read every element's attribute twice."""
+    with pytest.raises(ValueError, match="value is not ready"):
+        each([_Raising()]).value
+
+
+def test_each_element_is_asked_for_its_attribute_once():
+    asked = []
+
+    class Counted:
+        def __getattr__(self, name):
+            asked.append(name)
+            return 1
+
+    assert each([Counted(), Counted()]).anything == [1, 1]
+    assert asked == ["anything", "anything"]
+
+
+def test_a_missing_attribute_is_said_in_pythons_words():
+    element = Dummy(1)
+    with pytest.raises(AttributeError) as python:
+        getattr(element, "nonexistent")
+    with pytest.raises(AttributeError) as broadcast:
+        each([element]).nonexistent
+    assert str(broadcast.value) == str(python.value)

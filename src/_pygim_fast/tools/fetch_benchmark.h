@@ -9,9 +9,11 @@
 #include "../persistence/strategy/mssql/odbc_error.h"
 #include "../persistence/strategy/mssql/sql_type_map.h"
 #include "../persistence/strategy/mssql/stmt_handle.h"
+#include "../utils/timestamp.h"
 
 #include <chrono>
 #include <cstdint>
+#include <exception>
 #include <string>
 #include <string_view>
 #include <thread>
@@ -37,7 +39,7 @@ struct FetchBenchResult {
 inline FetchBenchResult bench_fetch(OdbcConnection& conn,
                                     std::string_view sql,
                                     int64_t block_size) {
-    using clock = std::chrono::steady_clock;
+    using clock = monotonic_timestamp;   // utils/timestamp.h: the monotonic clock, read in one place
     FetchBenchResult r;
     r.block_size = block_size;
     const auto t_total = clock::now();
@@ -137,7 +139,7 @@ inline ParallelFetchResult bench_fetch_parallel(
     int num_workers,
     int64_t block_size = 512)
 {
-    using clock = std::chrono::steady_clock;
+    using clock = monotonic_timestamp;   // utils/timestamp.h: the monotonic clock, read in one place
     ParallelFetchResult result;
     result.num_workers = num_workers;
     result.block_size = block_size;
@@ -147,6 +149,7 @@ inline ParallelFetchResult bench_fetch_parallel(
         std::string sql;
         int64_t rows_fetched{0};
         double fetch_s{0};
+        std::exception_ptr error;   // what the worker threw; rethrown here after join
     };
 
     std::vector<WorkerTask> tasks(static_cast<std::size_t>(num_workers));
@@ -162,7 +165,8 @@ inline ParallelFetchResult bench_fetch_parallel(
 
     const auto t_total = clock::now();
 
-    // Launch workers — each opens its own connection
+    // Launch workers — each opens its own connection. A worker catches everything into its
+    // task: an exception that leaves a thread body calls std::terminate and takes Python with it.
     std::vector<std::thread> threads;
     threads.reserve(static_cast<std::size_t>(num_workers));
 
@@ -171,15 +175,22 @@ inline ParallelFetchResult bench_fetch_parallel(
     for (int w = 0; w < num_workers; ++w) {
         threads.emplace_back([&tasks, w, &conn_str_copy, block_size]() {
             auto& task = tasks[static_cast<std::size_t>(w)];
-            OdbcConnection conn;
-            conn.open(conn_str_copy);
-            auto r = bench_fetch(conn, task.sql, block_size);
-            task.rows_fetched = r.total_rows;
-            task.fetch_s = r.fetch_s;
+            try {
+                OdbcConnection conn;
+                conn.open(conn_str_copy);
+                auto r = bench_fetch(conn, task.sql, block_size);
+                task.rows_fetched = r.total_rows;
+                task.fetch_s = r.fetch_s;
+            } catch (...) {
+                task.error = std::current_exception();
+            }
         });
     }
 
     for (auto& t : threads) t.join();
+    for (auto& task : tasks) {
+        if (task.error) std::rethrow_exception(task.error);   // the first failure, on the caller's thread
+    }
 
     result.total_s = std::chrono::duration<double>(clock::now() - t_total).count();
 

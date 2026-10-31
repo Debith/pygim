@@ -94,12 +94,12 @@ def test_interface_enforcement(dummy_interface, dummy_impl):
 
 def test_missing(factory):
     # creating a non‐existent entry should raise
-    with pytest.raises(RuntimeError):
+    with pytest.raises(KeyError):
         factory.create("nope")
 
 
 def test_getitem_missing_raises(factory):
-    with pytest.raises(RuntimeError):
+    with pytest.raises(KeyError):
         _ = factory["missing"]
 
 

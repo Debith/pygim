@@ -89,7 +89,7 @@ def test_decorator_usage(registry):
 
 
 def test_missing_key_raises(registry):
-    with pytest.raises(RuntimeError):
+    with pytest.raises(KeyError):
         _ = registry["missing"]
 
 

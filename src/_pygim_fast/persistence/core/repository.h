@@ -10,6 +10,7 @@
 
 #pragma once
 
+#include "persistence_error.h"
 #include "backend_policy.h"
 #include "connection_pool.h"
 #include "dialect.h"
@@ -71,7 +72,7 @@ public:
 
         auto result = m_pool->checkout();
         if (!result) {
-            throw std::runtime_error(
+            throw pygim::core::persistence_error(
                 std::format("Repository: checkout failed: {}", pool_error_name(result.error())));
         }
         auto handle = std::move(*result);
@@ -92,7 +93,7 @@ public:
 
         auto result = m_pool->checkout();
         if (!result) {
-            throw std::runtime_error(
+            throw pygim::core::persistence_error(
                 std::format("Repository: checkout failed: {}", pool_error_name(result.error())));
         }
         auto handle = std::move(*result);
@@ -129,7 +130,7 @@ public:
 
         auto result = m_pool->checkout();
         if (!result) {
-            throw std::runtime_error(
+            throw pygim::core::persistence_error(
                 std::format("Repository: checkout failed: {}", pool_error_name(result.error())));
         }
         auto handle = std::move(*result);

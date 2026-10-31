@@ -16,7 +16,7 @@ import time
 import click
 import polars as pl
 
-from pygim._persistence_test import Query, DataStore
+from pygim.persistence import Query, acquire_datastore
 
 # Connection string with non-existent driver — makes ODBC fail immediately
 # instead of hanging on DNS resolution (as "bench_conn" would).
@@ -129,7 +129,7 @@ def main(iterations: int, warmup: int) -> None:
     xform_budget = warmup + iterations + 100
 
     # ── No transforms ────────────────────────────────────────────────────
-    repo = DataStore(_BENCH_CONN, format="polars", pool_size=pool_budget)
+    repo = acquire_datastore(_BENCH_CONN, format="polars", pool_size=pool_budget)
 
     results.append(
         _run_scenario(
@@ -161,7 +161,7 @@ def main(iterations: int, warmup: int) -> None:
 
     # ── With transforms ──────────────────────────────────────────────────
     for n in (1, 5, 10):
-        repo_t = DataStore(_BENCH_CONN, format="polars", pool_size=xform_budget)
+        repo_t = acquire_datastore(_BENCH_CONN, format="polars", pool_size=xform_budget)
         for _ in range(n):
             repo_t.add_pre_transform(_noop)
             repo_t.add_post_transform(_noop)

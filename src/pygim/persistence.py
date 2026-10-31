@@ -21,6 +21,14 @@ Usage::
     df = pl.DataFrame({"id": [1, 2, 3], "name": ["a", "b", "c"]})
     metrics = store.save(df, "dbo.my_table")
     print(f"Saved {metrics['processed_rows']} rows in {metrics['total_seconds']:.2f}s")
+
+A query is built and rendered from plain values — no store, no connection::
+
+    from pygim.persistence import MssqlDialect, Query
+
+    q = Query().select("id").from_table("dbo.users").where("id > 5").limit(10)
+    MssqlDialect().render(q)   # 'SELECT TOP 10 [id] FROM [dbo].[users] WHERE id > 5'
+    store.load(q)              # runs that SQL on the store's connection
 """
 
 # Load Arrow's shared libraries into the process *before* the extension, so the
@@ -35,9 +43,15 @@ from pygim import _persistence as _ext  # type: ignore
 Format = _ext.Format
 DataStore = _ext.DataStore
 acquire_datastore = _ext.acquire_datastore
+Query = _ext.Query
+MssqlDialect = _ext.MssqlDialect
+PersistenceError = _ext.PersistenceError
 
 __all__ = [
     "Format",
     "DataStore",
     "acquire_datastore",
+    "Query",
+    "MssqlDialect",
+    "PersistenceError",
 ]

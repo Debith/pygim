@@ -30,13 +30,16 @@ public:
 
     hash_storage() = default;
 
-    [[nodiscard]] V* find(const K& key) {
-        auto it = m_map.find(key);
-        return it == m_map.end() ? nullptr : &it->second;
+    /// The value at `key`, or none; as const as the storage (C++23's deduced `this`: one body).
+    template <class Self>
+    [[nodiscard]] auto find(this Self& self, const K& key) -> decltype(&self.m_map.find(key)->second) {
+        auto it = self.m_map.find(key);
+        return it == self.m_map.end() ? nullptr : &it->second;
     }
-    [[nodiscard]] const V* find(const K& key) const {
-        auto it = m_map.find(key);
-        return it == m_map.end() ? nullptr : &it->second;
+    [[nodiscard]] bool contains(const K& key) const { return m_map.contains(key); }
+    [[nodiscard]] V value_or(const K& key, V fallback) const {
+        const auto it = m_map.find(key);
+        return it == m_map.end() ? std::move(fallback) : it->second;
     }
     void insert(const K& key, V value) { m_map.insert_or_assign(key, std::move(value)); }
     bool erase(const K& key) { return m_map.erase(key) > 0; }

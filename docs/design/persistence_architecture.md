@@ -58,11 +58,11 @@ src/_pygim_fast/persistence/
 │   ├── adapter.h                   ← RepositoryAdapter<Backend> (owns Repository directly)
 │   ├── arrow_export.h              ← shared_ptr<arrow::Table> → Python DataFrame
 │   ├── arrow_import.h              ← py::object → shared_ptr<arrow::Table> (PyCapsule)
-│   ├── bindings.cpp                ← Production: DataStore + Format + acquire_datastore()
-│   └── test_bindings.cpp           ← Test-only: Query, MssqlDialect, DataStore (module_local)
+│   ├── bindings.cpp                ← Registers DataStore, Format, Query, MssqlDialect, acquire_datastore()
+│   └── query_bindings.h            ← Query + bind_dialect<D>: built and rendered with no store
 
 src/pygim/
-└── persistence.py                   ← Public Python API: re-exports acquire_datastore, DataStore, Format
+└── persistence.py                   ← Public Python API: acquire_datastore, DataStore, Format, Query, MssqlDialect
 ```
 
 ### Build Configuration
@@ -70,7 +70,9 @@ src/pygim/
 | TOML file                         | Module name         | Sources                    | Purpose       |
 |-----------------------------------|---------------------|----------------------------|---------------|
 | `persistence/ext.persistence.toml`      | `_persistence`      | `adapter/bindings.cpp`      | Production    |
-| `persistence/ext.persistence_test.toml` | `_persistence_test`  | `adapter/test_bindings.cpp` | Test-only     |
+
+There is no test-only module: tests and benchmarks reach persistence through `pygim.persistence`,
+the way a user does (§4.2).
 
 ---
 
@@ -130,7 +132,9 @@ bindings.cpp
 ### 4.1 Concepts as Core Contracts
 
 `BackendPolicy` and `DialectPolicy` are defined in `core/` with no knowledge
-of concrete backends. New backends satisfy the concepts — no core code changes.
+of concrete backends. A new backend is written to satisfy the concepts, and the
+compiler checks that it does. Core code depends only on the concepts, so adding
+a backend changes no core code.
 
 ```cpp
 template <typename B>
@@ -152,31 +156,60 @@ concept BackendPolicy = requires(std::string_view s, int packet_size,
 ### 4.2 Dialect-Based SQL Rendering
 
 `Query` stores intent (columns, table, where, limit). Each backend's `Dialect`
-renders intent into backend-specific SQL. `build_sql(Query, Dialect)` dispatches
-at compile time.
+renders intent into backend-specific SQL. `build_sql(Query, Dialect)` takes the
+dialect as a type, so the compiler resolves which dialect's rendering runs;
+no dispatch is left for run time.
 
 - `MssqlDialect` → `SELECT TOP N [col] FROM [schema].[table] WHERE ...`
 - (future) `PostgresDialect` → `SELECT "col" FROM "table" WHERE ... LIMIT N`
 
+**A query is built and rendered from plain values — no store, no connection, no session.**
+
+```python
+from pygim.persistence import MssqlDialect, Query
+
+q = Query().select("id").from_table("dbo.users").where("id > 5").limit(10)
+MssqlDialect().render(q)                  # 'SELECT TOP 10 [id] FROM [dbo].[users] WHERE id > 5'
+MssqlDialect().render(Query("SELECT 1"))  # 'SELECT 1' — raw SQL passes through
+store.load(q)                             # the same SQL, run on the store's connection
+```
+
+What it buys: SQL can be built, read, logged and tested without a database, and a test of the
+rendering runs where no ODBC server exists. `adapter/query_bindings.h` binds `Query` and, through
+`bind_dialect<D>`, any type satisfying `DialectPolicy`; Python's `render` *is* `core::build_sql`,
+the function `load` uses, so what a user renders is what `load` runs.
+
+The rule, and its check: `core/query.h`, `core/dialect.h` and every `strategy/*/dialect.h`
+include only the standard library, `query.h` and logging, so nothing a connection needs can reach
+them (`test_layering.py::test_a_query_and_its_dialects_need_no_session_or_database`).
+
+Decided 2026-10-05 (#144). Rejected: `store.sql(query)` — rendering through a store needs a
+session; and keeping `Query` and `MssqlDialect` in a test-only module, which shipped in every wheel
+while the public `DataStore.load(query)` had no public way to build its argument — a release
+exports only the API, and a test reaches code through it (#133). That module also rendered a raw
+query as `SELECT * FROM []`: it called the dialect directly instead of `build_sql`.
+
 ### 4.3 Strategy Isolation
 
 MSSQL-specific types live in `strategy/mssql/` with their own namespace.
-Core headers never include strategy headers. Only `bindings.cpp` (and
-`test_bindings.cpp`) pull in both, where `static_assert(BackendPolicy<MssqlBackend>)`
+Core headers never include strategy headers. Only `bindings.cpp` pulls in
+both, where `static_assert(BackendPolicy<MssqlBackend>)`
 verifies concept satisfaction at compile time.
 
 ### 4.4 Format as Runtime Enum (Not Template Parameter)
 
 `RepositoryAdapter<Backend>` in `adapter/adapter.h` owns `core::Repository<Backend>`
 directly — ONE hop, matching the Registry/Factory adapter pattern. Format is a
-runtime `enum class Format { Polars, Pandas }` member, yielding ONE template
-instantiation per backend (not 2×).
+runtime `enum class Format { Polars, Pandas }` member. Had Format been a template
+parameter, every backend would need one instantiation per format — two per
+backend. As a runtime member, the format is chosen when the call runs, so each
+backend needs exactly ONE template instantiation.
 
 ### 4.5 Template Instantiation at the Edge
 
-`bindings.cpp` is the single production translation unit. All template
-instantiations happen here. `test_bindings.cpp` uses `py::module_local()`
-to avoid type conflicts with the production module.
+`bindings.cpp` is the single translation unit. All template instantiations
+happen here, `bind_dialect<MssqlDialect>` among them; each Python type is
+registered once, by this module.
 
 ### 4.6 RepositoryAdapter Owns Core Directly
 
@@ -195,8 +228,10 @@ Python  →  RepositoryAdapter<MssqlBackend>  →  core::Repository<MssqlBackend
 
 `ArrowBuilder` in `core/` does NOT include ODBC headers. Instead, it defines
 portable structs (`detail::DateStruct`, `detail::TimestampStruct`, `detail::Time2Struct`)
-that are binary-compatible with their ODBC counterparts. The strategy layer
-(`load_dispatch.h`) includes a `static_assert` verifying layout compatibility.
+with the same byte layout as their ODBC counterparts, so core code can read a
+buffer the ODBC driver filled through its own structs, without the ODBC
+headers. The strategy layer (`load_dispatch.h`) includes a `static_assert`
+verifying layout compatibility.
 This keeps the core layer free of platform-specific ODBC dependencies.
 
 ### 4.8 RAII Arrow Export
@@ -206,13 +241,32 @@ custom deleter that calls `release()` (if active) then `delete`. This eliminates
 the previous manual `new`/`delete` pattern and ensures cleanup on exception paths
 without explicit try/catch.
 
-### 4.9 GimError Exception Bridge
+### 4.9 PersistenceError
 
-`bindings.cpp` registers `py::exception<std::runtime_error>(m, "GimError", PyExc_RuntimeError)`.
-This maps all C++ `std::runtime_error` exceptions to `GimError` (a `RuntimeError` subclass)
-at the Python boundary. Existing `except RuntimeError` catches remain compatible.
-This aligns with the project convention of using `GimError` hierarchy for library-level
-failures (defined in `pygim.core.explib`).
+A failed persistence operation — a connection refused, a driver call failed, a pool exhausted, a
+batch Arrow could not read — raises `pygim.persistence.PersistenceError`:
+
+```python
+from pygim.persistence import PersistenceError, acquire_datastore
+
+try:
+    acquire_datastore("Driver={missing};").load("dbo.users")
+except PersistenceError as e:   # also a RuntimeError, and a pygim.core.explib.GimError
+    print(e)                    # OdbcConnection: SQLDriverConnect failed: [01000] ...
+```
+
+Every C++ throw site in persistence throws `core::persistence_error`
+(`core/persistence_error.h`, pybind-free, a `std::runtime_error`), and `bindings.cpp` registers
+it with `py::register_local_exception` as a class deriving from `GimError` and `RuntimeError`:
+a failed operation, and one of pygim's own errors. A bad argument is still `ValueError` and a
+wrong kind `TypeError`. The registration is local to this module: pybind11's translators are
+shared by every extension built with it and tried newest first, so a global one for a C++ type
+would rename other extensions' errors too ([exception boundaries](exception_boundaries.md)).
+
+Rejected, 2026-10-05: the former `py::exception<std::runtime_error>(m, "GimError", ...)`. It made
+a class without registering a translator, so nothing ever raised it, and the class was not
+`pygim.core.explib.GimError`; registering it for `std::runtime_error` would have caught pybind11's
+own `TypeError` and `ValueError`, which derive from that type.
 
 ### 4.10 Connection Pool
 
@@ -237,9 +291,12 @@ Save/metadata connections are short-lived checkouts. Don't merge them.
 ### 4.12 LoadCache Pattern
 
 `MssqlLoadCache` persists a `LoadConnectionPool` across multiple `load()` calls.
-Invalidates when `conn_str` or `pool_size` changes. `NullLoadCache` is zero-cost
-for non-MSSQL backends (empty struct). Eliminates 0.06–0.15s per-load connection
-establishment overhead for repeated load operations.
+Without the cache, each parallel load establishes its worker connections anew,
+at 0.06–0.15s per load; with the pool kept alive, the next load reuses the
+connections already established, so repeated loads pay that cost once. The
+cache invalidates when `conn_str` or `pool_size` changes: the cached pool was
+built with the old values, so it can no longer serve the new call.
+`NullLoadCache` is zero-cost for non-MSSQL backends (empty struct).
 
 ### 4.13 O(1) Dispatch Tables
 
@@ -249,7 +306,10 @@ Both save and load paths use function-pointer dispatch tables indexed by
 - **Save**: `bcp_bind_dispatch` — per-type bind functions; `bcp_rebind_dispatch` — fast pointer-only rebind
 - **Load**: `load_dispatch` — per-type block-append functions with nullable flag
 
-Zero branching in hot loops. Type resolution happens once during schema setup.
+A column's Arrow type is resolved once, during schema setup: the type indexes
+the array, and the function pointer it selects is stored for that column. The
+hot loops then call each column's stored pointer directly, so no type branch
+runs per row or per block.
 
 ### 4.14 Block Cursor Architecture
 
@@ -298,7 +358,7 @@ All components are fully implemented and tested.
 | `MssqlLoadCache`        | **Implemented** | Persistent pool cache (invalidate on change)                    |
 | `pk_detect`             | **Implemented** | SQLPrimaryKeys + SQLColumns integer PK detection                |
 | `ConnectionPool`        | **Implemented** | Thread-safe pool with std::expected checkout                    |
-| `Query / MssqlDialect`  | **Implemented** | Intent builder + T-SQL rendering                                |
+| `Query / MssqlDialect`  | **Implemented** | Intent builder + T-SQL rendering; public, need no store         |
 
 ---
 
@@ -313,7 +373,7 @@ All components are fully implemented and tested.
 4. `init_session()`: `bcp_init(table, DB_IN)` + optional `bcp_control(BCPHINTS, "TABLOCK")`
 5. Per-RecordBatch:
    - First batch: `bind_columns()` — full `bcp_bind` per column via `bcp_bind_dispatch`
-   - Subsequent batches: `rebind_columns()` — pointer-only update via `bcp_rebind_dispatch` (same schema)
+   - Subsequent batches: `rebind_columns()` — the schema is unchanged across batches, so the type bindings from the first batch still hold and only the buffer pointers need updating, via `bcp_rebind_dispatch`
    - Classify columns: fixed/string/temporal + check `any_has_nulls`
    - Fast path (no nulls): `row_loop_fast()` — memcpy staging + `bcp_sendrow`
    - General path (has nulls): `row_loop_general()` — per-cell null check → `bcp_collen(SQL_NULL_DATA)`
@@ -432,7 +492,7 @@ Repository::load(table, load_workers=N)
 On connection errors (`SQLSTATE 08S01, 08001, HY000`) during parallel load:
 1. Clear `MssqlLoadCache` (force fresh connections on retry)
 2. Retry the entire parallel load once with new connections
-3. No proactive health checks (avoids latency on the common path)
+3. No proactive health checks — checking each connection before use would add latency to every load, including the common case where nothing is wrong; a stale connection is instead detected by its error and handled by this retry
 
 ### 7.4 LoadResult / LoadMetrics
 
@@ -541,7 +601,7 @@ All parameters are configurable via `acquire_datastore()` and the benchmark CLI:
 - `block_size=4096` is the user-facing default; internal benchmark constant `kDefaultBlockSize` is 8192 — consider propagating to adapter defaults
 - `block_size=16384` can improve load by ~28% but increases memory per worker
 - `batch_size=100K` is optimal — both smaller and larger values degrade write
-- `packet_size` is capped at 16384 with `Encrypt=yes` (TLS record limit)
+- with `Encrypt=yes` the packets travel inside TLS records, and a TLS record carries at most 16384 bytes — so `packet_size` is capped at 16384
 
 ---
 
@@ -644,6 +704,6 @@ using NewDbRepo = adapter::RepositoryAdapter<NewDbBackend>;
 4. Set `using LoadCache = NullLoadCache` unless persistent caching is needed
 5. Add `static_assert(BackendPolicy<NewBackend>)` in bindings
 6. Add colocated `ext.<name>.toml` build configuration with sources relative to that TOML file
-7. Add `test_bindings.cpp` with `py::module_local()` for test isolation
+7. Bind the dialect with `adapter::bind_dialect<NewDialect>(m, "NewDialect", doc)` and export it from `pygim.persistence`; tests reach it there
 8. No changes to `core/` required (if concepts are sufficient)
 9. Add unit tests parametrized by backend (extend existing test matrix)

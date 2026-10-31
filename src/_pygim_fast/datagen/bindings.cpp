@@ -18,12 +18,9 @@ PYBIND11_MODULE(datagen, m) {
               "50–100× faster than equivalent pure-Python generation.";
 
     // ── ArrowStreamExporter (PyCapsule protocol) ────────────────────────
-    py::class_<ArrowStreamExporter>(m, "ArrowStreamExporter",
+    pygim::arrow_stream::bind(m, "ArrowStreamExporter",
         "Wrapper implementing the Arrow PyCapsule protocol (__arrow_c_stream__).\n"
-        "Pass directly to pyarrow.RecordBatchReader.from_stream() or pl.from_arrow().")
-        .def("__arrow_c_stream__", &ArrowStreamExporter::arrow_c_stream,
-             py::arg("requested_schema") = py::none(),
-             "Export as Arrow C Data Interface stream (PyCapsule protocol).");
+        "Pass directly to pyarrow.RecordBatchReader.from_stream() or pl.from_arrow().");
 
     // ── generate() ──────────────────────────────────────────────────────
     m.def("generate", &generate,

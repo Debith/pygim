@@ -162,7 +162,7 @@ public:
         const auto pos = lower_bound(s);
         if (pos != m_sorted.end() && (*this)[*pos] == s) return *pos;
         const id_type id = this->append(s);
-        m_sorted.insert(m_sorted.begin() + (pos - m_sorted.begin()), id);
+        m_sorted.insert(pos, id);
         return id;
     }
     /// The id of `s`, or npos. Never adds.                t.find("hom") -> 3, t.find("usr") -> npos
@@ -181,15 +181,10 @@ public:
     }
 
 private:
-    using index_iter = typename std::vector<id_type>::iterator;
     using index_citer = typename std::vector<id_type>::const_iterator;
     /// The first index position whose id's text is not less than `s`: where
     /// `s` is, or where it would be inserted.
     [[nodiscard]] constexpr index_citer lower_bound(std::string_view s) const noexcept {
-        return std::lower_bound(m_sorted.begin(), m_sorted.end(), s,
-                                [this](id_type id, std::string_view key) { return (*this)[id] < key; });
-    }
-    [[nodiscard]] constexpr index_iter lower_bound(std::string_view s) noexcept {
         return std::lower_bound(m_sorted.begin(), m_sorted.end(), s,
                                 [this](id_type id, std::string_view key) { return (*this)[id] < key; });
     }
@@ -227,8 +222,11 @@ public:
     /// string compare. When an insert brings the table past half full it
     /// doubles and every id is re-placed (ids themselves never change —
     /// see the growth law in the proofs).
-    [[nodiscard]] constexpr id_type intern(std::string_view s) {
-        const std::size_t i = probe(s);
+    [[nodiscard]] constexpr id_type intern(std::string_view s) { return intern(s, hash_of(s)); }
+    /// intern(s) with its hash made beforehand, `hash == hash_of(s)`: a merge hashes its strings
+    /// on every core and inserts on one.
+    [[nodiscard]] constexpr id_type intern(std::string_view s, std::uint64_t hash) {
+        const std::size_t i = probe(s, hash);
         if (m_slots[i]) return m_slots[i] - 1;
         const id_type id = this->append(s);
         m_slots[i] = id + 1;
@@ -238,7 +236,7 @@ public:
     /// The id of `s`, or npos. Never adds — a miss stops at the first empty
     /// slot on the probe path.                              t.find("usr") -> npos
     [[nodiscard]] constexpr id_type find(std::string_view s) const noexcept {
-        const id_type slot = m_slots[probe(s)];
+        const id_type slot = m_slots[probe(s, hash_of(s))];
         return slot ? slot - 1 : npos;
     }
     /// The arena's bytes plus the slot table (at least twice the ids, times 4).
@@ -255,13 +253,16 @@ public:
         if (ids * 2 > m_slots.size()) grow(hash::slots_for(ids));
     }
 
+    /// What a lookup of `s` starts from (FNV-1a, spread by mix64); its low bits choose the slot.
+    [[nodiscard]] static constexpr std::uint64_t hash_of(std::string_view s) noexcept { return hash::mix64(hash::fnv1a(s)); }
+
 private:
-    /// The slot where `s` is, or the empty slot where it would go: hash,
-    /// mask to the table, then step by one until the bytes match or a slot
+    /// The slot where `s` is, or the empty slot where it would go: its hash
+    /// masked to the table, then step by one until the bytes match or a slot
     /// is empty.
-    [[nodiscard]] constexpr std::size_t probe(std::string_view s) const noexcept {
+    [[nodiscard]] constexpr std::size_t probe(std::string_view s, std::uint64_t hash) const noexcept {
         const std::size_t mask = m_slots.size() - 1;
-        std::size_t i = static_cast<std::size_t>(hash::mix64(hash::fnv1a(s))) & mask;
+        std::size_t i = static_cast<std::size_t>(hash) & mask;
         while (m_slots[i] && (*this)[m_slots[i] - 1] != s) i = (i + 1) & mask;
         return i;
     }
@@ -271,7 +272,7 @@ private:
         std::vector<id_type> slots(new_size, 0);
         const std::size_t mask = slots.size() - 1;
         for (id_type id = 0; id < size(); ++id) {
-            std::size_t i = static_cast<std::size_t>(hash::mix64(hash::fnv1a((*this)[id]))) & mask;
+            std::size_t i = static_cast<std::size_t>(hash_of((*this)[id])) & mask;
             while (slots[i]) i = (i + 1) & mask;
             slots[i] = id + 1;
         }
@@ -290,5 +291,10 @@ static_assert(interner<flat_interner>);
 static_assert(interner<hashed_interner>);
 static_assert(interner<basic_flat_interner<std::uint16_t>>);
 static_assert(interner<basic_hashed_interner<std::uint64_t>>);
+static_assert([] {
+    hashed_interner t;
+    const auto home = t.intern("home", hashed_interner::hash_of("home"));
+    return home == 0 && t.intern("home") == 0 && t.intern("var", hashed_interner::hash_of("var")) == 1 && t.find("var") == 1;
+}());
 
 }  // namespace pygim::mapping

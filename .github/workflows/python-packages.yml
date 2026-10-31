@@ -3,11 +3,13 @@
 
 name: Python package
 
+# The matrix runs when a pull request into main is opened or updated, and on main itself. A push to
+# any other branch runs nothing: work in progress reaches CI when its pull request does.
 on:
   push:
-    branches: [ "main", "dev", "core/**", "copilot/**" ]
+    branches: [ "main" ]
   pull_request:
-    branches: [ "main", "dev" ]
+    branches: [ "main" ]
 
 jobs:
   build:
@@ -93,5 +95,8 @@ jobs:
       shell: pwsh
 
     - name: Test with pytest
+      # No time budget a test (tests/conftest.py) until a run here has measured these runners.
+      env:
+        PYGIM_TEST_TIME_SCALE: "0"
       run: |
         pytest

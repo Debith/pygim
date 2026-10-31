@@ -122,7 +122,7 @@ container.register(NeedsDatabase, NeedsDatabase, autowire=True)
 
 try:
     container.resolve(NeedsDatabase)
-except RuntimeError as error:
+except KeyError as error:  # a dependency with no provider is a missing key, as in a mapping
     assert "No provider" in str(error)
 else:
     raise AssertionError("Expected unresolvable dependency to fail resolution")

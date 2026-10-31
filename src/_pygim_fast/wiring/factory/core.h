@@ -5,6 +5,7 @@
 #include <utility>
 #include <vector>
 
+#include "../common/errors.h"
 #include "../registry/core.h"
 
 namespace pygim::core {
@@ -97,7 +98,7 @@ public:
         if (auto* creator = m_registry.try_get_const(name)) {
             return *creator;
         }
-        throw std::runtime_error("Unknown creator: " + name);
+        throw missing_key("Unknown creator: " + name);
     }
 
     /**

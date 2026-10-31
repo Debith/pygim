@@ -3,6 +3,7 @@
 // Delegates per-type bind/rebind logic to dedicated dispatch headers;
 // provides bind_columns, rebind_columns, classify_columns, setup_staging.
 
+#include "../../../core/persistence_error.h"
 #include "bcp_bind_dispatch.h"
 #include "bcp_rebind_dispatch.h"
 
@@ -28,7 +29,7 @@ inline std::vector<ColumnBinding> bind_columns(
 
         auto fn = (id < arrow::Type::MAX_ID) ? bind_dispatch[id] : nullptr;
         if (!fn) [[unlikely]]
-            throw std::runtime_error("Unsupported Arrow type: " + field->type()->ToString());
+            throw pygim::core::persistence_error("Unsupported Arrow type: " + field->type()->ToString());
 
         bindings.push_back(fn(bcp, dbc, array, ordinal));
     }

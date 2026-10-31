@@ -1,15 +1,18 @@
 // persistence/adapter/bindings.cpp
 // Production pybind11 bindings for the _persistence module.
 //
-// Binds ONE class: RepositoryAdapter<MssqlBackend>.
+// Binds the store, RepositoryAdapter<MssqlBackend>, and what a query is built and rendered with:
+// Query and MssqlDialect, which need no store (query_bindings.h).
 // Format is runtime enum, not template parameter — single instantiation.
-// Test-specific bindings (Query, pool internals) live in test_bindings.cpp.
 // Fetch benchmarks live in bench_bindings.cpp (_fetch_benchmark module).
 
+#include "../core/persistence_error.h"
 #include "../core/query.h"
+#include "../strategy/mssql/dialect.h"
 #include "../strategy/mssql/save_impl.h"
 #include "../strategy/mssql/load_impl.h"
 #include "adapter.h"
+#include "query_bindings.h"
 
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
@@ -40,16 +43,23 @@ static py::object acquire_datastore(const std::string& conn_str,
 PYBIND11_MODULE(_persistence, m) {
     m.doc() = "DataStore — database access with Arrow core and format conversion";
 
-    // Bridge C++ std::runtime_error to GimError (RuntimeError subclass).
-    // This aligns with the project's GimError exception hierarchy while
-    // maintaining backward compatibility with existing except RuntimeError catches.
-    static auto gim_error = py::exception<std::runtime_error>(m, "GimError", PyExc_RuntimeError);
+    // A failed persistence operation is PersistenceError: a RuntimeError, and one of pygim's own
+    // errors (pygim.core.explib.GimError). Local to this module: a translator every extension
+    // shared would rename their errors too.
+    py::register_local_exception<core::persistence_error>(
+        m, "PersistenceError",
+        py::make_tuple(py::module_::import("pygim.core.explib").attr("GimError"), py::handle(PyExc_RuntimeError)));
 
     // Format enum exposed to Python
     py::enum_<adapter::Format>(m, "Format")
         .value("polars", adapter::Format::Polars)
         .value("pandas", adapter::Format::Pandas)
         .export_values();
+
+    // Before DataStore, so its load(query) signature names the class.
+    adapter::bind_query(m);
+    adapter::bind_dialect<strategy::mssql::MssqlDialect>(
+        m, "MssqlDialect", "Renders a Query as T-SQL: [bracket] quoting, TOP N. Needs no connection.");
 
     // ONE class, not two
     py::class_<MssqlRepo>(m, "DataStore")

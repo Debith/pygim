@@ -2,6 +2,7 @@
 // Lightweight SQL identifier helpers.
 // BCP session setup and table qualification.
 
+#include "../../core/persistence_error.h"
 #include <algorithm>
 #include <format>
 #include <ranges>
@@ -36,7 +37,7 @@ namespace pygim::strategy::mssql::sql {
             && is_valid_identifier(s.substr(dot + 1));
     };
     if (!ok(table))
-        throw std::runtime_error("Invalid table identifier: " + table);
+        throw pygim::core::persistence_error("Invalid table identifier: " + table);
     return (table.find('.') == std::string::npos) ? std::format("dbo.{}", table) : table;
 }
 
