@@ -91,7 +91,7 @@ assert fixed == [m.read_bytes().decode() for m in members]       # same results,
 # 5. read_all_files(): the whole set as str, in one call
 # ----------------------------------------------------------------------------
 texts = PathSet(members).read_all_files()                        # the reads run without the GIL
-assert texts == [m.read_text() for m in members]
+assert texts == [m.read_bytes().decode() for m in members]     # the bytes as str: \r\n stays
 
 tmp.cleanup()
 print(f"read_each example OK: {len(first_lines)} files, crc32 {checksum:#010x}")

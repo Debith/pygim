@@ -9,13 +9,14 @@ import subprocess
 import sys
 
 import pytest
+from pool_threads import POOL_THREADS
 
 pytestmark = pytest.mark.skipif(sys.platform == "win32", reason="sends POSIX signals to a child process")
 
 # The child: 3,000 files read on one thread, interrupted by a helper thread. The switch interval is
 # long, so the helper gets the GIL only once read_all_files has let it go — the signal always lands
 # while the run is in progress.
-CHILD = r"""
+CHILD = POOL_THREADS + r"""
 import os, pathlib, signal, sys, threading, time
 from pygim import PathSet
 
@@ -26,7 +27,6 @@ for i in range(3_000):
     f.write_text("x" * 200)
     files.append(f)
 ps = PathSet(files)
-tasks = lambda: len(os.listdir("/proc/self/task")) if os.path.isdir("/proc/self/task") else 0
 if mode == "ignored":
     signal.signal(signal.SIGINT, signal.SIG_IGN)
 heard = []
@@ -37,7 +37,6 @@ sent = signal.SIGTERM if mode == "terminate" else signal.SIGINT
 t = time.perf_counter()
 ps.read_all_files(threads=1)
 full = time.perf_counter() - t                      # the whole run, uninterrupted
-before = tasks()
 sys.setswitchinterval(1.0)
 go = threading.Event()
 helper = threading.Thread(target=lambda: (go.wait(), os.kill(os.getpid(), sent)))
@@ -55,7 +54,7 @@ took = time.perf_counter() - t
 helper.join()
 print("stopped early", took < full / 2, f"({took * 1000:.1f} of {full * 1000:.1f} ms)")
 print("handler given back", signal.getsignal(signal.SIGINT) is handler_before)
-print("threads left", tasks() - before)
+print("threads left", pool_threads())
 """
 
 
@@ -104,22 +103,49 @@ def test_the_threads_a_run_starts_block_the_signals_a_program_is_sent(temp_dir):
     asynchronous one (utils/parallel.h, signals_blocked), so Ctrl-C reaches the thread that can act
     on it and cut short its blocking call, never a parked worker; a fault (SIGSEGV) stays theirs."""
     child = r"""
-import os, signal, sys
+import collections, os, signal, sys, threading
 from pygim import code
-for i in range(64):
-    open(os.path.join(sys.argv[1], f"m{i}.py"), "w").write("def f(a):\n    return a\n" * 50)
-main = os.getpid()
-before = {int(t) for t in os.listdir("/proc/self/task")} - {main}   # threads other libraries started
-code.parse(sys.argv[1], threads=4)
-for tid in sorted({int(t) for t in os.listdir("/proc/self/task")} - before):
+for i in range(200):
+    open(os.path.join(sys.argv[1], f"m{i}.py"), "w").write("def f(a):\n    return a\n" * 200)
+bit = lambda blocked, s: (blocked >> (s - 1)) & 1
+def blocked(tid):
     status = open(f"/proc/self/task/{tid}/status").read()
-    blocked = int(next(l for l in status.splitlines() if l.startswith("SigBlk:")).split()[1], 16)
-    bit = lambda s: (blocked >> (s - 1)) & 1
-    name = open(f"/proc/self/task/{tid}/comm").read().strip()
-    print("main" if tid == main else "worker", bit(signal.SIGINT), bit(signal.SIGTERM), bit(signal.SIGSEGV), name)
+    return int(next(l for l in status.splitlines() if l.startswith("SigBlk:")).split()[1], 16)
+seen, done = {}, threading.Event()
+def look():   # pygim's threads, by name: every name and mask each one is seen with
+    now = {}
+    for tid in os.listdir("/proc/self/task"):
+        try:
+            name = open(f"/proc/self/task/{tid}/comm").read().strip()
+            if name.startswith("pygim"):
+                now[tid] = (name, blocked(tid))
+        except OSError:   # a thread that ended meanwhile
+            pass
+    for tid, state in now.items():
+        seen.setdefault(tid, collections.Counter())[state] += 1
+    return now
+def watch():   # while the parse runs with the GIL let go
+    while not done.is_set():
+        look()
+watcher = threading.Thread(target=watch)
+watcher.start()
+code.parse(sys.argv[1], threads=4)
+done.set()
+watcher.join()
+for _ in range(3):   # the threads still alive, the parked workers, seen a few times more
+    look()
+mask = blocked(os.getpid())
+print("main", bit(mask, signal.SIGINT), bit(mask, signal.SIGTERM), bit(mask, signal.SIGSEGV))
+# A thread just started blocks every signal and bears its creator's name until its own first
+# instructions (glibc's, then name_this_thread), and one ending may read as blocking none: a thread
+# is what it is seen as most often, and one seen fewer than three times is not judged.
+for states in seen.values():
+    if sum(states.values()) >= 3:
+        (name, mask), _ = states.most_common(1)[0]
+        print("worker", bit(mask, signal.SIGINT), bit(mask, signal.SIGTERM), bit(mask, signal.SIGSEGV), name)
 """
     done = subprocess.run([sys.executable, "-c", child, str(temp_dir)], capture_output=True, text=True, timeout=60)
-    rows = [row.rsplit(" ", 1)[0] for row in done.stdout.split("\n")[:-1]]   # each thread's name, for the message only
+    rows = [row.split(" pygim")[0] for row in done.stdout.split("\n")[:-1]]   # each worker's name, for the message only
     assert rows[0] == "main 0 0 0", done.stdout + done.stderr
     workers = rows[1:]
     assert workers and set(workers) == {"worker 1 1 0"}, done.stdout

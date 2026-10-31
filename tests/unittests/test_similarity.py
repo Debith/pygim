@@ -24,6 +24,7 @@ from tabulate import tabulate
 from pygim import similarity
 from pygim.__main__ import cli
 from stub_parity import Stub
+from pool_threads import POOL_THREADS
 
 try:
     import polars as pl
@@ -564,7 +565,7 @@ class TestAddFiles:
         with pytest.raises(ValueError):
             similarity.Index("python").add_files(tree, threads=0)
 
-    CHILD = r"""
+    CHILD = POOL_THREADS + r"""
 import os, pathlib, signal, sys, threading, time
 from pygim import similarity
 root = pathlib.Path(sys.argv[1])
@@ -574,11 +575,9 @@ for d in range(800):
     p = root / f"m{d}.py"
     p.write_text(body)
     files.append(p)
-tasks = lambda: len(os.listdir("/proc/self/task")) if os.path.isdir("/proc/self/task") else 0
 t = time.perf_counter()
 similarity.Index("python").add_files(files)
 full = time.perf_counter() - t
-before = tasks()
 sys.setswitchinterval(1.0)   # the helper gets the GIL only once add_files has let it go
 go = threading.Event()
 helper = threading.Thread(target=lambda: (go.wait(), os.kill(os.getpid(), signal.SIGINT)))
@@ -595,7 +594,7 @@ took = time.perf_counter() - t
 helper.join()
 print("stopped early", took < full / 2, f"({took * 1000:.1f} of {full * 1000:.1f} ms)")
 print("nothing added", len(ix) == 0)
-print("threads left", tasks() - before)
+print("threads left", pool_threads())
 """
 
     @pytest.mark.skipif(sys.platform == "win32", reason="sends a POSIX signal to a child process")

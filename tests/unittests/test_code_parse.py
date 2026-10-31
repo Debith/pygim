@@ -17,6 +17,7 @@ import pytest
 
 from pygim import code
 from stub_parity import Stub
+from pool_threads import POOL_THREADS
 
 SRC = Path(__file__).resolve().parents[2] / "src" / "_pygim_fast" / "code" / "python"
 
@@ -656,7 +657,7 @@ def test_an_absolute_pattern_is_a_value_error(project):
         code.parse(project, "/etc/*.py")
 
 
-CHILD = r"""
+CHILD = POOL_THREADS + r"""
 import os, pathlib, signal, sys, threading, time
 from pygim import code
 
@@ -666,11 +667,9 @@ for d in range(800):
     p = root / f"p{d % 20}" / f"m{d}.py"
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text(body)
-tasks = lambda: len(os.listdir("/proc/self/task")) if os.path.isdir("/proc/self/task") else 0
 t = time.perf_counter()
 code.parse(root)
 full = time.perf_counter() - t
-before = tasks()
 sys.setswitchinterval(1.0)   # the helper gets the GIL only once parse has let it go
 go = threading.Event()
 helper = threading.Thread(target=lambda: (go.wait(), os.kill(os.getpid(), signal.SIGINT)))
@@ -685,7 +684,7 @@ except KeyboardInterrupt:
 took = time.perf_counter() - t
 helper.join()
 print("stopped early", took < full / 2, f"({took * 1000:.1f} of {full * 1000:.1f} ms)")
-print("threads left", tasks() - before)
+print("threads left", pool_threads())
 """
 
 

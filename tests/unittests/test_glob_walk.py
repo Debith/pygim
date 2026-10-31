@@ -11,6 +11,7 @@ import sys
 import pytest
 
 import pygim
+from pool_threads import POOL_THREADS
 
 pytestmark = pytest.mark.skipif(sys.platform == "win32", reason="symbolic links need privileges on Windows")
 
@@ -265,20 +266,16 @@ def test_a_wide_tree_matches_os_walk(temp_dir):
     assert [os.fspath(p) for p in pygim.path(root).glob("**/*.py")] == sorted(expected)
 
 
-CHILD = r"""
+CHILD = POOL_THREADS + r"""
 import os, pathlib, signal, sys, threading, time
 import pygim
 
 root, pattern = pathlib.Path(sys.argv[1]), sys.argv[2]
 for d in range(3_000):
     (root / f"p{d % 30}" / f"m{d}").mkdir(parents=True)
-# The threads alive, by id: those that appear during the interrupted glob and are still alive at
-# its end are the ones it left behind, whatever other threads end meanwhile.
-tasks = lambda: set(os.listdir("/proc/self/task")) if os.path.isdir("/proc/self/task") else set()
 t = time.perf_counter()
 pygim.path(root).glob(pattern)
 full = time.perf_counter() - t
-before = tasks()
 sys.setswitchinterval(1.0)   # the helper gets the GIL only once glob has let it go
 go = threading.Event()
 helper = threading.Thread(target=lambda: (go.wait(), os.kill(os.getpid(), signal.SIGINT)))
@@ -293,7 +290,7 @@ except KeyboardInterrupt:
 took = time.perf_counter() - t
 helper.join()
 print("stopped early", took < full / 2, f"({took * 1000:.1f} of {full * 1000:.1f} ms)")
-print("threads left", len(tasks() - before))
+print("threads left", pool_threads())
 """
 
 
