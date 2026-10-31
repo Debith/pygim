@@ -204,8 +204,8 @@ public:
     signals_blocked() noexcept {
 #if defined(__unix__) || defined(__APPLE__)
         sigset_t all;
-        ::sigfillset(&all);
-        for (int fault : {SIGSEGV, SIGBUS, SIGFPE, SIGILL}) ::sigdelset(&all, fault);
+        sigfillset(&all);   // unqualified: macOS defines sigfillset and sigdelset as macros
+        for (int fault : {SIGSEGV, SIGBUS, SIGFPE, SIGILL}) sigdelset(&all, fault);
         m_restore = ::pthread_sigmask(SIG_BLOCK, &all, &m_before) == 0;
 #endif
     }
