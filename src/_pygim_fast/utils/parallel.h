@@ -193,6 +193,19 @@ inline constexpr std::size_t max_workers = 64;
 
 // ── the threads the pools start ─────────────────────────────────────────
 
+/// Names the calling thread, as `top -H`, a debugger and /proc/<pid>/task/<tid>/comm show it (at
+/// most 15 characters on Linux): pygim-pool for a run's threads, joined when it ends, pygim-parked
+/// for the workers parallel::for_each keeps. Where threads have no names (Windows here), nothing.
+inline void name_this_thread(const char* name) noexcept {
+#if defined(__linux__)
+    pthread_setname_np(pthread_self(), name);
+#elif defined(__APPLE__)
+    pthread_setname_np(name);
+#else
+    (void)name;
+#endif
+}
+
 /// While it lives, the calling thread blocks every asynchronous signal, so the threads it starts
 /// inherit the mask (a thread starts with its creator's). A process's signal goes to a thread that
 /// does not block it: Ctrl-C then reaches the thread that can act on it — Python's main thread,
@@ -322,7 +335,7 @@ private:
         m_threads.reserve(threads);
         const signals_blocked quiet;   // inherited: the parked threads never take a signal
         try {
-            for (std::size_t t = 0; t < threads; ++t) m_threads.emplace_back([this] { serve(); });
+            for (std::size_t t = 0; t < threads; ++t) m_threads.emplace_back([this] { name_this_thread("pygim-parked"); serve(); });
         } catch (const std::system_error&) {
         }
 #if defined(__unix__) || defined(__APPLE__)
@@ -410,7 +423,7 @@ void for_each(std::size_t tasks, std::size_t threads, F&& f) {
         own.reserve(threads - 1);
         try {
             const signals_blocked quiet;   // inherited by the threads started here
-            for (std::size_t w = 1; w < threads; ++w) own.emplace_back(run, w);
+            for (std::size_t w = 1; w < threads; ++w) own.emplace_back([&run, w] { name_this_thread("pygim-pool"); run(w); });
         } catch (const std::system_error&) {
         }   // as many as could start: the work is the same, on fewer threads
         run(0);
@@ -794,7 +807,9 @@ private:
             ordered_pool& m_pool;
         } after(*this);
         const signals_blocked quiet;   // inherited by the workers started here
-        while (!m_stopping.load(std::memory_order_relaxed) && m_workers.size() + caller < threads) m_workers.emplace_back([this] { work(); });
+        while (!m_stopping.load(std::memory_order_relaxed) && m_workers.size() + caller < threads) {
+            m_workers.emplace_back([this] { name_this_thread("pygim-pool"); work(); });
+        }
     }
 
     // Task j, in the consumer: handed out and counted done, returned or thrown.
@@ -1034,7 +1049,9 @@ private:
             task_pool& m_pool;
         } after(*this);
         const signals_blocked quiet;   // inherited by the workers started here
-        while (!m_stopping_spawn && m_workers.size() + caller < threads) m_workers.emplace_back([this] { work(); });
+        while (!m_stopping_spawn && m_workers.size() + caller < threads) {
+            m_workers.emplace_back([this] { name_this_thread("pygim-pool"); work(); });
+        }
     }
 
     void stop() noexcept {
