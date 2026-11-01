@@ -59,6 +59,15 @@ else:
         # other -- observed as a segfault in pathlike's TOML reader whenever
         # pyarrow had been imported first.
         extra_link_args_global.append("-Wl,--exclude-libs,ALL")
+    # A sanitizer build — PYGIM_SANITIZE=address,undefined or PYGIM_SANITIZE=thread — instruments
+    # every extension, so the Python tests can run against them with the sanitizer's runtime
+    # preloaded. A developer's build, never a release: unoptimised enough for its reports to name
+    # the line, and no LTO.
+    sanitize = os.environ.get("PYGIM_SANITIZE", "").strip()
+    if sanitize:
+        extra_compile_args = [a for a in extra_compile_args if a not in ("-O3", "-flto")] + [
+            "-O1", "-g", "-fno-omit-frame-pointer", f"-fsanitize={sanitize}"]
+        extra_link_args_global = [a for a in extra_link_args_global if a != "-flto"] + [f"-fsanitize={sanitize}"]
 
 
 # ── Build environment ──────────────────────────────────────────────────────
@@ -450,6 +459,16 @@ FAST_ROOT = Path("src/_pygim_fast")
 ext_modules = []
 
 _require_compiler()
+
+# The compile-time proofs (tests/static/*_proofs.cpp, wired into the extensions' sources) may take
+# more steps in one static_assert than a compiler allows by default: clang's and MSVC's limit is
+# 1,048,576 (GCC counts operations, not steps, and allows 2^33).
+CONSTEXPR_STEPS = 1 << 26
+if sys.platform == "win32":
+    extra_compile_args.append(f"/constexpr:steps{CONSTEXPR_STEPS}")
+else:
+    std_flag = next(a for a in extra_compile_args if a.startswith("-std="))
+    extra_compile_args.extend(_supported_flags([f"-fconstexpr-steps={CONSTEXPR_STEPS}"], std_flag))
 
 for ext_toml in sorted(FAST_ROOT.rglob("ext.*.toml")):
     ext_cfg = tomllib.loads(ext_toml.read_text(encoding="utf-8"))["extension"]
