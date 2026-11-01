@@ -104,6 +104,16 @@ def test_each_import_is_used(example):
     assert unused_imports(example.read_text(encoding="utf-8"), example) == []
 
 
+@pytest.mark.parametrize("example", EXAMPLES, ids=IDS)
+def test_pathlib_is_imported_only_with_its_purpose(example):
+    """One file or folder is a pygim path and many a PathSet (README): pathlib is there only where
+    an example compares with it, and its import says so. Debith on PR #39: "again asking if we need
+    this, if so, add a comment of the purpose"."""
+    lines = example.read_text(encoding="utf-8").split("\n")
+    assert [f"{n}: {line}" for n, line in enumerate(lines, 1)
+            if re.match(r"(import pathlib|from pathlib import)\b", line) and "#" not in line] == []
+
+
 def test_every_example_has_a_row_in_the_index():
     """docs/examples/README.md lists every example (pathlike's example_10 had no row until 2026-10-30)."""
     index = (pathlike.path(ROOT) / "README.md").read_text(encoding="utf-8")

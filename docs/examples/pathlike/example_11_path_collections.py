@@ -24,7 +24,7 @@ This example demonstrates:
 import os
 import shutil
 import tempfile
-from pathlib import Path
+from pathlib import Path   # a set takes a str, a pathlib path and a pygim path alike (section 1)
 
 import pygim
 from pygim.pathlike import PathSet, ext, match_pattern, name
