@@ -35,12 +35,21 @@ class Stub:
 
     @classmethod
     def params(cls, f, method=True):
-        """(name, keyword_only, default) of each parameter of a stub's def, self left out."""
+        """(name, keyword_only, default) of each parameter of a stub's def, self left out; one only
+        positional is ("/", ...) after it, as pybind11 marks it, and `*name` is ("*args", ...): pybind11
+        names every one so."""
         value = lambda d: cls.NONE_GIVEN if d is None else eval(compile(ast.Expression(d), "<stub>", "eval"), {})
-        positional = f.args.args[1:] if method else f.args.args
+        positional = f.args.posonlyargs + f.args.args
         defaults = [None] * (len(positional) - len(f.args.defaults)) + f.args.defaults
-        return ([(a.arg, False, value(d)) for a, d in zip(positional, defaults)] +
-                [(a.arg, True, value(d)) for a, d in zip(f.args.kwonlyargs, f.args.kw_defaults)])
+        out = []
+        for i, (a, d) in enumerate(zip(positional, defaults)):
+            if not (method and i == 0):
+                out.append((a.arg, False, value(d)))
+            if i == len(f.args.posonlyargs) - 1:
+                out.append(("/", False, cls.NONE_GIVEN))
+        if f.args.vararg:
+            out.append(("*args", False, cls.NONE_GIVEN))
+        return out + [(a.arg, True, value(d)) for a, d in zip(f.args.kwonlyargs, f.args.kw_defaults)]
 
     @classmethod
     def binding_params(cls, function):
@@ -56,7 +65,12 @@ class Stub:
                 part += ch
         out, keyword_only = [], False
         for p in parts:
-            if p == "*":
+            if p == "/":
+                out.append(("/", False, cls.NONE_GIVEN))
+            elif p == "*":
+                keyword_only = True
+            elif p.startswith("*") and not p.startswith("**"):   # *args: what follows is keyword-only too
+                out.append(("*args", False, cls.NONE_GIVEN))
                 keyword_only = True
             elif p and not p.startswith("self"):
                 out.append((p.split(":")[0], keyword_only, ast.literal_eval(p.split(" = ", 1)[1]) if " = " in p else cls.NONE_GIVEN))

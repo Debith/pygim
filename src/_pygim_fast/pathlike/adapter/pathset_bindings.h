@@ -402,8 +402,8 @@ void bind_pathset(engine_list<Es...> es, py::module_& m, py::class_<pathview>& p
     py::class_<PathSet>(m, "PathSet",
         "Many paths as ONE table: every distinct path component is stored once and every path is "
         "a row (parent, name) in a hash-consed trie, so a path costs a few bytes plus its share of "
-        "the unique names. Iterating yields pathviews (nothing copied); scan() reuses one view "
-        "object per pass. filter_suffix()/filter_name() and |, &, - work on rows and return sets "
+        "the unique names. Iterating yields path objects over the table (nothing copied); scan() "
+        "reuses one path object per pass. filter_suffix()/filter_name() and |, &, - work on rows and return sets "
         "sharing the table; `ps & Filter` is a lazy Query; + and - take a PathSet or path(s); == compares "
         "as sets; to_list() renders the members. PathSet(paths, store=s) shares the store's table, so its "
         "members and path(text, store=s) objects are rows of one table. Sets are built, never edited: `ps -= x` "
@@ -431,7 +431,7 @@ void bind_pathset(engine_list<Es...> es, py::module_& m, py::class_<pathview>& p
         })
         .def("scan", [](py::object self) {
             return pathset_iter(self, true);
-        }, "Iterate reusing ONE pathview object (its row advances): no allocation per element. "
+        }, "Iterate reusing ONE path object (its row advances): no allocation per element. "
            "Do not keep the yielded object across iterations.")
         .def("__getitem__", [es](const PathSet& ps, py::ssize_t i) {
             const auto n = static_cast<py::ssize_t>(ps.size());
@@ -503,7 +503,7 @@ void bind_pathset(engine_list<Es...> es, py::module_& m, py::class_<pathview>& p
         .def("relative_to", [](const PathSet& ps, py::handle other) {
                 const text_arg t = text_view_of_arg(other);
                 return ps.relative_to(file(t.view()));
-            }, py::arg("other"),
+            }, py::arg("other"), py::pos_only(),   // as path.relative_to(other, /)
              "Every member with *other* taken off its front, like pathlib's relative_to() per path, as a\n"
              "set over the same table in member order: `path(d).pathset('**/*').relative_to(d)` names\n"
              "everything beneath d from d. Raises ValueError naming the first member that is neither\n"
