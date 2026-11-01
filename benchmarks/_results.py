@@ -24,14 +24,22 @@ RESULTS_DIR = HERE / "results"
 SCHEMA = 1
 
 
-def _git(*args, cwd=None):
+def _git(*args, cwd=HERE):
+    """What git prints for *args*, run in *cwd*; None when there is no git or it refuses."""
     try:
         return subprocess.run(
-            ["git", *args], cwd=cwd or HERE,
+            ["git", *args], cwd=cwd,
             capture_output=True, text=True, check=True,
         ).stdout.strip()
     except (OSError, subprocess.CalledProcessError):
         return None
+
+
+def _checkout_of(where):
+    """The top folder of the git checkout holding *where* (a folder, or a file's), resolved as a
+    resolved *where* is; None outside any checkout."""
+    top = _git("rev-parse", "--show-toplevel", cwd=where if where.is_dir() else where.parent)
+    return path(top).resolve() if top else None
 
 
 def corpus(folder):
@@ -39,10 +47,9 @@ def corpus(folder):
     (``cpython/Lib``, ``llvm-project``), never where on this machine it lies; a folder outside any
     checkout by its own name."""
     here = path(folder).expanduser().resolve()
-    top = _git("rev-parse", "--show-toplevel", cwd=here if here.is_dir() else here.parent)
-    if not top:
+    checkout = _checkout_of(here)
+    if checkout is None:
         return here.name
-    checkout = path(top).resolve()
     return "/".join([checkout.name, *here.relative_to(checkout).parts])
 
 
