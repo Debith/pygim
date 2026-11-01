@@ -108,11 +108,14 @@ def test_run_tests_refuses_a_module_without_a_file(pytest_runs, coverage_calls, 
 
 
 def test_quick_profile_prints_the_calls_it_saw(capsys):
-    with quick_profile(top=3, sort="cumtime"):
+    """All six of them: with top=3 the cut was by cumulative times of about 0.000 s, whose ties put
+    `next` and quick_profile itself before `sorted` (CI, macOS, Python 3.12, 2026-11-01)."""
+    with quick_profile(top=10, sort="cumtime"):
         sorted(range(1000), key=lambda n: -n)
     out = capsys.readouterr().out
     assert "function calls" in out
     assert "sorted" in out
+    assert "1000    " in out and "<lambda>" in out   # the key, called once an item
 
 
 def test_quick_profile_stops_profiling_when_the_code_raises(capsys):
