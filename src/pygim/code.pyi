@@ -11,7 +11,7 @@ import os
 from collections.abc import Iterator
 from typing import TypedDict
 
-from pygim.pathlike import PathSet
+from pygim.pathlike import PathSet, path as pygim_path   # Tree has a property named path
 
 StrPath = str | bytes | os.PathLike[str] | os.PathLike[bytes]   # what pygim's paths take
 
@@ -32,8 +32,9 @@ def parse(root: StrPath, pattern: str = "**/*.py", *, threads: int | None = None
     core. Ctrl-C stops the run and raises KeyboardInterrupt."""
 
 
-def parse_source(source: str | bytes, path: str = "<string>") -> Tree:
-    """One source (str, or bytes read from a file) parsed as Python 3.14: its Tree, or SyntaxError."""
+def parse_source(source: str | bytes, path: StrPath = "<string>") -> Tree:
+    """One source (str, or bytes read from a file) parsed as Python 3.14: its Tree, or SyntaxError.
+    path: the file it came from (str or any path), named by the tree and its SyntaxError."""
 
 
 class Corpus:
@@ -49,8 +50,8 @@ class Corpus:
     def files(self) -> PathSet:
         """Every file, parsed or not, as a PathSet in path order (corpus[i] is files[i]'s tree)."""
     @property
-    def errors(self) -> list[tuple[str, str, int | None, int | None]]:
-        """(path, message, line, column) of each file that is not Python; column in bytes from 0."""
+    def errors(self) -> list[SyntaxError]:
+        """Each file that is not Python, in path order, as the SyntaxError corpus[path] raises for it."""
     def stats(self) -> CorpusStats:
         """What the run did: files, failed, bytes, nodes, names, workers, seconds."""
 
@@ -59,8 +60,8 @@ class Tree:
     """One parsed file. A view; it keeps its corpus alive."""
 
     @property
-    def path(self) -> str:
-        """The file's path, as os.fsdecode spells it; parse_source()'s path argument for one source."""
+    def path(self) -> pygim_path:
+        """The file, as a pygim path; parse_source()'s path argument for one source."""
     @property
     def root(self) -> Node:
         """The Module node."""

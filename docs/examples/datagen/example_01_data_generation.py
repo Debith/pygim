@@ -1,5 +1,5 @@
 # type: ignore
-"""Test data in one call: ``pygim.create_df`` and ``pygim.datagen.generate``.
+"""Data generation in one call: ``pygim.create_df`` and ``pygim.datagen.generate``.
 
 A schema of column names and type names becomes a table of that many rows, made in C++ with
 Arrow's builders and handed over without a copy. The same seed makes the same table every
@@ -35,8 +35,8 @@ assert users["age"].dtype == pl.Int8            # SQL's tinyint is Arrow's int8
 # ----------------------------------------------------------------------------
 # 2. What each kind of column holds
 # ----------------------------------------------------------------------------
-assert users["id"].to_list()[:3] == [1, 2, 3]                     # serial: 1, 2, 3, ...
-assert users["name"].to_list()[:2] == ["name_0000000", "name_0000001"]   # its name and its row
+assert list(users["id"][:3]) == [1, 2, 3]                         # serial: 1, 2, 3, ...
+assert list(users["name"][:2]) == ["name_0000000", "name_0000001"]       # its name and its row
 ages = users["age"]
 assert ages.min() >= -120
 assert ages.max() <= 120                        # each integer type has its range

@@ -468,8 +468,8 @@ def test_a_file_named_past_utf8_is_named_as_os_fsdecode_names_it(temp_dir, write
     bad = write_named_past_utf8(os.path.join(root, b"\xfe.py"), b"x = (\n")
     corpus = code.parse(os.fsdecode(root))
     assert sorted(corpus.files.to_list()) == sorted([os.fsdecode(good), os.fsdecode(bad)])
-    assert [e[0] for e in corpus.errors] == [os.fsdecode(bad)]
-    assert corpus[os.fsdecode(good)].path == os.fsdecode(good)
+    assert [e.filename for e in corpus.errors] == [os.fsdecode(bad)]
+    assert corpus[os.fsdecode(good)].path == pygim.path(os.fsdecode(good))
 
 
 def test_find_lists_a_kind_in_source_order(tree):
@@ -554,13 +554,44 @@ def test_a_corpus_names_its_files_as_a_pathset_its_trees_are_found_by(project):
     corpus = code.parse(project)
     assert isinstance(corpus.files, pygim.PathSet)
     assert corpus.files == pygim.path(project).pathset("**/*.py", kind="file")
-    assert [corpus[member].path for member in corpus.files if member.name != "c.py"] == \
-        [os.fspath(member) for member in corpus.files if member.name != "c.py"]   # c.py is not Python
+    parsed = corpus.files - [error.filename for error in corpus.errors]
+    assert [corpus[member].path for member in parsed] == list(parsed)
 
 
-def test_a_file_that_is_not_python_is_listed_with_its_place(project):
-    (path, message, line, column), = code.parse(project).errors
-    assert (Path(os.path.relpath(path, project)).as_posix(), line) == ("pkg/c.py", 1)
+def test_parse_source_takes_its_path_as_any_path(tmp_path):
+    """A path is taken as a path wherever pygim takes one (str, os.PathLike, a pygim path), as
+    corpus[...] takes it. Found 2026-11-01 in review ("str should not be necessary"): parse_source's
+    path was a str only, so a caller wrote parse_source(text, str(p))."""
+    where = pygim.path(tmp_path) / "one.py"
+    assert code.parse_source("x = 1\n", where).path == where
+    assert code.parse_source("x = 1\n", tmp_path / "one.py").path == where
+    with pytest.raises(SyntaxError) as raised:
+        code.parse_source("x = (\n", where)
+    assert raised.value.filename == os.fspath(where)
+
+
+def test_a_tree_names_its_file_as_a_path(project):
+    """One file is a path, as many are a PathSet (pathlike's rule), so a tree's file is the member it
+    was found as. Found 2026-11-01 in review: Tree.path was a str, so the test above compared it with
+    os.fspath(member)."""
+    corpus = code.parse(project)
+    member = corpus.files[0]
+    assert isinstance(corpus[member].path, pygim.path)
+    assert corpus[member].path == member
+
+
+def test_a_file_that_is_not_python_is_listed_as_the_syntax_error_it_raises(project):
+    """An error is an object: corpus.errors holds, for each file that is not Python, the SyntaxError
+    corpus[path] raises for it. Found 2026-11-01 in review: they were (path, message, line, column)
+    tuples, which a reader had to unpack by position."""
+    corpus = code.parse(project)
+    listed, = corpus.errors
+    assert isinstance(listed, SyntaxError)
+    with pytest.raises(SyntaxError) as raised:
+        corpus[listed.filename]
+    place = lambda e: (e.msg, e.filename, e.lineno, e.offset)
+    assert place(listed) == place(raised.value)
+    assert ("/".join(pygim.path(listed.filename).relative_to(project).parts), listed.lineno) == ("pkg/c.py", 1)
 
 
 def test_a_failed_file_raises_its_syntax_error_on_request(project):
@@ -577,7 +608,7 @@ def test_iteration_gives_the_trees_that_parsed(project):
 @pytest.mark.parametrize("threads", [None, 1, 4])
 def test_the_trees_are_the_same_at_every_width(project, threads):
     corpus = code.parse(project, threads=threads)
-    assert [t.dump() for t in corpus] == [dump314(ast.parse(Path(t.path).read_bytes())) for t in corpus]
+    assert [t.dump() for t in corpus] == [dump314(ast.parse(t.path.read_bytes())) for t in corpus]
 
 
 def test_the_stats_count_the_run(project):

@@ -14,23 +14,20 @@ This example demonstrates:
 
 import copy
 import os
-import pathlib
+import pathlib   # what this example compares a pygim path with (sections 1 and 4)
 import pickle
 import tempfile
-from pathlib import Path
 
 import pygim
 
 tmp = tempfile.TemporaryDirectory()
-config = Path(tmp.name) / "app.yaml"
-config.write_text("k: 1\n")
-
-p = pygim.path(config)
+p = pygim.path(tmp.name) / "app.yaml"
+p.write_text("k: 1\n")
 
 # ----------------------------------------------------------------------------
 # 1. It IS a path: open(), os.fspath(), pathlib all accept it
 # ----------------------------------------------------------------------------
-assert os.fspath(p) == str(config)
+assert os.fspath(p) == os.path.join(tmp.name, "app.yaml")
 assert pathlib.Path(p).read_text() == "k: 1\n"
 with open(p) as fh:
     assert fh.read() == "k: 1\n"

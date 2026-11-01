@@ -30,7 +30,7 @@ import pygim
 from pygim.pathlike import PathSet, ext, match_pattern, name
 
 # A scratch directory with a few real files keeps the example self-contained.
-workdir = Path(tempfile.mkdtemp(prefix="pygim_pathset_example_"))
+workdir = pygim.path(tempfile.mkdtemp(prefix="pygim_pathset_example_"))
 (workdir / "readme.txt").write_text("hello")
 (workdir / "notes.txt").write_text("world")
 (workdir / "logo.png").write_text("<binary>")
@@ -43,9 +43,9 @@ try:
     # Iteration yields path objects over the set's table (name, suffix, parent,
     # ==, hash all read by row; typed by extension like any path).
     files = PathSet([
-        workdir / "readme.txt",
+        Path(workdir / "readme.txt"),
         str(workdir / "notes.txt"),
-        pygim.path(workdir / "logo.png"),
+        workdir / "logo.png",
     ])
 
     assert len(files) == 3
@@ -59,8 +59,8 @@ try:
 
     # Membership accepts strings, Path objects, files and views.
     assert str(workdir / "readme.txt") in files
-    assert (workdir / "logo.png") in files
-    assert pygim.path(workdir / "notes.txt") in files
+    assert Path(workdir / "logo.png") in files
+    assert workdir / "notes.txt" in files
 
     # ------------------------------------------------------------------------
     # 2. Subtracting and cloning

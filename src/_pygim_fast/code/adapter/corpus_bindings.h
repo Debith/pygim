@@ -302,12 +302,16 @@ private:
 }
 
 // A file's parse_failure as the SyntaxError compile() raises: (msg, (filename, lineno, offset, text)).
-[[noreturn]] inline void raise_syntax_error(const corpus_file& f) {
+[[nodiscard]] inline py::object syntax_error(const corpus_file& f) {
     const parse_failure& e = f.error();
     const auto [line, column] = line_and_column(e);
     const py::object offset = column.is_none() ? py::object(py::none()) : py::object(py::int_(column.cast<long long>() + 1));
     const py::tuple details = py::make_tuple(pathlike::str_from_text(f.path()), line, offset, py::none());
-    PyErr_SetObject(PyExc_SyntaxError, py::make_tuple(e.message(), details).ptr());
+    return py::handle(PyExc_SyntaxError)(e.message(), details);
+}
+
+[[noreturn]] inline void raise_syntax_error(const corpus_file& f) {
+    PyErr_SetObject(PyExc_SyntaxError, syntax_error(f).ptr());
     throw py::error_already_set();
 }
 
@@ -349,11 +353,11 @@ private:
     return i;
 }
 
-// pygim.pathlike's PathSet, looked up once, at the first Corpus.files: many files are handed over as
-// one set, as pathlike holds them. pygim.pathlike is loaded by then (pygim imports it first).
-[[nodiscard]] inline py::object& pathset_type() {
-    PYBIND11_CONSTINIT static py::gil_safe_call_once_and_store<py::object> found;
-    return found.call_once_and_store_result([] { return py::module_::import("pygim.pathlike").attr("PathSet"); }).get_stored();
+// pygim.pathlike, looked up once, at its first use: one file is handed over as a path and many as
+// a PathSet, as pathlike holds them. pygim.pathlike is loaded by then (pygim imports it first).
+[[nodiscard]] inline py::module_& pathlike_module() {
+    PYBIND11_CONSTINIT static py::gil_safe_call_once_and_store<py::module_> found;
+    return found.call_once_and_store_result([] { return py::module_::import("pygim.pathlike"); }).get_stored();
 }
 
 }  // namespace detail
@@ -383,8 +387,8 @@ inline void register_corpus(py::module_& m) {
         .def("__hash__", &node_view::hash);
 
     py::class_<tree_view>(m, "Tree", "One parsed file. A view; it keeps its corpus alive.")
-        .def_property_readonly("path", [](const tree_view& t) { return pathlike::str_from_text(t.path()); },   // os.fsdecode's
-                               "The file's path, as os.fsdecode spells it; parse_source()'s path argument for one source.")
+        .def_property_readonly("path", [](const tree_view& t) { return pathlike_module().attr("path")(pathlike::str_from_text(t.path())); },
+                               "The file, as a pygim path; parse_source()'s path argument for one source.")
         .def_property_readonly("root", &tree_view::root, "The Module node.")
         .def("__len__", &tree_view::size, "How many rows the tree has, node() reads: its nodes, and the field values kept\n"
              "as rows of their own ('identifier' in a list of names, 'cmpop', 'absent' for a missing value).")
@@ -410,18 +414,13 @@ inline void register_corpus(py::module_& m) {
         .def_property_readonly("files", [](const corpus& c) {
                  py::list out;
                  for (const corpus_file& f : c.files()) out.append(pathlike::str_from_text(f.path()));
-                 return detail::pathset_type()(out);
+                 return pathlike_module().attr("PathSet")(out);
              }, "Every file, parsed or not, as a PathSet in path order (corpus[i] is files[i]'s tree).")
         .def_property_readonly("errors", [](const corpus& c) {
-                 std::vector<py::tuple> out;
-                 for (const corpus_file& f : c.files()) {
-                     if (!f.parsed()) {
-                         const auto [line, column] = line_and_column(f.error());
-                         out.push_back(py::make_tuple(pathlike::str_from_text(f.path()), f.error().message(), line, column));
-                     }
-                 }
+                 py::list out;
+                 for (const corpus_file& f : c.files()) if (!f.parsed()) out.append(syntax_error(f));
                  return out;
-             }, "(path, message, line, column) of each file that is not Python; column in bytes from 0.")
+             }, "Each file that is not Python, in path order, as the SyntaxError corpus[path] raises for it.")
         .def("stats", [](const corpus& c) {
                  const corpus_stats& s = c.stats();
                  py::dict d;
@@ -442,7 +441,7 @@ inline void register_corpus(py::module_& m) {
           "Every file under root matching pattern, parsed as Python 3.14: one run in C++ that walks,\n"
           "reads and parses with the GIL released. threads: how many work at once; None, one per\n"
           "core. Ctrl-C stops the run and raises KeyboardInterrupt.");
-    m.def("parse_source", [](const py::handle& source, std::string path) {
+    m.def("parse_source", [](const py::handle& source, const py::handle& path) {
               arena_string bytes;   // on the heap: a tree parsed alone
               const bool decoded = !PyBytes_Check(source.ptr());
               if (!decoded) {
@@ -453,15 +452,17 @@ inline void register_corpus(py::module_& m) {
                   if (utf8 == nullptr) throw py::error_already_set();
                   bytes.assign(utf8, static_cast<std::size_t>(n));
               }
+              std::string where = pathlike::text_from_arg(path);   // as the corpus holds a file's: the OS's text
               corpus_ptr c;
               {
                   py::gil_scoped_release nogil;   // parse_text touches its arguments and locals only
-                  c = parse_text(std::move(bytes), std::move(path), decoded);
+                  c = parse_text(std::move(bytes), std::move(where), decoded);
               }
               if (!(*c)[0].parsed()) raise_syntax_error((*c)[0]);
               return tree_view(c, 0);
           }, py::arg("source"), py::arg("path") = "<string>",
-          "One source (str, or bytes read from a file) parsed as Python 3.14: its Tree, or SyntaxError.");
+          "One source (str, or bytes read from a file) parsed as Python 3.14: its Tree, or SyntaxError.\n"
+          "path: the file it came from (str or any path), named by the tree and its SyntaxError.");
 }
 
 }  // namespace pygim::code

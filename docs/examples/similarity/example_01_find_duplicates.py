@@ -24,7 +24,6 @@ This example demonstrates:
 """
 
 import tempfile
-from pathlib import Path
 
 import pyarrow as pa
 import pyarrow.compute as pc
@@ -175,17 +174,18 @@ reader = big.stream_pairs(batch_size=10_000)                 # a pyarrow.RecordB
 # A stream is NOT ranked: batches are swept on every core while you read them,
 # in a fixed order, in bounded memory -- the way to write 100M pairs to Parquet.
 with tempfile.TemporaryDirectory() as tmp:
-    with pq.ParquetWriter(Path(tmp) / "pairs.parquet", reader.schema) as writer:
+    pairs = path(tmp) / "pairs.parquet"
+    with pq.ParquetWriter(pairs, reader.schema) as writer:
         for batch in reader:
             assert batch.num_rows <= 10_000
             writer.write_batch(batch)
-    assert pq.read_table(Path(tmp) / "pairs.parquet").num_rows == ranked.num_rows
+    assert pq.read_table(pairs).num_rows == ranked.num_rows
 
 # ----------------------------------------------------------------------------
 # 7. Many files at once, one index per language
 # ----------------------------------------------------------------------------
 with tempfile.TemporaryDirectory() as tmp:
-    src = Path(tmp)
+    src = path(tmp)
     (src / "geo.cpp").write_text("int twice(int v) { return v * 2; }\n"
                                  "int doubled(int w) { return w * 2; }\n")
     (src / "geo.py").write_text("def twice(v):\n    return v * 2\n")
@@ -195,7 +195,7 @@ with tempfile.TemporaryDirectory() as tmp:
     # Files routed by extension: one PathSet of the folder, each language's files chosen by its
     # extensions (as language_of reads them), each set added to its index in one call — read,
     # parsed and fingerprinted on worker threads with the GIL released.
-    found = path(src).pathset("*", kind="file")
+    found = src.pathset("*", kind="file")
     by_language = {language: found.filter(ext(*record["exts"], case_sensitive=False))
                    for language, record in similarity.LANGUAGES.items()}
     indexes = {}
@@ -203,7 +203,7 @@ with tempfile.TemporaryDirectory() as tmp:
         indexes[language] = similarity.Index(language)
         left_out = indexes[language].add_files(files)       # [(path, why)] of what was not added
         if language == "python":
-            assert [Path(path).name for path, _ in left_out] == ["broken.py"]
+            assert [path(p).name for p, _ in left_out] == ["broken.py"]
     assert sorted(indexes) == ["cpp", "python"]
     (cpp_pair,) = indexes["cpp"].pairs().to_pylist()
     assert (cpp_pair["a_qualname"], cpp_pair["b_qualname"]) == ("twice", "doubled")

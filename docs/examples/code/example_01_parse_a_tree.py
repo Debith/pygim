@@ -12,19 +12,18 @@ what ``ast.dump(ast.parse(source))`` writes in Python 3.14.
 
 This example demonstrates:
 - Parsing a tree, and what the corpus says of the run
-- A file that is not Python: listed with its place, raised on request
+- A file that is not Python: listed as its SyntaxError, raised on request
 - Reading a tree: kinds, fields, positions, the source a node spans
 - dump(), and parsing one source
 - A file's encoding, as its coding cookie declares it
 """
 
 import tempfile
-from pathlib import Path
 
-from pygim import code
+from pygim import code, path
 
 with tempfile.TemporaryDirectory() as tmp:
-    root = Path(tmp)
+    root = path(tmp)
     (root / "pkg").mkdir()
     (root / "pkg" / "shapes.py").write_text(
         "from dataclasses import dataclass\n"
@@ -43,10 +42,9 @@ with tempfile.TemporaryDirectory() as tmp:
     # ------------------------------------------------------------------------
     # 1. One call parses the tree
     # ------------------------------------------------------------------------
-    #                         ┌─ pattern: "**/*.py" by default
-    #                         │          ┌─ threads: None is one per core; n fixes it
-    #                         ▼          ▼
-    corpus = code.parse(root, "**/*.py", threads=None)
+    #                         ┌─ threads: None is one per core; n fixes it
+    #                         ▼
+    corpus = code.parse(root, threads=None)            # every *.py beneath root
     assert [p.name for p in corpus.files] == ["broken.py", "shapes.py"]   # a PathSet, by path
     stats = corpus.stats()
     assert stats["files"] == 2
@@ -55,20 +53,21 @@ with tempfile.TemporaryDirectory() as tmp:
     # ------------------------------------------------------------------------
     # 2. A file that is not Python is a result too
     # ------------------------------------------------------------------------
-    (path, message, line, column), = corpus.errors     # the place, in lines and bytes
-    assert Path(path).name == "broken.py"
-    assert line == 1
+    error, = corpus.errors                             # each file that is not Python
+    assert isinstance(error, SyntaxError)              # as an object: the error it raises
+    assert path(error.filename).name == "broken.py"
+    assert error.lineno == 1
     try:
-        corpus[path]                                   # asking for its tree raises its SyntaxError
+        corpus[error.filename]                         # asking for its tree raises that error
         raise AssertionError("a file that is not Python has no tree")
     except SyntaxError as e:
-        assert e.lineno == 1
-        assert Path(e.filename).name == "broken.py"
+        assert (e.filename, e.lineno) == (error.filename, error.lineno)
 
     # ------------------------------------------------------------------------
     # 3. Reading a tree
     # ------------------------------------------------------------------------
-    tree = corpus[str(root / "pkg" / "shapes.py")]
+    tree = corpus[root / "pkg" / "shapes.py"]          # by its path, or by its index
+    assert tree.path == root / "pkg" / "shapes.py"     # one file is a pygim path
     #               ┌─ ast's own names: the kind, then the fields in _fields order
     #               ▼
     cls = tree.find("ClassDef")[0]

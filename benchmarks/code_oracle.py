@@ -130,11 +130,11 @@ def section_mutants(root, count, seed):
         for n in range(count):
             (written / f"m{n:06d}.py").write_text(mutant_of(rng.choice(texts), rng), errors="surrogateescape", newline="")
         judged = code.parse(written)   # pygim.code's verdict on every mutant, in one run
-        mutants, refused = judged.files, {error[0] for error in judged.errors}
+        mutants, refused = judged.files, pathlike.PathSet([error.filename for error in judged.errors])
         theirs, _ = cpython(mutants, "verdicts")
         agree, shown = 0, []
         for p, answer in zip(mutants, theirs):
-            ours = str(p) not in refused
+            ours = p not in refused
             if ours == answer["ok"]:
                 agree += 1
             elif len(shown) < 20:

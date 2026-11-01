@@ -15,15 +15,17 @@ This example demonstrates:
 """
 
 import tempfile
-from pathlib import Path
 
 import pygim
 
 tmp = tempfile.TemporaryDirectory()
-root = Path(tmp.name)
+root = pygim.path(tmp.name)
 
 legacy = root / "legacy.dat"
-legacy.write_text("name: imported\nversion: 3\n")
+legacy.write_text("""\
+name: imported
+version: 3
+""")
 
 # ----------------------------------------------------------------------------
 # 1. Pin the engine when the extension says nothing
@@ -39,7 +41,7 @@ assert p.read() == {"name": "imported", "version": 3}
 # 2. Without a pin, an unknown extension refuses to guess
 # ----------------------------------------------------------------------------
 try:
-    pygim.path(legacy).read()
+    legacy.read()
 except ValueError as e:
     assert "no engine" in str(e)
 else:

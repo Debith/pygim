@@ -497,7 +497,7 @@ IMPORTS = {
     "persistence/adapter/arrow_export.h": 2,     # pyarrow's reader import and polars.from_arrow, once at first use (D53)
     "wiring/ioc/adapter.h": 2,                   # inspect and typing, for a constructor its code object cannot say (D67)
     "wiring/factory/adapter.h": 1,               # Factory.use_module(name): importing is what it is asked
-    "code/adapter/corpus_bindings.h": 1,         # pygim.pathlike's PathSet, once at first use: Corpus.files is a set (D91)
+    "code/adapter/corpus_bindings.h": 1,         # pygim.pathlike, once at first use: Tree.path is a path, Corpus.files a set (D91)
 }
 
 
@@ -523,7 +523,7 @@ def test_no_assert_compares_a_value_with_itself():
     whether a property or a container hands back the one object. Found by pygim's own parser."""
     repo, found = ROOT.parents[1], []
     for top in ("tests", "docs/examples", "src", "benchmarks"):
-        for tree in code.parse(str(repo / top), "**/*.py"):
+        for tree in code.parse(repo / top):
             for node in tree.find("Assert"):
                 test = node.field("test")
                 if test.kind != "Compare" or test.field("ops") != ["Eq"]:
@@ -543,7 +543,7 @@ def test_a_module_a_sanitizer_run_cannot_load_is_imported_where_its_absence_is_h
     listed = next(n for n in runner.find("Assign") if n.field("targets")[0].source == "UNLOADABLE")
     unloadable = {name.field("value") for name in listed.field("value").field("elts")}
     found = []
-    for tree in code.parse(str(repo / "tests"), "**/*.py"):
+    for tree in code.parse(repo / "tests"):
         for statement in tree.root.children:   # the module's own statements: a try's are inside it
             if statement.kind == "Import":
                 names = [alias.field("name") for alias in statement.field("names")]

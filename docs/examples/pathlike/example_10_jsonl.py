@@ -15,12 +15,11 @@ This example demonstrates:
 
 import json
 import tempfile
-from pathlib import Path
 
 import pygim
 
 tmp = tempfile.TemporaryDirectory()
-root = Path(tmp.name)
+root = pygim.path(tmp.name)
 
 # ----------------------------------------------------------------------------
 # 1. Read: every line is a document, the file is a list
@@ -33,7 +32,7 @@ log.write_text("""\
 {"id": 3, "kind": "stop", "took": 2.5}
 """)
 
-events = pygim.path(log).read()
+events = log.read()
 assert len(events) == 3                       # the blank line is not a document
 assert events[0] == {"id": 1, "kind": "start", "ok": True}
 assert events[1]["text"] == "two lines\nin one string"
@@ -43,9 +42,12 @@ assert isinstance(events[2]["took"], float)
 # 2. A broken line fails loudly, with the file and line number
 # ----------------------------------------------------------------------------
 bad = root / "bad.jsonl"
-bad.write_text('{"id": 1}\n{oops}\n')
+bad.write_text("""\
+{"id": 1}
+{oops}
+""")
 try:
-    pygim.path(bad).read()
+    bad.read()
 except ValueError as e:
     assert "bad.jsonl" in str(e)
     assert "line 2" in str(e)
@@ -55,10 +57,10 @@ else:
 # ----------------------------------------------------------------------------
 # 3. Write: a list in, one compact document per line out
 # ----------------------------------------------------------------------------
-out = pygim.path(root / "out.jsonl")
+out = root / "out.jsonl"
 out.write([{"id": 1, "tags": ["a", "b"]}, {"id": 2, "tags": []}])
 
-lines = (root / "out.jsonl").read_text().splitlines()
+lines = out.read_text().splitlines()
 assert len(lines) == 2
 assert [json.loads(line) for line in lines] == out.read()   # stdlib agrees, line by line
 

@@ -11,12 +11,11 @@ This example demonstrates:
 """
 
 import tempfile
-from pathlib import Path
 
 import pygim
 
 tmp = tempfile.TemporaryDirectory()
-config = Path(tmp.name) / "app.yaml"
+config = pygim.path(tmp.name) / "app.yaml"
 config.write_text("""\
 server:
   host: db.example.com
@@ -28,7 +27,7 @@ debug: false
 # ----------------------------------------------------------------------------
 # 1. One call: the path reads and decodes itself
 # ----------------------------------------------------------------------------
-obj = pygim.path(config).read()
+obj = config.read()
 
 assert obj == {
     "server": {"host": "db.example.com", "port": 5432},

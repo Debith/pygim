@@ -12,7 +12,7 @@ from pygim import code
 
 corpus = code.parse("Lib", "**/*.py")       # walk, read, parse: C++ only, the GIL released, Ctrl-C owned
 corpus.stats()                              # {'files': 1846, 'failed': 4, 'nodes': 3321029, 'names': 81668, 'seconds': 0.064, ...}
-corpus.errors                               # [(path, message, line, column), ...] for files that are not Python
+corpus.errors                               # [SyntaxError, ...]: each file that is not Python, as corpus[path] raises it
 tree = corpus["Lib/ast.py"]                 # a view: no Python object per node
 cls = tree.find("ClassDef")[0]              # ast's kinds, fields and positions
 cls.field("name"), cls.lineno, cls.source

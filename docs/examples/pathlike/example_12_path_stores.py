@@ -18,7 +18,6 @@ This example demonstrates:
 
 import gc
 import tempfile
-from pathlib import Path
 
 import pygim
 from pygim.pathlike import PathSet, PathStore, default_store, yamlpath
@@ -75,7 +74,7 @@ assert ps.stats()["rows"] == mine.stats()["rows"]
 # store and drops it — the default table never sees the traffic.
 with tempfile.TemporaryDirectory() as tmp:
     for name in ("a.yaml", "b.yaml"):
-        (Path(tmp) / name).write_text("k: 1")
+        (pygim.path(tmp) / name).write_text("k: 1")
     rows_before = default_store().stats()["rows"]
     job = PathStore()
     root = pygim.path(tmp, store=job)

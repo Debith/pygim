@@ -12,25 +12,24 @@ This example demonstrates:
 
 import datetime
 import tempfile
-from pathlib import Path
 
 import pygim
 
 tmp = tempfile.TemporaryDirectory()
-root = Path(tmp.name)
+root = pygim.path(tmp.name)
 
 # ----------------------------------------------------------------------------
 # 1. JSON: fast and strict
 # ----------------------------------------------------------------------------
 good = root / "data.json"
 good.write_text('{"rows": [1, 2.5, true, null], "name": "x"}')
-assert pygim.path(good).read() == {"rows": [1, 2.5, True, None], "name": "x"}
+assert good.read() == {"rows": [1, 2.5, True, None], "name": "x"}
 
 # {key: 1} is valid YAML but NOT valid JSON -- the error names the file.
 sloppy = root / "sloppy.json"
 sloppy.write_text("{key: 1}")
 try:
-    pygim.path(sloppy).read()
+    sloppy.read()
 except ValueError as e:  # a document that does not parse is a bad value, as json.loads says too
     assert "sloppy.json" in str(e)
 else:
@@ -48,7 +47,7 @@ runs_at = 10:30:00
 stamp = 2024-01-15T10:30:00+02:00
 """)
 
-t = pygim.path(cfg).read()
+t = cfg.read()
 assert t["title"] == "svc"
 assert t["job"]["day"] == datetime.date(2024, 1, 15)
 assert t["job"]["runs_at"] == datetime.time(10, 30)

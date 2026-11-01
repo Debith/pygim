@@ -17,23 +17,20 @@ This example demonstrates:
 
 import os
 import tempfile
-from pathlib import Path
 
 import pygim
 
 tmp = tempfile.TemporaryDirectory()
-root = Path(tmp.name)
+top = pygim.path(tmp.name)
 for name, text in {
     "a.yaml": "k: 1",
     "b.yml": "k: 2",
     "sub/c.yaml": "k: 3",
     "sub/data.json": '{"k": 4}',
 }.items():
-    p = root / name
+    p = top / name
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text(text)
-
-top = pygim.path(root)
 
 # ----------------------------------------------------------------------------
 # 1. glob: one directory level per pattern component
@@ -57,7 +54,7 @@ assert [f.name for f in children] == sorted(f.name for f in children)
 # ----------------------------------------------------------------------------
 # Pin "yaml" on the root and even .json hits decode as YAML (JSON is a
 # YAML subset, so this gives a legitimate uniform view).
-pinned = pygim.path(root, engine="yaml")
+pinned = pygim.path(top, engine="yaml")
 hits = pinned.rglob("*.json")
 assert all(f.engine == "rapidyaml" for f in hits)
 assert hits[0].read() == {"k": 4}

@@ -4,22 +4,27 @@ over its argument (docs/examples/README.md's conventions, #149). No CI step ran 
 their asserts never ran there; a callout a column off pointed at the wrong argument."""
 
 import os
-import pathlib
 import re
 import runpy
+import sys
 
 import pytest
 
 from pygim import code, pathlike
 
 ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "docs", "examples")
-EXAMPLES = sorted(pathlib.Path(str(p)) for p in pathlike.path(os.path.normpath(ROOT)).pathset("*/example_*.py"))
+EXAMPLES = sorted(pathlike.path(os.path.normpath(ROOT)).pathset("*/example_*.py"))   # in order: stable test ids
 IDS = [f"{p.parent.name}/{p.stem}" for p in EXAMPLES]
 
 
 @pytest.mark.parametrize("example", EXAMPLES, ids=IDS)
 def test_the_example_runs_to_its_ok_line(example, capsys):
-    runpy.run_path(str(example), run_name="__main__")
+    try:
+        runpy.run_path(example, run_name="__main__")
+    except ModuleNotFoundError as e:
+        if e.name in sys.modules and sys.modules[e.name] is None:   # halted on purpose (run_tests_under_sanitizers.py)
+            pytest.skip(f"{e.name} cannot load in this run")
+        raise
     said = capsys.readouterr().out.strip().splitlines()
     assert said and " OK" in said[-1], said[-3:]
 
@@ -76,14 +81,31 @@ def test_each_line_is_under_a_hundred_characters(example):
 def test_each_assert_states_one_fact(example):
     """Debith on PR #37: "These asserts makes this file hard to read" — `assert a and b` is two facts
     a reader must take apart, and a failure names neither (#149). Found by pygim's own parser."""
-    tree = code.parse_source(example.read_text(encoding="utf-8"), str(example))
+    tree = code.parse_source(example.read_text(encoding="utf-8"), example)
     compound = [node.lineno for node in tree.find("Assert")
                 if node.field("test").kind == "BoolOp" and node.field("test").field("op") == "And"]
     assert compound == []
 
 
+def unused_imports(source, where):
+    """The names `source` imports and never reads: an import binds its alias, or its name's first part."""
+    tree = code.parse_source(source, where)
+    read = {node.field("id") for node in tree.find("Name")}
+    bound = [alias.field("asname") or alias.field("name").split(".")[0]
+             for node in [*tree.find("Import"), *tree.find("ImportFrom")] for alias in node.field("names")]
+    return [name for name in bound if name not in read]
+
+
+@pytest.mark.parametrize("example", EXAMPLES, ids=IDS)
+def test_each_import_is_used(example):
+    """An import is a question its reader asks — "Is this needed..?" (Debith on PR #39) — so an example
+    imports only what it uses. Found 2026-11-01 by sweeping for it: utils/example_01 imported gc and
+    never used it."""
+    assert unused_imports(example.read_text(encoding="utf-8"), example) == []
+
+
 def test_every_example_has_a_row_in_the_index():
     """docs/examples/README.md lists every example (pathlike's example_10 had no row until 2026-10-30)."""
-    index = (pathlib.Path(ROOT) / "README.md").read_text(encoding="utf-8")
+    index = (pathlike.path(ROOT) / "README.md").read_text(encoding="utf-8")
     assert [f"{p.parent.name}/{p.name}" for p in EXAMPLES if f"({p.parent.name}/{p.name})" not in index] == []
 

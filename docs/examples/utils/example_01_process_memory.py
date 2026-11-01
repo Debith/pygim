@@ -14,8 +14,6 @@ This example demonstrates:
 - Why a second measurement in the same process may not move
 """
 
-import gc
-
 from pygim import utils
 
 # ----------------------------------------------------------------------------
