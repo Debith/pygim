@@ -6,6 +6,7 @@ without Python — that is what lets their laws be compile-time proofs. Only
 adapter headers and bindings may include pybind11."""
 
 import ast
+import importlib
 import pathlib
 import re
 import shutil
@@ -14,7 +15,7 @@ import subprocess
 import pytest
 
 from _pygim import _config
-from pygim import code
+from pygim import code, pathlike
 from pygim.pathlike import PathSet, path
 
 ROOT = pathlib.Path(__file__).resolve().parents[2] / "src" / "_pygim_fast"
@@ -24,7 +25,7 @@ pytestmark = pytest.mark.skipif(not ROOT.is_dir(), reason="source tree not prese
 def _headers(pattern):
     """The headers matching *pattern*, through pygim's own walker — see `sources` below on why the
     project's components are used by the project even where the milliseconds do not matter."""
-    return sorted(pathlib.Path(str(p)) for p in path(str(ROOT)).pathset(pattern, kind="file"))
+    return sorted(pathlib.Path(p) for p in path(ROOT).pathset(pattern, kind="file"))
 
 
 def _declares_core(header):
@@ -51,7 +52,7 @@ def _code(header):
 
 def _text(header):
     """One header, read through PathSet — the same path every other read in this file takes."""
-    read = PathSet([path(str(header))]).read_all_files()
+    read = PathSet([header]).read_all_files()
     assert read, f"{header} is not a readable file"
     return read[0]
 
@@ -126,13 +127,13 @@ def sources(root, pattern, least=1):
     `read_all_files` skips a member that is not a regular file, so its list can be shorter than the
     membership; a walk that keeps files only (kind="file") cannot produce that, and the assertion
     says so rather than trusting it."""
-    found = path(str(root)).pathset("**/" + pattern, kind="file")
-    members, texts = found.to_list(), found.read_all_files()
+    found = path(root).pathset("**/" + pattern, kind="file")
+    members, texts = list(found), found.read_all_files()
     assert len(members) == len(texts), "a member was not a regular file; the two lists no longer align"
     assert len(members) >= least, (
         f"only {len(members)} files matched {pattern} under {root} — a rule checked over nothing "
         f"passes for the wrong reason, and this suite uses the library it is testing to do the walk")
-    return [(pathlib.Path(str(member)), text) for member, text in zip(members, texts)]
+    return [(pathlib.Path(member), text) for member, text in zip(members, texts)]
 
 
 def reads_the_environment(text, filename="<source>"):
@@ -141,7 +142,7 @@ def reads_the_environment(text, filename="<source>"):
     Text would do here and be wrong: a module that *explains* the rule in a docstring is not
     breaking it, and `_config`'s docstring does exactly that."""
     lines = []
-    for node in ast.walk(ast.parse(text, filename=str(filename))):
+    for node in ast.walk(ast.parse(text, filename=filename)):
         reads = (isinstance(node, ast.Attribute) and node.attr == "environ"
                  and isinstance(node.value, ast.Name) and node.value.id == "os")
         calls = (isinstance(node, ast.Call)
@@ -420,7 +421,7 @@ def test_each_test_module_has_a_name_of_its_own():
     stop the whole run at collection — while each folder run alone passes. tests/examples' and
     tests/unittests' test_examples.py did, 2026-10-30."""
     repo = ROOT.parents[1]
-    names = [p.name for top in ("tests", "src") for p in path(str(repo / top)).pathset("**/test_*.py", kind="file")]
+    names = [p.name for top in ("tests", "src") for p in path(repo / top).pathset("**/test_*.py", kind="file")]
     assert sorted({n for n in names if names.count(n) > 1}) == []
 
 
@@ -464,7 +465,7 @@ def test_every_package_that_ships_holds_something():
     for package in ("pygim", "_pygim"):
         for init in path(str(PY_ROOT)).pathset(f"{package}/**/__init__.py", kind="file"):
             others = init.parent.pathset("*", skip=["__pycache__"]) - [init]
-            if not _text(pathlib.Path(str(init))).strip() and not others:
+            if not _text(pathlib.Path(init)).strip() and not others:
                 empty.append(pathlib.Path(str(init.parent)).relative_to(PY_ROOT).as_posix())
     assert empty == [], "a package holding nothing: give it its code, or remove it"
 
@@ -583,10 +584,86 @@ def test_no_tracked_file_names_a_machine():
     (D82): a person's folder in the repository says whose machine it was, and works on no other.
     third_party is not ours to write."""
     repo = PY_ROOT.parent
-    listed = subprocess.run(["git", "-C", str(repo), "ls-files", "-z"], capture_output=True, text=True, check=True).stdout
-    files = PathSet([path(str(repo / name)) for name in listed.split("\0") if name and "third_party" not in name])
-    members, texts = files.to_list(), files.read_all_files()
+    listed = subprocess.run(["git", "-C", repo, "ls-files", "-z"], capture_output=True, text=True, check=True).stdout
+    files = PathSet([repo / name for name in listed.split("\0") if name and "third_party" not in name])
+    members, texts = list(files), files.read_all_files()
     assert len(members) == len(texts) >= 300                      # the tree is there to check
-    found = [f"{pathlib.Path(str(member)).relative_to(repo)}: {hit}"
+    found = [f"{pathlib.Path(member).relative_to(repo)}: {hit}"
              for member, text in zip(members, texts) for hit in names_a_machine(text)]
+    assert found == []
+
+
+# ── a binding takes a path as any path ───────────────────────────────────────
+
+# A parameter named for a file or a folder, typed str in a pybind11 signature line.
+PATH_AS_TEXT = re.compile(r"\b(path|paths|root|folder|file|files|origin|directory)\s*:\s*str\b")
+
+
+def bindings_taking_a_path_as_text():
+    """Each signature line of a pygim extension (ext.*.toml) whose path-named parameter is a str."""
+    found = []
+    for toml in path(ROOT).pathset("**/ext.*.toml", kind="file"):
+        module = importlib.import_module("pygim." + toml.read()["extension"]["module"])
+        members = [(name, obj) for name, obj in vars(module).items() if not name.startswith("__")]
+        members += [(f"{name}.{m}", o) for name, obj in members if isinstance(obj, type) for m, o in vars(obj).items()]
+        for name, obj in members:
+            for line in (getattr(obj, "__doc__", None) or "").splitlines():
+                if "(" in line and ") ->" in line and PATH_AS_TEXT.search(line):
+                    found.append(f"{module.__name__}.{name}: {line.strip()}")
+    return found
+
+
+def test_the_path_binding_check_finds_what_it_is_for():
+    assert PATH_AS_TEXT.search("add(self: Index, source: str, origin: str = '<string>') -> None")
+    assert not PATH_AS_TEXT.search("parse_source(source: object, path: object = '<string>') -> Tree")
+
+
+def test_a_binding_takes_a_path_as_any_path():
+    """A binding that takes a path as text teaches its callers str(p), and the habit spreads to calls
+    that never needed it (global #152). Debith on PR #39: "str should not be necessary", then "I am
+    curious how this happens so often that the objects are turned into language primitives". A
+    path-named parameter takes str, os.PathLike or a pygim path (pathlike::text_from_arg)."""
+    assert bindings_taking_a_path_as_text() == []
+
+
+# ── a parameter is annotated with the protocol it uses ───────────────────────
+
+# What a parameter is annotated with that names a type where a protocol belongs (global #153):
+# a collection or bytes by its concrete type, or a path-named parameter as text.
+CONCRETE = {"list", "dict", "set", "tuple", "frozenset", "bytes", "List", "Dict", "Set", "Tuple", "FrozenSet"}
+PATH_NAMED = {"path", "paths", "root", "folder", "file", "files", "origin", "directory"}
+
+
+def concrete_parameters(tree):
+    """Each parameter of a def in `tree` annotated as a concrete collection or bytes, or path-named and
+    annotated str: "name: annotation" at its line."""
+    found = []
+    for kind in ("FunctionDef", "AsyncFunctionDef"):
+        for function in tree.find(kind):
+            arguments = function.field("args")
+            for arg in [*arguments.field("posonlyargs"), *arguments.field("args"), *arguments.field("kwonlyargs")]:
+                annotation = arg.field("annotation")
+                if annotation is None:
+                    continue
+                head = re.match(r"['\"]?(?:typing\.)?(\w*)", annotation.source).group(1)   # a forward reference is quoted
+                as_text = head == "str" and "PathLike" not in annotation.source   # str | os.PathLike is the protocol
+                if head in CONCRETE or (as_text and arg.field("arg") in PATH_NAMED):
+                    found.append(f"{tree.path.name}:{arg.lineno}: {arg.field('arg')}: {annotation.source}")
+    return found
+
+
+def test_the_protocol_check_finds_what_it_is_for():
+    tree = code.parse_source("def f(rows: list, root: str, name: str, items: Iterable[str], m: Mapping[str, int],\n"
+                             "      file: str | os.PathLike[str]): ...", "t.py")
+    assert concrete_parameters(tree) == ["t.py:1: rows: list", "t.py:1: root: str"]
+
+
+def test_a_parameter_is_annotated_with_the_protocol_it_uses():
+    """Debith on PR #39: "Ideally, python functions should use protocols for annotations". A path is
+    os.PathLike (a stub's StrPath), many things Iterable or Sequence, a mapping Mapping, bytes-like
+    data a buffer; text stays str. A concrete annotation asks callers for a conversion nothing needs,
+    and hid a binding that refused a bytearray pathlib takes (write_bytes)."""
+    sources = path(ROOT.parent).pathset("**/*.py*", kind="file").filter(pathlike.ext(".py", ".pyi"))
+    found = [hit for content in sources.read_each()
+             for hit in concrete_parameters(code.parse_source(bytes(content), content.path))]
     assert found == []

@@ -228,7 +228,7 @@ stop = threading.Event()
 def grow():   # writes to the table the set's members are rows of
     i = 0
     while not stop.is_set():
-        path(str(root / "new" / f"n{i}" / "deeper"), store=store)
+        path(root / "new" / f"n{i}" / "deeper", store=store)
         i += 1
 
 writer = threading.Thread(target=grow)
@@ -249,5 +249,5 @@ def test_reading_while_another_thread_grows_its_table(temp_dir):
     """#126: the released reads — read_all_files and read_each, in one child — touch only values copied
     while the GIL was held, so a writer to the same table in another thread cannot race them. A race
     would kill the process, hence the subprocess."""
-    done = subprocess.run([sys.executable, "-c", RACE, str(temp_dir)], capture_output=True, text=True, timeout=120)
+    done = subprocess.run([sys.executable, "-c", RACE, temp_dir], capture_output=True, text=True, timeout=120)
     assert done.returncode == 0, done.stderr

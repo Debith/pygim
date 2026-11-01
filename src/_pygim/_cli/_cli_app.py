@@ -16,6 +16,7 @@ from importlib import import_module
 import click
 
 from _pygim._config import Environment
+from _pygim._core._typing import PathLike
 from _pygim._cli import _style
 from pygim.pathlike import ext, name, path
 
@@ -102,7 +103,7 @@ class GimmicksCliApp:
         if tests.returncode or report.returncode:
             raise SystemExit(tests.returncode or report.returncode)
 
-    def docs_serve(self, *, port: int = 8000, directory: str | None = None,
+    def docs_serve(self, *, port: int = 8000, directory: PathLike | None = None,
                    host: str | None = None, index: str | None = None,
                    rebuild: str | None = None, reload: bool = True) -> None:
         """Serve a docs directory locally with the ✎ commenter and image-drop endpoint; with
@@ -125,7 +126,7 @@ class GimmicksCliApp:
         except (FileNotFoundError, _docs_serve.ServeError) as exc:
             raise click.ClickException(str(exc)) from exc
 
-    def inventory(self, *, where: Environment, path: str | None, brief: bool = False) -> None:
+    def inventory(self, *, where: Environment, path: PathLike | None, brief: bool = False) -> None:
         """What is already at hand in a project, against what its code actually reaches for.
 
         The point is the join, not either list: a component you already have is invisible at the
@@ -138,7 +139,7 @@ class GimmicksCliApp:
         import pygim
 
         root = Path(path) if path else Path(where.cwd)
-        if not pygim.path(str(root)).is_dir():
+        if not pygim.path(root).is_dir():
             raise click.ClickException(f"{root} is not a directory")
         if brief:
             click.echo(_inventory.project_map(root, home=Path(where.home)))
@@ -239,14 +240,14 @@ class GimmicksCliApp:
         files = {}   # each file once, by its first spelling: overlapping roots name one tree twice
         for root in map(Path, paths or ["."]):
             if root.is_file():
-                if not _excluded((root.name,), exclude) and not _excluded((str(root),), exclude):
-                    files.setdefault(os.path.realpath(root), str(root))
+                if not _excluded((root.name,), exclude) and not _excluded((root,), exclude):
+                    files.setdefault(os.path.realpath(root), root)
             elif root.is_dir():
-                top = path(str(root))   # pygim's own walker and its own paths: pathlib's relative_to took 0.4 s on CPython's Lib
+                top = path(root)   # pygim's own walker and its own paths: pathlib's relative_to took 0.4 s on CPython's Lib
                 walked = top.pathset("**/*", kind="file", skip=HIDDEN)
                 for p, member in zip(walked, walked.relative_to(top)):   # the same members, in order
                     if not _excluded(member.parts, exclude):
-                        files.setdefault(os.path.realpath(str(p)), str(p))
+                        files.setdefault(os.path.realpath(p), p)
             else:
                 raise click.ClickException(f"{root}: is neither a file nor a directory")
 

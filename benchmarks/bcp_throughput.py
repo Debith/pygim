@@ -33,7 +33,10 @@ from datetime import datetime, timezone
 from decimal import Decimal
 
 import click
+import pyarrow as pa
+
 import pygim
+from pygim import datagen
 from pygim.utils import QuickTimer
 
 print(f"PID: {os.getpid()}")
@@ -60,7 +63,7 @@ def default_connection_string() -> str:
     )
 
 
-# ── Dataset schemas (for pygim.create_df C++ data generator) ─────────────────
+# ── Dataset schemas (for pygim.datagen, the C++ data generator) ─────────────────
 
 _SCHEMA_SIMPLE = {
     "id": "serial",
@@ -349,8 +352,6 @@ def run_load(
 
 
 def _polars_row_to_pydict(df, idx: int) -> dict:
-    import pyarrow as pa
-
     if isinstance(df, pa.Table):
         return {name: df.column(name)[idx].as_py() for name in df.column_names}
     return {col: df[col][idx] for col in df.columns}
@@ -482,7 +483,6 @@ def verify_round_trip(
     # 2. Column names
     cursor.execute(f"SELECT TOP 0 * FROM {table}")
     db_cols = [d[0] for d in cursor.description]
-    import pyarrow as pa
 
     src_cols = (
         list(source_df.column_names)
@@ -1003,7 +1003,7 @@ def bench(
                 f"Generating {rows:,} rows for [{pname}] ({profile['columns']} cols) …"
             )
             with generating.lap(pname) as lap:
-                df = pygim.create_df(profile["schema"], rows=rows, format="arrow")
+                df = pa.table(datagen.generate(profile["schema"], rows=rows))
             size_mb = estimate_size_bytes(df) / 1_048_576
             click.echo(f"  → {size_mb:.1f} MB in {lap.took.seconds:.2f}s")
             data[pname] = df

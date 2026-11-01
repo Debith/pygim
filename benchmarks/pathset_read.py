@@ -126,7 +126,7 @@ def main():
         root = given or generated(path(scratch))
         found = root.pathset("**/*.py", kind="file")   # sorted already
         members = found - [c.path for c in found.read_each() if not is_utf8(c)]   # CPython's Lib holds a few that are not, on purpose
-        files, size = members.to_list(), sum(members.sizes())
+        files, size = [os.fspath(p) for p in members], sum(members.sizes())   # the stdlib contenders read text paths
         print(f"{len(members):,} UTF-8 files ({len(found) - len(members)} others left out), {size / 2**20:,.1f} MB "
               f"under {root if given else 'a generated tree'}; best of {REPS}, ms\n")
         sections = {"corpus": {"root": corpus(root) if given else "generated", "files": len(members), "bytes": size}}

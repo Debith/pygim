@@ -17,7 +17,7 @@ from pathlib import Path
 import pytest
 
 import pygim
-from pygim import code
+from pygim import code, similarity
 from stub_parity import Stub
 from pool_threads import POOL_THREADS
 
@@ -467,7 +467,7 @@ def test_a_file_named_past_utf8_is_named_as_os_fsdecode_names_it(temp_dir, write
     good = write_named_past_utf8(os.path.join(root, b"\xff.py"), b"x = 1\n")
     bad = write_named_past_utf8(os.path.join(root, b"\xfe.py"), b"x = (\n")
     corpus = code.parse(os.fsdecode(root))
-    assert sorted(corpus.files.to_list()) == sorted([os.fsdecode(good), os.fsdecode(bad)])
+    assert sorted([os.fspath(p) for p in corpus.files]) == sorted([os.fsdecode(good), os.fsdecode(bad)])
     assert [e.filename for e in corpus.errors] == [os.fsdecode(bad)]
     assert corpus[os.fsdecode(good)].path == pygim.path(os.fsdecode(good))
 
@@ -612,6 +612,57 @@ def project(temp_dir):
     return temp_dir
 
 
+@pytest.fixture()
+def mixed(temp_dir):
+    """A module, a stub and a file of no language pygim.code parses, and one more module below."""
+    root = pygim.path(temp_dir)
+    (root / "sub").mkdir()
+    for name, text in {"a.py": "x = 1\n", "b.pyi": "def f() -> int: ...\n", "notes.txt": "def (:\n",
+                       "sub/c.py": "y = 2\n"}.items():
+        (root / name).write_text(text)
+    return root
+
+
+def names(corpus, root):
+    return ["/".join(member.parts) for member in corpus.files.relative_to(root)]
+
+
+def test_parse_takes_every_language_it_parses_by_default(mixed):
+    """D93, Debith on PR #39: "if we say code.parse, shouldn't it be all supported types there?" A
+    stub is Python to the parser, as similarity has it; "**/*.py" by default left .pyi out."""
+    assert names(code.parse(mixed), mixed) == ["a.py", "b.pyi", "sub/c.py"]
+
+
+def test_languages_names_the_ones_to_parse(mixed):
+    assert names(code.parse(mixed, languages="python"), mixed) == ["a.py", "b.pyi", "sub/c.py"]
+    assert names(code.parse(mixed, languages=["python"]), mixed) == ["a.py", "b.pyi", "sub/c.py"]
+
+
+def test_the_pattern_still_narrows_the_walk(mixed):
+    """Debith: "I wasn't against having the pattern ... it sounds useful". Part of a tree, every
+    language in it."""
+    assert names(code.parse(mixed, "sub/**/*"), mixed) == ["sub/c.py"]
+    assert names(code.parse(mixed, "*.pyi"), mixed) == ["b.pyi"]
+
+
+@pytest.mark.parametrize(("languages", "error", "message"), [
+    ("Python", ValueError, "no language is named 'Python': pygim.code parses python"),
+    (["python", "cobol"], ValueError, "no language is named 'cobol'"),
+    ([], ValueError, "name at least one, or None for every one"),
+    ([3], TypeError, "names of languages"),
+])
+def test_a_language_it_does_not_parse_is_refused_before_the_run(mixed, languages, error, message):
+    with pytest.raises(error, match=message):
+        code.parse(mixed, languages=languages)
+
+
+def test_code_and_similarity_name_python_files_alike():
+    """One table (code/languages.h): similarity's Python is pygim.code's parser, so the two cannot
+    disagree on what a Python file is."""
+    assert code.LANGUAGES["python"]["exts"] == (".py", ".pyi")
+    assert similarity.LANGUAGES["python"]["exts"] == code.LANGUAGES["python"]["exts"]
+
+
 def test_a_corpus_holds_every_match_sorted(project):
     corpus = code.parse(project)
     assert ["/".join(p.parts) for p in corpus.files.relative_to(project)] == ["a.py", "pkg/b.py", "pkg/c.py", "pkg/e.py/f.py", "pkg/sub/d.py"]
@@ -666,7 +717,7 @@ def test_a_file_that_is_not_python_is_listed_as_the_syntax_error_it_raises(proje
 def test_a_failed_file_raises_its_syntax_error_on_request(project):
     corpus = code.parse(project)
     with pytest.raises(SyntaxError) as raised:
-        corpus[str(project / "pkg" / "c.py")]
+        corpus[project / "pkg" / "c.py"]
     assert raised.value.filename == str(project / "pkg" / "c.py")
 
 
@@ -717,24 +768,29 @@ def outcome(parse):
 def test_a_corpus_reads_a_file_as_parse_source_reads_its_bytes(temp_dir, shape):
     (temp_dir / "m.py").write_bytes(FILE_SHAPES[shape])
     corpus = code.parse(temp_dir)
-    assert outcome(lambda: corpus[str(temp_dir / "m.py")]) == outcome(lambda: code.parse_source(FILE_SHAPES[shape]))
+    assert outcome(lambda: corpus[temp_dir / "m.py"]) == outcome(lambda: code.parse_source(FILE_SHAPES[shape]))
 
 
 @pytest.mark.skipif(not sys.platform.startswith("linux"), reason="/proc is Linux's")
-def test_a_corpus_reads_a_file_that_reports_no_size_to_its_end():
-    """fstat says 0 for a /proc file: the read goes on until the file ends."""
-    corpus = code.parse("/proc/self", "comm")
+def test_a_corpus_reads_a_file_that_reports_no_size_to_its_end(temp_dir):
+    """fstat says 0 for a /proc file: the read goes on until the file ends. Reached through a link
+    named as Python, since a run parses a file by its suffix (D93)."""
+    link = pygim.path(temp_dir) / "comm.py"
+    os.symlink("/proc/self/comm", link)
+    corpus = code.parse(temp_dir)
     assert corpus.stats()["bytes"] == len(Path("/proc/self/comm").read_bytes())
-    assert outcome(lambda: corpus["/proc/self/comm"]) == outcome(lambda: code.parse_source(Path("/proc/self/comm").read_bytes()))
+    assert outcome(lambda: corpus[link]) == outcome(lambda: code.parse_source(Path("/proc/self/comm").read_bytes()))
 
 
 @pytest.mark.skipif(not sys.platform.startswith("linux"), reason="/proc is Linux's")
-def test_a_corpus_reads_a_file_that_reports_no_size_past_its_first_page():
+def test_a_corpus_reads_a_file_that_reports_no_size_past_its_first_page(temp_dir):
     """A Python process's maps is longer than the page the read starts with. It changes as memory
-    is mapped; its first line, where the parse stops, does not."""
-    corpus = code.parse("/proc/self", "maps")
+    is mapped; its first line, where the parse stops, does not. Through a link, as above."""
+    link = pygim.path(temp_dir) / "maps.py"
+    os.symlink("/proc/self/maps", link)
+    corpus = code.parse(temp_dir)
     assert corpus.stats()["bytes"] > 4096
-    assert outcome(lambda: corpus["/proc/self/maps"]) == outcome(lambda: code.parse_source(Path("/proc/self/maps").read_bytes()))
+    assert outcome(lambda: corpus[link]) == outcome(lambda: code.parse_source(Path("/proc/self/maps").read_bytes()))
 
 
 def test_names_are_shared_across_files(project):
@@ -803,7 +859,7 @@ print("threads left", pool_threads())
 
 @pytest.mark.skipif(sys.platform == "win32", reason="sends a POSIX signal to a child process")
 def test_ctrl_c_stops_a_parse(temp_dir):
-    done = subprocess.run([sys.executable, "-c", CHILD, str(temp_dir)], capture_output=True, text=True, timeout=120)
+    done = subprocess.run([sys.executable, "-c", CHILD, temp_dir], capture_output=True, text=True, timeout=120)
     lines = done.stdout.splitlines()
     assert lines and lines[0] == "KeyboardInterrupt", done.stdout + done.stderr
     if "thread" not in os.environ.get("PYGIM_SANITIZED", ""):   # ThreadSanitizer holds the signal back (run_tests_under_sanitizers.py)
@@ -830,7 +886,7 @@ def test_the_generated_tables_are_python_3_14s(generator, header):
                           capture_output=True, text=True, check=True).stdout.strip()
     if made_by and tuple(map(int, here.split("."))) < tuple(map(int, made_by.group(1).split("."))):
         pytest.skip(f"python3.14 here is {here}, older than the {made_by.group(1)} that made {header}")
-    fresh = subprocess.run(["python3.14", str(SRC / generator), "--print"], capture_output=True, text=True, check=True).stdout
+    fresh = subprocess.run(["python3.14", SRC / generator, "--print"], capture_output=True, text=True, check=True).stdout
     tables = lambda text: re.sub(MADE_BY, "from Python 3.14's", text)
     assert tables(fresh) == tables(committed), f"stale: run python3.14 {SRC / generator} (python3.14 here is {here})"
 

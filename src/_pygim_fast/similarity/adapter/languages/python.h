@@ -11,13 +11,14 @@
 #include <string_view>
 #include <utility>
 
+#include "../../../code/languages.h"
 #include "../../core.h"
 #include "../../python_source.h"
 
 namespace pygim::similarity::languages {
 
 struct python {
-    static constexpr std::array<std::string_view, 2> exts{".py", ".pyi"};
+    static constexpr const auto& exts = pygim::code::python_extensions;   // pygim.code's: one table of what a Python file is (D93)
     static constexpr language_info info{
         "python",
         "Python 3.14, through pygim.code's own parser in C++; imports resolved to qualified names.",

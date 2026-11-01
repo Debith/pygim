@@ -83,7 +83,7 @@ def test_gimdict_mapping_protocol_set_get_delete_iter_len_contains():
 def test_gimdict_merge_method_matches_or_operator():
     left = utils.gimdict({"a": 1})
     right = utils.gimdict({"a": 2})
-    assert (left | right).to_dict() == left.merge(right).to_dict() == {"a": 3}
+    assert dict(left | right) == dict(left.merge(right)) == {"a": 3}
 
 
 def test_a_merge_leaves_both_sides_as_they_were():
@@ -93,15 +93,19 @@ def test_a_merge_leaves_both_sides_as_they_were():
     left, right = utils.gimdict({"a": 1, "n": {"x": 1}}, dict=utils.deep), utils.gimdict({"a": 2, "n": {"x": 2}})
     merged = left | right
     merged.set_strategy("a", "max")
-    assert left.to_dict() == {"a": 1, "n": {"x": 1}} and right.to_dict() == {"a": 2, "n": {"x": 2}}
+    assert dict(left) == {"a": 1, "n": {"x": 1}} and dict(right) == {"a": 2, "n": {"x": 2}}
     assert (left | right)["a"] == 3                    # left's strategy for "a" is still int's, sum
-    assert merged.to_dict() == {"a": 3, "n": {"x": 3}}
+    assert dict(merged) == {"a": 3, "n": {"x": 3}}
 
 
-def test_to_dict_is_a_copy():
-    d = utils.gimdict({"a": 1})
-    d.to_dict()["a"] = 99
-    assert d["a"] == 1
+def test_a_gimdict_is_handed_over_by_dict_not_a_typed_method():
+    """It already is a mapping, so dict(d) is its plain copy (D96, Debith on PR #39 of to_dict: "That
+    is funny as it already is a dictionary"; and of typed methods: "It associates type into class")."""
+    d = utils.gimdict({"a": 1, "n": {"x": 1}})
+    assert not hasattr(d, "to_dict")
+    copy = dict(d)
+    copy["a"] = 99
+    assert (d["a"], copy) == (1, {"a": 99, "n": {"x": 1}})
 
 
 @pytest.mark.parametrize("strategy", ["sum", "max", "min", "replace", max, min, sum])
@@ -234,39 +238,39 @@ def test_gimdict_conflict_error_for_invalid_sum_operation():
 def test_gimdict_deep_strategy_merges_nested_mappings_recursively():
     sheet = utils.gimdict({"abilities": {"DEX": 3, "STR": 0}}, dict=utils.deep)
     feat = utils.gimdict({"abilities": {"DEX": 1, "WIS": 2}})
-    merged = (sheet | feat).to_dict()
+    merged = dict(sheet | feat)
     assert merged["abilities"] == {"DEX": 4, "STR": 0, "WIS": 2}   # leaves stack
 
 
 def test_gimdict_deep_strategy_recurses_to_any_depth():
     d1 = utils.gimdict({"a": {"b": {"c": 1}}}, dict=utils.deep)
     d2 = utils.gimdict({"a": {"b": {"c": 2, "d": 9}}})
-    assert (d1 | d2).to_dict() == {"a": {"b": {"c": 3, "d": 9}}}
+    assert dict(d1 | d2) == {"a": {"b": {"c": 3, "d": 9}}}
 
 
 def test_gimdict_deep_falls_back_to_replace_for_non_mappings():
     d1 = utils.gimdict({"a": {"b": 1}}, dict=utils.deep)
     d2 = utils.gimdict({"a": "flat"})
-    assert (d1 | d2).to_dict() == {"a": "flat"}
+    assert dict(d1 | d2) == {"a": "flat"}
 
 
 def test_gimdict_extend_concatenates_sequences():
     d1 = utils.gimdict({"w": ["a"]}, list=utils.extend)
     d2 = utils.gimdict({"w": ["b", "a"]})
-    assert (d1 | d2).to_dict() == {"w": ["a", "b", "a"]}
+    assert dict(d1 | d2) == {"w": ["a", "b", "a"]}
 
 
 def test_gimdict_union_appends_only_unseen_elements():
     d1 = utils.gimdict({"gear": ["Dagger", "Rope"]}, list=utils.union)
     d2 = utils.gimdict({"gear": ["Dagger", "Lantern"]})
-    assert (d1 | d2).to_dict() == {"gear": ["Dagger", "Rope", "Lantern"]}
+    assert dict(d1 | d2) == {"gear": ["Dagger", "Rope", "Lantern"]}
 
 
 def test_gimdict_union_on_non_lists_replaces():
     d1 = utils.gimdict({"x": "a"})
     d1.set_strategy("x", "union")
     d2 = utils.gimdict({"x": "b"})
-    assert (d1 | d2).to_dict() == {"x": "b"}
+    assert dict(d1 | d2) == {"x": "b"}
 
 
 @pytest.mark.parametrize("name", ["deep", "extend", "union"])

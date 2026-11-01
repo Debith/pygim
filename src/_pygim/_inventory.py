@@ -27,7 +27,7 @@ import sys
 from dataclasses import dataclass, field
 from importlib import metadata
 from pathlib import Path
-from typing import Collection, Dict, Iterable, List, Mapping, NamedTuple, Optional, Sequence, Set, Tuple
+from typing import Collection, Dict, Iterable, List, Mapping, MutableMapping, NamedTuple, Optional, Sequence, Set, Tuple
 from urllib.parse import urlparse
 from urllib.request import url2pathname
 
@@ -149,7 +149,7 @@ def survey(*, imports: Mapping[str, Use], ships: Sequence[str], available: Mappi
     ours: Dict[str, Use] = {}
     unresolved: Dict[str, Use] = {}
 
-    def add(where: Dict[str, Use], key: str, use: Use) -> None:
+    def add(where: MutableMapping[str, Use], key: str, use: Use) -> None:
         where[key] = where.get(key, Use()).plus(use)
 
     for name, use in imports.items():
@@ -213,15 +213,15 @@ def python_files(root: Path) -> List[Tuple[str, str]]:
     (read_each names it), so a file removed between the walk and the read is only absent, and one
     that is not UTF-8 is read with its bad bytes replaced: neither takes the rest of the project with it.
     """
-    return _texts_of(path(str(root)).pathset("**/*.py", kind="file", skip=NOT_OURS), root)
+    return _texts_of(path(root).pathset("**/*.py", kind="file", skip=NOT_OURS), root)
 
 
 def _texts_of(found: PathSet, root: Path) -> List[Tuple[str, str]]:
     """Each member of *found* that is a file, as its path relative to *root* (``/`` between its parts)
     with its text — bytes that are not UTF-8 replaced — in member order; a member that is gone by the
     time it is read is only absent (read_each pairs each text with its member)."""
-    named = {str(p): "/".join(member.parts) for member, p in zip(found.relative_to(str(root)), found)}   # the same members, in order
-    return [(named[str(content.path)], str(memoryview(content), "utf-8", "replace")) for content in found.read_each()]
+    named = {p: "/".join(member.parts) for member, p in zip(found.relative_to(root), found)}   # the same members, in order
+    return [(named[content.path], str(memoryview(content), "utf-8", "replace")) for content in found.read_each()]
 
 
 def ships_in(root: Path) -> List[str]:
@@ -236,7 +236,7 @@ def ships_in(root: Path) -> List[str]:
     private = (".*", "_*")   # folders whose names say they are not for importers
     names: List[str] = []
     for source in SOURCE:
-        for init in (path(str(root)) / source).pathset("*/__init__.py", kind="file", skip=(*private, *NOT_SHIPPED)):
+        for init in (path(root) / source).pathset("*/__init__.py", kind="file", skip=(*private, *NOT_SHIPPED)):
             package = init.parent
             modules = package.pathset("*", kind="file") & ext(".py", ".so", ".pyd") & ~name("_*")
             subpackages = package.pathset("*/__init__.py", kind="file", skip=private)
@@ -404,7 +404,7 @@ def manifest_of(root: Path) -> dict:
     Read by pygim's own TOML engine, not `tomllib`: that arrived in Python 3.11, and on 3.10
     importing it crashed the inventory and the project map every session starts with."""
 
-    manifest = path(str(root)) / "pyproject.toml"
+    manifest = path(root) / "pyproject.toml"
     if not manifest.is_file():
         return {}
     try:
@@ -470,7 +470,7 @@ TEXT = (".py", ".pyi", ".h", ".hpp", ".cpp", ".c", ".md", ".rst", ".toml", ".yam
 def git(args: Sequence[str], cwd: Path) -> Optional[str]:
     """``git <args>`` in *cwd*: its stripped output, or None when git is missing or it fails."""
     try:
-        done = subprocess.run(["git", *args], cwd=str(cwd), capture_output=True, text=True, timeout=60)
+        done = subprocess.run(["git", *args], cwd=cwd, capture_output=True, text=True, timeout=60)
     except (OSError, subprocess.TimeoutExpired):
         return None
     return done.stdout.strip() if done.returncode == 0 else None
@@ -490,9 +490,9 @@ def text_files(root: Path) -> List[Tuple[str, str]]:
     """
     listed = git(["ls-files", "-z"], Path(root))
     if listed is None:
-        found = path(str(root)).pathset("**/*", kind="file", skip=NOT_OURS)
+        found = path(root).pathset("**/*", kind="file", skip=NOT_OURS)
     else:   # git's names, NOT_OURS's folders left out (a vendored third_party/ is tracked): text, not paths, until here
-        found = PathSet([str(Path(root) / n) for n in listed.split("\0") if n and not NOT_OURS.intersection(n.split("/")[:-1])])
+        found = PathSet([Path(root) / n for n in listed.split("\0") if n and not NOT_OURS.intersection(n.split("/")[:-1])])
     return _texts_of(found.filter(ext(*TEXT)), root)
 
 
@@ -522,14 +522,14 @@ class Host:
 
         for found in (self.prefix / "bin" / name, self.prefix / "Scripts" / f"{name}.exe",
                       self.prefix / "Scripts" / name, self.prefix / f"{name}.exe"):
-            if path(str(found)).exists():
+            if path(found).exists():
                 return found
         return None
 
 
-def _dist(folder: str) -> str:
+def _dist(dist_info: str) -> str:
     """`pygim-0.0.8.post1.dev69+dirty.dist-info` -> `pygim 0.0.8.post1.dev69+dirty`."""
-    stem = folder[: -len(".dist-info")]
+    stem = dist_info[: -len(".dist-info")]
     name, _, version = stem.partition("-")
     return f"{name} {version}".strip()
 
@@ -543,15 +543,15 @@ def environments(root: Path, home: Path) -> List[Host]:
     the conda environment by itself and the other gave up on the inventory. An editable install says
     which checkout it came from (`direct_url.json`), which is what makes this work for any project
     developed with `pip install -e`, not only this one. *home* is the one the program was given."""
-    here = path(str(root)).resolve()
-    root = Path(str(here))
+    here = path(root).resolve()
+    root = Path(here)
     candidates: List[Tuple[Path, str, str]] = []
     for base in CONDA_ROOTS:
-        conda = path(str(home)) / base
+        conda = path(home) / base
         if (conda / "conda-meta").is_dir():
-            candidates.append((Path(str(conda)), "conda env", "base"))
+            candidates.append((Path(conda), "conda env", "base"))
         if (conda / "envs").is_dir():
-            candidates += [(Path(str(env)), "conda env", env.name) for env in (conda / "envs").pathset("*", kind="dir")]
+            candidates += [(Path(env), "conda env", env.name) for env in (conda / "envs").pathset("*", kind="dir")]
     candidates += [(root / name, "venv", name) for name in LOCAL_ENVS if (here / name / "pyvenv.cfg").is_file()]
     named = ""
     environment = here / "environment.yml"
@@ -563,12 +563,12 @@ def environments(root: Path, home: Path) -> List[Host]:
     hosts: List[Host] = []
     for prefix, kind, name in candidates:
         seen, installs, owned = set(), [], []
-        records = [path(str(prefix)).pathset(layout + "/*.dist-info/direct_url.json", kind="file") for layout in SITE_PACKAGES]
+        records = [path(prefix).pathset(layout + "/*.dist-info/direct_url.json", kind="file") for layout in SITE_PACKAGES]
         for record in (record for found in records for record in found):
             real = record.resolve()
-            if str(real) in seen:                 # lib/python3.1 may be a link to lib/python3.12
+            if real in seen:                      # lib/python3.1 may be a link to lib/python3.12
                 continue
-            seen.add(str(real))
+            seen.add(real)
             try:
                 data = real.read()                # pygim's JSON engine
             except (OSError, RuntimeError, ValueError):
@@ -601,7 +601,7 @@ def _python_version(prefix: Path) -> str:
     else conda-meta's record of the python package, which is all a Windows conda environment has;
     "" when none of them says."""
 
-    env = path(str(prefix))
+    env = path(prefix)
     linked = (env / "bin" / "python").resolve().name
     if linked.startswith("python3"):
         return linked[len("python"):]
@@ -621,7 +621,7 @@ def _shown(target: Path, home: Path) -> str:
     a session runs commands in accepts, Windows' included."""
 
     try:
-        return "~/" + ("/".join(path(str(target)).relative_to(str(home)).parts) or ".")
+        return "~/" + ("/".join(path(target).relative_to(home).parts) or ".")
     except ValueError:
         return Path(target).as_posix()
 
@@ -646,7 +646,7 @@ def project_map(root: Path, *, home: Optional[Path] = None, recent: int = 3) -> 
     idle in its own work, what it reaches for, how it is run, and what changed last. Under 1.5 KB.
     """
     root = Path(root)
-    here = path(str(root))
+    here = path(root)
     listed = git(["ls-files"], root)
     names = [n for n in (listed or "").splitlines() if n]
     lines: List[str] = []

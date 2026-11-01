@@ -56,3 +56,18 @@ def test_what_the_build_made_in_the_copy_stays(harness, tree_and_out):
     (out / "docs" / "built.so").write_bytes(b"\x7fELF")
     harness.mirror(out)
     assert (out / "docs" / "built.so").exists()
+
+
+def test_a_module_no_extension_declares_is_dropped_from_the_copy(harness, tmp_path):
+    """Found 2026-11-01: datagen's extension became _datagen; its old module stayed in OUT, and an
+    extension module is imported before a Python module of the same name, so `pygim.datagen` there
+    was the old extension, and the tests of the new one failed."""
+    out = pygim.path(tmp_path)
+    (out / "src" / "_pygim_fast" / "datagen").mkdir(parents=True)
+    (out / "src" / "_pygim_fast" / "datagen" / "ext.datagen.toml").write_text('[extension]\nmodule = "_datagen"\n')
+    built = out / "src" / "pygim"
+    built.mkdir(parents=True)
+    for name in ("_datagen.cpython-312-x86_64-linux-gnu.so", "datagen.cpython-312-x86_64-linux-gnu.so", "datagen.py"):
+        (built / name).write_bytes(b"")
+    assert harness.drop_stale_modules(out) == ["datagen.cpython-312-x86_64-linux-gnu.so"]
+    assert sorted(p.name for p in built.pathset("*")) == ["_datagen.cpython-312-x86_64-linux-gnu.so", "datagen.py"]

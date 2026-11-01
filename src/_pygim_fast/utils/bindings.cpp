@@ -234,10 +234,6 @@ public:
             return out;
       }
 
-      py::dict to_dict() const {
-            return copy_of(m_values);
-      }
-
       py::object iter() const {
             return m_values.attr("__iter__")();
       }
@@ -542,7 +538,6 @@ PYBIND11_MODULE(utils, m) {
         .def("merge_in", &PyGimDict::merge_in, py::arg("key"), py::arg("value"),
              "`value` merged into `key`'s by its strategy; set when `key` has none.")
         .def("merge", &PyGimDict::merged, py::arg("other"), "A new gimdict: this one with every value of `other` merged in (a | b).")
-        .def("to_dict", &PyGimDict::to_dict, "The values as a plain dict.")
         .def("__getitem__", &PyGimDict::getitem, py::arg("key"), "The value of `key`; KeyError when it has none.")
         .def("__setitem__", &PyGimDict::setitem, py::arg("key"), py::arg("value"), "Sets `key` to `value`, replacing what is there.")
         .def("__delitem__", &PyGimDict::delitem, py::arg("key"), "Removes `key`; KeyError when it has no value.")

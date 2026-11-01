@@ -80,7 +80,7 @@ python -c "import pyarrow, pygim; print(pygim.path('x.toml').read())"
 
 ## How Arrow libraries are resolved
 
-Arrow-linked extensions (`datagen`, `_persistence`, `_fetch_benchmark`)
+Arrow-linked extensions (`_datagen`, `_persistence`, `_similarity`, `_fetch_benchmark`)
 carry `NEEDED libarrow.so.<major>` and resolve it at
 load time via, in order:
 
@@ -93,8 +93,8 @@ load time via, in order:
 Path 3 is what makes **editable installs** work. In an editable install the
 extension sits in `src/pygim/`, so `$ORIGIN/../pyarrow` points nowhere; the
 extension then depends on `libarrow` already being loaded when it is. That is
-why `pygim.persistence` and `create_df` import `pyarrow` *before* touching
-the extension, and `tests/conftest.py` preloads it before any test module:
+why `pygim.persistence`, `pygim.similarity` and `pygim.datagen` — each the Python
+front of its extension — import `pyarrow` *before* touching it, and `tests/conftest.py` preloads it before any test module:
 importing `pyarrow` brings `libarrow` into the process, and the extension's
 load reuses it.
 Because build-time and runtime pyarrow must share the SONAME major, always
@@ -171,8 +171,8 @@ here as precedent:
   silently remove a type mapping on a hypothetical broken platform.
 - `#ifdef VERSION_INFO … #else "dev"` in the bindings — masked a
   build-system regression as version `"dev"`; now `#error`.
-- `except ImportError: return table` in `create_df` — polars is a hard
-  dependency; the fallback changed the return type on a broken install.
+- `except ImportError: return table` in the former `create_df` — polars was a
+  hard dependency; the fallback changed the return type on a broken install.
 
 `test_setup_helpers.py::test_no_availability_conditional_compilation`
 enforces the bans mechanically (vendored `third_party/` exempt).

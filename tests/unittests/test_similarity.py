@@ -21,7 +21,7 @@ import pytest
 from click.testing import CliRunner
 from tabulate import tabulate
 
-from pygim import similarity
+from pygim import path, similarity
 from pygim.__main__ import cli
 from stub_parity import Stub
 from pool_threads import POOL_THREADS
@@ -1353,3 +1353,14 @@ def test_a_file_name_the_filesystem_cannot_decode_is_refused_before_any_work(tmp
     with pytest.raises(UnicodeEncodeError):
         ix.add_files([name if as_bytes else os.fsdecode(name)])
     assert len(ix) == 0
+
+
+def test_add_takes_its_origin_as_any_path(tmp_path):
+    """An origin names where a source came from, so it is taken as a path: str, os.PathLike or a pygim
+    path, recorded as os.fspath shows it. Found 2026-11-01 by test_layering's binding check: add()
+    took a str only, as parse_source() did."""
+    where = path(tmp_path) / "a.py"
+    ix = similarity.Index("python")
+    ix.add("def f(x):\n    return x\n", where)
+    ix.add("def g(y):\n    return y\n", tmp_path / "b.py")
+    assert ix.units().column("origin").to_pylist() == [os.fspath(where), os.fspath(tmp_path / "b.py")]

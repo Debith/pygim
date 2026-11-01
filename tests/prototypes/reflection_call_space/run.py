@@ -87,7 +87,7 @@ def write_json(destination, value):
 
 def command(argv, cwd, env=None):
     started = time.perf_counter()
-    result = subprocess.run([str(a) for a in argv], cwd=str(cwd), env=env,
+    result = subprocess.run(argv, cwd=cwd, env=env,
                             capture_output=True, text=True, encoding="utf-8", timeout=120, check=False)
     return result, time.perf_counter() - started
 
@@ -109,14 +109,14 @@ def build(source, destination, includes, compiler, coverage=False):
 
 
 def collect_coverage(run_dir, gcov_binary, header_suffix, function_fragment):
-    notes = [run_dir / name for name in os.listdir(str(run_dir)) if name.endswith(".gcno")]
+    notes = [run_dir / name for name in os.listdir(run_dir) if name.endswith(".gcno")]
     if len(notes) != 1:
         raise AssertionError(f"Expected one standalone translation unit, found {notes}")
     gcov, gcov_seconds = command([gcov_binary, "--json-format", "--branch-probabilities",
                                   "--branch-counts", "--conditions", notes[0]], run_dir)
     require_success(gcov, "gcov")
     write_text(run_dir / "gcov.log", gcov.stdout + gcov.stderr)
-    coverage_file = path(os.path.splitext(str(notes[0]))[0] + ".gcov.json.gz")
+    coverage_file = path(os.path.splitext(notes[0])[0] + ".gcov.json.gz")
     coverage = json.loads(gzip.decompress(coverage_file.read_bytes()))
     core_coverage = next(f for f in coverage["files"] if f["file"].endswith(header_suffix))
     target_function = next(f for f in core_coverage["functions"] if function_fragment in f["demangled_name"])

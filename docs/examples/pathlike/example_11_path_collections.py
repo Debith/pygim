@@ -92,7 +92,7 @@ try:
     txt = snapshot & ext(".txt")                 # a Query
     assert len(txt) == 2
     assert all(v.suffix == ".txt" for v in txt)
-    assert (snapshot & ~ext(".txt")).eval().to_list() == [str(workdir / "logo.png")]
+    assert [os.fspath(p) for p in (snapshot & ~ext(".txt")).eval()] == [str(workdir / "logo.png")]
     assert len(snapshot & (ext(".txt") | ext(".png"))) == 3
     assert len(snapshot & name("read*")) == 1
     assert snapshot.filter(ext(".png")) == PathSet(workdir / "logo.png")

@@ -209,8 +209,6 @@ class gimdict(MutableMapping[object, object]):
         """`value` merged into `key`'s by its strategy; set when `key` has none."""
     def merge(self, other: gimdict) -> gimdict:
         """A new gimdict: this one with every value of `other` merged in (a | b)."""
-    def to_dict(self) -> dict[object, object]:
-        """The values as a plain dict."""
     def __getitem__(self, key: object) -> object:
         """The value of `key`; KeyError when it has none."""
     def __setitem__(self, key: object, value: object) -> None:

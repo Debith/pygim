@@ -1,8 +1,10 @@
-"""pygim.datagen.generate and pygim.create_df: columns of test data, made in C++, as Arrow."""
+"""pygim.datagen.generate: columns of test data, made in C++, handed over as Arrow's C stream."""
 
 from __future__ import annotations
 
 import locale
+import subprocess
+import sys
 
 import pytest
 
@@ -27,7 +29,7 @@ SQL_ALIASES = {
 
 
 def table(schema, rows=100, **options):
-    return pa.RecordBatchReader.from_stream(datagen.generate(schema, rows, **options)).read_all()
+    return pa.table(datagen.generate(schema, rows, **options))
 
 
 @pytest.mark.parametrize("name", sorted(ARROW_TYPES))
@@ -147,19 +149,34 @@ def test_a_bool_column_holds_both():
     assert 400 < sum(values) < 600
 
 
-def test_create_df_is_polars_by_default():
+def test_a_reader_builds_its_own_table_from_the_data():
+    """pygim names no library: a reader that takes Arrow's C stream builds its own table (D95, Debith
+    on PR #39 of create_df: "the name `create_df` can give bit different expectation, as I understand
+    this is purely for data generation purposes"; of the proposal: "I like the proposal a lot")."""
     pl = pytest.importorskip("polars")
-    df = pygim.create_df({"id": "serial", "name": "string"}, rows=3)
-    assert isinstance(df, pl.DataFrame) and df["id"].to_list() == [1, 2, 3]
+    users = pl.DataFrame(datagen.generate({"id": "serial", "name": "string"}, rows=3))
+    assert list(users["id"]) == [1, 2, 3]
 
 
-def test_create_df_is_an_arrow_table_when_asked():
-    made = pygim.create_df({"id": "uuid"}, rows=3, format="arrow")
-    assert isinstance(made, pa.Table) and made.schema.field("id").type == pa.binary(16)
+def test_the_same_data_can_be_read_more_than_once():
+    data = datagen.generate({"id": "uuid", "n": "int64"}, rows=3, seed=5)
+    assert pa.table(data).equals(pa.table(data))
 
 
-@pytest.mark.parametrize("format", ["pandas", "Arrow", ""])
-def test_create_df_refuses_a_format_it_does_not_make(format):
-    """Found 2026-10-31: any format but "arrow" gave a polars DataFrame, so a typo was never told."""
-    with pytest.raises(ValueError, match=r"format must be 'polars' or 'arrow'"):
-        pygim.create_df({"id": "serial"}, rows=3, format=format)
+def test_seed_and_null_fraction_are_named():
+    with pytest.raises(TypeError):
+        datagen.generate({"id": "serial"}, 3, 7)
+
+
+def test_create_df_is_gone():
+    """One call makes the data, under datagen: the root names no data-generation helper (D95)."""
+    assert not hasattr(pygim, "create_df")
+
+
+def test_datagen_imports_on_its_own():
+    """pygim.datagen loads pyarrow before its extension, as similarity and persistence do: an
+    in-place build finds libarrow only through it. Found 2026-11-01 (D95): `from pygim import
+    datagen` in a fresh interpreter failed with libarrow not found."""
+    made = subprocess.run([sys.executable, "-c", "from pygim import datagen; print(datagen.generate({'a': 'int8'}, rows=2))"],
+                          capture_output=True, text=True)
+    assert made.returncode == 0, made.stderr

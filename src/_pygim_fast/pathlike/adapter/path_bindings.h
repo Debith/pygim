@@ -141,6 +141,26 @@ inline const pathview* held(PyObject* obj) noexcept {
     return nullptr;
 }
 
+/// A bytes-like object's bytes, held for one call: bytes, a bytearray, a memoryview, an array — what
+/// pathlib's write_bytes takes through memoryview(data). Contiguous, as a file's write needs them
+/// (PyBUF_SIMPLE: a non-contiguous view is a BufferError, as file.write's). Released with the GIL held.
+class held_bytes {
+public:
+    explicit held_bytes(const py::handle& data) {
+        if (PyObject_GetBuffer(data.ptr(), &m_view, PyBUF_SIMPLE) != 0) throw py::error_already_set();
+    }
+    ~held_bytes() { PyBuffer_Release(&m_view); }
+    held_bytes(const held_bytes&) = delete;
+    held_bytes& operator=(const held_bytes&) = delete;
+
+    [[nodiscard]] std::string_view view() const noexcept {
+        return {static_cast<const char*>(m_view.buf), static_cast<std::size_t>(m_view.len)};
+    }
+
+private:
+    Py_buffer m_view{};
+};
+
 /// The type's own comparison and hash, its tp_richcompare and tp_hash, where they were pybind11
 /// methods: a sort, a set and a dict call them straight, not through pybind11's dispatcher (D85:
 /// one `a < b` 307 ns, pathlib's 214). Two paths compare by equals() and pathlib's order
@@ -544,13 +564,17 @@ py::class_<pathview> bind_path(engine_list<Es...> es, py::module_& m, const path
             py::kw_only(), py::arg("atomic") = false,
             "pathlib's write_text(): data encoded (UTF-8 unless encoding says), each \\n written as os.linesep unless "
             "newline is given; the characters written. atomic=True as for write().")
-        .def("write_bytes", [](const pathview& v, py::bytes data, bool atomic) {
-                const std::string_view sv = data;
+        .def("write_bytes", [](const pathview& v, const py::handle& data, bool atomic) {
+                const held_bytes held(data);
                 const file f = v.value();
-                py::gil_scoped_release nogil;
-                f.write_bytes(sv, atomic ? write_mode::atomic : write_mode::in_place);
+                {
+                    py::gil_scoped_release nogil;   // the bytes stay held: their exporter cannot resize them
+                    f.write_bytes(held.view(), atomic ? write_mode::atomic : write_mode::in_place);
+                }
+                return held.view().size();
             }, py::arg("data"), py::kw_only(), py::arg("atomic") = false,
-            "Replace the file's contents with the given bytes; atomic=True as for write().")
+            "Replace the file's contents with the given bytes-like data (bytes, bytearray, memoryview, ...),\n"
+            "as pathlib's write_bytes takes it; atomic=True as for write(). The number of bytes written.")
         .def("mkdir", [](const pathview& v, bool parents, bool exist_ok) { v.value().mkdir(parents, exist_ok); },
              py::arg("parents") = false, py::arg("exist_ok") = false,
              "Create this directory, like pathlib: parents= creates missing ancestors, exist_ok= tolerates an existing directory.")

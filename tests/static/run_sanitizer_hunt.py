@@ -52,7 +52,7 @@ EXTENSIONS = {"python": {".py"}, "cpp": {".c", ".cc", ".cpp", ".cxx", ".h", ".hh
 def build(out, name="sanitizer_hunt", defines=()):
     binary = out / name
     if not binary.exists():
-        subprocess.run(["g++", "-std=c++26", *SANITIZE, *defines, str(HERE / "sanitizer_hunt.cpp"), "-o", str(binary)], check=True)
+        subprocess.run(["g++", "-std=c++26", *SANITIZE, *defines, HERE / "sanitizer_hunt.cpp", "-o", binary], check=True)
     return binary
 
 
@@ -76,7 +76,7 @@ def negative_control(out):
         listing.write_bytes(f"{source}\n".encode())
         crash = probe / "crashes" / "python-u0-i0.bin"
         crash.unlink(missing_ok=True)
-        proc = subprocess.run([str(binary), "python", str(listing), "0", "0", "1", str(probe / "crashes")],
+        proc = subprocess.run([binary, "python", listing, "0", "0", "1", probe / "crashes"],
                               capture_output=True, text=True, env=dict(os.environ, **SANITIZER_OPTIONS))
         report = "heap-buffer-overflow" if tag == "A" else "signed integer overflow"
         caught.append(proc.returncode != 0 and report in proc.stderr and died_on(proc.stderr) == 0
@@ -92,7 +92,7 @@ def seed_list(out, target, roots):
     listing = out / f"{target}-files.txt"
     if not listing.exists():
         sources = functools.reduce(operator.or_, (path(root).pathset("**/*", kind="file") for root in roots)).filter(ext(*EXTENSIONS[target]))
-        found = sorted((p for p, size in zip(sources, sources.sizes()) if 0 < size <= MAX_SEED_BYTES), key=str)
+        found = sorted((p for p, size in zip(sources, sources.sizes()) if 0 < size <= MAX_SEED_BYTES))
         seeds = out / "seeds" / target
         seeds.mkdir(parents=True, exist_ok=True)
         copies = []
@@ -115,7 +115,7 @@ def run_unit(binary, out, target, listing, unit, real_units):
     first, inputs, refused, slowest_ms, slowest_i, findings = 0, 0, 0, 0.0, None, 0
     env = dict(os.environ, **SANITIZER_OPTIONS)
     while first < count and findings < MAX_FINDINGS:
-        proc = subprocess.run([str(binary), target, str(listing), str(unit), str(first), str(count - first), str(out / "crashes")],
+        proc = subprocess.run([binary, target, listing, str(unit), str(first), str(count - first), out / "crashes"],
                               capture_output=True, text=True, env=env, timeout=3600)
         if proc.returncode == 0:
             r = json.loads(proc.stdout.strip().splitlines()[-1])

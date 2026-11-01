@@ -80,7 +80,7 @@ def main():
         sys.exit(str(e))
     corpora = {name: dirs.split(",") for name, dirs in (a.split("=", 1) for a in args[1:])}
     try:
-        commit = subprocess.run(["git", "-C", str(root), "log", "-1", "--format=%h %cd", "--date=short"],
+        commit = subprocess.run(["git", "-C", root, "log", "-1", "--format=%h %cd", "--date=short"],
                                 capture_output=True, text=True).stdout.strip()
     except OSError:
         commit = "?"

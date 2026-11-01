@@ -10,7 +10,7 @@ listed beside them.
 ```python
 from pygim import code
 
-corpus = code.parse("Lib", "**/*.py")       # walk, read, parse: C++ only, the GIL released, Ctrl-C owned
+corpus = code.parse("Lib")                  # every .py and .pyi: walk, read, parse in C++, the GIL released, Ctrl-C owned
 corpus.stats()                              # {'files': 1846, 'failed': 4, 'nodes': 3321029, 'names': 81668, 'seconds': 0.064, ...}
 corpus.errors                               # [SyntaxError, ...]: each file that is not Python, as corpus[path] raises it
 tree = corpus["Lib/ast.py"]                 # a view: no Python object per node
@@ -36,7 +36,7 @@ CodeBuilder's own decisions.
 ## How it runs
 
 ```
-code.parse(root, pattern)                  adapter/corpus_bindings.h: interrupt_scope, GIL released
+code.parse(root, pattern, languages)       adapter/corpus_bindings.h: interrupt_scope, GIL released
  └─ corpus_run (corpus.h)                  one parallel::task_pool for all of it
       ├─ a directory task                  glob_step (pathlike/glob_walk.h): adds directories and file tasks
       └─ a file task                       native_reads, then parse on the same worker (#276: fused)
@@ -89,6 +89,7 @@ Nothing is built and then thrown away: the pegen spike made 3.2 nodes for every 
 | D45 *(Q39, Debith 2026-10-27: "based on cpus for default")* | the width: `threads=None` is one thread per core from the start (`width_for<one_per_core>(…)`): parsing computes. pathlike's reads keep growing their width while more threads help | the elastic width, which a walk's tasks fool into thinking they wait: 145 ms at 20-24 workers on 16 cores, against 75 ms fixed at the cores |
 | D47 (Debith: "Do fixes", 2026-10-26) | the whole-buffer source checks — is the text UTF-8, where do its lines start — scan 64 bytes a step (`utils/byte_scan.h`: SSE2 on x86-64, NEON on arm64, and two 32-byte compares where AVX2 is there, chosen at run time since 2026-10-27); the line starts come from one mask per 64 bytes, every line end taken from it (`for_each_line_end`: Lib's line index 12.6-13.5 → 3.9-4.4 ms). The scalar loop is the definition, run by a constant evaluation, the tail and `PYGIM_BYTE_SCAN_SCALAR`; `test_the_buffer_scans_agree_with_cpython_at_every_offset_around_their_steps` checks every width. The lexers stay scalar | simdjson's `validate_utf8`, which pygim vendors in pathlike's adapter: no offset for the error, no line ends, and its 1.5 MB source in another extension; SIMD in the lexers (17% for the lexer alone, 0% in a whole parse: its runs are a few bytes) |
 | D94 (Debith 2026-11-01, PR #39: "I like this suggestion. Go with it") | `code.like(kind, **fields)` is the node a test expects, and `node == like` compares in C++ (`expected_node`, `corpus_bindings.h`): the kind, then each field or position named, a value as `field()` gives it, a nested `like` for a node, a list item by item. A field not named is not compared. A kind, field or position no node could have is a ValueError when the `like` is made. The kind is the one positional argument (`*args`), since `Constant` has a field named `kind` | an expected node that names every field, so `==` is the whole node (a test would spell out each body); comparing with an `ast` node (the C API does not reach the `ast` classes, D40) |
+| D93 (Debith 2026-11-01, PR #39: "if we say code.parse, shouldn't it be all supported types there?"; "by default it should be all and we should be able to limit it to specific language when needed ... def parse(..., languages=all, ...)") | `code.parse(root, pattern="**/*", *, languages=None, threads=None)`: every file under root that the pattern matches and a language of the run owns by its suffix, a file of none never read (`code/languages.h`, `language_set`). `code.LANGUAGES` is the table, Python's `.py` and `.pyi` today, and similarity's Python reads its suffixes from it. Languages are named by str: with one language an enum would name one member | "**/*.py" as the default, which left stubs out where similarity counted them; a PathSet as the first argument instead of the pattern (proposed, then dropped: the pattern selects inside the run) |
 
 ## How it was checked
 

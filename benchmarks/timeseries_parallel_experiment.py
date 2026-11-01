@@ -19,7 +19,9 @@ from bcp_throughput import (
     estimate_size_bytes,
     default_connection_string,
 )
-import pygim
+import pyarrow as pa
+
+from pygim import datagen
 from pygim.utils import QuickTimer
 
 
@@ -159,8 +161,8 @@ def experiment(conn, rows, iters):
     schema_no_id = {"ts": "timestamp", "data": "float64"}
     schema_with_id = {"id": "serial", "ts": "timestamp", "data": "float64"}
     click.echo(f"Generating {rows:,} timeseries rows (2 variants) …")
-    df = pygim.create_df(schema_no_id, rows=rows, format="arrow")
-    df_with_id = pygim.create_df(schema_with_id, rows=rows, format="arrow")
+    df = pa.table(datagen.generate(schema_no_id, rows=rows))
+    df_with_id = pa.table(datagen.generate(schema_with_id, rows=rows))
     click.echo(f"  → no-id: {estimate_size_bytes(df) / 1_048_576:.1f} MB")
     click.echo(f"  → with-id: {estimate_size_bytes(df_with_id) / 1_048_576:.1f} MB\n")
 

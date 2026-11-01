@@ -105,7 +105,7 @@ def test_glob_results_share_the_table(tmp_path):
     st = pathlike.PathStore()
     d = pygim.path(tmp_path, store=st)
     hits = d.glob("*.yaml")
-    assert hits == sorted(hits, key=os.fspath) and all(h.store == st for h in hits)
+    assert hits == sorted(hits) and all(h.store == st for h in hits)
     assert all(isinstance(h, pathlike.yamlpath) for h in hits) and hits[0].parent == d
     assert len(d.pathset("*.yaml")) == 2 and d.pathset("*.yaml").stats()["rows"] == st.stats()["rows"]
 
@@ -123,7 +123,7 @@ def test_join_matches_pathlib(seg):
         want = P(s) / seg
         got = p / seg
         assert os.fspath(got) == str(want), (s, seg)
-        assert got == pygim.path(str(want)) and hash(got) == hash(pygim.path(str(want)))
+        assert got == pygim.path(want) and hash(got) == hash(pygim.path(want))
     p = pygim.path("j/k")
     assert os.fspath(p.joinpath("a", "b/c", "d")) == str(P("j/k/a/b/c/d"))
 

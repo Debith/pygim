@@ -2,7 +2,7 @@
 // code/adapter/corpus_bindings.h — pygim.code's parse: one call starts a parse, and views show
 // its result. Registered by register_corpus(m) from code/bindings.cpp.
 //
-//     corpus = code.parse("Lib", "**/*.py")      # walk, read, parse: C++, the GIL released, Ctrl-C owned
+//     corpus = code.parse("Lib")                 # walk, read, parse: C++, the GIL released, Ctrl-C owned
 //     tree = corpus["Lib/ast.py"]                # a view: no Python object per node
 //     tree.root.kind, tree.root.children[0].field("names")
 //     tree.dump(include_attributes=True)         # == ast.dump(ast.parse(...), include_attributes=True)
@@ -31,6 +31,7 @@
 #include "../../pathlike/adapter/path_text.h"
 #include "../../utils/interrupted.h"
 #include "../corpus.h"
+#include "../languages.h"
 #include "../python/dump.h"
 #include "../python/literals.h"
 
@@ -402,11 +403,41 @@ private:
     throw py::error_already_set();
 }
 
-// The corpus of every file under `root` matching `pattern`: built with no Python, the GIL
-// released, Ctrl-C and SIGTERM owned for the run (#272).
-[[nodiscard]] inline corpus_ptr parse_tree(const py::handle& root, std::string_view pattern, std::optional<std::size_t> threads) {
+// The names of every language pygim.code parses, for an error: "python".
+[[nodiscard]] inline std::string language_names() {
+    std::string out;
+    for (const language& l : languages) out += (out.empty() ? "" : ", ") + std::string(l.name());
+    return out;
+}
+
+// The languages a run parses: every one for None, else each one named, by a str or an iterable of
+// them. A name pygim.code does not parse is a ValueError naming the ones it does (D93).
+[[nodiscard]] inline language_set languages_of(const py::handle& asked) {
+    if (asked.is_none()) return language_set::all();
+    language_set out;
+    const auto take = [&out](const py::handle& name) {
+        if (!py::isinstance<py::str>(name)) throw py::type_error("languages: names of languages (str), not " + py::repr(name).cast<std::string>());
+        const std::string n = name.cast<std::string>();
+        const std::optional<std::size_t> i = language_named(n);
+        if (!i) throw py::value_error("no language is named '" + n + "': pygim.code parses " + language_names());
+        out.add(*i);
+    };
+    if (py::isinstance<py::str>(asked)) {
+        take(asked);   // one name: a str iterated is its characters
+    } else {
+        for (const py::handle name : py::iter(asked)) take(name);
+    }
+    if (out.empty()) throw py::value_error("languages: name at least one, or None for every one");
+    return out;
+}
+
+// The corpus of every file under `root` matching `pattern` in `languages`: built with no Python,
+// the GIL released, Ctrl-C and SIGTERM owned for the run (#272).
+[[nodiscard]] inline corpus_ptr parse_tree(const py::handle& root, std::string_view pattern, const py::handle& languages,
+                                           std::optional<std::size_t> threads) {
     const std::string where = pathlike::text_from_arg(root);   // as the OS takes it: a POSIX name need not be UTF-8
-    pathlike::glob_pattern parsed(pattern);   // a bad pattern is a ValueError before any thread starts
+    pathlike::glob_pattern parsed(pattern, std::nullopt, pathlike::glob_kind::file);   // a bad pattern is a ValueError before any thread starts
+    const language_set chosen = languages_of(languages);
     parallel::chosen_width width = parallel::width_for<parallel::one_per_core>(threads, "parse");   // parsing computes (Q39)
     // No Python from the run's start to its collect. What the threads share is the run's own: its
     // free workspaces (m_free, m_workspaces under m_lock), the pool's queue under its lock, the
@@ -414,7 +445,7 @@ private:
     // on and the last task's finished() or a signal wakes. Nothing points into the caller's
     // objects: `where` and the parsed pattern are copies.
     return run_interruptible(
-        "code.parse", [&] { return corpus_run(pathlike::file(where).to_fs(), std::move(parsed), std::move(width)); },   // UTF-8 on Windows too
+        "code.parse", [&] { return corpus_run(pathlike::file(where).to_fs(), std::move(parsed), chosen, std::move(width)); },   // UTF-8 on Windows too
         [](corpus_run& run) { return std::make_shared<corpus>(run.collect()); });
 }
 
@@ -544,10 +575,25 @@ inline void register_corpus(py::module_& m) {
             return "<Corpus: " + std::to_string(c.size()) + " files, " + std::to_string(c.stats().failed()) + " not Python, " + std::to_string(c.stats().nodes()) + " nodes>";
         });
 
-    m.def("parse", &parse_tree, py::arg("root"), py::arg("pattern") = "**/*.py", py::kw_only(), py::arg("threads") = py::none(),
-          "Every file under root matching pattern, parsed as Python 3.14: one run in C++ that walks,\n"
-          "reads and parses with the GIL released. threads: how many work at once; None, one per\n"
-          "core. Ctrl-C stops the run and raises KeyboardInterrupt.");
+    py::dict known;   // LANGUAGES: what each language is, and the suffixes that make a file one
+    for (const language& l : languages) {
+        py::tuple exts(l.exts().size());
+        std::size_t at = 0;
+        for (const std::string_view ext : l.exts()) exts[at++] = py::str(std::string(ext));
+        py::dict about;
+        about["doc"] = std::string(l.doc());
+        about["exts"] = exts;
+        known[py::str(std::string(l.name()))] = about;
+    }
+    m.attr("LANGUAGES") = known;
+
+    m.def("parse", &parse_tree, py::arg("root"), py::arg("pattern") = "**/*", py::kw_only(), py::arg("languages") = py::none(),
+          py::arg("threads") = py::none(),
+          "Every file under root matching pattern in the languages asked for, parsed: one run in C++\n"
+          "that walks, reads and parses with the GIL released. languages: None for every one pygim.code\n"
+          "parses (code.LANGUAGES: Python's .py and .pyi), or a name, or several; a file of none is not\n"
+          "read. threads: how many work at once; None, one per core. Ctrl-C stops the run and raises\n"
+          "KeyboardInterrupt.");
     m.def("parse_source", [](const py::handle& source, const py::handle& path) {
               arena_string bytes;   // on the heap: a tree parsed alone
               const bool decoded = !PyBytes_Check(source.ptr());

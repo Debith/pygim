@@ -248,8 +248,7 @@ def test_rglob_is_glob_with_a_leading_double_star(temp_dir):
 
 def test_pathset_of_a_recursive_pattern_holds_the_same_paths(temp_dir):
     root = make_tree(temp_dir / "t")
-    assert sorted(os.fspath(p) for p in pygim.path(root).pathset("**/*.py")) == \
-        sorted(os.fspath(p) for p in pygim.path(root).glob("**/*.py"))
+    assert sorted(pygim.path(root).pathset("**/*.py")) == sorted(pygim.path(root).glob("**/*.py"))
 
 
 def in_a_skipped_folder(root, found, skip):
@@ -369,7 +368,7 @@ print("threads left", pool_threads())
 
 @pytest.mark.parametrize("pattern", ["**/*.py", "*/*/*.py"])   # a wildcard level lists every folder of it, ** or not
 def test_ctrl_c_stops_a_glob_that_lists_many_folders(temp_dir, pattern):
-    done = subprocess.run([sys.executable, "-c", CHILD, str(temp_dir), pattern], capture_output=True, text=True, timeout=120)
+    done = subprocess.run([sys.executable, "-c", CHILD, temp_dir, pattern], capture_output=True, text=True, timeout=120)
     lines = done.stdout.splitlines()
     assert lines and lines[0] == "KeyboardInterrupt", done.stdout + done.stderr
     assert "stopped early True" in done.stdout, done.stdout

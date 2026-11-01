@@ -1,7 +1,8 @@
 # type: ignore
 """Python source parsed in C++: ``code.parse()`` for a whole tree, ``code.parse_source()`` for one.
 
-``code.parse(root)`` walks ``root``, reads every ``*.py`` file and parses it as Python 3.14 —
+``code.parse(root)`` walks ``root``, reads every file of a language it parses (``code.LANGUAGES``:
+Python's ``.py`` and ``.pyi``) and parses it as Python 3.14 —
 all of it in C++, one thread per core, with the GIL released. What comes back is a ``Corpus``:
 the files sorted by path, each a syntax tree or the reason it is not one. A ``Tree`` and its
 ``Node`` objects are views: no Python object exists per node until you ask for one, and a
@@ -45,7 +46,7 @@ with tempfile.TemporaryDirectory() as tmp:
     # ------------------------------------------------------------------------
     #                         ┌─ threads: None is one per core; n fixes it
     #                         ▼
-    corpus = code.parse(root, threads=None)            # every *.py beneath root
+    corpus = code.parse(root, threads=None)            # every .py and .pyi beneath root
     assert [p.name for p in corpus.files] == ["broken.py", "shapes.py"]   # a PathSet, by path
     stats = corpus.stats()
     assert stats["files"] == 2

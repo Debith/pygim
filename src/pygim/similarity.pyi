@@ -52,8 +52,8 @@ class Index:
     @property
     def language(self) -> str:
         """The language this index holds."""
-    def add(self, source: str, origin: str = "<string>", module: str | None = None) -> None:
-        """Parse `source` (str) and add its units, recorded as coming from `origin`.
+    def add(self, source: str, origin: StrPath = "<string>", module: str | None = None) -> None:
+        """Parse `source` (str) and add its units, recorded as coming from `origin` (str or any path).
 
         `module` is the source's dotted module name ("pkg.sub.m"): it qualifies the
         module-level names and resolves relative imports, so the same function

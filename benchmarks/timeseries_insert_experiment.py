@@ -23,7 +23,9 @@ from bcp_throughput import (
     estimate_size_bytes,
     default_connection_string,
 )
-import pygim
+import pyarrow as pa
+
+from pygim import datagen
 from pygim.utils import QuickTimer
 
 
@@ -157,7 +159,7 @@ def experiment(conn, rows, iters):
 
     schema = {"ts": "timestamp", "data": "float64"}
     click.echo(f"Generating {rows:,} timeseries rows …")
-    df = pygim.create_df(schema, rows=rows, format="arrow")
+    df = pa.table(datagen.generate(schema, rows=rows))
     payload_mb = estimate_size_bytes(df) / 1_048_576
     click.echo(f"  → {payload_mb:.1f} MB\n")
 

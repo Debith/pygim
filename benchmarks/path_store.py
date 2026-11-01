@@ -16,8 +16,6 @@ Each run appends its raw measurements + environment metadata to
 ``results/path_store.jsonl`` (see ``_results.py``).
 """
 
-import gc
-import os
 import pathlib  # the reference: pathlib.PurePath's memory and speed against path()
 
 from tabulate import tabulate

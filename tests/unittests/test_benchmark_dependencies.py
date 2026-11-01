@@ -22,7 +22,7 @@ except ImportError:  # Python < 3.11: the [test] extra installs the backport
     import tomli as tomllib
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
-BENCHMARKS = sorted(pathlib.Path(str(p)) for p in path(str(ROOT / "benchmarks")).pathset("*.py", kind="file"))   # pygim's own walker
+BENCHMARKS = sorted(pathlib.Path(p) for p in path(ROOT / "benchmarks").pathset("*.py", kind="file"))   # pygim's own walker
 PROJECT = {"pygim", "_pygim"}
 # The standard library's on a later Python than this one may be: tomllib from 3.11, the [test]
 # extra's tomli standing in before it.

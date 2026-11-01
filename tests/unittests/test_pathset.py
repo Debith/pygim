@@ -46,7 +46,7 @@ def test_equality(temp_files):
     assert a == a and a == PathSet(temp_files) and a != PathSet([])
     assert PathSet(reversed(temp_files)) == a                     # order does not matter
     assert a != PathSet(temp_files[:2])
-    other_table = PathSet([str(p) for p in temp_files])           # its own table: compared by chain
+    other_table = PathSet(temp_files)                             # its own table: compared by chain
     assert other_table == a and a == other_table
     assert PathSet(["x/y", "x//y/"]) == PathSet("x/y")            # spellings collapse
 
@@ -59,7 +59,7 @@ def test_membership(temp_files):
 
 def test_subtraction(temp_dir, temp_files):
     files = PathSet(temp_files)
-    files -= str(temp_dir / "readme.txt")                         # one path: a new set, the name rebound
+    files -= temp_dir / "readme.txt"                              # one path: a new set, the name rebound
     assert len(files) == 2
     files -= PathSet(temp_dir / "readme.rst")
     assert len(files) == 1 and files[0].name == "AUTHORS.rst"
@@ -84,7 +84,7 @@ def test_cloning(temp_files):
 def test_modification_after_cloning(temp_dir, temp_files):
     files = PathSet(temp_files)
     cloned = files.clone()
-    files -= str(temp_dir / "readme.txt")
+    files -= temp_dir / "readme.txt"
     assert len(files) == 2 and len(cloned) == 3
 
 
@@ -157,7 +157,7 @@ def test_filters_read_the_table_not_the_filesystem():
     # pathlib's is_absolute() needs a drive on Windows: anchor the path on the current one.
     absp = str(pathlib.PurePath(pathlib.Path.cwd().anchor, "etc", "a.yaml"))
     ps = PathSet([absp, "rel/b.yaml", "rel/c.json"])              # none of these exist on disk
-    assert ps.filter(absolute()).to_list() == [absp]
+    assert [os.fspath(p) for p in ps.filter(absolute())] == [absp]
     assert len(ps & ext(".yaml") & ~absolute()) == 1
     assert ps.filter(name("?.json")) == PathSet("rel/c.json")
 

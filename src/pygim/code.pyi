@@ -8,7 +8,7 @@ one is asked for. Kinds, fields and positions are Python 3.14's ``ast``'s.
 """
 
 import os
-from collections.abc import Iterator
+from collections.abc import Iterable, Iterator
 from typing import ClassVar, TypedDict
 
 from pygim.pathlike import PathSet, path as pygim_path   # Tree has a property named path
@@ -26,10 +26,22 @@ class CorpusStats(TypedDict):
     seconds: float
 
 
-def parse(root: StrPath, pattern: str = "**/*.py", *, threads: int | None = None) -> Corpus:
-    """Every file under root matching pattern, parsed as Python 3.14: one run in C++ that walks,
-    reads and parses with the GIL released. threads: how many work at once; None, one per
-    core. Ctrl-C stops the run and raises KeyboardInterrupt."""
+class LanguageInfo(TypedDict):
+    doc: str
+    exts: tuple[str, ...]
+
+
+LANGUAGES: dict[str, LanguageInfo]
+"""Every language pygim.code parses: what it is, and the suffixes that make a file one."""
+
+
+def parse(root: StrPath, pattern: str = "**/*", *, languages: str | Iterable[str] | None = None,
+          threads: int | None = None) -> Corpus:
+    """Every file under root matching pattern in the languages asked for, parsed: one run in C++
+    that walks, reads and parses with the GIL released. languages: None for every one pygim.code
+    parses (code.LANGUAGES: Python's .py and .pyi), or a name, or several; a file of none is not
+    read. threads: how many work at once; None, one per core. Ctrl-C stops the run and raises
+    KeyboardInterrupt."""
 
 
 def parse_source(source: str | bytes, path: StrPath = "<string>") -> Tree:

@@ -370,9 +370,9 @@ class TestTheCommandAHumanRuns:
         monkeypatch.setitem(sys.modules, "tomllib", None)
         where = _config.read({"NO_COLOR": "1", "HOME": str(tmp_path / "home")}, cwd=project,
                              home=tmp_path / "home")
-        said = GimmicksCliApp._capture(lambda: GimmicksCliApp().inventory(where=where, path=str(project)))
+        said = GimmicksCliApp._capture(lambda: GimmicksCliApp().inventory(where=where, path=project))
         assert "no-such-distribution-here" in said                  # declared, and not installed here
-        mapped = GimmicksCliApp._capture(lambda: GimmicksCliApp().inventory(where=where, path=str(project), brief=True))
+        mapped = GimmicksCliApp._capture(lambda: GimmicksCliApp().inventory(where=where, path=project, brief=True))
         assert "run as: proj" in mapped
 
     def test_it_prints_the_join_for_a_project_it_was_pointed_at(self, tmp_path):
@@ -381,14 +381,14 @@ class TestTheCommandAHumanRuns:
         (lib / "__init__.py").write_text("", encoding="utf-8")
         (lib / "unused.py").write_text("", encoding="utf-8")
         env = {**os.environ, "NO_COLOR": "1", "HOME": str(tmp_path / "home")}
-        done = subprocess.run([str(OO), "inventory", "--path", str(tmp_path)],
+        done = subprocess.run([OO, "inventory", "--path", tmp_path],
                               capture_output=True, text=True, env=env, timeout=120)
         assert done.returncode == 0, done.stderr
         assert "ships, and nothing imports it" in done.stdout
         assert "lib.unused" in done.stdout
         (tmp_path / "build").mkdir()
         (tmp_path / "build" / "bad_coding.py").write_bytes(b"# -*- coding: latin-1 -*-\nx = '\xe9'\n")   # left out, so never read
-        again = subprocess.run([str(OO), "inventory", "--path", str(tmp_path)],
+        again = subprocess.run([OO, "inventory", "--path", tmp_path],
                                capture_output=True, text=True, env=env, timeout=120)
         assert again.returncode == 0 and again.stdout == done.stdout, again.stderr
         assert "2 of 2 shipped module(s) are not used" in done.stdout
@@ -396,7 +396,7 @@ class TestTheCommandAHumanRuns:
     def test_an_application_that_ships_nothing_is_told_so_plainly(self, tmp_path):
         (tmp_path / "run.py").write_text("import json\n", encoding="utf-8")
         env = {**os.environ, "NO_COLOR": "1", "HOME": str(tmp_path / "home")}
-        done = subprocess.run([str(OO), "inventory", "--path", str(tmp_path)],
+        done = subprocess.run([OO, "inventory", "--path", tmp_path],
                               capture_output=True, text=True, env=env, timeout=120)
         assert done.returncode == 0, done.stderr
         assert "ships nothing importable" in done.stdout
@@ -415,7 +415,7 @@ class TestTheCommandAHumanRuns:
         (tmp_path / "tests" / "test_mod.py").write_text("from lib.sub.mod import x\n", encoding="utf-8")
         where = _config.read({"NO_COLOR": "1", "HOME": str(tmp_path / "home")}, cwd=tmp_path,
                              home=tmp_path / "home")
-        said = GimmicksCliApp._capture(lambda: GimmicksCliApp().inventory(where=where, path=str(tmp_path)))
+        said = GimmicksCliApp._capture(lambda: GimmicksCliApp().inventory(where=where, path=tmp_path))
         section = lambda heading: said.partition(heading)[2].partition("\n\n")[0]
         assert "lib.sub" not in section("ships, and nothing imports it"), said
         assert "lib.sub" in section("ships, and only its own tests and examples import it"), said
@@ -435,7 +435,7 @@ class TestTheCommandAHumanRuns:
         (tmp_path / "tests" / "test_sub.py").write_text("from lib import sub\n", encoding="utf-8")
         where = _config.read({"NO_COLOR": "1", "HOME": str(tmp_path / "home")}, cwd=tmp_path,
                              home=tmp_path / "home")
-        said = GimmicksCliApp._capture(lambda: GimmicksCliApp().inventory(where=where, path=str(tmp_path)))
+        said = GimmicksCliApp._capture(lambda: GimmicksCliApp().inventory(where=where, path=tmp_path))
         section = lambda heading: said.partition(heading)[2].partition("\n\n")[0]
         assert "lib.sub" not in section("ships, and nothing imports it"), said
         assert "lib.sub" in section("ships, and only its own tests and examples import it"), said
@@ -445,7 +445,7 @@ class TestTheCommandAHumanRuns:
         (tmp_path / "tests").mkdir()
         (tmp_path / "tests" / "test_run.py").write_text("import pytest\n", encoding="utf-8")
         env = {**os.environ, "NO_COLOR": "1", "HOME": str(tmp_path / "home")}
-        done = subprocess.run([str(OO), "inventory", "--path", str(tmp_path)],
+        done = subprocess.run([OO, "inventory", "--path", tmp_path],
                               capture_output=True, text=True, env=env, timeout=120)
         assert done.returncode == 0, done.stderr
         work, _, shown = done.stdout.partition("used only by tests, examples and benchmarks")
@@ -458,7 +458,7 @@ class TestTheCommandAHumanRuns:
         lib.mkdir(parents=True)
         (lib / "__init__.py").write_text("", encoding="utf-8")
         env = {**os.environ, "NO_COLOR": "1", "HOME": str(tmp_path / "home")}
-        done = subprocess.run([str(OO), "inventory", "--path", str(tmp_path)],
+        done = subprocess.run([OO, "inventory", "--path", tmp_path],
                               capture_output=True, text=True, env=env, timeout=120)
         assert done.returncode == 0
 

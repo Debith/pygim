@@ -65,6 +65,7 @@ import re
 import socket
 import socketserver
 import urllib.parse
+from collections.abc import Iterable, Mapping, Sequence
 
 import pygim
 from pygim.pathlike import PathStore, ext
@@ -210,10 +211,9 @@ class _SiteIndex:
         except (OSError, RuntimeError, UnicodeDecodeError):
             return None
         href = _relative(self.root, page.with_suffix(GENERATED_SUFFIX))
-        key = os.fspath(page)
-        self.pages[key] = href
+        self.pages[page] = href
         sections = [(number, f"{number} {heading}".strip()) for number, heading in _HEADING_RE.findall(text)]
-        self._defined[key] = ((page.name, key), href, sections, _terms_of(text))
+        self._defined[page] = ((page.name, page), href, sections, _terms_of(text))
         if combine:
             self._combine()
         return href
@@ -229,7 +229,7 @@ class _SiteIndex:
                 terms.setdefault(term, meaning)
         self.terms, self.sections = terms, sections
 
-    def link(self, number: str, page: str | None, qualifier: str | None = None, folder: str | None = None):
+    def link(self, number: str, page: str | None, qualifier: str | None = None, folder_name: str | None = None):
         """A section reference as a link into the page that defines it. A reference
         that names its page — "section 03 §2.1", "overview §4.8" — goes there or
         nowhere; a bare one goes to this page first, then to the first page by name,
@@ -246,21 +246,21 @@ class _SiteIndex:
                 named = hits[:1]        # no page is called that: the first page is the overview
             if not named:
                 return None
-            if folder:
+            if folder_name:
                 inside = [hit for hit in named
-                          if folder.lower() in (part.lower() for part in hit[0].strip("/").split("/")[:-1])]
+                          if folder_name.lower() in (part.lower() for part in hit[0].strip("/").split("/")[:-1])]
                 named = inside or named
             href, heading = _nearest(named, page)
         else:
             href, heading = next((hit for hit in hits if hit[0] == page), None) or _nearest(hits, page)
         return _xref(href, heading, number, page)
 
-    def file_link(self, number: str, page: str | None, file: str):
+    def file_link(self, number: str, page: str | None, written: str):
         """A section reference that names its page by file — "`brief.md` §2",
         "`docs/design/guide/00_overview.md` §4.7" — as a link into that file, matched by as
         much of its path as the site holds; None when the site has no such file defining it."""
         hits = self.sections.get(number) or []
-        parts = [part for part in file.replace("\\", "/").split("/") if part not in ("", ".")]
+        parts = [part for part in written.replace("\\", "/").split("/") if part not in ("", ".")]
         parts[-1] = parts[-1][:-len(".md")] + GENERATED_SUFFIX
         for start in range(len(parts)):
             tail = "/" + "/".join(parts[start:])
@@ -280,7 +280,7 @@ def _xref(href: str, heading: str, number: str, page: str | None) -> str:
             f' title="{html.escape(heading, quote=True)}">&sect;{number}</a>')
 
 
-def _nearest(hits: list, page: str | None):
+def _nearest(hits: Sequence[tuple[str, str]], page: str | None):
     """The hit to link: the first by file name, as the index is ordered — and when pages of
     that same name sit in several folders (``design/guide/00_overview.md`` and
     ``design/task/00_overview.md``), the copy nearest *page*: the most folders in common with
@@ -472,7 +472,7 @@ def _digest(block: str) -> str:
     return hashlib.sha1(block.encode("utf-8")).hexdigest()[:12]
 
 
-def _tokens(blocks: list) -> list:
+def _tokens(blocks: Iterable[str]) -> list[str]:
     """What names each block in a page: its place and the digest of its text, ``"<n>-<digest>"``,
     so a page made from other text never matches a token by accident."""
     return [f"{n}-{_digest(block)}" for n, block in enumerate(blocks)]
@@ -551,7 +551,7 @@ def pregenerate(root) -> int:
         if page.suffix != ".md":
             continue
         out = page.with_suffix(GENERATED_SUFFIX)
-        stale = not out.is_file() or os.path.getmtime(os.fspath(out)) < os.path.getmtime(os.fspath(page))
+        stale = not out.is_file() or os.path.getmtime(out) < os.path.getmtime(page)
         try:
             if materialize_markdown(page, site=site) is not None and stale:
                 count += 1
@@ -574,7 +574,7 @@ def materialize_markdown(md, *, site=None):
             head = ""
         if "generated from" not in head or "oo docs serve" not in head:
             return out                                   # not ours: never overwritten
-        if RENDERER in head and os.path.getmtime(os.fspath(out)) >= os.path.getmtime(os.fspath(md)):
+        if RENDERER in head and os.path.getmtime(out) >= os.path.getmtime(md):
             return out                                   # fresh, and made by this renderer
     page = site.add(md) if site is not None else None     # (re)rendering: the page's terms may have changed
     rendered = render_markdown(_page_text(md), md.stem, site=site, page=page)
@@ -605,12 +605,12 @@ def history_of(path) -> dict:
     committed. The git fields are None outside a checkout, or where git cannot be run."""
     import subprocess
 
-    changed = datetime.datetime.fromtimestamp(os.path.getmtime(os.fspath(path))).astimezone()
+    changed = datetime.datetime.fromtimestamp(os.path.getmtime(path)).astimezone()
     out = {"changed": changed.isoformat(timespec="seconds"), "commit": None, "committed": None,
            "uncommitted": None}
 
     def git(*args):
-        return subprocess.run(["git", "-C", os.fspath(path.parent), *args, "--", path.name],
+        return subprocess.run(["git", "-C", path.parent, *args, "--", path.name],
                               capture_output=True, text=True, timeout=5, check=False)
 
     try:
@@ -674,7 +674,7 @@ def _likeness(pair, old: str, new: str, score: float):
     return ratio if ratio >= SAME_BLOCK else None
 
 
-def _alignment(before: list, now: list) -> list:
+def _alignment(before: Sequence[str], now: Sequence[str]) -> list:
     """*before* and *now* (lists of blocks) paired in document order: ``(kind, i, j)`` with kind
     ``same``, ``changed`` (old block i became new block j), ``added`` (i None) or ``removed``
     (j None). A replaced range can hold a reworded block beside a deleted one, so each new block
@@ -766,7 +766,7 @@ def _committed_text(path):
     committed, so a commit is no baseline for it), or where git cannot be run."""
     import subprocess
 
-    folder = os.fspath(path.parent)
+    folder = path.parent
     try:
         inside = subprocess.run(["git", "-C", folder, "rev-parse", "--is-inside-work-tree"],
                                 capture_output=True, timeout=5, check=False)
@@ -871,7 +871,7 @@ def _uncommitted(root) -> set:
     import subprocess
 
     def git(*args):
-        return subprocess.run(["git", "-C", os.fspath(root), *args], capture_output=True, text=True,
+        return subprocess.run(["git", "-C", root, *args], capture_output=True, text=True,
                               timeout=10, check=False)
 
     try:
@@ -911,7 +911,7 @@ def _listing(root, folder, url_path: str) -> str:
     rows = [] if folder == root else ['<li class="dir"><a href="../">../</a></li>']
     folders, by_name = folder.pathset("*", kind="dir"), lambda p: p.name.lower()   # the listing tells: no stat a row
     for entry in [*sorted(folders, key=by_name), *sorted(folder.pathset("*") - folders, key=by_name)]:
-        path, name = os.fspath(entry), entry.name
+        path, name = os.fspath(entry), entry.name   # text: matched against git's names, a folder by prefix
         if entry in folders:
             inside = path + os.sep
             marks = tags(sum(p.startswith(inside) for p in read_changed), sum(p.startswith(inside) for p in uncommitted))
@@ -944,13 +944,13 @@ def _make_handler(root, index: str | None, site=None):
     def load_comments() -> list:
         return comments.read() if comments.is_file() else []
 
-    def save_comments(rows: list) -> None:
+    def save_comments(rows: Iterable[Mapping[str, object]]) -> None:
         comments.parent.mkdir(parents=True, exist_ok=True)
-        comments.write(rows)
+        comments.write(list(rows))   # JSON lines writes a list's items, one a line
 
     class Handler(http.server.SimpleHTTPRequestHandler):
         def __init__(self, *a, **kw):
-            super().__init__(*a, directory=str(root), **kw)
+            super().__init__(*a, directory=root, **kw)
 
         # ---- GET -------------------------------------------------------
         def do_GET(self):
@@ -1198,7 +1198,7 @@ def rebuild(doc_root, command: str, *, store=None):
 
     root = pygim.path(doc_root, store=store or PathStore()).resolve()
     before = site_pages(root)
-    rc = subprocess.run(command, shell=True, cwd=os.fspath(root), check=False).returncode
+    rc = subprocess.run(command, shell=True, cwd=root, check=False).returncode
     if rc:
         raise ServeError(f"rebuild command failed (exit {rc}): {command}")
     after = site_pages(root)
@@ -1262,9 +1262,9 @@ class Watch:
         stamps = {}
         for f in self.files:
             try:
-                stamps[os.fspath(f)] = os.path.getmtime(os.fspath(f))
+                stamps[f] = os.path.getmtime(f)
             except OSError:
-                stamps[os.fspath(f)] = None               # gone, or not yet there: that is a state too
+                stamps[f] = None                          # gone, or not yet there: that is a state too
         return stamps
 
     def changed(self) -> bool:
@@ -1277,7 +1277,7 @@ def own_sources() -> list:
     """The code a running server has loaded that changes while it runs: this package, the review
     layer's fragment beside it, and the command line that starts it."""
     here = pygim.path(os.path.dirname(os.path.abspath(__file__)))
-    return sorted(here.pathset("*.py"), key=os.fspath) + [here.parent.parent / "pygim" / "__main__.py"]
+    return sorted(here.pathset("*.py")) + [here.parent.parent / "pygim" / "__main__.py"]
 
 
 def _reexec() -> None:

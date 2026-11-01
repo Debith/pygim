@@ -320,7 +320,7 @@ def write_behavior_report(document, specification, destination):
     started = time.perf_counter()
     destination.mkdir(parents=True, exist_ok=True)
     (destination / "rules.json").write_bytes((json.dumps(specification, indent=2) + "\n").encode())
-    with open(str(destination / "cases.jsonl"), "w", encoding="utf-8") as stream:
+    with open(destination / "cases.jsonl", "w", encoding="utf-8") as stream:
         report = analyze_behaviors(document, specification,
                                    lambda row: stream.write(json.dumps(row, separators=(",", ":")) + "\n"))
     report["call_space_gaps"] = coverage_gaps(document)
@@ -368,7 +368,7 @@ def write_conflict_control(document, specification, destination):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("cases", help="Reflected cases.json from an autowiring run")
-    parser.add_argument("--rules", default=str(path(__file__).parent / "autowire_behaviors.json"))
+    parser.add_argument("--rules", default=path(__file__).parent / "autowire_behaviors.json")
     parser.add_argument("--output", required=True, help="Directory for the behavior report and witnesses")
     args = parser.parse_args()
     document = json.loads(path(args.cases).read_bytes())

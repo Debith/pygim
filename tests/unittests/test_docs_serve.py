@@ -190,12 +190,11 @@ class TestMarkdown:
         md.write_text("# one\n", encoding="utf-8")
         root = _docs_serve.pygim.path(site, store=PathStore())
         out = _docs_serve.materialize_markdown(root / "note.md")
-        first = os.fspath(out)
         assert "<h1" in (site / "note.generated.html").read_text(encoding="utf-8") \
             and "one" in (site / "note.generated.html").read_text(encoding="utf-8")
-        stamp = os.path.getmtime(first)
+        stamp = os.path.getmtime(out)
         _docs_serve.materialize_markdown(root / "note.md")
-        assert os.path.getmtime(first) == stamp                        # fresh: untouched
+        assert os.path.getmtime(out) == stamp                        # fresh: untouched
         md.write_text("# two\n", encoding="utf-8")
         touched_later(md)
         _docs_serve.materialize_markdown(root / "note.md")
@@ -593,7 +592,7 @@ class TestWhatChangedSinceRead:
     @pytest.mark.skipif(shutil.which("git") is None, reason="needs git")
     def test_git_says_whether_the_page_is_committed(self, temp_dir):
         def git(*args):
-            subprocess.run(["git", "-C", str(temp_dir), "-c", "user.name=t", "-c", "user.email=t@example.com", *args],
+            subprocess.run(["git", "-C", temp_dir, "-c", "user.name=t", "-c", "user.email=t@example.com", *args],
                            check=True, capture_output=True)
         git("init", "-q")
         (temp_dir / "doc.md").write_text("# one\n", encoding="utf-8")
@@ -663,7 +662,7 @@ class _Served:
 def _git_repo(root):
     """*root* as a git checkout; returns a function that runs git in it."""
     def git(*args):
-        subprocess.run(["git", "-C", str(root), "-c", "user.name=t", "-c", "user.email=t@example.com", *args],
+        subprocess.run(["git", "-C", root, "-c", "user.name=t", "-c", "user.email=t@example.com", *args],
                        check=True, capture_output=True)
     git("init", "-q")
     return git
@@ -811,7 +810,7 @@ class TestFolderListingMarksWhatChanged:
     @pytest.mark.skipif(shutil.which("git") is None, reason="needs git")
     def test_files_git_has_not_committed_are_marked_and_counted(self, temp_dir):
         def git(*args):
-            subprocess.run(["git", "-C", str(temp_dir), "-c", "user.name=t", "-c", "user.email=t@example.com", *args],
+            subprocess.run(["git", "-C", temp_dir, "-c", "user.name=t", "-c", "user.email=t@example.com", *args],
                            check=True, capture_output=True)
         git("init", "-q")
         (temp_dir / "kept.txt").write_text("same\n", encoding="utf-8")
@@ -966,10 +965,10 @@ class TestCrossReferencesAndTerms:
         for name, target in (("guide/01_model.md", '"00_overview.generated.html#5-principles"'),
                              ("task/studies/plan.md", '"../00_overview.generated.html#5-what-each-part-depends-on"')):
             out = _docs_serve.materialize_markdown(root.joinpath(*name.split("/")), site=site)
-            body = open(os.fspath(out), encoding="utf-8").read().split("<body>")[1]
+            body = open(out, encoding="utf-8").read().split("<body>")[1]
             assert body.count(f'class="xref" href={target}') == 2, name
         out = _docs_serve.materialize_markdown(root / "task" / "studies" / "review.md", site=site)
-        body = open(os.fspath(out), encoding="utf-8").read().split("<body>")[1]
+        body = open(out, encoding="utf-8").read().split("<body>")[1]
         assert 'GUIDE 00 <a class="xref" href="../../guide/00_overview.generated.html#5-principles"' in body
         assert 'see 00 <a class="xref" href="../00_overview.generated.html#5-what-each-part-depends-on"' in body
 
@@ -987,7 +986,7 @@ class TestCrossReferencesAndTerms:
         root = pygim.path(temp_dir, store=PathStore()).resolve()
         site = _docs_serve._SiteIndex.build(root)
         out = _docs_serve.materialize_markdown(root / "task" / "studies" / "plan.md", site=site)
-        body = open(os.fspath(out), encoding="utf-8").read().split("<body>")[1]
+        body = open(out, encoding="utf-8").read().split("<body>")[1]
         assert '<code>brief.md</code> <a class="xref" href="brief.generated.html#2-the-environment"' in body
         assert '<code>docs/guide/00_overview.md</code> <a class="xref" href="../../guide/00_overview.generated.html#5-principles"' in body
         assert body.count('class="xref"') == 2           # MISSING.md §5 stays text, not a guess
@@ -1000,7 +999,7 @@ class TestCrossReferencesAndTerms:
         site = _docs_serve._SiteIndex.build(root)
         (temp_dir / "task" / "studies" / "new.md").write_text("# New\n\nSee \u00a75.\n", encoding="utf-8")
         out = _docs_serve.materialize_markdown(root / "task" / "studies" / "new.md", site=site)
-        assert 'class="xref" href="../00_overview.generated.html#5-what-each-part-depends-on"' in open(os.fspath(out), encoding="utf-8").read()
+        assert 'class="xref" href="../00_overview.generated.html#5-what-each-part-depends-on"' in open(out, encoding="utf-8").read()
 
     def test_a_page_whose_term_table_changed_hovers_with_its_new_terms(self, temp_dir):
         """End to end: the server running, a page fetched, then its Term table changed — one term
@@ -1201,13 +1200,13 @@ class TestCli:
     def test_failing_rebuild_aborts_before_serving(self, site, monkeypatch):
         monkeypatch.setattr(_docs_serve, "serve", lambda *a, **k: pytest.fail("must not serve"))
         with pytest.raises(click.ClickException) as info:
-            GimmicksCliApp().docs_serve(directory=str(site), rebuild="exit 3")
+            GimmicksCliApp().docs_serve(directory=site, rebuild="exit 3")
         assert "exit 3" in str(info.value)
 
     def test_rebuild_runs_in_served_dir_then_serves(self, site, monkeypatch):
         calls = []
         monkeypatch.setattr(_docs_serve, "serve", lambda root, **k: calls.append((root, k)))
-        GimmicksCliApp().docs_serve(directory=str(site), port=1234, host="127.0.0.1",
+        GimmicksCliApp().docs_serve(directory=site, port=1234, host="127.0.0.1",
                                     rebuild="touch built.marker")
         assert (site / "built.marker").exists()
         [(root, kw)] = calls

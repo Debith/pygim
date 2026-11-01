@@ -24,7 +24,7 @@ OWN = {
 }
 
 ROOT = path(__file__).resolve().parent.parent.parent
-BENCHMARKS = path(str(ROOT / "benchmarks")).pathset("*.py", kind="file")   # none in a tree without benchmarks/
+BENCHMARKS = (ROOT / "benchmarks").pathset("*.py", kind="file")   # none in a tree without benchmarks/
 pytestmark = pytest.mark.skipif(not BENCHMARKS, reason="benchmarks/ not present (testing the installed package)")
 
 
@@ -48,6 +48,6 @@ def test_the_check_finds_what_it_is_for():
 
 
 def test_a_benchmark_says_why_it_imports_what_pygim_ships():
-    names = [path(str(p)).name for p in BENCHMARKS.to_list()]
+    names = [p.name for p in BENCHMARKS]
     found = [hit for name, text in zip(names, BENCHMARKS.read_all_files()) for hit in unexplained(name, text)]
     assert found == [], "use pygim's own, or say on the import why this module (the reference, or what pygim lacks):\n" + "\n".join(found)

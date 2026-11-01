@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 """Tests for ``pygim.path`` — the self-reading, self-decoding PathLike."""
 
+import array
 import copy
 import json
 import operator
@@ -193,18 +194,18 @@ def test_malformed_yaml_raises_not_aborts(temp_dir):
 def test_truediv_joins_and_returns_a_file():
     p = pygim.path("base") / "sub" / "doc.yaml"
     assert isinstance(p, pathlike.path)
-    assert pathlib.PurePath(os.fspath(p)) == pathlib.PurePath("base/sub/doc.yaml")
+    assert pathlib.PurePath(p) == pathlib.PurePath("base/sub/doc.yaml")
     assert p.suffix == ".yaml"                       # still a decodable file after joining
 
 
 def test_rtruediv_joins_from_a_string():
     p = "root" / pygim.path("leaf.yaml")
-    assert pathlib.PurePath(os.fspath(p)) == pathlib.PurePath("root/leaf.yaml")
+    assert pathlib.PurePath(p) == pathlib.PurePath("root/leaf.yaml")
 
 
 def test_joinpath_appends_many_components():
     joined = pygim.path("a").joinpath("b", "c.yaml")
-    assert pathlib.PurePath(os.fspath(joined)) == pathlib.PurePath("a/b/c.yaml")
+    assert pathlib.PurePath(joined) == pathlib.PurePath("a/b/c.yaml")
 
 
 def test_absolute_component_replaces():
@@ -214,7 +215,7 @@ def test_absolute_component_replaces():
 
 def test_parent_name_stem_and_flags():
     p = pygim.path("a/b/c.yaml")
-    assert pathlib.PurePath(os.fspath(p.parent)) == pathlib.PurePath("a/b")
+    assert pathlib.PurePath(p.parent) == pathlib.PurePath("a/b")
     assert isinstance(p.parent, pathlike.path)
     assert p.name == "c.yaml" and p.stem == "c"
     assert p.is_absolute() is False
@@ -774,7 +775,7 @@ def test_json_bigint_limitation_is_loud(temp_dir):
 
     p = pygim.path(temp_dir / "big.json")
     p.write({"big": 12345678901234567890123})
-    assert json.loads(open(str(p)).read()) == {"big": 12345678901234567890123}
+    assert json.loads(open(p).read()) == {"big": 12345678901234567890123}
     with pytest.raises(ValueError, match="BIGINT"):
         p.read()
 
@@ -1074,6 +1075,29 @@ def test_write_bytes_roundtrips_raw(temp_dir):
     p.write_bytes(b"\x00\xff\r\n")
     assert p.read_bytes() == b"\x00\xff\r\n"
     assert (temp_dir / "blob.bin").read_bytes() == b"\x00\xff\r\n"
+
+
+# What pathlib's write_bytes takes: any bytes-like object, through memoryview(data).
+BYTES_LIKE = {"bytes": lambda b: b, "bytearray": bytearray, "memoryview": memoryview,
+              "array": lambda b: array.array("B", b)}
+
+
+@pytest.mark.parametrize("make", BYTES_LIKE.values(), ids=BYTES_LIKE)
+def test_write_bytes_takes_what_pathlibs_takes(temp_dir, make):
+    """Any bytes-like object, and the count of bytes written, as pathlib's write_bytes. Found
+    2026-11-01, when its stub was moved to the buffer protocol (Debith on PR #39: "python functions
+    should use protocols for annotations"): a bytearray or a memoryview was a TypeError."""
+    data = b"\x00\xff\r\nend"
+    theirs = pathlib.Path(temp_dir / "theirs.bin").write_bytes(make(data))
+    ours = pygim.path(temp_dir / "ours.bin").write_bytes(make(data))
+    assert (ours, (temp_dir / "ours.bin").read_bytes()) == (theirs, (temp_dir / "theirs.bin").read_bytes())
+
+
+def test_write_bytes_refuses_what_pathlibs_refuses(temp_dir):
+    with pytest.raises(TypeError):
+        pathlib.Path(temp_dir / "theirs.bin").write_bytes("text")
+    with pytest.raises(TypeError):
+        pygim.path(temp_dir / "ours.bin").write_bytes("text")
 
 
 def test_write_bytes_into_missing_directory_fails_loudly(temp_dir):
@@ -1529,10 +1553,10 @@ def test_relative_to_takes_text_a_pathlike_or_a_path_and_keeps_the_pin(tmp_path)
     from pygim.pathlike import yamlpath
 
     target = tmp_path / "sub" / "doc.txt"
-    for base in (str(tmp_path), tmp_path, pygim.path(str(tmp_path))):
-        got = pygim.path(str(target)).relative_to(base)
+    for base in (str(tmp_path), tmp_path, pygim.path(tmp_path)):
+        got = pygim.path(target).relative_to(base)
         assert got.parts == ["sub", "doc.txt"]
-    pinned = yamlpath(str(target)).relative_to(tmp_path)
+    pinned = yamlpath(target).relative_to(tmp_path)
     assert isinstance(pinned, yamlpath)                       # the pin travels, as with with_name
 
 
@@ -1540,16 +1564,16 @@ def test_a_pathset_is_relative_to_a_base_member_by_member_in_order(tmp_path):
     (tmp_path / "pkg").mkdir()
     (tmp_path / "a.py").write_text("", encoding="utf-8")
     (tmp_path / "pkg" / "c.py").write_text("", encoding="utf-8")
-    walked = pygim.path(str(tmp_path)).pathset("**/*")
+    walked = pygim.path(tmp_path).pathset("**/*")
     relative = walked.relative_to(tmp_path)
     assert isinstance(relative, pathlike.PathSet) and len(relative) == len(walked)
-    want = [str(pathlib.PurePath(m).relative_to(tmp_path)) for m in walked.to_list()]
-    assert relative.to_list() == want                         # the same members, the same order
-    assert sorted(relative.to_list()) == sorted(str(p.relative_to(tmp_path)) for p in tmp_path.rglob("*"))
+    want = [str(pathlib.PurePath(m).relative_to(tmp_path)) for m in walked]
+    assert [os.fspath(p) for p in relative] == want                         # the same members, the same order
+    assert sorted([os.fspath(p) for p in relative]) == sorted(str(p.relative_to(tmp_path)) for p in tmp_path.rglob("*"))
 
 
 def test_a_pathset_with_a_member_outside_the_base_names_it(tmp_path):
-    members = pathlike.PathSet([str(tmp_path / "in.py"), str(tmp_path.parent / "out.py")])
+    members = pathlike.PathSet([tmp_path / "in.py", tmp_path.parent / "out.py"])
     with pytest.raises(ValueError, match="out.py"):
         members.relative_to(tmp_path)
 

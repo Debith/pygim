@@ -405,7 +405,7 @@ void bind_pathset(engine_list<Es...> es, py::module_& m, py::class_<pathview>& p
         "the unique names. Iterating yields path objects over the table (nothing copied); scan() "
         "reuses one path object per pass. filter_suffix()/filter_name() and |, &, - work on rows and return sets "
         "sharing the table; `ps & Filter` is a lazy Query; + and - take a PathSet or path(s); == compares "
-        "as sets; to_list() renders the members. PathSet(paths, store=s) shares the store's table, so its "
+        "as sets; list(ps) lists the members. PathSet(paths, store=s) shares the store's table, so its "
         "members and path(text, store=s) objects are rows of one table. Sets are built, never edited: `ps -= x` "
         "rebinds the name to a new set. Insertion order, append-only.")
         .def(py::init([](py::object paths, py::object store) {
@@ -508,11 +508,6 @@ void bind_pathset(engine_list<Es...> es, py::module_& m, py::class_<pathview>& p
              "set over the same table in member order: `path(d).pathset('**/*').relative_to(d)` names\n"
              "everything beneath d from d. Raises ValueError naming the first member that is neither\n"
              "*other* nor beneath it.")
-        .def("to_list", [](const PathSet& ps) {
-            py::list out;
-            for (const std::uint32_t r : ps.members()) out.append(str_from_text(ps.table()->render<native_strategy>(r)));
-            return out;
-        })
         .def("stats", [](const PathSet& ps) {
             py::dict d;
             d["members"] = ps.size();

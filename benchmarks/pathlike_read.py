@@ -57,7 +57,7 @@ def bench_bytes(root):
     for name, size, reads in (("100 B", 100, SMALL_READS), ("1 MB", 1 << 20, 1), ("50 MB", 50_000_000, 1)):
         f = root / f"blob_{size}.bin"
         f.write_bytes(os.urandom(size))
-        reference = pathlib.Path(str(f))
+        reference = pathlib.Path(f)
         assert f.read_bytes() == reference.read_bytes()
         label = f"{name} x {reads:,}" if reads > 1 else name
         row, raw[label] = pair(label, lambda r=reference, n=reads: [r.read_bytes() for _ in range(n)],
@@ -74,11 +74,11 @@ def bench_json(root, rows_of_data):
     lines.write(rows_of_data)
 
     def python_json():
-        with open(str(document), "rb") as fh:
+        with open(document, "rb") as fh:
             return json.load(fh)
 
     def python_jsonl():
-        with open(str(lines), "rb") as fh:
+        with open(lines, "rb") as fh:
             return [json.loads(line) for line in fh]
 
     assert document.read() == python_json()

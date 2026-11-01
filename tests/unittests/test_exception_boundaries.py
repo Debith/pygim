@@ -55,12 +55,12 @@ _NOT_CODE = re.compile(r'//[^\n]*|/\*.*?\*/|R"(?P<d>[^(\s]*)\(.*?\)(?P=d)"|"(?:\
 def _first_party():
     """Every first-party C++ file as (path, code), walked and read through pygim's own PathSet as
     test_layering's `sources` does. Vendored code is not ours to hold to these rules."""
-    found = path(str(FAST)).pathset("**/*", kind="file").filter(ext(".h", ".cpp"))
-    members, texts = found.to_list(), found.read_all_files()
+    found = path(FAST).pathset("**/*", kind="file").filter(ext(".h", ".cpp"))
+    members, texts = list(found), found.read_all_files()
     assert len(members) == len(texts), "a member was not a regular file; the two lists no longer align"
     assert len(members) >= 50, f"only {len(members)} C++ files under {FAST}: a rule checked over nothing passes"
-    return sorted((pathlib.Path(str(m)), _code(t)) for m, t in zip(members, texts)
-                  if "third_party" not in pathlib.Path(str(m)).parts)
+    return sorted((pathlib.Path(m), _code(t)) for m, t in zip(members, texts)
+                  if "third_party" not in pathlib.Path(m).parts)
 
 
 def _code(text):
@@ -252,7 +252,7 @@ def test_one_extension_cannot_rename_another_extensions_errors(tmp_path):
     must still not be persistence's GimError. A global translator for `std::runtime_error` would
     break it."""
     with pytest.raises(Exception) as pathlike_error:
-        path(str(tmp_path / "missing")).read_bytes()
+        path(tmp_path / "missing").read_bytes()
     assert not isinstance(pathlike_error.value, persistence.PersistenceError)
 
 
@@ -264,7 +264,7 @@ def test_an_except_clause_naming_the_subclass_catches_it(tmp_path):
     except clause on Python 3.10 and older compares that type, and caught nothing (PR #39's 3.9 and
     3.10 jobs; pytest.raises compares the instance, and passed). And MSVC's words were lowercase."""
     try:
-        path(str(tmp_path / "missing")).read_bytes()
+        path(tmp_path / "missing").read_bytes()
     except FileNotFoundError as caught:
         assert caught.strerror == os.strerror(caught.errno) and caught.filename == str(tmp_path / "missing")
     else:
@@ -296,7 +296,7 @@ def test_a_file_error_is_the_oserror_pathlib_raises(tmp_path, case):
     with pytest.raises(OSError) as expected:
         on_pathlib(tmp_path / target)
     with pytest.raises(type(expected.value)):
-        on_pygim(path(str(tmp_path / target)))
+        on_pygim(path(tmp_path / target))
 
 
 MALFORMED = {"json": ("bad.json", "{nope"),
@@ -312,7 +312,7 @@ def test_a_malformed_document_is_a_value_error(tmp_path, engine):
     name, text = MALFORMED[engine]
     (tmp_path / name).write_text(text, encoding="utf-8")
     with pytest.raises(ValueError, match=re.escape(name)):
-        path(str(tmp_path / name)).read()
+        path(tmp_path / name).read()
 
 
 NOT_UTF8 = {"json": ("latin1.json", b'{"a": "\xe9"}'),
@@ -327,7 +327,7 @@ def test_a_document_that_is_not_utf8_is_a_value_error(tmp_path, engine):
     name, data = NOT_UTF8[engine]
     (tmp_path / name).write_bytes(data)
     with pytest.raises(ValueError, match=re.escape(name)):
-        path(str(tmp_path / name)).read()
+        path(tmp_path / name).read()
 
 
 @pytest.mark.parametrize("tail", ['{"b": ', '{"b": 2', "[1, 2"], ids=["after a key", "before the brace", "an array"])
@@ -337,7 +337,7 @@ def test_a_jsonl_file_whose_last_document_is_cut_short_is_an_error(tmp_path, tai
     back as its complete rows, silently: today this returns [{"a": 1}]."""
     (tmp_path / "cut.jsonl").write_text('{"a": 1}\n' + tail + "\n", encoding="utf-8")
     with pytest.raises(ValueError, match=r"cut\.jsonl, line 2"):
-        path(str(tmp_path / "cut.jsonl")).read()
+        path(tmp_path / "cut.jsonl").read()
 
 
 class _IService:

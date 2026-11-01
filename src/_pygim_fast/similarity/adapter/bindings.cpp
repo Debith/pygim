@@ -60,10 +60,11 @@ Index(language) -- language is a key of LANGUAGES ("python", "cpp").)doc")
         .def(py::init<std::string_view>(), py::arg("language"),
              "An empty index of `language` (a key of LANGUAGES); ValueError naming the known languages otherwise.")
         .def_property_readonly("language", &Index::language, "The language this index holds.")
-        .def("add", [](Index& ix, std::string_view source, std::string_view origin, const std::optional<std::string>& module) {
-                 ix.add(source, origin, module ? std::string_view(*module) : std::string_view());
+        .def("add", [](Index& ix, std::string_view source, const py::handle& origin, const std::optional<std::string>& module) {
+                 const std::string shown = pygim::pathlike::utf8_fspath(origin);   // an origin in results: os.fspath's text
+                 ix.add(source, shown, module ? std::string_view(*module) : std::string_view());
              }, py::arg("source"), py::arg("origin") = "<string>", py::arg("module") = py::none(),
-             R"doc(Parse `source` (str) and add its units, recorded as coming from `origin`.
+             R"doc(Parse `source` (str) and add its units, recorded as coming from `origin` (str or any path).
 
 `module` is the source's dotted module name ("pkg.sub.m"): it qualifies the
 module-level names and resolves relative imports, so the same function

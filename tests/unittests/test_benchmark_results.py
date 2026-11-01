@@ -27,9 +27,9 @@ def results_module():
 
 
 def stored_records():
-    files = path(str(BENCHMARKS / "results")).pathset("*.jsonl", kind="file")   # pygim's own walker and reader
-    return [(pathlib.Path(str(f)).name, json.loads(line))
-            for f, text in zip(files.to_list(), files.read_all_files()) for line in text.splitlines() if line.strip()]
+    files = path(BENCHMARKS / "results").pathset("*.jsonl", kind="file")   # pygim's own walker and reader
+    return [(f.name, json.loads(line))
+            for f, text in zip(files, files.read_all_files()) for line in text.splitlines() if line.strip()]
 
 
 def test_a_recorded_run_does_not_name_its_machine(tmp_path, monkeypatch):
@@ -85,7 +85,7 @@ def test_a_corpus_is_named_by_its_checkout_and_below(tmp_path):
     results = results_module()
     checkout = tmp_path / "cpython"
     (checkout / "Lib").mkdir(parents=True)
-    subprocess.run(["git", "init", "-q", str(checkout)], check=True)
+    subprocess.run(["git", "init", "-q", checkout], check=True)
     (tmp_path / "loose").mkdir()
     named = lambda folder: path(folder).resolve()                # as _bench.folder hands --root over
     assert results.corpus(named(checkout / "Lib")) == "cpython/Lib"

@@ -59,7 +59,7 @@ print("threads left", pool_threads())
 
 
 def run_child(temp_dir, mode):
-    return subprocess.run([sys.executable, "-c", CHILD, str(temp_dir), mode], capture_output=True, text=True, timeout=120)
+    return subprocess.run([sys.executable, "-c", CHILD, temp_dir, mode], capture_output=True, text=True, timeout=120)
 
 
 @pytest.fixture(scope="module")
@@ -144,7 +144,7 @@ for states in seen.values():
         (name, mask), _ = states.most_common(1)[0]
         print("worker", bit(mask, signal.SIGINT), bit(mask, signal.SIGTERM), bit(mask, signal.SIGSEGV), name)
 """
-    done = subprocess.run([sys.executable, "-c", child, str(temp_dir)], capture_output=True, text=True, timeout=60)
+    done = subprocess.run([sys.executable, "-c", child, temp_dir], capture_output=True, text=True, timeout=60)
     rows = [row.split(" pygim")[0] for row in done.stdout.split("\n")[:-1]]   # each worker's name, for the message only
     assert rows[0] == "main 0 0 0", done.stdout + done.stderr
     workers = rows[1:]

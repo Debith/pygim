@@ -108,7 +108,7 @@ def test_add_and_extend_with_files_and_views():
     other = pathlike.PathSet(["d", "a"])
     ps.extend(other)
     ps.extend(["e", b"f"])
-    assert ps.to_list() == [str(P(x)) for x in ["a", "b/c.toml", "d", "e", "f"]]
+    assert [os.fspath(p) for p in ps] == [str(P(x)) for x in ["a", "b/c.toml", "d", "e", "f"]]
 
 
 # ── iteration: fresh views, and the reusing cursor ────────────────────────
@@ -116,7 +116,7 @@ def test_add_and_extend_with_files_and_views():
 def test_iter_yields_fresh_views(ps):
     views = list(ps)
     assert len(views) == len(ps) and len({id(v) for v in views}) == len(views)
-    assert [os.fspath(v) for v in views] == ps.to_list()
+    assert [os.fspath(v) for v in views] == [os.fspath(p) for p in ps]
 
 
 def test_scan_reuses_one_object(ps):
@@ -125,7 +125,7 @@ def test_scan_reuses_one_object(ps):
     for v in ps.scan():
         ids.add(id(v))
         seen.append(os.fspath(v))
-    assert len(ids) == 1 and seen == ps.to_list()
+    assert len(ids) == 1 and seen == [os.fspath(p) for p in ps]
 
 
 def test_views_outlive_their_set():
@@ -139,29 +139,29 @@ def test_views_outlive_their_set():
 
 def test_filter_suffix_and_name(strs, ps):
     yaml = ps.filter_suffix(".yaml")
-    assert yaml.to_list() == [str(P(s)) for s in strs if P(s).suffix == ".yaml"]
+    assert [os.fspath(p) for p in yaml] == [str(P(s)) for s in strs if P(s).suffix == ".yaml"]
     assert all(v.suffix == ".yaml" for v in yaml)
     glob = ps.filter_name("file1*.json")
-    assert glob.to_list() == [str(P(s)) for s in strs if P(s).name.startswith("file1") and P(s).suffix == ".json"]
-    assert ps.filter_absolute().to_list() == [str(P(s)) for s in strs if P(s).is_absolute()]
+    assert [os.fspath(p) for p in glob] == [str(P(s)) for s in strs if P(s).name.startswith("file1") and P(s).suffix == ".json"]
+    assert [os.fspath(p) for p in ps.filter_absolute()] == [str(P(s)) for s in strs if P(s).is_absolute()]
 
 
 def test_algebra_same_table(strs, ps):
     a = ps.filter_suffix(".yaml")
     b = ps.filter_absolute()
     expect = lambda pred: sorted(str(P(s)) for s in strs if pred(P(s)))  # noqa: E731
-    assert sorted((a | b).to_list()) == expect(lambda p: p.suffix == ".yaml" or p.is_absolute())
-    assert sorted((a & b).to_list()) == expect(lambda p: p.suffix == ".yaml" and p.is_absolute())
-    assert sorted((a - b).to_list()) == expect(lambda p: p.suffix == ".yaml" and not p.is_absolute())
+    assert sorted([os.fspath(p) for p in (a | b)]) == expect(lambda p: p.suffix == ".yaml" or p.is_absolute())
+    assert sorted([os.fspath(p) for p in (a & b)]) == expect(lambda p: p.suffix == ".yaml" and p.is_absolute())
+    assert sorted([os.fspath(p) for p in (a - b)]) == expect(lambda p: p.suffix == ".yaml" and not p.is_absolute())
 
 
 def test_algebra_across_tables():
     a = pathlike.PathSet(["x", "y/z.yaml", "w"])
     b = pathlike.PathSet(["w", "q", "y//z.yaml"])
-    assert sorted((a | b).to_list()) == sorted(str(P(s)) for s in ["x", "y/z.yaml", "w", "q"])
-    assert sorted((a & b).to_list()) == sorted(str(P(s)) for s in ["y/z.yaml", "w"])
-    assert (a - b).to_list() == ["x"]
-    assert (b - a).to_list() == ["q"]
+    assert sorted([os.fspath(p) for p in (a | b)]) == sorted(str(P(s)) for s in ["x", "y/z.yaml", "w", "q"])
+    assert sorted([os.fspath(p) for p in (a & b)]) == sorted(str(P(s)) for s in ["y/z.yaml", "w"])
+    assert [os.fspath(p) for p in (a - b)] == ["x"]
+    assert [os.fspath(p) for p in (b - a)] == ["q"]
 
 
 def test_stats_show_the_sharing(strs, ps):
@@ -181,3 +181,11 @@ def test_counts_agree_with_the_built_sets(strs, ps):
     assert ps.count_intersection(other) == len(ps & other) == len(strs[::3])
     assert ps.count_union(other) == len(ps | other) and other.count_difference(ps) == len(other - ps) == 1
     assert pathlike.PathSet().count_union(ps) == len(ps) and pathlike.PathSet().count_intersection(ps) == 0
+
+
+def test_a_pathset_is_handed_over_by_list_not_a_typed_method():
+    """Iteration gives the members as paths, so list(ps) is the list (D96, Debith on PR #39: "I don't
+    like typed methods, like to_list ... I would prefer more like supporting list(...)")."""
+    ps = pathlike.PathSet(["a", "b/c.toml"])
+    assert not hasattr(ps, "to_list")
+    assert list(ps) == [pygim.path("a"), pygim.path("b/c.toml")]

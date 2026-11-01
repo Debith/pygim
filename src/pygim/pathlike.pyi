@@ -11,6 +11,7 @@ a test.
 """
 
 import os
+from _typeshed import ReadableBuffer
 from typing import Any, Iterable, Iterator, Literal, NamedTuple, overload
 
 PathLike = str | bytes | os.PathLike[str] | path
@@ -70,8 +71,9 @@ class path(os.PathLike[str]):
           resolved; strings that would read back typed are quoted on write."""
     def read_bytes(self) -> bytes:
         """The raw file bytes, undecoded."""
-    def write_bytes(self, data: bytes, *, atomic: bool = False) -> None:
-        """Replace the file's contents with the given bytes; atomic=True as for write()."""
+    def write_bytes(self, data: ReadableBuffer, *, atomic: bool = False) -> int:
+        """Replace the file's contents with the given bytes-like data (bytes, bytearray, memoryview, ...),
+        as pathlib's write_bytes takes it; atomic=True as for write(). The number of bytes written."""
     def mkdir(self, parents: bool = False, exist_ok: bool = False) -> None:
         """Create this directory, like pathlib: parents= creates missing ancestors, exist_ok=
         tolerates an existing directory."""
@@ -216,7 +218,7 @@ class PathSet:
     unique names. Iterating yields path objects over the table (nothing copied); scan() reuses
     one path object per pass. filter_suffix()/filter_name() and |, &, - work on rows and return
     sets sharing the table; `ps & Filter` is a lazy Query; + and - take a PathSet or path(s); ==
-    compares as sets; to_list() renders the members. PathSet(paths, store=s) shares the store's
+    compares as sets; list(ps) lists the members. PathSet(paths, store=s) shares the store's
     table, so its members and path(text, store=s) objects are rows of one table. Sets are built,
     never edited: `ps -= x` rebinds the name to a new set. Insertion order, append-only."""
     def __init__(self, paths: PathLike | Iterable[PathLike] | None = None,
@@ -292,7 +294,6 @@ class PathSet:
         a set over the same table in member order: `path(d).pathset('**/*').relative_to(d)` names
         everything beneath d from d. Raises ValueError naming the first member that is neither
         *other* nor beneath it."""
-    def to_list(self) -> list[str]: ...
     def stats(self) -> dict[str, int]: ...
 
 

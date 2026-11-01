@@ -36,7 +36,7 @@ def test_views_come_in_member_order_at_every_width(members, threads):
     files = [f for f in found if f.is_file()]
     views = list(PathSet(found).read_each(threads=threads))
     assert [bytes(v) for v in views] == expected
-    assert [str(v.path) for v in views] == [str(f) for f in files]
+    assert [v.path for v in views] == [path(f) for f in files]
 
 
 def test_a_view_is_its_bytes_without_a_copy(temp_dir):
@@ -144,7 +144,7 @@ def test_two_threads_on_one_iterator_share_it_or_are_told_it_is_busy(temp_dir):
     def drain():
         try:
             for content in reading:
-                taken.append(str(content.path))
+                taken.append(content.path)
         except ValueError as busy:
             told.append(str(busy))
 

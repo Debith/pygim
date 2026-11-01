@@ -85,7 +85,7 @@ def test_run_tests_passes_its_own_arguments(pytest_runs):
 
 def test_run_tests_measures_the_module_it_names(pytest_runs, coverage_calls, tmp_path, monkeypatch):
     (tmp_path / "measured_here.py").write_text("VALUE = 1\n")
-    monkeypatch.syspath_prepend(str(tmp_path))
+    monkeypatch.syspath_prepend(tmp_path)
     import measured_here
 
     monkeypatch.setitem(sys.modules, "measured_here", measured_here)

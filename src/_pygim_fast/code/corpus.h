@@ -1,14 +1,16 @@
 #pragma once
-// code/corpus.h — every Python file under a directory, parsed: the code component's one operation.
+// code/corpus.h — every file under a directory in the languages asked for, parsed: the code
+// component's one operation.
 //
-//     corpus_run run(fs::path("Lib"), pathlike::glob_pattern("**/*.py"), width);
+//     corpus_run run(fs::path("Lib"), pathlike::glob_pattern("**/*"), language_set::all(), width);
 //     run.run_here();                                                // walk, read, parse: C++ only
 //     corpus c = run.collect();
 //     c.size(), c[i].path(), c[i].parsed() ? c[i].tree() : c[i].error()
 //     c.names()                                                      // one name table for all files
 //
 // One pool of tasks runs the whole of it (#270, D27): a directory listed is a task that adds the
-// directories under it and a task per file it matches; a file task reads the file and parses it
+// directories under it and a task per file it matches in a language of the run (languages.h, D93:
+// a file of none is never read); a file task reads the file and parses it
 // on the same worker (read and parse fused, #276). Nothing waits for the walk to end before the
 // first parse starts. Each worker reads and parses with a workspace of its own — its scratch rows,
 // its name table, the arena its files are read into and their trees' nodes packed into (D61, D69)
@@ -46,6 +48,7 @@
 #include "../utils/chunk_arena.h"
 #include "../utils/parallel.h"
 #include "../utils/timestamp.h"
+#include "languages.h"
 #include "python/tree.h"
 
 namespace pygim::code {
@@ -147,8 +150,9 @@ template <parallel::width_policy Width = parallel::chosen_width, clock_source Cl
     requires(Names::hashed)
 class basic_corpus_run {
 public:
-    basic_corpus_run(fs::path root, pathlike::glob_pattern pattern, Width width, Clock clock = Clock{})
-        : m_pattern(std::move(pattern)), m_clock(clock), m_started(m_clock.now_ns()), m_pool(worker(this), std::move(width)) {
+    basic_corpus_run(fs::path root, pathlike::glob_pattern pattern, language_set languages, Width width, Clock clock = Clock{})
+        : m_pattern(std::move(pattern)), m_languages(languages), m_clock(clock), m_started(m_clock.now_ns()),
+          m_pool(worker(this), std::move(width)) {
         m_pool.submit(task(pathlike::glob_task::first(m_pattern, std::move(root))));
     }
 
@@ -307,7 +311,10 @@ private:
         template <class Add>
         void operator()(task&& t, const Add& add) const {
             if (auto* dir = std::get_if<pathlike::glob_task>(&t)) {
-                pathlike::glob_step(m_run->m_pattern, *dir, [&](fs::path p) { add(task(std::move(p))); }, [&](pathlike::glob_task g) { add(task(std::move(g))); });
+                const auto file = [&](fs::path p) {
+                    if (m_run->m_languages.parses(pathlike::text_from_fs(p.filename()))) add(task(std::move(p)));
+                };
+                pathlike::glob_step(m_run->m_pattern, *dir, file, [&](pathlike::glob_task g) { add(task(std::move(g))); });
                 return;
             }
             const fs::path& p = std::get<fs::path>(t);
@@ -319,6 +326,7 @@ private:
     };
 
     pathlike::glob_pattern m_pattern;
+    language_set m_languages;
     [[no_unique_address]] Clock m_clock;
     std::int64_t m_started;
     std::mutex m_lock;

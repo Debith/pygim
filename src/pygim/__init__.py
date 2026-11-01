@@ -17,7 +17,7 @@ _LAZY_EXPORTS = {
     "acquire_datastore": ("pygim.persistence", "acquire_datastore"),
 }
 
-__all__ = [*_LAZY_EXPORTS, "create_df"]
+__all__ = [*_LAZY_EXPORTS]
 
 
 def __getattr__(name):
@@ -30,68 +30,3 @@ def __getattr__(name):
     value = getattr(importlib.import_module(module_name), attr)
     globals()[name] = value   # resolved once: from now on a plain attribute (PEP 562 only fires on a miss)
     return value
-
-
-def create_df(
-    schema: dict,
-    rows: int = 100_000,
-    *,
-    seed: int = 42,
-    null_fraction: float = 0.0,
-    format: str = "polars",
-):
-    """Generate a test DataFrame with the given schema.
-
-    Uses a fast C++ backend with Arrow array builders — typically
-    50–100× faster than equivalent pure-Python generation.
-
-    Parameters
-    ----------
-    schema : dict[str, str]
-        Column definitions as ``{name: type_string}``.
-        Supported types: int8, int16, int32, int64, uint8–uint64, bool,
-        float32, float64, string, date, time, timestamp, duration, binary, uuid,
-        serial (sequential 1, 2, 3, … for PK columns).
-        Also accepts SQL aliases: tinyint, smallint, bigint, bit, real, double,
-        nvarchar, varchar, datetime, datetime2, varbinary, uniqueidentifier.
-    rows : int
-        Number of rows (default: 100,000).
-    seed : int
-        Deterministic PRNG seed (default: 42).
-    null_fraction : float
-        Fraction of NULLs per column in [0.0, 1.0] (default: 0.0).
-    format : str
-        Output format: ``"polars"`` (default), ``"arrow"`` (PyArrow Table).
-        Use ``"arrow"`` to preserve Arrow-native types like ``fixed_size_binary``
-        that Polars may convert to variable-length equivalents.
-
-    Returns
-    -------
-    polars.DataFrame or pyarrow.Table
-        Polars DataFrame by default, PyArrow Table when ``format="arrow"``.
-
-    Raises
-    ------
-    ValueError
-        A format other than ``"polars"`` or ``"arrow"``, a type it does not know, ``rows`` below
-        1, or a ``null_fraction`` outside [0.0, 1.0].
-
-    Examples
-    --------
-    >>> import pygim
-    >>> df = pygim.create_df({"id": "int32", "name": "string"}, rows=10)  # doctest: +SKIP
-    """
-    if format not in ("polars", "arrow"):
-        raise ValueError(f"format must be 'polars' or 'arrow', not {format!r}")
-    import pyarrow as pa  # before the extension: it links against Arrow's libs
-
-    from pygim.datagen import generate as _generate  # C++ extension
-
-    exporter = _generate(schema, rows, seed, null_fraction)
-
-    table = pa.RecordBatchReader.from_stream(exporter).read_all()
-    if format == "arrow":
-        return table
-    import polars as pl  # hard dependency; a missing install must fail, not change the return type
-
-    return pl.from_arrow(table)

@@ -24,7 +24,7 @@ import shutil
 import subprocess
 import sys
 
-from pygim.pathlike import path
+from pygim.pathlike import ext, path
 
 HERE = path(os.path.dirname(os.path.abspath(__file__)))
 ROOT = HERE.parent.parent
@@ -61,7 +61,7 @@ TSAN_SUPPRESSIONS = "\n".join([
 
 def tree_files():
     """The working tree's files as git sees them: tracked, and untracked but not ignored."""
-    out = subprocess.run(["git", "ls-files", "-co", "--exclude-standard", "-z"], cwd=str(ROOT), capture_output=True, check=True)
+    out = subprocess.run(["git", "ls-files", "-co", "--exclude-standard", "-z"], cwd=ROOT, capture_output=True, check=True)
     return [f for f in out.stdout.decode().split("\0") if f]
 
 
@@ -89,6 +89,18 @@ def mirror(out):
         copied += 1
     record.write_text("\0".join(names))
     return copied
+
+
+def drop_stale_modules(out):
+    """Removes each compiled module in `out`'s src/pygim that no ext.*.toml declares any more — an
+    extension renamed, whose old module would be imported before the Python module of its old name
+    (an extension module is found first); returns the names it removed."""
+    declared = {toml.read()["extension"]["module"] for toml in (out / "src" / "_pygim_fast").pathset("**/ext.*.toml", kind="file")}
+    built = (out / "src" / "pygim").pathset("*", kind="file").filter(ext(".so", ".pyd"))
+    stale = sorted((module for module in built if module.name.split(".")[0] not in declared), key=lambda m: m.name)
+    for module in stale:
+        module.unlink()
+    return [module.name for module in stale]
 
 
 # What one instrumented compile of a pybind11 and Arrow source may take at its peak. Sixteen at once
@@ -124,18 +136,20 @@ def main():
     out = path(os.path.abspath(args.out))
     out.mkdir(parents=True, exist_ok=True)
     print(f"{mirror(out)} file(s) copied into {out}")
+    for name in drop_stale_modules(out):
+        print(f"removed {name}: no extension declares it any more")
     env = {**os.environ, "PYGIM_SANITIZE": args.sanitizer}
     env.setdefault("SETUPTOOLS_SCM_PRETEND_VERSION", "0.0.0+sanitized")   # the copy has no git history to version from
     jobs = build_jobs()
     print(f"building with {jobs} compile(s) at once")
-    built = subprocess.run([sys.executable, "setup.py", "build_ext", "--inplace", "-j", str(jobs)], cwd=str(out), env=env,
+    built = subprocess.run([sys.executable, "setup.py", "build_ext", "--inplace", "-j", str(jobs)], cwd=out, env=env,
                            capture_output=True, text=True)
     if built.returncode != 0:
         print(built.stdout[-3000:] + built.stderr[-3000:])
         print("the instrumented build failed")
         return 1
     for objects in (out / "build").pathset("temp*", kind="dir"):   # a gigabyte of objects; build/lib's modules say what is up to date
-        shutil.rmtree(str(objects), ignore_errors=True)
+        shutil.rmtree(objects, ignore_errors=True)
     reports = out / "sanitizer-report"   # a report goes to a file: pytest holds stderr, and a halt loses it
     for stale in out.pathset("sanitizer-report.*", kind="file"):
         stale.unlink()
@@ -157,7 +171,7 @@ def main():
     # PYGIM_TEST_TIME_SCALE=0: no time budget, which an instrumented test's clock would measure the instrumentation against.
     tested = {**os.environ, **options, **ENVIRONMENT, "PYTHONPATH": python_path, "PYGIM_SANITIZED": args.sanitizer,
               "PYGIM_TEST_TIME_SCALE": "0"}
-    code = subprocess.run(command, cwd=str(out), env=tested).returncode
+    code = subprocess.run(command, cwd=out, env=tested).returncode
     for report in out.pathset("sanitizer-report.*", kind="file"):   # sorted already
         print(f"--- {report}\n{report.read_bytes().decode(errors='replace')[:20000]}")
     return code

@@ -130,7 +130,7 @@ def main():
     root, out = args.checkout, args.out
     out.mkdir(parents=True, exist_ok=True)
     try:
-        commit = subprocess.run(["git", "-C", str(root), "log", "-1", "--format=%h %cd", "--date=short"],
+        commit = subprocess.run(["git", "-C", root, "log", "-1", "--format=%h %cd", "--date=short"],
                                 capture_output=True, text=True).stdout.strip()
     except OSError:
         commit = "?"
@@ -176,7 +176,7 @@ def main():
         with ranking.lap(name) as lap, PeakRss() as rss:
             tb = ix.pairs(threshold=THRESHOLD, min_size=MIN_SIZE)
         seconds = lap.took.seconds
-        pq.write_table(tb, str(out / f"{name}.parquet"))
+        pq.write_table(tb, out / f"{name}.parquet")
         ranked[name] = tb
         exact = pc.sum(tb["exact"]).as_py() or 0
         near = tb.filter(pc.invert(tb["exact"]))
