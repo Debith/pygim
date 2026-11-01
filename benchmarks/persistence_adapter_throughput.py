@@ -15,7 +15,7 @@ import click
 import polars as pl
 
 from pygim.persistence import Query, acquire_datastore
-from _bench import stopwatch
+from pygim.utils import QuickTimer
 
 # Connection string with non-existent driver — makes ODBC fail immediately
 # instead of hanging on DNS resolution (as "bench_conn" would).
@@ -42,10 +42,10 @@ def _try_load(repo, source, workers=1):
 
 def _bench(fn, iterations: int) -> float:
     """Run fn for iterations, return total elapsed nanoseconds (pygim's own timer, D83)."""
-    with stopwatch() as t:
+    with QuickTimer.silent() as timer:
         for _ in range(iterations):
             fn()
-    return t.snapshot().total.nanoseconds
+    return timer.total.nanoseconds
 
 
 def _run_scenario(

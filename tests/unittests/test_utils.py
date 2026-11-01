@@ -245,7 +245,7 @@ def test_a_unit_is_read_without_the_locale():
 
 
 # ── the stub ────────────────────────────────────────────────────────────────
-UTILS_CLASSES = ("Duration", "ManualTime", "Timestamp", "TimerSnapshot", "Report", "QuickTimer", "gimdict")
+UTILS_CLASSES = ("Duration", "ManualTime", "Timestamp", "TimerSnapshot", "TimerLap", "Report", "QuickTimer", "gimdict")
 # What pybind11 gives every class, or what the stub leaves to object's.
 UTILS_NOT_STUBBED = {"__module__", "__doc__", "__dict__", "__weakref__", "__new__", "__repr__", "_pybind11_conduit_v1_"}
 

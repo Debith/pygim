@@ -11,6 +11,7 @@ calls your hooks.
 This example demonstrates:
 - Timing a block and its laps with a manual clock, so every number is exact
 - Silent timing for metrics: the values come out, nothing is printed
+- Laps as with blocks on QuickTimer.silent(): started and stopped by the block
 - Hooks: your own callbacks when a lap starts, when it stops, when the timer finishes
 - The default report: today's text on sys.stderr
 """
@@ -52,7 +53,20 @@ time.advance(secs=5)                         # later readings of a finished time
 assert timer.snapshot().total == utils.Duration(msecs=420)
 
 # ----------------------------------------------------------------------------
-# 3. Hooks: your callbacks at each moment
+# 3. Laps as with blocks, on a timer that tells nobody
+# ----------------------------------------------------------------------------
+with utils.QuickTimer.silent("load csv", clock=time) as timer:
+    with timer.lap("read") as read:          # started here, stopped as the block ends
+        time.advance(msecs=120)
+    time.advance(msecs=8)                    # between the blocks: in the total, in no lap
+    with timer.lap("parse"):
+        time.advance(msecs=292)
+assert read.took == utils.Duration(msecs=120)
+assert timer.laps == {"read": utils.Duration(msecs=120), "parse": utils.Duration(msecs=292)}
+assert timer.total.seconds == 0.42           # read off the timer: no snapshot needed
+
+# ----------------------------------------------------------------------------
+# 4. Hooks: your callbacks at each moment
 # ----------------------------------------------------------------------------
 lines = []
 report = utils.Report.hooks()
@@ -79,7 +93,7 @@ with utils.QuickTimer("load csv", clock=time, report=report) as timer:
 assert quiet == ["parse"]
 
 # ----------------------------------------------------------------------------
-# 4. The default report: text on sys.stderr, as QuickTimer has always printed it
+# 5. The default report: text on sys.stderr, as QuickTimer has always printed it
 # ----------------------------------------------------------------------------
 # It writes through sys.stderr, so whatever redirects that (here, contextlib; pytest's capsys;
 # a notebook) sees the lines.

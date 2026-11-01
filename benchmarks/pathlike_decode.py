@@ -25,14 +25,14 @@ from tabulate import tabulate
 
 import pygim
 from _results import save, wants_save
-from _bench import timed
+import _bench
 
 REPS = 7
 
 
 def best(fn, *args):
     """Best-of-REPS wall time in seconds (min is the least noisy estimator)."""
-    return min(timed(fn, *args)[0] for _ in range(REPS))
+    return _bench.best(lambda: fn(*args), reps=REPS)[0]
 
 
 # ── Workloads ────────────────────────────────────────────────────────────────

@@ -96,6 +96,19 @@ class TimerSnapshot:
         """{lap name: Duration}, in the order the laps first started."""
 
 
+class TimerLap:
+    """A lap of a QuickTimer as a with block: QuickTimer.lap(name)."""
+
+    @property
+    def name(self) -> str:
+        """The lap's name."""
+    @property
+    def took(self) -> Duration:
+        """All the lap's time so far: every block it ran."""
+    def __enter__(self) -> TimerLap: ...
+    def __exit__(self, exc_type: object, exc: BaseException | None, traceback: object) -> bool: ...
+
+
 class Report:
     """How a QuickTimer tells what it measured: Report.silent(), Report.stderr(), Report.hooks(), Report.both(...)."""
 
@@ -127,6 +140,9 @@ class QuickTimer:
     Use it in a with block: leaving it finishes the timer."""
 
     def __init__(self, name: str = "QuickTimer", *, clock: ManualTime | None = None, report: Report | None = None) -> None: ...
+    @staticmethod
+    def silent(name: str = "QuickTimer", *, clock: ManualTime | None = None) -> QuickTimer:
+        """A timer that tells nobody: QuickTimer(name, clock=clock, report=Report.silent())."""
     def start_lap(self, name: str) -> None:
         """Starts the lap `name`, stopping the one running."""
     def stop_lap(self, name: str | None = None) -> Duration:
@@ -135,6 +151,14 @@ class QuickTimer:
         """Stops the running lap, freezes the total, tells the report: once."""
     def snapshot(self) -> TimerSnapshot:
         """What it measured so far, or at its finish."""
+    @property
+    def total(self) -> Duration:
+        """From the start to now, or to the finish once finished."""
+    @property
+    def laps(self) -> dict[str, Duration]:
+        """{lap name: Duration}, in the order the laps first started."""
+    def lap(self, name: str) -> TimerLap:
+        """The lap `name` as a with block: started as the block begins, stopped as it ends."""
     def __enter__(self) -> QuickTimer: ...
     def __exit__(self, exc_type: object, exc: BaseException | None, traceback: object) -> bool: ...
 

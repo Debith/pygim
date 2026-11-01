@@ -263,3 +263,56 @@ def test_the_lap_calls_have_one_name_each():
     """start_sub_timer and stop_sub_timer became start_lap and stop_lap (D62, 2026-10-30), with no
     alias: pygim is below 1.0, and a rename there needs no deprecation (Debith, 2026-10-31)."""
     assert [name for name in dir(utils.QuickTimer) if "sub_timer" in name] == []
+
+
+# ── what a with block asks of a timer (Debith on PR #39, 2026-11-01: the benchmarks' stopwatch,
+# elapsed and timed helpers "are sign quick timer is not doing its job") ───────────────────────
+
+def test_silent_is_a_timer_that_tells_nobody(time, capfd):
+    with utils.QuickTimer.silent("job", clock=time) as timer:
+        time.advance(msecs=3)
+    assert capfd.readouterr().err == "" and timer.snapshot().name == "job"
+    assert utils.QuickTimer.silent().snapshot().name == "QuickTimer"
+
+
+def test_total_and_laps_are_read_off_the_timer(time):
+    with utils.QuickTimer.silent("job", clock=time) as timer:
+        timer.start_lap("read")
+        time.advance(msecs=2)
+        assert timer.total == ms(2)   # running: up to now
+        time.advance(msecs=1)
+    time.advance(secs=5)
+    assert (timer.total, timer.laps) == (ms(3), {"read": ms(3)}) == (timer.snapshot().total, timer.snapshot().laps)
+
+
+def test_a_lap_block_starts_its_lap_and_stops_it_as_it_ends(time):
+    with utils.QuickTimer.silent("job", clock=time) as timer:
+        with timer.lap("read") as read:
+            time.advance(msecs=2)
+        time.advance(msecs=7)          # between the blocks: no lap runs
+        with timer.lap("parse"):
+            time.advance(msecs=4)
+        with timer.lap("read"):        # again: the lap's time adds up
+            time.advance(msecs=1)
+    assert timer.laps == {"read": ms(3), "parse": ms(4)} and read.took == ms(3) and read.name == "read"
+    assert timer.total == ms(14)
+
+
+def test_a_lap_block_that_raises_still_stops_its_lap(time):
+    timer = utils.QuickTimer.silent("job", clock=time)
+    with pytest.raises(KeyError):
+        with timer.lap("read"):
+            time.advance(msecs=2)
+            raise KeyError("x")
+    time.advance(msecs=5)
+    assert timer.laps == {"read": ms(2)}
+
+
+def test_a_hook_that_raises_as_a_lap_block_ends_keeps_the_blocks_own_error(time):
+    report = utils.Report.hooks()
+    report.on_stopped(lambda name, lap, took: (_ for _ in ()).throw(RuntimeError("hook")))
+    timer = utils.QuickTimer("job", clock=time, report=report)
+    with pytest.raises(RuntimeError, match="hook") as raised:
+        with timer.lap("read"):
+            raise KeyError("block")
+    assert isinstance(raised.value.__context__, KeyError)

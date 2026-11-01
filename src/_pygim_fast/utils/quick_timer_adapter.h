@@ -7,9 +7,11 @@
 // timer one clock_source and one timer_report. Lap names the timer keeps as views are Python
 // strings this adapter keeps alive; a snapshot handed to Python copies them.
 //
-//     with utils.QuickTimer("load csv", clock=time, report=utils.Report.silent()) as timer:
-//         timer.start_lap("read")
-//     timer.snapshot().laps       -> {"read": Duration(...)}
+//     with utils.QuickTimer.silent("load csv", clock=time) as timer:
+//         with timer.lap("read"):
+//             ...
+//     timer.laps                  -> {"read": Duration(...)}
+//     timer.total.seconds         -> 0.002
 
 #include <memory>
 #include <optional>
@@ -208,6 +210,10 @@ public:
     }
     void finish() { m_timer.finish(); }
     [[nodiscard]] python_snapshot snapshot() const { return python_snapshot(m_timer.snapshot()); }
+    /// From the start to now, or to the finish once finished.
+    [[nodiscard]] duration total() const { return m_timer.total(); }
+    /// All the time of the lap `name`; IndexError when there is no such lap.
+    [[nodiscard]] duration lap_time(const py::str& name) const { return m_timer.lap(view_of(name)); }
 
 private:
     py::str m_name;
@@ -240,7 +246,37 @@ private:
     }
 };
 
-/// Binds TimerSnapshot, Report and QuickTimer into `m` (Duration and ManualTime must be bound first).
+/// f() as a with block ends. A hook that raises then raises here; the block's own error, if any,
+/// becomes its __context__, as a Python __exit__'s would — pybind's re-raise left it out, and it was lost.
+template <class F>
+void ending_block(const py::object& error, F&& f) {
+    try {
+        f();
+    } catch (py::error_already_set& raised) {
+        if (!error.is_none()) PyException_SetContext(raised.value().ptr(), error.inc_ref().ptr());   // steals the reference
+        throw;
+    }
+}
+
+/// `with timer.lap("read") as lap:` — the lap started as the block begins and stopped as it ends;
+/// `lap.took` is all its time so far. It holds its timer, so it never outlives what it reads.
+class python_timer_lap {
+public:
+    python_timer_lap(py::object timer, py::str name) : m_timer(std::move(timer)), m_name(std::move(name)) {}
+
+    void start() { timer().start_lap(m_name); }
+    void stop() { timer().stop_lap(m_name); }
+    [[nodiscard]] const py::str& name() const noexcept { return m_name; }
+    [[nodiscard]] duration took() const { return timer().lap_time(m_name); }
+
+private:
+    py::object m_timer;   // a QuickTimer
+    py::str m_name;
+
+    [[nodiscard]] python_quick_timer& timer() const { return m_timer.cast<python_quick_timer&>(); }
+};
+
+/// Binds TimerSnapshot, TimerLap, Report and QuickTimer into `m` (Duration and ManualTime must be bound first).
 inline void bind_quick_timer(py::module_& m) {
     py::class_<python_snapshot>(m, "TimerSnapshot", "What a QuickTimer measured: its name, total and laps.")
         .def_property_readonly("name", &python_snapshot::name, "The timer's name.")
@@ -250,6 +286,18 @@ inline void bind_quick_timer(py::module_& m) {
             return "TimerSnapshot(" + py::repr(py::str(s.name())).cast<std::string>() +
                    ", total=" + py::repr(py::cast(s.total())).cast<std::string>() + ")";
         });
+
+    py::class_<python_timer_lap>(m, "TimerLap", "A lap of a QuickTimer as a with block: QuickTimer.lap(name).")
+        .def_property_readonly("name", &python_timer_lap::name, "The lap's name.")
+        .def_property_readonly("took", &python_timer_lap::took, "All the lap's time so far: every block it ran.")
+        .def("__enter__", [](py::object self) {
+            self.cast<python_timer_lap&>().start();
+            return self;
+        })
+        .def("__exit__", [](python_timer_lap& lap, const py::object&, const py::object& error, const py::object&) {
+            ending_block(error, [&] { lap.stop(); });
+            return false;
+        }, py::arg("exc_type"), py::arg("exc"), py::arg("traceback"));
 
     py::class_<python_report, std::shared_ptr<python_report>>(m, "Report",
         "How a QuickTimer tells what it measured: Report.silent(), Report.stderr(), Report.hooks(), Report.both(...).")
@@ -291,17 +339,20 @@ inline void bind_quick_timer(py::module_& m) {
         .def("stop_lap", &python_quick_timer::stop_lap, py::arg("name") = py::none(),
              "Stops the lap `name` (the running one when None) and returns all its time.")
         .def("finish", &python_quick_timer::finish, "Stops the running lap, freezes the total, tells the report: once.")
+        .def_static("silent", [](py::str name, py::object clock) {
+                return std::make_unique<python_quick_timer>(std::move(name), std::move(clock),
+                                                            py::cast(std::make_shared<python_report>(python_report::silent_report())));
+            }, py::arg("name") = py::str("QuickTimer"), py::kw_only(), py::arg("clock") = py::none(),
+            "A timer that tells nobody: QuickTimer(name, clock=clock, report=Report.silent()).")
         .def("snapshot", &python_quick_timer::snapshot, "What it measured so far, or at its finish.")
+        .def_property_readonly("total", &python_quick_timer::total, "From the start to now, or to the finish once finished.")
+        .def_property_readonly("laps", [](const python_quick_timer& timer) { return timer.snapshot().laps(); },
+                               "{lap name: Duration}, in the order the laps first started.")
+        .def("lap", [](py::object self, py::str name) { return python_timer_lap(std::move(self), std::move(name)); },
+             py::arg("name"), "The lap `name` as a with block: started as the block begins, stopped as it ends.")
         .def("__enter__", [](py::object self) { return self; })
-        // A hook that raises as the block ends raises here; the block's own error, if any, becomes its
-        // __context__, as a Python __exit__'s would — pybind's re-raise left it out, and it was lost.
         .def("__exit__", [](python_quick_timer& timer, const py::object&, const py::object& error, const py::object&) {
-            try {
-                timer.finish();
-            } catch (py::error_already_set& raised) {
-                if (!error.is_none()) PyException_SetContext(raised.value().ptr(), error.inc_ref().ptr());   // steals the reference
-                throw;
-            }
+            ending_block(error, [&] { timer.finish(); });
             return false;
         }, py::arg("exc_type"), py::arg("exc"), py::arg("traceback"));
 }

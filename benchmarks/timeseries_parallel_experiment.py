@@ -20,7 +20,7 @@ from bcp_throughput import (
     default_connection_string,
 )
 import pygim
-from _bench import elapsed as seconds_of, stopwatch
+from pygim.utils import QuickTimer
 
 
 # ── Table DDLs ───────────────────────────────────────────────────────────────
@@ -94,9 +94,9 @@ def _run_write_with_hint(
 
     # Found 2026-10-31: the store was made and never written to, so this timed an empty interval
     # and every result it reported measured nothing.
-    with stopwatch() as t:
+    with QuickTimer.silent("save") as saving:
         store.save(df, table)
-    elapsed = seconds_of(t)
+    elapsed = saving.total.seconds
 
     mb_s = (payload_bytes / 1_048_576) / elapsed if elapsed > 0 else 0.0
     return {

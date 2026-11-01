@@ -27,14 +27,14 @@ import math
 import os
 import platform
 import sys
-import time  # time.sleep between runs; the timing is pygim's (_bench.stopwatch)
+import time  # time.sleep between runs; the timing is pygim's QuickTimer
 from datetime import date as py_date
 from datetime import datetime, timezone
 from decimal import Decimal
 
 import click
 import pygim
-from _bench import elapsed as seconds_of, stopwatch, timed
+from pygim.utils import QuickTimer
 
 print(f"PID: {os.getpid()}")
 
@@ -288,9 +288,9 @@ def run_write(
     payload_bytes = estimate_size_bytes(df)
     nrows = len(df)
 
-    with stopwatch() as t:
+    with QuickTimer.silent("write") as writing:
         metrics = store.save(df, table)
-    elapsed = seconds_of(t)
+    elapsed = writing.total.seconds
 
     mb_s = (payload_bytes / 1_048_576) / elapsed if elapsed > 0 else 0.0
 
@@ -322,9 +322,9 @@ def run_load(
         conn_str, format="polars", block_size=block_size, packet_size=packet_size
     )
 
-    with stopwatch() as t:
+    with QuickTimer.silent("load") as loading:
         df = store.load(table, load_workers=load_workers)
-    elapsed = seconds_of(t)
+    elapsed = loading.total.seconds
 
     nrows = len(df)
     try:
@@ -968,14 +968,16 @@ def bench(
     # ── Generate data ────────────────────────────────────────────────────
     data: dict[str, object] = {}
     if mode in ("write", "both"):
+        generating = QuickTimer.silent("generate")   # a lap a profile
         for pname in profiles:
             profile = PROFILES[pname]
             click.echo(
                 f"Generating {rows:,} rows for [{pname}] ({profile['columns']} cols) …"
             )
-            gen_s, df = timed(pygim.create_df, profile["schema"], rows=rows, format="arrow")
+            with generating.lap(pname) as lap:
+                df = pygim.create_df(profile["schema"], rows=rows, format="arrow")
             size_mb = estimate_size_bytes(df) / 1_048_576
-            click.echo(f"  → {size_mb:.1f} MB in {gen_s:.2f}s")
+            click.echo(f"  → {size_mb:.1f} MB in {lap.took.seconds:.2f}s")
             data[pname] = df
 
     do_write = mode in ("write", "both")

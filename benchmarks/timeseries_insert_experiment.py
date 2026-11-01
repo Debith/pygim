@@ -24,7 +24,7 @@ from bcp_throughput import (
     default_connection_string,
 )
 import pygim
-from _bench import elapsed as seconds_of, stopwatch
+from pygim.utils import QuickTimer
 
 
 DDL = """
@@ -74,7 +74,7 @@ def insert_via_executemany(conn_str, table, df_arrow, batch_size):
     # Convert Arrow to list of tuples in batches
     nrows = len(df_arrow)
     total_sent = 0
-    with stopwatch() as t:
+    with QuickTimer.silent("insert") as inserting:
         for offset in range(0, nrows, batch_size):
             end = min(offset + batch_size, nrows)
             chunk = df_arrow.slice(offset, end - offset)
@@ -86,7 +86,7 @@ def insert_via_executemany(conn_str, table, df_arrow, batch_size):
             total_sent += len(rows)
 
         cn.commit()
-    elapsed = seconds_of(t)
+    elapsed = inserting.total.seconds
     cursor.close()
     cn.close()
 
@@ -115,7 +115,7 @@ def insert_via_executemany_numpy(conn_str, table, df_arrow, batch_size):
 
     nrows = len(df_arrow)
     total_sent = 0
-    with stopwatch() as t:
+    with QuickTimer.silent("insert") as inserting:
         for offset in range(0, nrows, batch_size):
             end = min(offset + batch_size, nrows)
             ts_batch = ts_np[offset:end]
@@ -132,7 +132,7 @@ def insert_via_executemany_numpy(conn_str, table, df_arrow, batch_size):
             total_sent += len(rows)
 
         cn.commit()
-    elapsed = seconds_of(t)
+    elapsed = inserting.total.seconds
     cursor.close()
     cn.close()
 
