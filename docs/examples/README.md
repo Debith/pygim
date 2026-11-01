@@ -32,7 +32,7 @@ python -m pytest tests/unittests/test_examples.py
 
 | Area | Example | What it teaches |
 | ------ | --------- | ----------------- |
-| code | [example_01_parse_a_tree.py](code/example_01_parse_a_tree.py) | `code.parse()`: a tree of files walked, read and parsed in C++; a file that is not Python listed and raised on request; nodes as views with ast's kinds, fields and positions; `dump()` equal to `ast.dump`; bytes read in the encoding their cookie declares |
+| code | [example_01_parse_a_tree.py](code/example_01_parse_a_tree.py) | `code.parse()`: a tree of files walked, read and parsed in C++; a file that is not Python listed and raised on request; nodes as views with ast's kinds, fields and positions; a node compared with the one a test expects (`code.like`); `dump()` equal to `ast.dump`; bytes read in the encoding their cookie declares |
 | datagen | [example_01_data_generation.py](datagen/example_01_data_generation.py) | `create_df` and `datagen.generate`: a schema of Arrow and SQL type names made into a table in C++, what each kind of column holds, the same seed's same data and another's different data, nulls by fraction, PyArrow when asked, what is refused |
 | ioc | [example_01_basic_container.py](ioc/example_01_basic_container.py) | Registering providers, transient vs. singleton lifecycles, named variants, decorator registration, provider decorators, interface validation, introspection |
 | ioc | [example_02_autowire.py](ioc/example_02_autowire.py) | Opt-in constructor autowiring from type hints across a multi-layer object graph, default-value fallback, guard rails |

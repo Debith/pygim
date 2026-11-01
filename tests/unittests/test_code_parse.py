@@ -532,6 +532,75 @@ def test_constants_are_their_python_values():
     assert [v.field("value") for v in values] == [1, 1.5, 2j, "a", b"b", None, True, ..., 255]
 
 
+# ── code.like: an expected node, for == (D94) ───────────────────────────────
+
+POINT = "@dataclass\nclass Point(Base):\n    x: int\n    y = 2 * k\n"
+
+
+@pytest.fixture()
+def point():
+    return code.parse_source(POINT).find("ClassDef")[0]
+
+
+def test_a_node_equals_an_expected_node_of_its_kind_and_the_fields_it_names(point):
+    """Debith on PR #39: "for testing purposes like this, it would be better if we construct equivalent
+    object here, so that we can compare cls == expected(kind="ClassDef", name= ...)". A field not
+    named is not compared, so a test names only what it is about."""
+    assert point == code.like("ClassDef", name="Point")
+    assert point != code.like("ClassDef", name="Line")
+    assert point != code.like("FunctionDef", name="Point")
+
+
+def test_an_expected_node_compares_from_either_side(point):
+    assert code.like("ClassDef", name="Point") == point
+    assert point in [None, code.like("ClassDef", name="Point")]
+
+
+def test_an_expected_field_holds_nodes_lists_names_and_constants_as_field_returns_them(point):
+    assert point == code.like("ClassDef", decorator_list=[code.like("Name", id="dataclass", ctx="Load")],
+                              bases=[code.like("Name", id="Base")])
+    assign = point.field("body")[1]
+    assert assign == code.like("Assign", value=code.like("BinOp", left=code.like("Constant", value=2), op="Mult"))
+
+
+def test_a_list_is_compared_whole_in_order(point):
+    assert point != code.like("ClassDef", bases=[])
+    assert point != code.like("ClassDef", body=[code.like("Assign"), code.like("AnnAssign")])
+    assert point == code.like("ClassDef", body=[code.like("AnnAssign"), code.like("Assign")])
+
+
+def test_an_expected_node_names_positions_as_fields(point):
+    assert point == code.like("ClassDef", lineno=2, col_offset=0, end_lineno=4)
+    assert point != code.like("ClassDef", lineno=1)
+
+
+def test_a_field_named_kind_is_a_field(point):
+    """Constant has a field named kind (the u prefix): the node's kind is the first argument only."""
+    assert code.parse_source("u'x'").find("Constant")[0] == code.like("Constant", value="x", kind="u")
+
+
+def test_an_expected_node_is_refused_where_no_node_could_match():
+    """A misspelt kind or field is a ValueError when the expectation is made, as find("Nmae") is,
+    never an expectation that matches nothing."""
+    with pytest.raises(ValueError, match="no node kind is named 'Nmae'"):
+        code.like("Nmae")
+    with pytest.raises(ValueError, match="'ClassDef' has no field 'nmae'"):
+        code.like("ClassDef", nmae="Point")
+    with pytest.raises(ValueError, match="'Module' has no position"):
+        code.like("Module", lineno=1)
+    with pytest.raises(TypeError, match="takes a node's kind, then its fields by name"):
+        code.like(name="Point")
+
+
+def test_an_expected_node_is_not_any_other_value(point):
+    assert code.like("Name") != "Name"
+    assert code.like("Name") != None   # noqa: E711
+
+
+def test_an_expected_node_shows_how_it_was_made():
+    assert repr(code.like("Name", id="x", ctx="Load")) == "like('Name', id='x', ctx='Load')"
+
+
 # ── the corpus ──────────────────────────────────────────────────────────────
 @pytest.fixture()
 def project(temp_dir):
@@ -770,7 +839,7 @@ MADE_BY = r"from Python (3\.14\.\d+)'s"   # how a generated header names the rel
 
 
 # ── the stub ────────────────────────────────────────────────────────────────
-STUBBED_CLASSES = ("Corpus", "Tree", "Node")
+STUBBED_CLASSES = ("Corpus", "Tree", "Node", "like")
 # What pybind11 gives every class, or what the stub leaves to object's (repr) and to `...` (hash).
 NOT_STUBBED = {"__init__", "__new__", "__repr__", "__module__", "__doc__", "__dict__", "__weakref__", "_pybind11_conduit_v1_"}
 

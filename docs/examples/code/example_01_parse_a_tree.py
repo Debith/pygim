@@ -14,6 +14,7 @@ This example demonstrates:
 - Parsing a tree, and what the corpus says of the run
 - A file that is not Python: listed as its SyntaxError, raised on request
 - Reading a tree: kinds, fields, positions, the source a node spans
+- A node compared with the node a test expects: ``code.like``
 - dump(), and parsing one source
 - A file's encoding, as its coding cookie declares it
 """
@@ -72,26 +73,33 @@ with tempfile.TemporaryDirectory() as tmp:
     #               ▼
     cls = tree.find("ClassDef")[0]
     assert cls.kind == "ClassDef"
-    assert cls.field("name") == "Point"
+    assert cls.field("name") == "Point"                # a field's value, as ast holds it
     assert cls.fields[:2] == ["name", "bases"]
-    # a decorated class starts at `class`, as in ast
-    assert cls.lineno == 4
-    assert cls.field("decorator_list")[0].field("id") == "dataclass"
-    annotated = [n.field("target").field("id") for n in cls.field("body") if n.kind == "AnnAssign"]
-    assert annotated == ["x", "y"]
     ret = tree.find("Return")[0]
     assert ret.source == "return Point(self.x * k, self.y * k)"     # the text a node spans
-    # operators and contexts by name
-    assert ret.field("value").field("args")[0].field("op") == "Mult"
-    assert ret.parent.field("name") == "scaled"
     try:
         tree.find("Nmae")                              # a kind ast does not have
         raise AssertionError("an unknown kind is an error, not an empty list")
     except ValueError:
         pass
 
+    # ------------------------------------------------------------------------
+    # 4. A node compared with the node a test expects
+    # ------------------------------------------------------------------------
+    #                       ┌─ kind: then only the fields and positions to compare
+    #                       ▼
+    assert cls == code.like("ClassDef", name="Point", lineno=4)   # decorated: it starts at `class`
+    assert cls == code.like("ClassDef", decorator_list=[code.like("Name", id="dataclass")])
+    annotated = [code.like("AnnAssign", target=code.like("Name", id="x")),
+                 code.like("AnnAssign", target=code.like("Name", id="y"))]
+    assert cls.field("body")[:2] == annotated          # a list, item by item
+    times = code.like("BinOp", op="Mult")              # operators and contexts by name
+    assert ret == code.like("Return", value=code.like("Call", args=[times, times]))
+    assert ret.parent == code.like("FunctionDef", name="scaled")
+    assert cls != code.like("ClassDef", name="Line")
+
 # ----------------------------------------------------------------------------
-# 4. dump() is ast.dump; parse_source() parses one text
+# 5. dump() is ast.dump; parse_source() parses one text
 # ----------------------------------------------------------------------------
 one = code.parse_source("x = f'{y!r:>8}'")
 assert one.dump() == (
@@ -101,7 +109,7 @@ assert one.dump() == (
 )
 
 # ----------------------------------------------------------------------------
-# 5. Bytes are read as a file is: in the encoding its cookie declares
+# 6. Bytes are read as a file is: in the encoding its cookie declares
 # ----------------------------------------------------------------------------
 euro = code.parse_source(b"# coding: cp1252\nx = '\x80'\n")    # cp1252's 0x80 is the euro sign
 assert euro.root.children[0].field("value").field("value") == "€"

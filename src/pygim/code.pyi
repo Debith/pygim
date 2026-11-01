@@ -9,7 +9,7 @@ one is asked for. Kinds, fields and positions are Python 3.14's ``ast``'s.
 
 import os
 from collections.abc import Iterator
-from typing import TypedDict
+from typing import ClassVar, TypedDict
 
 from pygim.pathlike import PathSet, path as pygim_path   # Tree has a property named path
 
@@ -116,5 +116,16 @@ class Node:
     def dump(self, *, include_attributes: bool = False) -> str:
         """The node as ast.dump writes it."""
     def __eq__(self, other: object) -> bool:
-        """The same node of the same tree."""
+        """The same node of the same tree; or, against a like(...), of its kind and holding each value it names."""
     def __hash__(self) -> int: ...
+
+
+class like:
+    """A node a test expects: its kind, and only the fields and positions named, each a value as
+    field() returns it (a like for a node, a list for a list): node == like('ClassDef', name='Point').
+    ValueError for a kind no node has, a field the kind does not have, a position on a kind with none."""
+
+    def __init__(self, kind: str, /, **fields: object) -> None: ...
+    def __eq__(self, other: object) -> bool:
+        """Whether a node is of the kind and holds each value named."""
+    __hash__: ClassVar[None]  # type: ignore[assignment]
