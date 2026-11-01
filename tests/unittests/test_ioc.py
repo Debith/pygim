@@ -1,7 +1,9 @@
+import gc
+
 import pytest
 
 from pygim import Container as TopLevelContainer
-from pygim.ioc import Container
+from pygim.ioc import Container, ServiceDescriptor
 
 
 @pytest.fixture
@@ -488,8 +490,6 @@ def test_registration_decorator_is_reusable():
 
 
 def test_registration_decorator_keeps_container_alive():
-    import gc
-
     class IService:
         pass
 
@@ -551,8 +551,6 @@ def test_capacity_and_repr():
 
 
 def test_service_descriptor_construction_and_lifecycle_property():
-    from pygim.ioc import ServiceDescriptor
-
     class IService:
         pass
 
@@ -568,9 +566,34 @@ def test_service_descriptor_construction_and_lifecycle_property():
     assert descriptor.autowire is False
 
 
-def test_service_descriptor_is_read_only():
-    from pygim.ioc import ServiceDescriptor
+def test_a_descriptor_equals_one_built_from_the_same_parts(container):
+    """A registration is a value: what one is expected to be is built and compared, not read back
+    part by part. Debith on PR #39, of an example reading a query's parts: "This could be q == Query(...)"."""
+    class IService:
+        pass
 
+    class Service(IService):
+        pass
+
+    container.register(IService, Service, name="primary", lifecycle="singleton")
+    described = container.describe((IService, "primary"))
+    assert described == ServiceDescriptor(IService, Service, lifecycle="singleton", name="primary")
+    assert described != ServiceDescriptor(IService, Service, name="primary")            # transient
+    assert described != ServiceDescriptor(IService, Service, lifecycle="singleton")     # no name
+    assert described != ServiceDescriptor(IService, Service, lifecycle="singleton", name="primary", autowire=True)
+    assert described != "IService"
+
+
+def test_a_descriptor_shows_how_it_was_made():
+    class Service:
+        pass
+
+    made = ServiceDescriptor(Service, Service, lifecycle="singleton", name="x")
+    assert repr(made) == f"ServiceDescriptor({Service!r}, {Service!r}, lifecycle='singleton', name='x')"
+    assert repr(ServiceDescriptor(Service, Service)) == f"ServiceDescriptor({Service!r}, {Service!r})"
+
+
+def test_service_descriptor_is_read_only():
     class IService:
         pass
 

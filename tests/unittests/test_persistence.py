@@ -235,6 +235,35 @@ def test_query_multiple_selects():
     assert q.columns == ["a", "b"]
 
 
+def test_a_query_built_from_its_parts_equals_the_one_the_builder_made():
+    """A query is a value: what a test expects is built and compared, not read back field by field.
+    Debith on PR #39, of the example's five asserts on q's parts: "This could be q == Query(...)"."""
+    built = Query().select("id").select("name").from_table("dbo.users").where("active = 1").limit(10)
+    assert built == Query(columns=["id", "name"], table="dbo.users", where="active = 1", limit=10)
+
+
+def test_queries_differ_by_any_part():
+    q = Query(columns=["id"], table="t", where="x > 1", limit=5)
+    assert q != Query(columns=["id"], table="t", where="x > 1")
+    assert q != Query(columns=["id", "name"], table="t", where="x > 1", limit=5)
+    assert Query("SELECT 1") == Query(raw_sql="SELECT 1")
+    assert Query("SELECT 1") != Query()
+    assert Query() != "SELECT 1"
+
+
+def test_raw_sql_is_never_given_with_parts():
+    """Raw SQL is the whole query: every dialect passes it through, so a part beside it would be
+    ignored without a word."""
+    with pytest.raises(ValueError, match="raw SQL or its parts, not both"):
+        Query("SELECT 1", table="t")
+
+
+def test_a_query_shows_its_parts():
+    assert repr(Query(columns=["id"], table="t", limit=5)) == "Query(columns=['id'], table='t', limit=5)"
+    assert repr(Query("SELECT 1")) == "Query('SELECT 1')"
+    assert repr(Query()) == "Query()"
+
+
 # ─── Dialect ─────────────────────────────────────────────────────────────────
 
 

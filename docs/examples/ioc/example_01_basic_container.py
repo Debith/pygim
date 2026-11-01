@@ -17,7 +17,7 @@ This example demonstrates:
 - Introspection: ``len``, ``in``, ``registered_keys``, ``describe``, ``repr``
 """
 
-from pygim.ioc import Container
+from pygim.ioc import Container, ServiceDescriptor
 
 # A container can reserve space upfront to avoid rehashing while you
 # register services in bulk.
@@ -156,10 +156,11 @@ keys = [tuple(key) for key in container.registered_keys()]
 assert (Repository, "cached") in keys
 assert (Repository, None) in keys
 
-# describe(key) exposes the stored ServiceDescriptor without resolving.
+# describe(key) exposes the stored ServiceDescriptor without resolving: a value, so the
+# registration a test expects is built and compared.
 descriptor = container.describe((Repository, "cached"))
-assert descriptor.provider is CachedRepository
-assert descriptor.lifecycle == "singleton"
-assert descriptor.name == "cached"
+expected = ServiceDescriptor(Repository, CachedRepository, lifecycle="singleton", name="cached")
+assert descriptor == expected
+assert descriptor.lifecycle == "singleton"     # and each part reads back
 
 print("IoC basic container example OK:", container)

@@ -38,8 +38,7 @@ scores = utils.gimdict({"best": 70, "tries": 1}, int=max)
 scores.set_strategy("tries", "sum")          # a key's strategy comes before its type's
 scores.merge_in("best", 64)                  # merged into what is there, by that strategy
 scores.merge_in("tries", 1)
-assert scores["best"] == 70                  # max
-assert scores["tries"] == 2                  # sum, the key's own
+assert scores == {"best": 70, "tries": 2}    # best by max, its type's; tries by sum, its own
 assert scores.type_strategy("int") == "max"
 
 # ----------------------------------------------------------------------------

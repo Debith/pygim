@@ -48,10 +48,12 @@ stamp = 2024-01-15T10:30:00+02:00
 """)
 
 t = cfg.read()
-assert t["title"] == "svc"
-assert t["job"]["day"] == datetime.date(2024, 1, 15)
-assert t["job"]["runs_at"] == datetime.time(10, 30)
-assert t["job"]["stamp"].utcoffset() == datetime.timedelta(hours=2)
+plus_two = datetime.timezone(datetime.timedelta(hours=2))
+job = {"day": datetime.date(2024, 1, 15),
+       "runs_at": datetime.time(10, 30),
+       "stamp": datetime.datetime(2024, 1, 15, 10, 30, tzinfo=plus_two)}
+assert t == {"title": "svc", "job": job}
+assert t["job"]["stamp"].utcoffset() == datetime.timedelta(hours=2)   # the offset as written
 
 tmp.cleanup()
 print("pathlike JSON & TOML example OK:", t["title"])

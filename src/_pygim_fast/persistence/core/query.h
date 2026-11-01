@@ -74,6 +74,9 @@ public:
     [[nodiscard]] std::string_view where_clause() const { return m_where; }
     [[nodiscard]] std::optional<int> limit_value() const { return m_limit; }
     [[nodiscard]] std::string_view raw_sql() const { return m_raw_sql; }
+
+    /// The same intent, or the same raw SQL: a query is a value.
+    friend bool operator==(const Query&, const Query&) = default;
 };
 
 } // namespace pygim::core

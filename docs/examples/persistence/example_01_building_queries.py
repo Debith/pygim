@@ -8,7 +8,7 @@ tested anywhere; ``DataStore.load(query)`` is what finally runs it, rendering it
 with the same function shown here.
 
 This example demonstrates:
-- The fluent builder, and reading the intent back
+- The fluent builder, and the same query built from its parts
 - Rendering for SQL Server: ``[bracket]`` quoting, ``TOP N``, schema-qualified tables
 - Raw SQL, which every dialect passes through unchanged
 - Quoting one identifier, including the escape for an embedded ``]``
@@ -30,11 +30,9 @@ q.where("active = 1").limit(10)
 #       │                   └─ n: keep at most n rows
 #       └─ clause: the WHERE condition, as SQL text
 
-assert q.columns == ["id", "name"]
-assert q.table == "dbo.users"
-assert q.where_clause == "active = 1"
-assert q.limit_value == 10
-assert q.is_raw() is False
+# A query is a value: the same intent built from its parts is the same query.
+assert q == Query(columns=["id", "name"], table="dbo.users", where="active = 1", limit=10)
+assert q.table == "dbo.users"                  # and each part reads back
 
 
 # ----------------------------------------------------------------------------

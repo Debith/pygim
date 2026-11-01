@@ -1,5 +1,8 @@
 #include <pybind11/pybind11.h>
 
+#include <algorithm>
+#include <string>
+
 #include "../common/adapter_errors.h"
 #include "adapter.h"
 
@@ -42,7 +45,22 @@ PYBIND11_MODULE(ioc, m) {
             })
         .def_readonly("name", &Descriptor::name)
         .def_readonly("decorators", &Descriptor::decorators)
-        .def_readonly("autowire", &Descriptor::autowire);
+        .def_readonly("autowire", &Descriptor::autowire)
+        .def("__eq__", [](const Descriptor& a, const Descriptor& b) {
+                 const auto same = [](const py::object& x, const py::object& y) { return x.equal(y); };
+                 return same(a.interface, b.interface) && same(a.provider, b.provider) && a.lifecycle == b.lifecycle &&
+                        a.name == b.name && a.autowire == b.autowire && std::ranges::equal(a.decorators, b.decorators, same);
+             }, py::is_operator(), py::arg("other"),
+             "The same registration: interface, provider, lifecycle, name, decorators and autowire.")   // NotImplemented for any other type
+        .def("__repr__", [](const Descriptor& d) {
+                 std::string out = "ServiceDescriptor(" + py::repr(d.interface).cast<std::string>() + ", " + py::repr(d.provider).cast<std::string>();
+                 if (d.lifecycle != pygim::core::Lifecycle::Transient)
+                     out += ", lifecycle='" + std::string(pygim::core::lifecycle_to_string(d.lifecycle)) + "'";
+                 if (d.name) out += ", name=" + py::repr(py::str(*d.name)).cast<std::string>();
+                 if (!d.decorators.empty()) out += ", decorators=" + py::repr(py::cast(d.decorators)).cast<std::string>();
+                 if (d.autowire) out += ", autowire=True";
+                 return out + ")";
+             });
 
     py::class_<pygim::Container>(m, "Container",
         "IoC container mapping interfaces to providers.\n\n"

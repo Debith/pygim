@@ -19,8 +19,10 @@
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 
+#include <optional>
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace pygim::adapter {
 
@@ -34,9 +36,36 @@ inline void bind_query(py::module_& m) {
     py::class_<Query>(m, "Query",
                       "A query as intent — columns, table, where clause, limit — or as raw SQL.\n"
                       "Built from plain values; a dialect renders it and DataStore.load runs it.")
-        .def(py::init<>())
-        .def(py::init<std::string_view>(), py::arg("raw_sql"),
-             "Raw SQL, passed through unchanged by every dialect.")
+        .def(py::init([](std::optional<std::string_view> raw_sql, const std::vector<std::string>& columns, std::string_view table,
+                         std::string_view where, std::optional<int> limit) {
+                 if (raw_sql) {
+                     if (!columns.empty() || !table.empty() || !where.empty() || limit)
+                         throw py::value_error("Query takes raw SQL or its parts, not both: raw SQL is passed through whole");
+                     return Query(*raw_sql);
+                 }
+                 Query q;
+                 for (const std::string& column : columns) q.select(column);
+                 if (!table.empty()) q.from_table(table);
+                 if (!where.empty()) q.where(where);
+                 if (limit) q.limit(*limit);
+                 return q;
+             }), py::arg("raw_sql") = py::none(), py::kw_only(), py::arg("columns") = std::vector<std::string>{},
+             py::arg("table") = "", py::arg("where") = "", py::arg("limit") = py::none(),
+             "Raw SQL, passed through unchanged by every dialect; or the parts the builder's steps set,\n"
+             "so Query(columns=['id'], table='t', limit=5) == Query().select('id').from_table('t').limit(5).")
+        .def("__eq__", [](Query const& a, Query const& b) { return a == b; }, py::is_operator(), py::arg("other"),
+             "The same intent, or the same raw SQL.")   // NotImplemented for any other type
+        .def("__repr__", [](Query const& q) {
+                 const auto shown = [](std::string_view text) { return py::repr(py::str(std::string(text))).cast<std::string>(); };
+                 if (q.is_raw()) return "Query(" + shown(q.raw_sql()) + ")";
+                 std::string parts;
+                 const auto add = [&parts](const std::string& part) { parts += (parts.empty() ? "" : ", ") + part; };
+                 if (!q.columns().empty()) add("columns=" + py::repr(py::cast(q.columns())).cast<std::string>());
+                 if (!q.table().empty()) add("table=" + shown(q.table()));
+                 if (!q.where_clause().empty()) add("where=" + shown(q.where_clause()));
+                 if (q.limit_value()) add("limit=" + std::to_string(*q.limit_value()));
+                 return "Query(" + parts + ")";
+             })
         .def("select", &Query::select, py::arg("col"), py::return_value_policy::reference_internal,
              "Add a column; returns this query.")
         .def("from_table", &Query::from_table, py::arg("table"), py::return_value_policy::reference_internal,
