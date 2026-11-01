@@ -1,9 +1,11 @@
 # -*- coding: utf-8 -*-
 """Tests for ``pygim.path`` — the self-reading, self-decoding PathLike."""
 
+import copy
 import json
 import operator
 import os
+import pickle
 import sys
 
 import pytest
@@ -1557,6 +1559,65 @@ def test_a_path_is_not_ordered_against_another_type(other):
         pygim.path("a") < other
     with pytest.raises(TypeError):
         other < pygim.path("a")
+
+
+# --------------------------------------------------------------------------- #
+# pickle, copy and construction (pathlib parity; global rule #305)
+# --------------------------------------------------------------------------- #
+class Kept(pygim.path):
+    """A user's subclass, at module level so that pickle can name it."""
+
+
+def pickled():
+    """A plain path, an absolute one, one typed by its suffix, two pinned to an engine their suffix
+    would not choose, one from a store of its own, and a user's subclass."""
+    return [pygim.path("a/b.txt"), pygim.path("/x/y"), pygim.path("c.yaml"), pygim.path("notes.txt", engine="yaml"),
+            pathlike.jsonpath("d.toml"), pygim.path("e/f", store=pathlike.PathStore()), Kept("g/h")]
+
+
+@pytest.mark.parametrize("protocol", range(pickle.HIGHEST_PROTOCOL + 1))
+def test_a_path_pickles_as_pathlibs_does(protocol):
+    """pathlib's paths pickle, so they reach another process (multiprocessing pickles its
+    arguments); pygim's raised TypeError until 2026-11-01 (D89). One comes back the same path, of
+    its class, with its engine — pinned, or chosen by its suffix, which a new suffix tells apart —
+    in the default store, as path() makes one."""
+    for p in pickled():
+        back = pickle.loads(pickle.dumps(p, protocol))
+        assert (back, type(back), back.engine) == (p, type(p), p.engine)
+        assert back.with_suffix(".json").engine == p.with_suffix(".json").engine
+
+
+def test_a_path_copies_as_decimal_does():
+    """A path is a value: copy and deepcopy hand back the object itself, its store with it, as
+    Decimal's do. A user's subclass may not be one, and is made again."""
+    for p in pickled():
+        if type(p) is Kept:
+            assert all(c == p and type(c) is Kept and c is not p for c in (copy.copy(p), copy.deepcopy(p)))
+        else:
+            assert copy.copy(p) is p and copy.deepcopy(p) is p
+
+
+def test_a_path_no_constructor_filled_is_not_copied_or_pickled():
+    """Handing back the object would hand on one that holds no path, and its recipe would read
+    memory nothing wrote (memory #307): refused, as a comparison refuses it."""
+    empty = pygim.path.__new__(pygim.path)
+    with pytest.raises(TypeError, match="holds no path"):
+        copy.copy(empty)
+    with pytest.raises(TypeError, match="holds no path"):
+        pickle.dumps(empty)
+    with pytest.raises(TypeError, match="holds no path"):
+        empty == pygim.path("a")
+
+
+def test_a_subclass_whose_init_skips_the_base_one_is_refused():
+    """Found 2026-11-01: the metaclass made a user's subclass through type's own call, past
+    pybind11's check that the base __init__ ran, so the object held memory nothing wrote and its
+    first str() crashed. pybind11's call raises, as it does for every class it binds."""
+    class Forgets(pygim.path):
+        def __init__(self, text):
+            pass
+    with pytest.raises(TypeError, match=r"__init__\(\) must be called when overriding __init__"):
+        Forgets("a")
 
 
 # --------------------------------------------------------------------------- #

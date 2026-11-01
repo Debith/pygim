@@ -70,6 +70,13 @@ class path(os.PathLike[str]):
     def __le__(self, other: path) -> bool: ...
     def __gt__(self, other: path) -> bool: ...
     def __ge__(self, other: path) -> bool: ...
+    # pickle and copy, as pathlib's and Decimal's; a user's subclass is copied by its recipe.
+    def __reduce__(self) -> tuple[type[path], tuple[str] | tuple[str, str]]:
+        """pickle's recipe: the class, the text, and the engine when one is pinned. It loads into the default store."""
+    def __copy__(self) -> path:
+        """The path itself: a path is a value."""
+    def __deepcopy__(self, memo: object) -> path:
+        """The path itself: a path is a value."""
 
     # -- name components (pathlib parity), read from the table ---------------
     @property

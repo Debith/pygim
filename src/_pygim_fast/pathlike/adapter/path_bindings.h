@@ -204,6 +204,35 @@ inline typed_registry& typed_types() {
     return *r;
 }
 
+/// `path` itself or a typed class: pygim's own, which path() chooses, and whose objects are values.
+inline bool is_pygims_own(PyTypeObject* tp) {
+    return tp == path_type || typed_types().value_or(tp, nullptr) != nullptr;
+}
+
+/// pickle's recipe for a path, as pathlib's and Decimal's are: its class called with its text, and
+/// with its pinned engine's name when it has one. A path of pygim's own class is made by path(),
+/// which chooses the class again (the typed class itself would pin what the suffix only chose); a
+/// user's subclass is called as itself. The store is not kept: the path loads into the default one.
+inline py::tuple reduced(py::handle self) {
+    const pathview* v = held(self.ptr());   // an object no constructor filled is refused (memory #307)
+    if (!v) throw py::error_already_set();
+    PyTypeObject* tp = Py_TYPE(self.ptr());
+    const py::handle cls(reinterpret_cast<PyObject*>(is_pygims_own(tp) ? path_type : tp));
+    py::object text = str_from_text(v->fspath());
+    const py::tuple args = v->pin() ? py::tuple(py::make_tuple(text, std::string(v->pin()->name))) : py::tuple(py::make_tuple(text));
+    return py::make_tuple(cls, args);
+}
+
+/// copy and deepcopy as Decimal's: a path of pygim's own class is a value, so the object itself,
+/// its store kept; a user's subclass may not be one, so it is made again from its recipe. An
+/// object no constructor filled is refused, as every other method refuses it (memory #307).
+inline py::object copied(py::handle self) {
+    if (!held(self.ptr())) throw py::error_already_set();
+    if (is_pygims_own(Py_TYPE(self.ptr()))) return py::reinterpret_borrow<py::object>(self);
+    const py::tuple recipe = reduced(self);
+    return recipe[0](*py::tuple(recipe[1]));
+}
+
 template <Engine E>
 bool wrap_if(const engine_info* e, pathview& v, py::object& out) {
     if (e != &E::info) return false;
@@ -296,19 +325,23 @@ py::class_<pathview> bind_path(engine_list<Es...> es, py::module_& m, const path
     // The metaclass: `path(...)` and `yamlpath(...)` build through wrap(), so
     // the constructed object is the typed subclass its engine resolves to —
     // something a Python constructor cannot do on its own. Other subclasses
-    // (a user's `class Mine(path)`) construct the ordinary way.
+    // (a user's `class Mine(path)`) construct as any pybind11 class does.
     py::object base_meta = py::type::of<path_store>().attr("__class__");   // pybind11's metaclass
+    const ternaryfunc pybind11_call = reinterpret_cast<PyTypeObject*>(base_meta.ptr())->tp_call;
     py::dict ns;
     ns["__module__"] = "pygim.pathlike";
-    ns["__call__"] = py::cpp_function([es](py::object cls, py::args args, py::kwargs kwargs) -> py::object {
+    ns["__call__"] = py::cpp_function([es, pybind11_call](py::object cls, py::args args, py::kwargs kwargs) -> py::object {
         static PyTypeObject* const base_type = reinterpret_cast<PyTypeObject*>(py::type::of<pathview>().ptr());
         auto* tp = reinterpret_cast<PyTypeObject*>(cls.ptr());
         const bool is_base = tp == base_type;
         const engine_info* typed = is_base ? nullptr : typed_types().value_or(tp, nullptr);
         if (!is_base && typed == nullptr) {
-            // A user's subclass: a NULL here means its __new__ or __init__ raised. Hand that error
-            // on as itself; returned as an empty object, pybind11 would replace it with a TypeError.
-            py::object built = py::reinterpret_steal<py::object>(PyType_Type.tp_call(cls.ptr(), args.ptr(), kwargs.ptr()));
+            // A user's subclass, made by pybind11's metaclass call, which raises TypeError when its
+            // __init__ skipped the base one. type's own call did not, and the object held memory
+            // nothing wrote (until 2026-11-01). A NULL here is that error, or one its __new__ or
+            // __init__ raised: handed on as itself; returned as an empty object, pybind11 would
+            // replace it with a TypeError.
+            py::object built = py::reinterpret_steal<py::object>(pybind11_call(cls.ptr(), args.ptr(), kwargs.ptr()));
             if (!built) throw py::error_already_set();
             return built;
         }
@@ -362,6 +395,12 @@ py::class_<pathview> bind_path(engine_list<Es...> es, py::module_& m, const path
         .def("__str__", [](const pathview& v) { return str_from_text(v.fspath()); })
         .def("__repr__", [](const pathview& v) { return v.value().repr(); })
         // ==, !=, <, <=, >, >= and hash(): the type's own slots (compare_slot, hash_slot)
+        // -- pickle and copy (pathlib parity, D89) --
+        .def("__reduce__", [](py::handle self) { return reduced(self); },
+             "pickle's recipe: the class, the text, and the engine when one is pinned. It loads into the default store.")
+        .def("__copy__", [](py::handle self) { return copied(self); }, "The path itself: a path is a value.")
+        .def("__deepcopy__", [](py::handle self, py::handle) { return copied(self); }, py::arg("memo"),
+             "The path itself: a path is a value.")
         .def_property_readonly("uri", [](const pathview& v) { return v.value().as_uri(); },
                                "The RFC 3986 file URI of an absolute path (percent-encoded: "
                                "file:///a%20b, file://host/share/x); a relative path keeps the "
