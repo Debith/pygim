@@ -62,24 +62,35 @@ def test_bytes_that_are_not_utf8_name_the_first_such_member(temp_dir, threads):
 @pytest.mark.skipif(not os.path.isdir("/proc/self/task"), reason="counting threads needs /proc")
 def test_more_threads_than_members_starts_one_a_member(temp_dir):
     """threads= is a most, not a count: two members are read by two threads at most. Found
-    2026-10-29: read_all_files(threads=1000) of two files started a thousand."""
+    2026-10-29: read_all_files(threads=1000) of two files started a thousand.
+
+    Counted only while a call runs, with a pause between calls: a joined thread can stay listed in
+    /proc for a moment after its join returns (the kernel wakes the joiner before it removes the
+    entry), and a counter fast enough caught the last call's reader beside this call's two
+    (2026-11-01, a release wheel's run: 26 against 25)."""
     members = [temp_dir / "a.txt", temp_dir / "b.txt"]
     for m in members:
         m.write_text("x")
-    seen, stop = [], threading.Event()
+    seen, stop, reading = [], threading.Event(), threading.Event()
     threads_now = lambda: len(path("/proc/self/task").pathset())   # native threads too
 
     def count():
         while not stop.is_set():
-            seen.append(threads_now())
+            n = threads_now()
+            if reading.is_set():
+                seen.append(n)
 
     before = threads_now()
     counter = threading.Thread(target=count)
     counter.start()
     for _ in range(20):
+        reading.set()
         assert PathSet(members).read_all_files(threads=1000) == ["x", "x"]
+        reading.clear()
+        time.sleep(0.005)   # the last call's readers gone from /proc before the next call starts
     stop.set()
     counter.join()
+    assert seen, "no count landed while a call ran"
     assert max(seen) <= before + 1 + 2   # the counter, and a reader a member
 
 

@@ -135,6 +135,7 @@ Changed
 
 Fixed
 ~~~~~
+- Code: a coding cookie may name the eight codec aliases Python 3.14.6 added (IANA's ``cp00858``, ``ibm01140``, ``ebcdic_us_37_euro`` and five more, CPython gh-149801), as CPython 3.14.6 takes them; the table was made by 3.14.4 and called them unknown. The release wheels' tests, whose python3.14 is 3.14.6, failed on it in every run since 2026-11-01 morning. The generated header names the release that made it, and the test holds it to a python3.14 that is that release or newer, skipping (and saying so) for an older one.
 - Inventory: the text files of a project holding a tracked file that is not UTF-8 are read, that file's bad bytes replaced, as its Python files already were; the whole read raised ``ValueError`` before (CPython's checkout, whose ``Lib/test/badsyntax_pep3120.py`` is not UTF-8 on purpose).
 - Docs serve: a read mark names its page through ``relative_to``, not by cutting the notes folder's text off the front of the mark's path (ENACT #129).
 - PathLike: ``path.resolve()`` makes a relative path absolute, as pathlib's does, whether or not any of it exists; ``path('~/x').resolve()`` was ``~/x`` where pathlib's is ``<cwd>/~/x`` (``std::filesystem::weakly_canonical`` makes absolute only what exists). It takes pathlib's ``strict=False``: strict, a missing part is ``FileNotFoundError``. Tested against pathlib on seven relative paths, a symbolic link and a missing part (2026-11-01, found answering Debith's question on PR #39 whether ``resolve`` should expand ``~``; pathlib's does not, D90).

@@ -5,6 +5,7 @@ position; a source CPython refuses must be refused."""
 
 import ast
 import os
+import re
 import shutil
 import signal
 import subprocess
@@ -717,8 +718,18 @@ def test_ctrl_c_stops_a_parse(temp_dir):
 @pytest.mark.parametrize("generator, header", [("gen_ast_tables.py", "ast_tables.gen.h"), ("gen_unicode_tables.py", "unicode_tables.gen.h"),
                                                ("gen_codec_tables.py", "codec_tables.gen.h")])
 def test_the_generated_tables_are_python_3_14s(generator, header):
+    """A header that names the release which made it ("from Python 3.14.6's") is held to a python3.14
+    of that release or newer: a patch release can add names (3.14.6 added eight codec aliases), and
+    an older one would call the header stale for knowing them. Found 2026-11-01: the release wheels'
+    3.14.6 failed this against a header made by 3.14.4, for five runs, unseen."""
+    committed = (SRC / header).read_text(encoding="utf-8")
+    made_by = re.search(r"from Python (3\.14\.\d+)'s", committed)
+    here = subprocess.run(["python3.14", "-c", "import sys; print(*sys.version_info[:3], sep='.')"],
+                          capture_output=True, text=True, check=True).stdout.strip()
+    if made_by and tuple(map(int, here.split("."))) < tuple(map(int, made_by.group(1).split("."))):
+        pytest.skip(f"python3.14 here is {here}, older than the {made_by.group(1)} that made {header}")
     fresh = subprocess.run(["python3.14", str(SRC / generator), "--print"], capture_output=True, text=True, check=True).stdout
-    assert fresh == (SRC / header).read_text(encoding="utf-8"), f"stale: run python3.14 {SRC / generator}"
+    assert fresh == committed, f"stale: run python3.14 {SRC / generator} (python3.14 here is {here})"
 
 
 # ── the stub ────────────────────────────────────────────────────────────────
