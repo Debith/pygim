@@ -8,6 +8,8 @@ adapter headers and bindings may include pybind11."""
 import ast
 import pathlib
 import re
+import shutil
+import subprocess
 
 import pytest
 
@@ -507,3 +509,40 @@ def test_a_module_a_sanitizer_run_cannot_load_is_imported_where_its_absence_is_h
                 continue
             found += [f"{tree.path}:{statement.lineno}" for name in names if name.split(".")[0] in unloadable]
     assert unloadable and found == []
+
+
+# ── the repository names no one's machine ────────────────────────────────────
+
+# The tests' and the proofs' own made-up users, whose homes stand in for a real one.
+MADE_UP = {"someone", "other", "x", "x.yaml"}
+MACHINE = re.compile(r"(?:/home/|/Users/|[A-Za-z]:\\+Users\\+)([\w.-]+)|/tmp/claude-[\w-]+")
+
+
+def names_a_machine(text):
+    """Each home folder, or session's scratch folder, that *text* names and no test made up."""
+    return [found.group(0) for found in MACHINE.finditer(text) if found.group(1) not in MADE_UP]
+
+
+def test_the_machine_check_finds_what_it_is_for():
+    """Against its own hard case first: the made-up homes pass, a person's and a session's do not.
+    Both are named at run time, or this file would hand them to the check below."""
+    who, uid = "a.person", 1000
+    assert names_a_machine('"/home/someone", "C:\\\\Users\\\\other\\\\x", file:///C:/Users/x.yaml') == []
+    assert names_a_machine(f"cd /home/{who}/projects && C:\\Users\\{who}\\x /tmp/claude-{uid}/s") == [
+        f"/home/{who}", f"C:\\Users\\{who}", f"/tmp/claude-{uid}"]
+
+
+@pytest.mark.skipif(not PY_ROOT.is_dir() or shutil.which("git") is None or not (PY_ROOT.parent / ".git").exists(),
+                    reason="not a git checkout of the source tree")
+def test_no_tracked_file_names_a_machine():
+    """A `cd` into Debith's home folder opened each command of the tester agent until 2026-11-01
+    (D82): a person's folder in the repository says whose machine it was, and works on no other.
+    third_party is not ours to write."""
+    repo = PY_ROOT.parent
+    listed = subprocess.run(["git", "-C", str(repo), "ls-files", "-z"], capture_output=True, text=True, check=True).stdout
+    files = PathSet([path(str(repo / name)) for name in listed.split("\0") if name and "third_party" not in name])
+    members, texts = files.to_list(), files.read_all_files()
+    assert len(members) == len(texts) >= 300                      # the tree is there to check
+    found = [f"{pathlib.Path(str(member)).relative_to(repo)}: {hit}"
+             for member, text in zip(members, texts) for hit in names_a_machine(text)]
+    assert found == []
