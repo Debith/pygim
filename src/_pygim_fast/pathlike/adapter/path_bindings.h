@@ -490,7 +490,7 @@ py::class_<pathview> bind_path(engine_list<Es...> es, py::module_& m, const path
         .def("is_file", [](const pathview& v) { return v.value().is_file(); }, "Whether it is a regular file.")
         .def("is_dir", [](const pathview& v) { return v.value().is_dir(); }, "Whether it is a directory.")
         .def("is_symlink", [](const pathview& v) { return v.value().is_symlink(); }, "Whether it is a symbolic link.")
-        .def("size", [](const pathview& v) { return v.value().size(); }, "File size in bytes (raises if it does not exist).")
+        .def("size", [](const pathview& v) { return v.value().size(); }, "File size in bytes, a link followed; FileNotFoundError when it is not there, IsADirectoryError for a folder.")
         .def("read_bytes", [](const pathview& v) {
                 const file f = v.value();
                 py::object bytes;   // read into where it lies, with the GIL released: no copy

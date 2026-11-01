@@ -388,13 +388,13 @@ private:
 };
 
 /// Each file's size in bytes, in order: file::size of each (a link followed). One that is not there,
-/// or is not a file, is the OS's error naming it (std::filesystem_error), as path.size() raises it.
+/// or is a folder, is the error naming it (std::filesystem_error), as path.size() raises it.
 ///
 ///     sizes_of(ps.fs_paths()) -> {259, 4096, 12}
 [[nodiscard]] inline std::vector<std::uintmax_t> sizes_of(const std::vector<fs::path>& paths) {
     std::vector<std::uintmax_t> out;
     out.reserve(paths.size());
-    for (const fs::path& p : paths) out.push_back(fs::file_size(p));
+    for (const fs::path& p : paths) out.push_back(platform::file_size(p));
     return out;
 }
 

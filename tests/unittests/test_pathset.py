@@ -185,10 +185,10 @@ def test_sizes_are_each_members_size_in_member_order(temp_dir, temp_files):
     with pytest.raises(FileNotFoundError) as missing:
         PathSet([temp_files[0], temp_dir / "gone.txt"]).sizes()
     assert missing.value.filename == os.fspath(temp_dir / "gone.txt")
-    with pytest.raises(OSError) as folder:
+    with pytest.raises(IsADirectoryError):                       # a folder has no size, on every system
         PathSet([temp_dir]).sizes()
-    with pytest.raises(type(folder.value)):
-        pygim.path(temp_dir).size()                               # the same error path.size() raises
+    with pytest.raises(IsADirectoryError):                       # MSVC's std::filesystem answered one
+        pygim.path(temp_dir).size()
 
 
 FNMATCH_PATTERNS = ["*.py", "?.py", "[ab]", "[!a]*", "[a-c]?", "[]a]", "[!]a]", "[a-]", "[-a]", "[c-a]", "[ab", "x[!]", "[[]",

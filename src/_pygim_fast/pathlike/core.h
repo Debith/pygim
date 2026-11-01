@@ -413,7 +413,7 @@ public:
     [[nodiscard]] bool is_file() const { return fs::is_regular_file(to_fs()); }
     [[nodiscard]] bool is_dir() const { return fs::is_directory(to_fs()); }
     [[nodiscard]] bool is_symlink() const { return fs::is_symlink(to_fs()); }
-    [[nodiscard]] std::uintmax_t size() const { return fs::file_size(to_fs()); }
+    [[nodiscard]] std::uintmax_t size() const { return platform::file_size(to_fs()); }   // a folder is IsADirectoryError everywhere
 
     // Children of this directory, sorted for determinism.
     [[nodiscard]] std::vector<basic_file> iterdir() const {

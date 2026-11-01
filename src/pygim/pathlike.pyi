@@ -178,7 +178,8 @@ class path(os.PathLike[str]):
     def is_symlink(self) -> bool:
         """Whether it is a symbolic link."""
     def size(self) -> int:
-        """File size in bytes (raises if it does not exist)."""
+        """File size in bytes, a link followed; FileNotFoundError when it is not there, IsADirectoryError for a
+        folder."""
 
     # -- directory traversal ------------------------------------------------
     def iterdir(self) -> list[path]:

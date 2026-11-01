@@ -11,10 +11,12 @@
 #include <cerrno>
 #include <climits>
 #include <cstddef>
+#include <cstdint>
 #include <expected>
 #include <filesystem>
 #include <string>
 #include <string_view>
+#include <system_error>
 
 #include <fcntl.h>
 #include <sys/stat.h>
@@ -206,6 +208,19 @@ template <class Grow>
     }
     if (close_fd(fd) != 0 && failed == 0) failed = errno;
     return failed;
+}
+
+/// A file's size in bytes, a link followed, by one rule on every system: a folder has none
+/// (std::errc::is_a_directory, Python's IsADirectoryError). std::filesystem leaves a folder's size
+/// to the implementation — libstdc++ and libc++ refuse it, MSVC's answers — so Windows asks first.
+/// A path that is not there, or one the OS refuses, is the OS's error, naming it.
+template <family F = native>
+[[nodiscard]] std::uintmax_t file_size(const fs::path& p) {
+    if constexpr (F == family::windows) {
+        std::error_code ec;
+        if (fs::is_directory(p, ec)) throw fs::filesystem_error("cannot get the size of a folder", p, std::make_error_code(std::errc::is_a_directory));
+    }
+    return fs::file_size(p);
 }
 
 }  // namespace pygim::platform
