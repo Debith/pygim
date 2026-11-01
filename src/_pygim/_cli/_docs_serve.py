@@ -195,19 +195,24 @@ def _make_handler(root, index: str | None):
             self.end_headers()
             self.wfile.write(body)
 
-        def _body_length(self, limit):
+        def _read_body(self):
+            """The request's body, read whole before anything answers the request; None when it is
+            empty or over MAX_BYTES. A body left unread when the server answers and closes resets
+            the connection on Windows, and the client sees the reset instead of the answer (CI,
+            2026-11-02: an upload refused for its path). One over MAX_BYTES is left unread all the
+            same: reading it would cost more than the reset."""
             try:
                 length = int(self.headers.get("Content-Length", 0))
             except ValueError:
                 length = 0
-            return length if 0 < length <= limit else None
+            return self.rfile.read(length) if 0 < length <= MAX_BYTES else None
 
-        def _read_json_body(self, limit=MAX_COMMENT):
-            length = self._body_length(limit)
-            if length is None:
+        @staticmethod
+        def _json_object(body):
+            if body is None or len(body) > MAX_COMMENT:
                 return None
             try:
-                obj = json.loads(self.rfile.read(length).decode("utf-8"))
+                obj = json.loads(body.decode("utf-8"))
             except (ValueError, UnicodeDecodeError):
                 return None
             return obj if isinstance(obj, dict) else None
@@ -216,20 +221,21 @@ def _make_handler(root, index: str | None):
         def do_POST(self):
             parsed = urllib.parse.urlparse(self.path)
             route = parsed.path.rstrip("/")
+            body = self._read_body()
             if route == "/comment":
-                self._guarded(self._post_comment)
+                self._guarded(lambda: self._post_comment(body))
             elif route in ("/comment-edit", "/comment-delete"):
-                self._guarded(lambda: self._post_comment_change(editing=route == "/comment-edit"))
+                self._guarded(lambda: self._post_comment_change(body, editing=route == "/comment-edit"))
             elif route == "/upload":
-                self._post_upload(parsed)
+                self._post_upload(parsed, body)
             else:
                 self.send_error(404, "not found")
 
-        def _post_comment(self):
-            if self._body_length(MAX_COMMENT) is None:
+        def _post_comment(self, body):
+            if body is None or len(body) > MAX_COMMENT:
                 self.send_error(413, "bad size")
                 return
-            obj = self._read_json_body()
+            obj = self._json_object(body)
             if obj is None or not str(obj.get("text", "")).strip():
                 self.send_error(400, "bad comment")
                 return
@@ -240,8 +246,8 @@ def _make_handler(root, index: str | None):
             print(f"  comment on {obj.get('page', '?')}: {str(obj['text'])[:60]}")
             self._send_json(obj)
 
-        def _post_comment_change(self, *, editing: bool):
-            obj = self._read_json_body()
+        def _post_comment_change(self, body, *, editing: bool):
+            obj = self._json_object(body)
             if obj is None or not obj.get("id"):
                 self.send_error(400, "bad request")
                 return
@@ -255,17 +261,15 @@ def _make_handler(root, index: str | None):
             save_comments(rows if editing else [c for c in rows if c.get("id") != obj["id"]])
             self._send_json({"ok": True})
 
-        def _post_upload(self, parsed):
+        def _post_upload(self, parsed, data):
             target = _upload_target(root, urllib.parse.parse_qs(parsed.query))
             if not target:
                 self.send_error(400, "bad path")
                 return
             dest, rel = target
-            length = self._body_length(MAX_BYTES)
-            if length is None:
+            if data is None:
                 self.send_error(413, "bad size")
                 return
-            data = self.rfile.read(length)
             dest.parent.mkdir(parents=True, exist_ok=True)
             dest.write_bytes(data)
             print(f"  wrote {rel}  ({len(data)} bytes)")
