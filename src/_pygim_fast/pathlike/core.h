@@ -29,9 +29,11 @@
 #include <string>
 #include <string_view>
 #include <tuple>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
+#include "../platform/files.h"
 #include "../utils/hash.h"
 #include "uri.h"
 
@@ -136,26 +138,10 @@ template <class Strategy>
     return p == pattern.size();
 }
 
-// The OS boundary: the internal text form is the NATIVE byte string on POSIX
-// (so non-UTF-8 file names round-trip) and UTF-8 on Windows (lossless from the
-// wide native form, and what Python's str carries). fs::path::string() would
-// narrow through the ACP on Windows and can mangle non-ASCII paths.
-[[nodiscard]] inline std::string text_from_fs(const fs::path& p) {
-#ifdef _WIN32
-    const std::u8string u = p.u8string();
-    return std::string(u.begin(), u.end());
-#else
-    return p.native();
-#endif
-}
-
-[[nodiscard]] inline fs::path fs_from_text(std::string_view text) {
-#ifdef _WIN32
-    return fs::path(std::u8string(text.begin(), text.end()));
-#else
-    return fs::path(std::string(text));
-#endif
-}
+// The internal text form is the system's own byte string on POSIX and UTF-8 on Windows: the
+// platform boundary says which (platform/files.h, D77).
+using platform::fs_from_text;
+using platform::text_from_fs;
 
 // Split native path text on separators, dropping "" and "." components and
 // keeping ".." — pathlib's rule for the non-anchor part of a path.
@@ -416,11 +402,9 @@ struct windows_strategy : strategy_base<windows_strategy> {
     }
 };
 
-#ifdef _WIN32
-using native_strategy = windows_strategy;
-#else
-using native_strategy = posix_strategy;
-#endif
+// The running system's rules, chosen by the platform's family (D77): both strategies are compiled,
+// and proven, on every system.
+using native_strategy = std::conditional_t<platform::native == platform::family::windows, windows_strategy, posix_strategy>;
 
 // A path that reads and decodes itself. Models os.PathLike (it exposes
 // __fspath__ through the binding), so it drops straight into open(), Path(),

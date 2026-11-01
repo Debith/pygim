@@ -195,7 +195,7 @@ inline void init_session(const BcpApi& api, SQLHDBC dbc,
     w.reserve(qualified_table.size());
     for (char ch : qualified_table) w.push_back(static_cast<char16_t>(ch));
 
-    if (api.init(dbc, reinterpret_cast<LPCWSTR>(w.c_str()),
+    if (api.init(dbc, reinterpret_cast<wide_text>(w.c_str()),
                  nullptr, nullptr, DB_IN) != kSucceed) {
         odbc::raise_if_error(
             SQL_ERROR, SQL_HANDLE_DBC, dbc,

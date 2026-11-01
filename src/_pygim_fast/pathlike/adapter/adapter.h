@@ -109,15 +109,17 @@ struct text_arg {
     std::string_view view;
 };
 inline text_arg text_view_of_arg(py::handle obj) {
-#ifndef _WIN32
-    if (filesystem_is_utf8() && PyUnicode_Check(obj.ptr())) {
-        py::ssize_t n = 0;
-        if (const char* s = PyUnicode_AsUTF8AndSize(obj.ptr(), &n)) {
-            return {py::reinterpret_borrow<py::object>(obj), std::string_view(s, static_cast<std::size_t>(n))};
+    // The internal text is UTF-8 on Windows and the system's own bytes on POSIX (platform/files.h,
+    // D77): a str is taken as it is where those agree, encoded by os.fsencode where they need not.
+    if constexpr (!platform::path_text_is_utf8) {
+        if (filesystem_is_utf8() && PyUnicode_Check(obj.ptr())) {
+            py::ssize_t n = 0;
+            if (const char* s = PyUnicode_AsUTF8AndSize(obj.ptr(), &n)) {
+                return {py::reinterpret_borrow<py::object>(obj), std::string_view(s, static_cast<std::size_t>(n))};
+            }
+            PyErr_Clear();   // lone surrogates: os.fsencode's surrogateescape below is the answer
         }
-        PyErr_Clear();   // lone surrogates: os.fsencode's surrogateescape below is the answer
     }
-#endif
     py::object p = py::reinterpret_steal<py::object>(PyOS_FSPath(obj.ptr()));   // str or bytes
     if (!p) throw py::error_already_set();
     if (PyBytes_Check(p.ptr())) {
@@ -126,19 +128,19 @@ inline text_arg text_view_of_arg(py::handle obj) {
         if (PyBytes_AsStringAndSize(p.ptr(), &s, &n) < 0) throw py::error_already_set();
         return {std::move(p), std::string_view(s, static_cast<std::size_t>(n))};
     }
-#ifdef _WIN32
-    py::ssize_t n = 0;
-    const char* s = PyUnicode_AsUTF8AndSize(p.ptr(), &n);
-    if (!s) throw py::error_already_set();
-    return {std::move(p), std::string_view(s, static_cast<std::size_t>(n))};
-#else
-    py::object b = py::reinterpret_steal<py::object>(PyUnicode_EncodeFSDefault(p.ptr()));
-    if (!b) throw py::error_already_set();
-    char* s = nullptr;
-    py::ssize_t n = 0;
-    if (PyBytes_AsStringAndSize(b.ptr(), &s, &n) < 0) throw py::error_already_set();
-    return {std::move(b), std::string_view(s, static_cast<std::size_t>(n))};
-#endif
+    if constexpr (platform::path_text_is_utf8) {
+        py::ssize_t n = 0;
+        const char* s = PyUnicode_AsUTF8AndSize(p.ptr(), &n);
+        if (!s) throw py::error_already_set();
+        return {std::move(p), std::string_view(s, static_cast<std::size_t>(n))};
+    } else {
+        py::object b = py::reinterpret_steal<py::object>(PyUnicode_EncodeFSDefault(p.ptr()));
+        if (!b) throw py::error_already_set();
+        char* s = nullptr;
+        py::ssize_t n = 0;
+        if (PyBytes_AsStringAndSize(b.ptr(), &s, &n) < 0) throw py::error_already_set();
+        return {std::move(b), std::string_view(s, static_cast<std::size_t>(n))};
+    }
 }
 inline std::string text_from_arg(py::handle obj) {
     const text_arg t = text_view_of_arg(obj);
@@ -149,12 +151,12 @@ inline std::string text_from_arg(py::handle obj) {
 // filesystem encoding on POSIX (os.fsdecode, so non-UTF-8 names round-trip);
 // on Windows the internal text is UTF-8 already.
 inline py::str str_from_text(std::string_view text) {
-#ifdef _WIN32
-    return py::str(text.data(), text.size());
-#else
-    return py::reinterpret_steal<py::str>(
-        PyUnicode_DecodeFSDefaultAndSize(text.data(), static_cast<py::ssize_t>(text.size())));
-#endif
+    if constexpr (platform::path_text_is_utf8) {
+        return py::str(text.data(), text.size());
+    } else {
+        return py::reinterpret_steal<py::str>(
+            PyUnicode_DecodeFSDefaultAndSize(text.data(), static_cast<py::ssize_t>(text.size())));
+    }
 }
 
 template <Engine E>
