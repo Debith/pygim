@@ -263,6 +263,60 @@ def test_resolve_collapses_dotdot():
     assert pygim.path("a/../b/c.yaml").resolve().name == "c.yaml"
 
 
+@pytest.mark.parametrize("text", ["nope/x", "~/x", "a/../b", "./c", ".", "x/./y/..", "a/nope/../z"])
+def test_resolve_makes_a_relative_path_absolute_as_pathlib_does(text, tmp_path, monkeypatch):
+    """Whether or not any of it exists. std::filesystem's weakly_canonical alone left a path
+    relative when none of it existed: path('~/x').resolve() was '~/x' (found 2026-11-01, answering
+    Debith's question on PR #39 whether resolve should expand '~'; pathlib's does not)."""
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "a").mkdir()
+    assert str(pygim.path(text).resolve()) == str(pathlib.Path(text).resolve())
+
+
+def test_resolve_strict_refuses_a_missing_part_as_pathlib_does(tmp_path):
+    missing = tmp_path / "nope" / "x"
+    with pytest.raises(FileNotFoundError) as ours:
+        pygim.path(missing).resolve(strict=True)
+    with pytest.raises(FileNotFoundError) as theirs:
+        pathlib.Path(missing).resolve(strict=True)
+    assert ours.value.errno == theirs.value.errno
+    assert str(pygim.path(tmp_path).resolve(strict=True)) == str(pathlib.Path(tmp_path).resolve(strict=True))
+
+
+def test_resolve_follows_a_link_as_pathlib_does(tmp_path):
+    (tmp_path / "real").mkdir()
+    link = tmp_path / "link"
+    try:
+        link.symlink_to(tmp_path / "real", target_is_directory=True)
+    except OSError:
+        pytest.skip("this system makes no symbolic link here (Windows without the privilege)")
+    for p in (link, link / "missing", link / ".." / "real"):
+        assert str(pygim.path(p).resolve()) == str(pathlib.Path(p).resolve())
+    assert str(pygim.path(link).resolve(strict=True)) == str(pathlib.Path(link).resolve(strict=True))
+
+
+REFUSED = {
+    "iterdir of nothing": (lambda d: d / "nope", lambda p: list(p.iterdir()), lambda p: list(p.iterdir())),
+    "iterdir of a file": (lambda d: d / "f", lambda p: list(p.iterdir()), lambda p: list(p.iterdir())),
+    "size of nothing": (lambda d: d / "nope", lambda p: p.size(), lambda p: p.stat().st_size),
+}
+
+
+@pytest.mark.parametrize("case", REFUSED, ids=list(REFUSED))
+def test_a_call_the_file_system_refuses_raises_pathlibs_oserror(case, tmp_path):
+    """The OSError subclass pathlib raises, its errno and its filename: a std::filesystem call's own
+    error was a RuntimeError until 2026-11-01 (docs/design/exception_boundaries.md)."""
+    where, ours_call, theirs_call = REFUSED[case]
+    (tmp_path / "f").write_bytes(b"")
+    target = where(tmp_path)
+    with pytest.raises(OSError) as theirs:
+        theirs_call(pathlib.Path(target))
+    with pytest.raises(OSError) as ours:
+        ours_call(pygim.path(target))
+    assert (type(ours.value), ours.value.errno, ours.value.filename) == (
+        type(theirs.value), theirs.value.errno, theirs.value.filename)
+
+
 def test_status_and_size(temp_dir):
     f = _write(temp_dir, "sized.yaml", "k: v\n")
     p = pygim.path(f)

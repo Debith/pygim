@@ -401,7 +401,13 @@ public:
     [[nodiscard]] fs::path to_fs() const { return detail::fs_from_text(fspath()); }
 
     [[nodiscard]] basic_file absolute() const { return from_fs(fs::absolute(to_fs())); }
-    [[nodiscard]] basic_file resolve() const { return from_fs(fs::weakly_canonical(to_fs())); }
+    /// pathlib's resolve(): absolute first, then its links and `..` resolved — the parts that exist
+    /// (weakly_canonical alone left a relative path relative when none of it existed, 2026-11-01),
+    /// or, strict, all of them, a missing one a filesystem_error (FileNotFoundError in Python).
+    [[nodiscard]] basic_file resolve(bool strict = false) const {
+        const fs::path whole = fs::absolute(to_fs());
+        return from_fs(strict ? fs::canonical(whole) : fs::weakly_canonical(whole));
+    }
 
     [[nodiscard]] bool exists() const { return fs::exists(to_fs()); }
     [[nodiscard]] bool is_file() const { return fs::is_regular_file(to_fs()); }

@@ -470,8 +470,9 @@ py::class_<pathview> bind_path(engine_list<Es...> es, py::module_& m, const path
              py::arg("stem"), "A copy with the stem replaced (suffix kept).")
         .def("absolute", [es](const pathview& v) { return wrap(es, v.intern(v.value().absolute())); },
              "An absolute copy (does not resolve symlinks/..).")
-        .def("resolve", [es](const pathview& v) { return wrap(es, v.intern(v.value().resolve())); },
-             "A canonical, absolute copy (resolves symlinks/..).")
+        .def("resolve", [es](const pathview& v, bool strict) { return wrap(es, v.intern(v.value().resolve(strict))); },
+             py::arg("strict") = false,
+             "pathlib's resolve(): an absolute copy, its symlinks and '..' resolved; strict, a missing part is FileNotFoundError.")
         .def("expanduser", [es](const pathview& v) {
                 const file f = v.value();
                 file expanded;

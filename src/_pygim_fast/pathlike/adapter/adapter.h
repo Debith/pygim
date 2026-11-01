@@ -21,9 +21,11 @@
 #include <cerrno>
 #include <concepts>
 #include <cstddef>
+#include <filesystem>
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <system_error>
 #include <utility>
 
 #include <pybind11/pybind11.h>
@@ -148,6 +150,10 @@ void write(engine_list<Es...>, const engine_info* e, const file& f, py::handle o
 // PyErr_SetObject(OSError, (errno, words, filename)), the error was a PermissionError whose raised
 // type was OSError, which an `except PermissionError` on Python 3.10 and older does not match, and
 // MSVC's words were lowercase. Local to this module: only its own functions throw file_error.
+//
+// A std::filesystem call's own filesystem_error (iterdir, size, resolve, exists) is raised the same
+// way, by the errno its code stands for: its portable condition, which on Windows maps the system's
+// error codes to errno's (ERROR_PATH_NOT_FOUND -> ENOENT). It was a RuntimeError until 2026-11-01.
 inline void register_file_errors() {
     py::register_local_exception_translator([](std::exception_ptr p) {
         if (!p) return;
@@ -156,6 +162,13 @@ inline void register_file_errors() {
         } catch (const file_error& e) {
             const py::object name = str_from_text(e.path);
             errno = e.code().value();   // set last: making the name may change errno
+            PyErr_SetFromErrnoWithFilenameObject(PyExc_OSError, name.ptr());
+        } catch (const std::filesystem::filesystem_error& e) {
+            const std::error_condition condition = e.code().default_error_condition();
+            const int err = condition.category() == std::generic_category() ? condition.value() : EIO;
+            py::object name;   // none when the call named no path
+            if (!e.path1().empty()) name = str_from_text(text_from_fs(e.path1()));
+            errno = err;       // set last: making the name may change errno
             PyErr_SetFromErrnoWithFilenameObject(PyExc_OSError, name.ptr());
         } catch (const glob_unsupported& e) {   // a pattern that is not relative, as pathlib refuses it
             PyErr_SetString(PyExc_NotImplementedError, e.what());
