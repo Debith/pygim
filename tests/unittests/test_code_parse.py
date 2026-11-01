@@ -719,17 +719,23 @@ def test_ctrl_c_stops_a_parse(temp_dir):
                                                ("gen_codec_tables.py", "codec_tables.gen.h")])
 def test_the_generated_tables_are_python_3_14s(generator, header):
     """A header that names the release which made it ("from Python 3.14.6's") is held to a python3.14
-    of that release or newer: a patch release can add names (3.14.6 added eight codec aliases), and
-    an older one would call the header stale for knowing them. Found 2026-11-01: the release wheels'
-    3.14.6 failed this against a header made by 3.14.4, for five runs, unseen."""
+    of that release or newer, its tables compared and that name not: a patch release can add names
+    (3.14.6 added eight codec aliases), so an older one would call the header stale for knowing
+    them, and a newer one is stale only where it knows more. Found 2026-11-01: the release wheels'
+    newer 3.14 failed this against a header made by 3.14.4, for five runs, unseen; then, once the
+    header named its maker, the wheels' 3.14.7 and 3.14.10 failed it on that name alone."""
     committed = (SRC / header).read_text(encoding="utf-8")
-    made_by = re.search(r"from Python (3\.14\.\d+)'s", committed)
+    made_by = re.search(MADE_BY, committed)
     here = subprocess.run(["python3.14", "-c", "import sys; print(*sys.version_info[:3], sep='.')"],
                           capture_output=True, text=True, check=True).stdout.strip()
     if made_by and tuple(map(int, here.split("."))) < tuple(map(int, made_by.group(1).split("."))):
         pytest.skip(f"python3.14 here is {here}, older than the {made_by.group(1)} that made {header}")
     fresh = subprocess.run(["python3.14", str(SRC / generator), "--print"], capture_output=True, text=True, check=True).stdout
-    assert fresh == committed, f"stale: run python3.14 {SRC / generator} (python3.14 here is {here})"
+    tables = lambda text: re.sub(MADE_BY, "from Python 3.14's", text)
+    assert tables(fresh) == tables(committed), f"stale: run python3.14 {SRC / generator} (python3.14 here is {here})"
+
+
+MADE_BY = r"from Python (3\.14\.\d+)'s"   # how a generated header names the release that made it
 
 
 # ── the stub ────────────────────────────────────────────────────────────────
