@@ -305,7 +305,8 @@ REFUSED = {
 @pytest.mark.parametrize("case", REFUSED, ids=list(REFUSED))
 def test_a_call_the_file_system_refuses_raises_pathlibs_oserror(case, tmp_path):
     """The OSError subclass pathlib raises, its errno and its filename: a std::filesystem call's own
-    error was a RuntimeError until 2026-11-01 (docs/design/exception_boundaries.md)."""
+    error was a RuntimeError until 2026-11-01 (docs/design/exception_boundaries.md). On Windows, by
+    Python's own mapping of the system's error: MSVC's maps iterdir of a file's to EINVAL (CI)."""
     where, ours_call, theirs_call = REFUSED[case]
     (tmp_path / "f").write_bytes(b"")
     target = where(tmp_path)
@@ -313,8 +314,9 @@ def test_a_call_the_file_system_refuses_raises_pathlibs_oserror(case, tmp_path):
         theirs_call(pathlib.Path(target))
     with pytest.raises(OSError) as ours:
         ours_call(pygim.path(target))
-    assert (type(ours.value), ours.value.errno, ours.value.filename) == (
-        type(theirs.value), theirs.value.errno, theirs.value.filename)
+    def told(e):   # winerror: Windows' own code, which Python maps to the errno and the subclass
+        return type(e), e.errno, e.filename, getattr(e, "winerror", None)
+    assert told(ours.value) == told(theirs.value)
 
 
 def test_status_and_size(temp_dir):
