@@ -23,7 +23,9 @@ def cli():
 @flag_opt("-c", "--compiled-files", help="Remove compiled files")
 @flag_opt("-a", "--all", help="Remove all extra files or folders.")
 def clean_up(**kwargs):
-    """Remove unnecessary files and folders related to Python."""
+    """Remove unnecessary files and folders related to Python.
+
+    Never inside .git, .venv, venv or node_modules: what is there is installed, not left over."""
     GimmicksCliApp().clean_up(**kwargs)
 
 

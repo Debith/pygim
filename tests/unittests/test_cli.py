@@ -66,6 +66,21 @@ class TestCleanUp:
         assert not pycache.exists(), "__pycache__ should have been removed"
 
 
+    def test_clean_up_never_walks_into_history_or_an_environment(self, temp_dir, monkeypatch):
+        """D92 (Debith, 2026-11-01): .git, .venv, venv and node_modules hold what is installed, not
+        what a build left: a virtual environment's compiled modules were offered for deletion."""
+        monkeypatch.chdir(temp_dir)
+        kept = [temp_dir / ".venv" / "lib" / "ext.so", temp_dir / "venv" / "build" / "x.py",
+                temp_dir / ".git" / "objects" / "__pycache__" / "y.pyc", temp_dir / "node_modules" / "m" / "z.c"]
+        removed = [temp_dir / "src" / "ext.so", temp_dir / "build" / "x.py", temp_dir / "src" / "__pycache__" / "y.pyc"]
+        for f in kept + removed:
+            f.parent.mkdir(parents=True, exist_ok=True)
+            f.touch()
+        GimmicksCliApp().clean_up(yes=True, build_dirs=False, pycache_dirs=False, compiled_files=False, quiet=True, all=True)
+        assert [f.relative_to(temp_dir).as_posix() for f in kept if not f.exists()] == []
+        assert [f.relative_to(temp_dir).as_posix() for f in removed if f.exists()] == []
+
+
 class TestShowTestCoverage:
     """GimmicksCliApp.show_test_coverage: the tests here under coverage, then the report. Found
     2026-10-31: it ran the first python on PATH, hid the tests' errors with their output, and

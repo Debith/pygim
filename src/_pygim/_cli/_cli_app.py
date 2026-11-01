@@ -31,6 +31,9 @@ flag_opt = functools.partial(click.option, is_flag=True, default=False)
 
 # The folders a walk of sources passes over: dot folders and __pycache__ (pathset's skip).
 HIDDEN = (".*", "__pycache__")
+# What clean-up never walks into: a repository's history and the environments whose compiled
+# modules and build folders are installed, not left over (D92, Debith, 2026-11-01).
+NEVER_CLEANED = (".git", ".venv", "venv", "node_modules")
 
 
 def _excluded(parts, patterns) -> bool:
@@ -68,9 +71,9 @@ class GimmicksCliApp:
         folders = [n for n, wanted in (("build", all or build_dirs), ("__pycache__", all or pycache_dirs)) if wanted]
         found = []   # one walk for the folders, one for the files: sets over root's table
         if folders:
-            found.append(root.pathset("**/*", kind="dir").filter(functools.reduce(operator.or_, map(name, folders))))
+            found.append(root.pathset("**/*", kind="dir", skip=NEVER_CLEANED).filter(functools.reduce(operator.or_, map(name, folders))))
         if all or compiled_files:
-            found.append(root.pathset("**/*", kind="file").filter(ext(".c", ".so")))
+            found.append(root.pathset("**/*", kind="file", skip=NEVER_CLEANED).filter(ext(".c", ".so")))
         targets = functools.reduce(operator.or_, found)   # never empty: no flag at all asks for __pycache__
 
         if targets and not yes:

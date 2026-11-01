@@ -135,6 +135,7 @@ Changed
 
 Fixed
 ~~~~~
+- CLI: ``pygim clean-up`` never walks into ``.git``, ``.venv``, ``venv`` or ``node_modules`` (D92, Debith, 2026-11-01): what is there is installed, not left over, and ``--compiled-files`` offered a virtual environment's compiled modules for deletion.
 - PathLike: ``path.size()`` of a folder is ``IsADirectoryError`` on every system, and so is ``PathSet.sizes()`` holding one; on Windows it answered a number, because ``std::filesystem`` leaves a folder's size to the implementation (libstdc++ and libc++ refuse it, MSVC's answers). The rule is ``platform::file_size`` (``platform/files.h``).
 - Code: a coding cookie may name the eight codec aliases Python 3.14.6 added (IANA's ``cp00858``, ``ibm01140``, ``ebcdic_us_37_euro`` and five more, CPython gh-149801), as CPython 3.14.6 takes them; the table was made by 3.14.4 and called them unknown. The release wheels' tests, whose python3.14 is 3.14.6, failed on it in every run since 2026-11-01 morning. The generated header names the release that made it, and the test holds it to a python3.14 that is that release or newer, skipping (and saying so) for an older one.
 - Inventory: the text files of a project holding a tracked file that is not UTF-8 are read, that file's bad bytes replaced, as its Python files already were; the whole read raised ``ValueError`` before (CPython's checkout, whose ``Lib/test/badsyntax_pep3120.py`` is not UTF-8 on purpose).
