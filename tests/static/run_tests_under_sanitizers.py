@@ -65,13 +65,21 @@ def tree_files():
     return [f for f in out.stdout.decode().split("\0") if f]
 
 
+MIRRORED = ".mirrored"   # in OUT: the tree files the last mirror put there, one name after each NUL
+
+
 def mirror(out):
-    """Copies every tree file into `out` whose bytes differ there; returns how many it copied."""
+    """Makes `out` hold the tree's files as they are now: copies each whose bytes differ there, and
+    removes each the last mirror put there that the tree no longer has (renamed or deleted), so what
+    the build made stays. Returns how many it copied."""
+    names = [name for name in tree_files() if (ROOT / name).is_file()]   # not one: deleted, not yet in git
+    record = out / MIRRORED
+    before = record.read_text().split("\0") if record.exists() else []
+    for gone in set(before) - set(names) - {""}:
+        (out / gone).unlink(missing_ok=True)
     copied = 0
-    for name in tree_files():
+    for name in names:
         source = ROOT / name
-        if not source.is_file():
-            continue   # deleted in the tree, not yet in git
         data = source.read_bytes()
         target = out / name
         if target.exists() and target.read_bytes() == data:
@@ -79,6 +87,7 @@ def mirror(out):
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_bytes(data)
         copied += 1
+    record.write_text("\0".join(names))
     return copied
 
 
