@@ -1539,6 +1539,17 @@ def test_a_typed_path_is_ordered_with_any_path():
     assert pathlike.yamlpath("a.yaml") < pygim.path("b") < pathlike.jsonpath("c.json")
 
 
+def test_a_subclass_compares_and_hashes_as_its_base():
+    """The comparisons and the hash are the type's own slots (D85), which a subclass inherits as it
+    inherited the methods they were."""
+    class Mine(pygim.path):
+        pass
+    mine = Mine("a/b")
+    assert mine == pygim.path("a/b") and mine != pygim.path("a") and hash(mine) == hash(pygim.path("a/b"))
+    assert pygim.path("a") < mine <= pygim.path("a/b") < pygim.path("a/c")
+    assert sorted([pygim.path("b"), mine]) == [mine, pygim.path("b")]
+
+
 @pytest.mark.parametrize("other", ["a", pathlib.PurePath("a"), 1], ids=["str", "pathlib", "int"])
 def test_a_path_is_not_ordered_against_another_type(other):
     """As pathlib's: PurePath('a') < 'a' is a TypeError, not an order of their texts."""
