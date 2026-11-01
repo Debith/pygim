@@ -42,3 +42,16 @@ def test_core_headers_include_only_core():
     for header in CORE:
         for inc in re.findall(r'#\s*include\s*"([^"]+)"', _code(header)):
             assert "adapter/" not in inc and "bindings" not in inc, f"{header.relative_to(ROOT)} includes {inc}"
+
+
+def test_every_package_that_ships_holds_something():
+    """A package of one empty __init__.py ships in every wheel and imports as if it offered
+    something: pygim.ai did from 2025-08-07 until Debith dropped it (D78, 2026-10-31)."""
+    src = ROOT.parent
+    empty = []
+    for package in ("pygim", "_pygim"):
+        for init in sorted((src / package).rglob("__init__.py")):
+            others = [p for p in init.parent.iterdir() if p.name not in ("__init__.py", "__pycache__")]
+            if not init.read_text(encoding="utf-8").strip() and not others:
+                empty.append(init.parent.relative_to(src).as_posix())
+    assert empty == [], "a package holding nothing: give it its code, or remove it"
