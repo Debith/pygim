@@ -9,9 +9,11 @@
 
 #pragma once
 
+#include "../core/persistence_error.h"
 #include <arrow/c/bridge.h>
 #include <arrow/record_batch.h>
 #include <arrow/table.h>
+#include <pybind11/gil_safe_call_once.h>
 #include <pybind11/pybind11.h>
 #include <cstring>
 #include <memory>
@@ -20,6 +22,24 @@
 namespace pygim::adapter {
 
 namespace py = pybind11;
+
+namespace detail {
+
+// pyarrow's RecordBatchReader._import_from_c and polars.from_arrow, looked up once, at the first
+// load that needs them — not on every load, as each export imported both before (D53, as
+// utils/arrow_stream.h looks up pyarrow's constructors). Never destroyed: no Python object is left
+// for C++'s exit handlers to release after the interpreter.
+[[nodiscard]] inline py::object& pyarrow_reader_import() {
+    PYBIND11_CONSTINIT static py::gil_safe_call_once_and_store<py::object> found;
+    return found.call_once_and_store_result([] { return py::module_::import("pyarrow").attr("RecordBatchReader").attr("_import_from_c"); })
+        .get_stored();
+}
+[[nodiscard]] inline py::object& polars_from_arrow() {
+    PYBIND11_CONSTINIT static py::gil_safe_call_once_and_store<py::object> found;
+    return found.call_once_and_store_result([] { return py::module_::import("polars").attr("from_arrow"); }).get_stored();
+}
+
+}  // namespace detail
 
 /// Export an Arrow Table to a Python DataFrame (Polars or Pandas).
 /// Must be called WITH GIL held.
@@ -44,15 +64,14 @@ inline py::object export_table(std::shared_ptr<arrow::Table> table,
 
     auto status = arrow::ExportRecordBatchReader(reader, c_stream.get());
     if (!status.ok()) [[unlikely]] {
-        throw std::runtime_error("export_table: ExportRecordBatchReader failed: "
+        throw pygim::core::persistence_error("export_table: ExportRecordBatchReader failed: "
                                  + status.ToString());
     }
 
     // Import into PyArrow via C Data Interface address.
     // _import_from_c consumes the stream (sets release to nullptr).
-    auto pa = py::module_::import("pyarrow");
     auto addr = py::int_(reinterpret_cast<uintptr_t>(c_stream.get()));
-    auto reader_obj = pa.attr("RecordBatchReader").attr("_import_from_c")(addr);
+    auto reader_obj = detail::pyarrow_reader_import()(addr);
 
     // _import_from_c consumed the stream — release is now nullptr.
     // unique_ptr destructor will call delete (release guard is a no-op).
@@ -61,7 +80,7 @@ inline py::object export_table(std::shared_ptr<arrow::Table> table,
     auto pa_table = reader_obj.attr("read_all")();
 
     if (use_polars) {
-        return py::module_::import("polars").attr("from_arrow")(pa_table);
+        return detail::polars_from_arrow()(pa_table);
     } else {
         return pa_table.attr("to_pandas")();
     }

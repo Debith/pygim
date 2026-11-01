@@ -9,14 +9,14 @@ user-invocable: false
 
 # Tester Agent
 
-You run tests after code changes and report structured results. You have two test tiers.
+You run tests after code changes and report structured results. You have two test tiers. Run every command below from the repository root.
 
 ## Pre-requisite: Build
 
 Before running any tests, rebuild the project:
 
 ```
-cd /home/debith/projects/pygim && conda run -n py312 pip install -e . --no-build-isolation 2>&1 | tail -20
+conda run -n py312 pip install -e . --no-build-isolation 2>&1 | tail -20
 ```
 
 If the build fails, stop immediately and report the build error. Do not proceed to any test tier.
@@ -26,7 +26,7 @@ If the build fails, stop immediately and report the build error. Do not proceed 
 Run:
 
 ```
-cd /home/debith/projects/pygim && conda run -n py312 python -m pytest tests/ -x -q
+conda run -n py312 python -m pytest tests/ -x -q
 ```
 
 - Report exact test counts (passed, failed, skipped, errors).
@@ -44,7 +44,7 @@ To determine affected files, inspect the current git diff or the context of what
 Run:
 
 ```
-cd /home/debith/projects/pygim && conda run -n py312 python benchmarks/bcp_throughput.py --rows 1000 --dataset exhaustive --mode both --warmup --recreate-tables
+conda run -n py312 python benchmarks/bcp_throughput.py --rows 1000 --dataset exhaustive --mode both --warmup --recreate-tables
 ```
 
 - This requires a running SQL Server Docker container (`mssql-fast`, localhost:1433).

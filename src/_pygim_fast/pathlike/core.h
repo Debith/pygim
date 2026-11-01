@@ -18,50 +18,101 @@
 // This header carries no pybind11 and no parser library, so it stays fast to
 // compile and trivially testable; the engine glue that must speak Python lives
 // in adapter/.
+//
+// CORE layer: pybind-free.
 
 #include <algorithm>
 #include <array>
+#include <cerrno>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
-#include <sstream>
+#include <optional>
+#include <random>
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <system_error>
 #include <tuple>
 #include <utility>
 #include <vector>
 
+#include "../utils/chars.h"
 #include "../utils/hash.h"
+#include "../utils/string_list.h"
+#include "../platform/files.h"
+#include "../platform/home.h"
+#include "glob_walk.h"
+#include "path_rules.h"
 #include "uri.h"
+
 
 namespace pygim::pathlike {
 
 namespace fs = std::filesystem;
 
-// A borrowed view over an engine's constexpr string list — a deliberately
-// minimal stand-in for std::span that is usable in constant expressions on
-// every compiler in the build matrix.
-struct sv_list {
-    const std::string_view* first = nullptr;
-    std::size_t count = 0;
+// A file operation the operating system refused, as errno and the path it was about — what
+// Python's OSError carries, so the adapter raises the subclass pathlib raises for the same call:
+//   path("missing").read_bytes()  ->  file_error{ENOENT, "missing"}  ->  FileNotFoundError
+//   path("a_dir").mkdir()         ->  file_error{EEXIST, "a_dir"}    ->  FileExistsError
+// Derives from std::runtime_error (through std::system_error), so C++ that catches that keeps working.
+struct file_error : std::system_error {
+    std::string path;   // as fspath() spells it
 
-    constexpr sv_list() = default;
-    template <std::size_t N>
-    constexpr sv_list(const std::array<std::string_view, N>& items) noexcept  // implicit by design
-        : first(items.data()), count(N) {}
+    file_error(int err, std::string where, const std::string& what)
+        : std::system_error(err, std::generic_category(), what + " '" + where + "'"), path(std::move(where)) {}
+};
 
-    [[nodiscard]] constexpr const std::string_view* begin() const noexcept { return first; }
-    [[nodiscard]] constexpr const std::string_view* end() const noexcept { return first + count; }
-    [[nodiscard]] constexpr std::size_t size() const noexcept { return count; }
-    [[nodiscard]] constexpr bool empty() const noexcept { return count == 0; }
-    [[nodiscard]] constexpr bool contains(std::string_view s) const noexcept {
-        for (std::string_view x : *this) {
-            if (x == s) return true;
-        }
-        return false;
+namespace detail {
+
+// errno as the failed open left it. A library that failed without setting it gets the nearest
+// answer the file system gives: nothing there is ENOENT, anything else EACCES.
+[[nodiscard]] inline int open_errno(const fs::path& p) noexcept {
+    const int err = errno;
+    if (err != 0) return err;
+    std::error_code ec;
+    return fs::exists(p, ec) ? EACCES : ENOENT;
+}
+
+// Sixteen hex digits from the system's entropy: what tells one writer's temporary file from another's.
+[[nodiscard]] inline std::string random_tag() {
+    std::random_device entropy;
+    const std::uint64_t bits = (std::uint64_t{entropy()} << 32) ^ std::uint64_t{entropy()};
+    std::string out(16, '0');
+    for (std::size_t i = 0; i < out.size(); ++i) out[out.size() - 1 - i] = "0123456789abcdef"[(bits >> (4 * i)) & 0xF];
+    return out;
+}
+
+// The system's calls, from behind the platform boundary (platform/files.h).
+using platform::close_fd;
+using platform::force_fd;
+using platform::force_folder;
+using platform::fs_from_text;
+using platform::open_exclusive;
+using platform::text_from_fs;
+using platform::write_some;
+
+}  // namespace detail
+
+/// Whether a write replaces the file in place (pathlib's write) or atomically (a temporary renamed
+/// over it). Example: f.write_bytes("{}", write_mode::atomic).
+enum class write_mode { in_place, atomic };
+
+/// How an atomic write forces bytes to the disk: the operating system's own calls. A policy, so a
+/// test can record the order of forcing instead (docs/design/pathlike_writes.md, step 4). A folder
+/// on a file system that cannot force one (EINVAL, ENOTSUP) is let be: the rename has been made.
+struct disk_sync {
+    static void file(int fd, const std::string& where) {
+        if (detail::force_fd(fd) != 0) throw file_error(errno, where, "cannot force to the disk");
+    }
+    static void folder(const fs::path& folder, const std::string& where) {
+        if (detail::force_folder(folder) == 0 || errno == EINVAL || errno == ENOTSUP) return;
+        throw file_error(errno, where, "cannot force its folder to the disk");
     }
 };
+
+template <class File, class Sync = disk_sync>
+class basic_atomic_write;
 
 // The pybind-free face of one engine: everything the registry, the proofs and
 // `file` need to know. Every engine header declares one as `static constexpr
@@ -71,8 +122,8 @@ struct engine_info {
     std::string_view name;     // format name: engine="json"; the Python class is "<name>path"
     std::string_view label;    // LIBRARY label reported by .engine: "simdjson"
     std::string_view doc;      // one sentence, used by every derived docstring
-    sv_list exts;              // auto-dispatch extensions: lower-case, leading dot
-    sv_list aliases;           // extra engine= spellings: "yml", "ndjson", "tomlplusplus"
+    string_list exts;          // auto-dispatch extensions: lower-case, leading dot
+    string_list aliases;       // extra engine= spellings: "yml", "ndjson", "tomlplusplus"
 
     // engine= selectors: the format name, the library label and the aliases.
     [[nodiscard]] constexpr bool selects(std::string_view n) const noexcept {
@@ -88,339 +139,7 @@ using pygim::hash::fnv_basis;
 using pygim::hash::fnv_prime;
 using pygim::hash::mix_string;
 
-// One plain component under Strategy: no separator, not empty, not "."
-// (a join drops it), not a drive spelling. What `p / other` may answer with a
-// child row instead of the full join algebra. ".." IS a plain component, as
-// in pathlib.
-template <class Strategy>
-[[nodiscard]] constexpr bool plain_component(std::string_view s) noexcept {
-    if (s.empty() || s == ".") return false;
-    if (s.size() >= 2 && s[1] == ':') return false;
-    for (const char c : s) {
-        if (Strategy::is_sep(c)) return false;
-    }
-    return true;
-}
-
-// pathlib's stem and suffix of a final component: the last dot splits them
-// unless it is the first or the last character (".bashrc", "a." have no suffix).
-[[nodiscard]] constexpr std::string_view suffix_of(std::string_view n) noexcept {
-    const std::size_t dot = n.rfind('.');
-    if (dot == std::string_view::npos || dot == 0 || dot == n.size() - 1) return {};
-    return n.substr(dot);
-}
-[[nodiscard]] constexpr std::string_view stem_of(std::string_view n) noexcept {
-    const std::size_t dot = n.rfind('.');
-    if (dot == std::string_view::npos || dot == 0 || dot == n.size() - 1) return n;
-    return n.substr(0, dot);
-}
-// One glob *segment* against one path component: `*` and `?`, never crossing
-// a directory separator (the walk in file::glob() handles `/` and `**`).
-[[nodiscard]] constexpr bool glob_match(std::string_view pattern, std::string_view name) noexcept {
-    std::size_t p = 0, n = 0;
-    std::size_t star_p = std::string_view::npos, star_n = 0;
-    while (n < name.size()) {
-        if (p < pattern.size() && (pattern[p] == '?' || pattern[p] == name[n])) {
-            ++p; ++n;
-        } else if (p < pattern.size() && pattern[p] == '*') {
-            star_p = p++;
-            star_n = n;
-        } else if (star_p != std::string_view::npos) {
-            p = star_p + 1;
-            n = ++star_n;
-        } else {
-            return false;
-        }
-    }
-    while (p < pattern.size() && pattern[p] == '*') ++p;
-    return p == pattern.size();
-}
-
-// The OS boundary: the internal text form is the NATIVE byte string on POSIX
-// (so non-UTF-8 file names round-trip) and UTF-8 on Windows (lossless from the
-// wide native form, and what Python's str carries). fs::path::string() would
-// narrow through the ACP on Windows and can mangle non-ASCII paths.
-[[nodiscard]] inline std::string text_from_fs(const fs::path& p) {
-#ifdef _WIN32
-    const std::u8string u = p.u8string();
-    return std::string(u.begin(), u.end());
-#else
-    return p.native();
-#endif
-}
-
-[[nodiscard]] inline fs::path fs_from_text(std::string_view text) {
-#ifdef _WIN32
-    return fs::path(std::u8string(text.begin(), text.end()));
-#else
-    return fs::path(std::string(text));
-#endif
-}
-
-// Split native path text on separators, dropping "" and "." components and
-// keeping ".." — pathlib's rule for the non-anchor part of a path.
-template <class IsSep>
-constexpr void append_components(uri& u, std::string_view s, IsSep is_sep) {
-    std::size_t start = 0;
-    while (start <= s.size()) {
-        std::size_t end = start;
-        while (end < s.size() && !is_sep(s[end])) ++end;
-        const std::string_view seg = s.substr(start, end - start);
-        if (!seg.empty() && seg != ".") u.segments.emplace_back(seg);
-        if (end == s.size()) break;
-        start = end + 1;
-    }
-}
-
-// The host of a file URI that names a remote machine: pathlib.Path.from_uri
-// treats an empty authority and "localhost" as the local machine.
-[[nodiscard]] constexpr std::string_view remote_host(const uri& u) noexcept {
-    if (!u.has_authority || u.authority.empty() || u.authority == "localhost") return {};
-    return u.authority;
-}
 }  // namespace detail
-
-// What every strategy shares, expressed once over the strategy's own
-// anchor()/anchor_segments()/sep/parse_into(): the by-value parse, pathlib's
-// str() rendering, and the RFC file-URI form. (A strategy is stateless, so
-// this is CRTP over static members only.)
-template <class Strategy>
-struct strategy_base {
-    [[nodiscard]] static constexpr uri parse(std::string_view s) {
-        uri u;
-        Strategy::parse_into(u, s);
-        return u;
-    }
-
-    // pathlib's str(): the anchor, then the components joined; "." when empty.
-    [[nodiscard]] static constexpr std::string render(const uri& u) {
-        std::string out = Strategy::anchor(u);
-        u.append_segments(out, Strategy::anchor_segments(u), Strategy::sep, false);
-        return out.empty() ? std::string(".") : out;
-    }
-
-    // The RFC form of an absolute path, in place: file:///a/b — an authority is
-    // present (empty unless the path already names a host, as a UNC share does).
-    static constexpr void make_file_uri(uri& u) {
-        u.scheme = "file";
-        if (!u.has_authority) {
-            u.has_authority = true;
-            u.authority.clear();
-        }
-    }
-
-    // The parse as a stream: sink.anchor(absolute, has_authority, authority,
-    // anchor_segments) once, then sink.segment(text) per segment — exactly
-    // what parse_into() yields, without building a uri when a strategy
-    // provides a direct tokeniser (posix_strategy does; this generic one
-    // serves the rest). path_table.h consumes it.
-    template <class Sink>
-    static constexpr void tokenise(std::string_view s, Sink& sink) {
-        uri u;
-        Strategy::parse_into(u, s);
-        sink.anchor(u.absolute, u.has_authority, u.authority, Strategy::anchor_segments(u));
-        for (const std::string& seg : u.segments) sink.segment(seg);
-    }
-};
-
-// ── Strategies: native text <-> uri value, pathlib's rules ───────────────────
-// A strategy is a stateless policy: parse() maps a native path string onto the
-// uri model, render() maps it back (pathlib's str()), and the anchor helpers
-// say which leading segments are the drive/share that name() and parent()
-// must never consume. from_uri_text() applies pathlib.Path.from_uri's rules
-// to a decoded RFC 8089 file URI.
-
-// POSIX: "/" separates; the root is "/" — or "//", which POSIX reserves for an
-// implementation-defined meaning and pathlib therefore preserves (exactly two
-// leading slashes; three or more collapse to "/"). Represented as the
-// absolute flag plus a leading EMPTY segment, which is also what RFC 3986
-// says the path "//x" is.
-struct posix_strategy : strategy_base<posix_strategy> {
-    static constexpr std::string_view name = "posix";
-    static constexpr char sep = '/';
-    static constexpr bool remote_hosts = false;   // file://host/x has no local meaning: rejected, as pathlib.Path.from_uri (3.14) does
-    [[nodiscard]] static constexpr bool is_sep(char c) noexcept { return c == '/'; }
-
-    // Fills `u` in place. (Constant evaluation on GCC 13/14 mishandles a
-    // string-holding struct returned by value straight into a member, so every
-    // strategy operation mutates in place; parse() is the by-value convenience.)
-    static constexpr void parse_into(uri& u, std::string_view s) {
-        u = uri{};
-        u.scheme = "file";
-        std::size_t slashes = 0;
-        while (slashes < s.size() && s[slashes] == '/') ++slashes;
-        if (slashes) {
-            u.absolute = true;
-            if (slashes == 2) u.segments.emplace_back();   // the "//" root
-            s.remove_prefix(slashes);
-        }
-        detail::append_components(u, s, is_sep);
-    }
-
-    // parse_into() as a stream, allocation-free (proven equal to parse_into
-    // in tests/static/pathlike_core_proofs.cpp).
-    template <class Sink>
-    static constexpr void tokenise(std::string_view s, Sink& sink) {
-        std::size_t slashes = 0;
-        while (slashes < s.size() && s[slashes] == '/') ++slashes;
-        sink.anchor(slashes > 0, false, std::string_view{}, slashes == 2 ? 1 : 0);
-        if (slashes == 2) sink.segment(std::string_view{});   // the "//" root
-        s.remove_prefix(slashes);
-        std::size_t start = 0;
-        while (start <= s.size()) {
-            std::size_t end = start;
-            while (end < s.size() && s[end] != '/') ++end;
-            const std::string_view seg = s.substr(start, end - start);
-            if (!seg.empty() && seg != ".") sink.segment(seg);
-            if (end == s.size()) break;
-            start = end + 1;
-        }
-    }
-
-    // Leading segments that belong to the anchor (the "//" root's empty segment).
-    [[nodiscard]] static constexpr std::size_t anchor_segments(const uri& u) noexcept {
-        return (u.absolute && !u.segments.empty() && u.segments.front().empty()) ? 1 : 0;
-    }
-    [[nodiscard]] static constexpr std::string anchor(const uri& u) {
-        if (!u.absolute) return "";
-        return anchor_segments(u) ? "//" : "/";
-    }
-    [[nodiscard]] static constexpr bool is_absolute(const uri& u) noexcept { return u.absolute; }
-    [[nodiscard]] static constexpr bool is_anchored(const uri& u) noexcept { return u.absolute; }
-
-    // pathlib's join, in place: an absolute `other` replaces the whole path.
-    static constexpr void join_into(uri& base, const uri& other) {
-        if (other.absolute) {
-            base = other;
-            return;
-        }
-        base.segments.insert(base.segments.end(), other.segments.begin(), other.segments.end());
-    }
-
-    // RFC 8089 -> native text (pathlib.Path.from_uri): an empty or "localhost"
-    // authority is dropped; a remote host was refused by problem() before this.
-    [[nodiscard]] static constexpr std::string from_uri_text(const uri& u) { return u.path(); }
-};
-
-// Windows: "\" and "/" both separate. The anchor is a drive ("C:") or a UNC
-// share ("\\server\share") plus the root "\". A drive is stored as the first
-// segment ("C:", as RFC 8089 writes file:///C:/x) and a UNC host as the
-// authority (file://server/share/x); the share is the first segment.
-struct windows_strategy : strategy_base<windows_strategy> {
-    static constexpr std::string_view name = "windows";
-    static constexpr char sep = '\\';
-    static constexpr bool remote_hosts = true;   // file://host/share/x is the UNC path \\host\share\x
-    [[nodiscard]] static constexpr bool is_sep(char c) noexcept { return c == '\\' || c == '/'; }
-    [[nodiscard]] static constexpr bool is_drive(std::string_view seg) noexcept {
-        return seg.size() == 2 && uri::is_alpha(seg[0]) && seg[1] == ':';
-    }
-
-    static constexpr void parse_into(uri& u, std::string_view s) {
-        u = uri{};
-        u.scheme = "file";
-        if (s.size() >= 2 && is_sep(s[0]) && is_sep(s[1])) {   // UNC, exactly as ntpath.splitroot
-            s.remove_prefix(2);
-            u.has_authority = true;
-            std::size_t end = 0;
-            while (end < s.size() && !is_sep(s[end])) ++end;
-            u.authority = std::string(s.substr(0, end));       // may be empty ("///x" is host "", share "x")
-            if (end == s.size()) return;                         // "\\host": the drive alone, no root
-            s.remove_prefix(end + 1);
-            end = 0;
-            while (end < s.size() && !is_sep(s[end])) ++end;
-            u.segments.emplace_back(s.substr(0, end));          // the share (part of the drive)
-            if (end == s.size()) {                               // "\\host\share" with nothing after:
-                // pathlib roots a UNC drive implicitly, unless the host is empty
-                // or a device marker ("\\?\", "\\.\") — PureWindowsPath._parse_path.
-                u.absolute = !u.authority.empty() && u.authority != "?" && u.authority != ".";
-                return;
-            }
-            u.absolute = true;                                   // the separator after the share is the root
-            s.remove_prefix(end + 1);
-            detail::append_components(u, s, is_sep);
-            return;
-        }
-        if (s.size() >= 2 && uri::is_alpha(s[0]) && s[1] == ':') {   // drive
-            u.segments.emplace_back(s.substr(0, 2));
-            s.remove_prefix(2);
-        }
-        if (!s.empty() && is_sep(s.front())) u.absolute = true;
-        while (!s.empty() && is_sep(s.front())) s.remove_prefix(1);
-        detail::append_components(u, s, is_sep);
-    }
-
-    [[nodiscard]] static constexpr bool has_drive(const uri& u) noexcept {
-        return !u.has_authority && !u.segments.empty() && is_drive(u.segments.front());
-    }
-    [[nodiscard]] static constexpr std::size_t anchor_segments(const uri& u) noexcept {
-        if (u.has_authority) return u.segments.empty() ? 0 : 1;   // the share
-        return has_drive(u) ? 1 : 0;
-    }
-    // pathlib's drive: "C:" or "\\server\share".
-    [[nodiscard]] static constexpr std::string drive(const uri& u) {
-        if (u.has_authority) {
-            std::string d = "\\\\" + u.authority;
-            if (!u.segments.empty()) d += "\\" + u.segments.front();
-            return d;
-        }
-        return has_drive(u) ? u.segments.front() : std::string();
-    }
-    [[nodiscard]] static constexpr std::string anchor(const uri& u) { return drive(u) + (u.absolute ? "\\" : ""); }
-    [[nodiscard]] static constexpr bool is_absolute(const uri& u) noexcept {
-        return u.absolute && (u.has_authority || has_drive(u));
-    }
-    [[nodiscard]] static constexpr bool is_anchored(const uri& u) noexcept {
-        return u.absolute || u.has_authority || has_drive(u);
-    }
-
-    [[nodiscard]] static constexpr bool same_drive(const uri& a, const uri& b) noexcept {
-        if (!has_drive(a) || !has_drive(b)) return false;
-        return uri::to_lower(a.segments.front()[0]) == uri::to_lower(b.segments.front()[0]);
-    }
-
-    // pathlib's join, in place: a UNC or foreign-drive `other` replaces; a
-    // rooted `other` keeps our drive; a same-drive drive-relative `other`
-    // appends; anything else appends.
-    static constexpr void join_into(uri& base, const uri& other) {
-        if (other.has_authority) {
-            base = other;
-            return;
-        }
-        if (has_drive(other)) {
-            if (other.absolute || !same_drive(base, other)) {
-                base = other;
-                return;
-            }
-            base.segments.insert(base.segments.end(), other.segments.begin() + 1, other.segments.end());
-            return;
-        }
-        if (other.absolute) {
-            base.segments.resize(anchor_segments(base));
-            base.absolute = true;
-        }
-        base.segments.insert(base.segments.end(), other.segments.begin(), other.segments.end());
-    }
-
-    // RFC 8089 -> native text (pathlib.Path.from_uri): a host becomes a UNC
-    // prefix, the slash before a drive is dropped ("/C:/x" -> "C:/x"), and the
-    // legacy "C|" drive spelling becomes "C:".
-    [[nodiscard]] static constexpr std::string from_uri_text(const uri& u) {
-        std::string text;
-        if (const std::string_view host = detail::remote_host(u); !host.empty()) text = "\\\\" + std::string(host);
-        std::string p = u.path();
-        if (text.empty() && p.size() >= 3 && p[0] == '/' && uri::is_alpha(p[1]) && (p[2] == ':' || p[2] == '|')) {
-            p = p.substr(1);
-            p[1] = ':';
-        }
-        return text + p;
-    }
-};
-
-#ifdef _WIN32
-using native_strategy = windows_strategy;
-#else
-using native_strategy = posix_strategy;
-#endif
 
 // A path that reads and decodes itself. Models os.PathLike (it exposes
 // __fspath__ through the binding), so it drops straight into open(), Path(),
@@ -445,7 +164,7 @@ public:
 
     // ── construction rules (constexpr, so provable) ────────────────────────
     [[nodiscard]] static constexpr bool is_file_scheme(std::string_view sch) noexcept {
-        return uri::ascii_lower(sch) == "file";
+        return chars::lower(sch) == "file";
     }
 
     // Parse path text or a file URI (RFC 8089) into `u`, in ONE pass: "" on
@@ -550,7 +269,7 @@ public:
     }
 
     // The lower-cased extension the registry dispatches on (".yaml").
-    [[nodiscard]] constexpr std::string ext_key() const { return uri::ascii_lower(suffix()); }
+    [[nodiscard]] constexpr std::string ext_key() const { return chars::lower(suffix()); }
 
     // pathlib's parts: the anchor ("/", "C:\", "\\server\share\"), then the components.
     [[nodiscard]] constexpr std::vector<std::string> parts() const {
@@ -598,6 +317,24 @@ public:
         return out;
     }
 
+    // pathlib's expanduser(): a path with no drive and no root whose first part starts with "~"
+    // has that part replaced by the home it names — "~" this user's, "~name" that user's — and
+    // keeps every later part; any other path is itself. `home_of(user)` answers ("" for this user),
+    // by default the system (platform/home.h). No home known, or one that starts with "~" itself,
+    // is std::runtime_error, as pathlib's RuntimeError.
+    //
+    //     basic_file("~/a/b").expanduser(home)   -> "/home/someone/a/b"     ("~root/x" -> "/root/x")
+    template <class HomeOf>
+    [[nodiscard]] constexpr basic_file expanduser(HomeOf&& home_of) const {
+        if (m_uri.absolute || anchor_count() != 0 || m_uri.segments.empty() || !m_uri.segments.front().starts_with('~')) return *this;
+        const std::optional<std::string> home = home_of(std::string_view(m_uri.segments.front()).substr(1));
+        if (!home || home->starts_with('~')) throw std::runtime_error("Could not determine home directory.");
+        basic_file out(Strategy::parse(*home), m_pin);
+        out.m_uri.segments.insert(out.m_uri.segments.end(), m_uri.segments.begin() + 1, m_uri.segments.end());
+        return out;
+    }
+    [[nodiscard]] basic_file expanduser() const { return expanduser(platform::home_of); }
+
     [[nodiscard]] constexpr basic_file parent() const {
         basic_file out = *this;
         if (out.has_name()) out.m_uri.segments.pop_back();   // the anchor (or ".") is its own parent
@@ -617,6 +354,28 @@ public:
         }
         return out;
     }
+
+    // pathlib's relative_to: this path with `base` taken off its front, or nullopt when this path is
+    // neither `base` nor beneath it. Same anchor (root, drive, share) and every segment of `base` a
+    // leading segment of this one, compared as written — the equality `==` uses, so unlike
+    // PureWindowsPath it does not fold case. Lexical, as pathlib's is: ".." is a segment like any
+    // other. "/a/b" relative to "/a/" -> "b"; "/ab/c" relative to "/a" -> nullopt; a path relative to
+    // itself -> ".".
+    [[nodiscard]] constexpr std::optional<basic_file> relative_to(const basic_file& base) const {
+        const uri& a = m_uri;
+        const uri& b = base.m_uri;
+        if (a.scheme != b.scheme || a.has_authority != b.has_authority || a.authority != b.authority ||
+            a.absolute != b.absolute || b.segments.size() > a.segments.size()) {
+            return std::nullopt;
+        }
+        for (std::size_t i = 0; i < b.segments.size(); ++i) {
+            if (a.segments[i] != b.segments[i]) return std::nullopt;
+        }
+        uri rest;   // relative: no scheme, no authority, no root
+        rest.segments.assign(a.segments.begin() + static_cast<std::ptrdiff_t>(b.segments.size()), a.segments.end());
+        return basic_file(std::move(rest), m_pin);
+    }
+    [[nodiscard]] constexpr bool is_relative_to(const basic_file& base) const { return relative_to(base).has_value(); }
 
     // pathlib's rule: a name is any non-empty component without a separator
     // that is not "." (".." is allowed, as in pathlib).
@@ -642,13 +401,19 @@ public:
     [[nodiscard]] fs::path to_fs() const { return detail::fs_from_text(fspath()); }
 
     [[nodiscard]] basic_file absolute() const { return from_fs(fs::absolute(to_fs())); }
-    [[nodiscard]] basic_file resolve() const { return from_fs(fs::weakly_canonical(to_fs())); }
+    /// pathlib's resolve(): absolute first, then its links and `..` resolved — the parts that exist
+    /// (weakly_canonical alone left a relative path relative when none of it existed, 2026-11-01),
+    /// or, strict, all of them, a missing one a filesystem_error (FileNotFoundError in Python).
+    [[nodiscard]] basic_file resolve(bool strict = false) const {
+        const fs::path whole = fs::absolute(to_fs());
+        return from_fs(strict ? fs::canonical(whole) : fs::weakly_canonical(whole));
+    }
 
     [[nodiscard]] bool exists() const { return fs::exists(to_fs()); }
     [[nodiscard]] bool is_file() const { return fs::is_regular_file(to_fs()); }
     [[nodiscard]] bool is_dir() const { return fs::is_directory(to_fs()); }
     [[nodiscard]] bool is_symlink() const { return fs::is_symlink(to_fs()); }
-    [[nodiscard]] std::uintmax_t size() const { return fs::file_size(to_fs()); }
+    [[nodiscard]] std::uintmax_t size() const { return platform::file_size(to_fs()); }   // a folder is IsADirectoryError everywhere
 
     // Children of this directory, sorted for determinism.
     [[nodiscard]] std::vector<basic_file> iterdir() const {
@@ -658,28 +423,17 @@ public:
         return out;
     }
 
-    // Relative glob: `*` and `?` within a component, `/` separates components,
-    // `**` matches any number of directories (and, as the final component,
-    // every descendant). Sorted, deduplicated.
-    [[nodiscard]] std::vector<basic_file> glob(std::string_view pattern) const {
-        if (pattern.empty()) throw std::invalid_argument("glob: empty pattern");
-        std::vector<std::string> segs;
-        for (std::size_t start = 0; start <= pattern.size();) {
-            const std::size_t slash = pattern.find('/', start);
-            const std::size_t end = (slash == std::string_view::npos) ? pattern.size() : slash;
-            if (end > start) segs.emplace_back(pattern.substr(start, end - start));
-            if (slash == std::string_view::npos) break;
-            start = slash + 1;
-        }
-        // A leading '/' is rejected explicitly: on Windows fs::path("/x") is
-        // NOT is_absolute() (no drive), yet the pattern is clearly not
-        // relative in the caller's intent.
-        if (segs.empty() || pattern.front() == '/' || fs::path(pattern).is_absolute()) {
-            throw std::invalid_argument("glob: pattern must be relative, got '" +
-                                        std::string(pattern) + "'");
-        }
+    // What pathlib's glob finds under this directory, sorted and deduplicated. The rules are
+    // glob_walk.h's; this runs them on the calling thread (parallel_glob.h runs the same on a pool).
+    [[nodiscard]] std::vector<basic_file> glob(std::string_view pattern) const { return glob(glob_pattern(pattern)); }
+    /// The same with the pattern parsed already (a caller that checked it first parses it once).
+    [[nodiscard]] std::vector<basic_file> glob(const glob_pattern& pattern) const { return found_by_glob(glob_walk_here(pattern, to_fs())); }
+
+    // What a walk found, as files with this one's pin: sorted and deduplicated, as glob() returns them.
+    [[nodiscard]] std::vector<basic_file> found_by_glob(const std::vector<fs::path>& found) const {
         std::vector<basic_file> out;
-        glob_walk(to_fs(), segs, 0, out);
+        out.reserve(found.size());
+        for (const fs::path& p : found) out.push_back(from_fs(p));
         std::sort(out.begin(), out.end());
         out.erase(std::unique(out.begin(), out.end()), out.end());
         return out;
@@ -690,42 +444,83 @@ public:
         return glob("**/" + std::string(pattern));
     }
 
-    // The raw bytes of the file, undecoded (binary, no newline translation).
-    [[nodiscard]] std::string read_bytes() const {
-        std::ifstream ifs(to_fs(), std::ios::binary);
-        if (!ifs) throw std::runtime_error("cannot open file: " + fspath());
-        std::ostringstream buffer;
-        buffer << ifs.rdbuf();
-        return buffer.str();
+    // The raw bytes of the file, undecoded (binary, no newline translation), read by the system's
+    // calls into the room `grow` gives (platform::read_whole_into: grow(n) is a buffer of at least
+    // n bytes that keeps what it held); how many. Fails as pathlib does: file_error with the errno
+    // of the open or the read — EISDIR for a directory on POSIX, EACCES on Windows.
+    template <class Grow>
+    std::size_t read_bytes_into(Grow&& grow) const {
+        const auto got = platform::read_whole_into(to_fs(), std::forward<Grow>(grow));
+        if (!got) throw file_error(got.error(), fspath(), got.error() == EISDIR ? "is a directory" : "cannot read file");
+        return *got;
     }
 
-    // Replace the file's contents with `data`, byte for byte (pathlib parity).
-    void write_bytes(std::string_view data) const {
-        std::ofstream ofs(to_fs(), std::ios::binary | std::ios::trunc);
-        if (!ofs) throw std::runtime_error("cannot open file for writing: " + fspath());
+    // The same, as a string.
+    [[nodiscard]] std::string read_bytes() const {
+        std::string bytes;
+        const std::size_t got = read_bytes_into([&bytes](std::size_t n) {
+            bytes.resize_and_overwrite(n, [](char*, std::size_t m) noexcept { return m; });   // filled by the read, not zeroed
+            return bytes.data();
+        });
+        bytes.resize(got);
+        return bytes;
+    }
+
+    // Append `text` to the file as lines, the file made when it is not there: a "\n" first when
+    // its last line has none (platform::append_lines). file_error with the errno of what failed.
+    void append_lines(std::string_view text) const {
+        if (const int err = platform::append_lines(to_fs(), text); err != 0) throw file_error(err, fspath(), "cannot append to file");
+    }
+
+    // Replace the file's contents with `data`, byte for byte: in place by default (pathlib parity),
+    // or atomically (basic_atomic_write: a reader sees the old contents or the new, never part of
+    // either). Closed before it returns, so a failure the close reports — a full disk — is raised.
+    void write_bytes(std::string_view data, write_mode mode = write_mode::in_place) const {
+        if (mode == write_mode::atomic) {
+            basic_atomic_write<basic_file> replacement(*this);
+            replacement.write(data);
+            replacement.commit();
+            return;
+        }
+        const fs::path p = to_fs();
+        errno = 0;
+        std::ofstream ofs(p, std::ios::binary | std::ios::trunc);
+        if (!ofs) throw file_error(detail::open_errno(p), fspath(), "cannot open file for writing");
         ofs.write(data.data(), static_cast<std::streamsize>(data.size()));
-        if (!ofs) throw std::runtime_error("write failed: " + fspath());
+        ofs.close();
+        if (!ofs) throw file_error(errno != 0 ? errno : EIO, fspath(), "write failed");
     }
 
     // Create this directory (pathlib parity): `parents` creates missing
     // ancestors, `exist_ok` tolerates an existing directory. A non-directory
-    // in the way always fails.
+    // in the way always fails, as FileExistsError; a missing parent is ENOENT.
     void mkdir(bool parents = false, bool exist_ok = false) const {
         const fs::path p = to_fs();
         std::error_code ec;
         if (fs::is_directory(p, ec)) {
             if (exist_ok) return;
-            throw std::runtime_error("directory exists: " + fspath());
+            throw file_error(EEXIST, fspath(), "directory exists");
         }
         if (fs::exists(p, ec)) {
-            throw std::runtime_error("not a directory: " + fspath());
+            throw file_error(EEXIST, fspath(), "not a directory");
         }
         const bool made = parents ? fs::create_directories(p, ec) : fs::create_directory(p, ec);
-        if (ec || !made) {
-            throw std::runtime_error("cannot create directory " + fspath() +
-                                     (ec ? ": " + ec.message() : std::string{}));
-        }
+        // The condition maps a platform's own code (a Win32 error) to the errno Python expects.
+        if (ec) throw file_error(ec.default_error_condition().value(), fspath(), "cannot create directory");
+        if (!made) throw file_error(EEXIST, fspath(), "cannot create directory");
     }
+
+    // Remove this file or symbolic link (pathlib parity): a symlink goes, not what it points to;
+    // nothing there is ENOENT unless `missing_ok`. A directory is refused with the operating
+    // system's own errno, as os.unlink refuses it (EISDIR on Linux, EPERM on macOS, EACCES on Windows).
+    void unlink(bool missing_ok = false) const {
+        const fs::path p = to_fs();
+        if (platform::unlink_file(p) == 0) return;
+        const int err = errno;
+        if (err == ENOENT && missing_ok) return;
+        throw file_error(err, fspath(), "cannot remove file");
+    }
+
 
 private:
     [[nodiscard]] constexpr std::size_t anchor_count() const noexcept { return Strategy::anchor_segments(m_uri); }
@@ -737,44 +532,98 @@ private:
         return out;
     }
 
-    // Walk one pattern segment at `base`. Iteration errors (permissions,
-    // races) are skipped rather than thrown — matching pathlib's tolerance.
-    void glob_walk(const fs::path& base, const std::vector<std::string>& segs,
-                   std::size_t idx, std::vector<basic_file>& out) const {
-        const std::string& seg = segs[idx];
-        const bool last = idx + 1 == segs.size();
-        std::error_code ec;
-        if (seg == "**") {
-            if (last) {   // final `**`: every descendant, files and directories
-                for (fs::recursive_directory_iterator it(base, ec), end; !ec && it != end;
-                     it.increment(ec)) {
-                    out.push_back(from_fs(it->path()));
-                }
-                return;
-            }
-            glob_walk(base, segs, idx + 1, out);   // `**` matching zero directories
-            for (fs::recursive_directory_iterator it(base, ec), end; !ec && it != end;
-                 it.increment(ec)) {
-                std::error_code dec;
-                if (it->is_directory(dec) && !dec) glob_walk(it->path(), segs, idx + 1, out);
-            }
-            return;
-        }
-        for (fs::directory_iterator it(base, ec), end; !ec && it != end; it.increment(ec)) {
-            if (!detail::glob_match(seg, detail::text_from_fs(it->path().filename()))) continue;
-            if (last) {
-                out.push_back(from_fs(it->path()));
-            } else {
-                std::error_code dec;
-                if (it->is_directory(dec) && !dec) glob_walk(it->path(), segs, idx + 1, out);
-            }
-        }
-    }
-
     uri m_uri;
     const engine_info* m_pin{nullptr};   // pinned at construction; nullptr = auto by extension
 };
 
 using file = basic_file<native_strategy>;
+
+// The OS boundary for a caller that holds an fs::path (a walk's match): its text as pathlike holds
+// it — native bytes on POSIX, UTF-8 on Windows — and back.
+using detail::fs_from_text;
+using detail::text_from_fs;
+
+/// One atomic replacement of a file, owning its temporary from creation to rename or removal
+/// (docs/design/pathlike_writes.md). Example:
+///   atomic_write replacement(file("notes.json")); replacement.write("{}"); replacement.commit();
+/// The temporary is a hidden sibling, `.notes.json.<16 hex digits>.tmp`, created exclusively, so two
+/// writers never share one. commit() forces it to the disk, gives it the file's permission bits,
+/// renames it over the file and forces the folder: a reader sees the old contents or the new, and
+/// after a power cut one of them is there whole. Destroyed without commit(), it removes the
+/// temporary. A symbolic link is written through: the file it names is replaced, the link stays. The
+/// file is still a new one — a second hard link keeps the old contents, the owner is the writer's.
+template <class File, class Sync>
+class basic_atomic_write {
+public:
+    explicit basic_atomic_write(const File& target) : m_where(target.fspath()), m_destination(destination_of(target.to_fs())) {
+        fs::path folder = m_destination.parent_path();
+        for (int attempt = 0; attempt < 8; ++attempt) {   // two writers drawing one tag is 1 in 2^64: retried, not assumed away
+            fs::path name(".");
+            name += m_destination.filename();
+            name += "." + detail::random_tag() + ".tmp";
+            m_temporary = folder / name;
+            m_fd = detail::open_exclusive(m_temporary);
+            if (m_fd >= 0) return;
+            if (errno != EEXIST) break;
+        }
+        throw file_error(errno, m_where, "cannot create a temporary file beside");
+    }
+    basic_atomic_write(const basic_atomic_write&) = delete;
+    basic_atomic_write& operator=(const basic_atomic_write&) = delete;
+    ~basic_atomic_write() { abandon(); }
+
+    /// The temporary, for a writer that writes by path (an engine): what it holds at commit() is what
+    /// replaces the file.
+    [[nodiscard]] File temporary() const { return File(detail::text_from_fs(m_temporary)); }
+
+    /// Add `part` to the temporary.
+    void write(std::string_view part) {
+        while (!part.empty()) {
+            const long long written = detail::write_some(m_fd, part.data(), part.size());
+            if (written < 0) {
+                if (errno == EINTR) continue;
+                throw file_error(errno, m_where, "write failed");
+            }
+            part.remove_prefix(static_cast<std::size_t>(written));
+        }
+    }
+
+    /// Force the temporary to the disk, rename it over the file, force the folder.
+    void commit() {
+        Sync::file(m_fd, m_where);
+        if (detail::close_fd(std::exchange(m_fd, -1)) != 0) throw file_error(errno, m_where, "write failed");
+        std::error_code ec;
+        if (const fs::file_status status = fs::status(m_destination, ec); !ec && fs::exists(status))
+            fs::permissions(m_temporary, status.permissions(), ec);   // best effort: the contents are the point
+        fs::rename(m_temporary, m_destination, ec);
+        if (ec) throw file_error(ec.default_error_condition().value(), m_where, "cannot replace file");
+        m_committed = true;
+        const fs::path folder = m_destination.parent_path();
+        Sync::folder(folder.empty() ? fs::path(".") : folder, m_where);
+    }
+
+private:
+    // The file a write replaces: a symbolic link's target, so the link survives the rename.
+    [[nodiscard]] static fs::path destination_of(const fs::path& p) {
+        std::error_code ec;
+        return fs::is_symlink(p, ec) ? fs::weakly_canonical(p) : p;
+    }
+
+    void abandon() noexcept {
+        if (m_fd >= 0) detail::close_fd(std::exchange(m_fd, -1));
+        if (!m_committed) {
+            std::error_code ignored;
+            fs::remove(m_temporary, ignored);
+        }
+    }
+
+    std::string m_where;        // the path as the caller spelt it, for errors
+    fs::path m_destination;
+    fs::path m_temporary;
+    int m_fd = -1;
+    bool m_committed = false;
+};
+
+using atomic_write = basic_atomic_write<file>;
 
 }  // namespace pygim::pathlike

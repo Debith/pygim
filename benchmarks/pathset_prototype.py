@@ -22,7 +22,7 @@ Each run appends its raw measurements + environment metadata to
 
 import gc
 import os
-import pathlib
+import pathlib  # the reference: a list of pathlib.PurePath against one table
 import sys
 
 from tabulate import tabulate
@@ -129,7 +129,7 @@ def bench_filter(strs, ps, files):
     rec("[s for s in strs if s.endswith('.yaml')]", lambda: [s for s in strs if s.endswith(".yaml")])
     try:
         import polars as pl
-        series = pl.Series(ps.to_list())
+        series = pl.Series([os.fspath(p) for p in ps])
         rec("polars series.str.ends_with('.yaml')", lambda: series.filter(series.str.ends_with(".yaml")))
     except ImportError:
         pass
@@ -184,12 +184,12 @@ def bench_render(strs, ps):
         rows.append([label, f"{t * 1e3:,.1f}", f"{ns(t, n):,.0f}"])
         return r
 
-    rec("ps.to_list()", lambda: ps.to_list())
+    rec("[os.fspath(p) for p in ps]", lambda: [os.fspath(p) for p in ps])
     rec("[os.fspath(v) for v in ps.scan()]", lambda: [os.fspath(v) for v in ps.scan()])
     rec("[str(P) for P in PurePath list] (reference render)", lambda: [str(pathlib.PurePath(s)) for s in strs])
     try:
         import polars as pl
-        rec("polars.Series(ps.to_list())", lambda: pl.Series(ps.to_list()))
+        rec("polars.Series(members as text)", lambda: pl.Series([os.fspath(p) for p in ps]))
     except ImportError:
         pass
     print(f"\n## 5. render, {n:,} paths (best of {REPS})\n")

@@ -16,7 +16,7 @@
 //
 // Ids are never removed: a set is built, not edited. Two sets may only be
 // combined when their ids mean the same thing (rows of ONE table); the type
-// cannot know that — the caller does (adapter/pathset.h compares table
+// cannot know that — the caller does (pathlike/pathset.h compares table
 // pointers before touching bitmaps).
 //
 // basic_id_set<Id, Word> is generic over the id's integer type (what the

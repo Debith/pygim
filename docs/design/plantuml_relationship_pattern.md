@@ -18,8 +18,6 @@ This keeps "is-a" relationships visually distinct from "uses" relationships.
 
 ### Inheritance / Generalization
 
-Use when one type is a specialization of another.
-
 ```plantuml
 Child -up-|> Parent
 ```
@@ -34,15 +32,12 @@ Preferred reading: the child points to the parent.
 
 ### Realization / Interface Implementation
 
-Use when a concrete type implements an interface, protocol, or abstract contract.
-
 ```plantuml
 Implementation ..up|> Interface
 ```
 
 ### Usage / Dependency
 
-Use when one type calls, references, validates, builds, or otherwise depends on another.
 These arrows do not imply hierarchy, so route them however best clarifies the picture.
 
 ```plantuml
@@ -52,8 +47,9 @@ Container ..> Helpers : validate boundary
 
 ### Ownership / Composition
 
-Use composition or aggregation to show stored lifetime relationships. Direction may be
-chosen for layout clarity; the semantic payload is the diamond, not an upward orientation.
+The ownership meaning is carried by the diamond marker, not by which way the arrow
+points — so an ownership arrow does not need to point upward, and its direction may
+be chosen for layout clarity.
 
 ```plantuml
 Container *-down-> Core : owns m_core

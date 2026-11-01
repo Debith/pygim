@@ -6,7 +6,8 @@ This module contains utilities to get profiling quickly.
 from contextlib import contextmanager
 import cProfile
 import pstats
-import time
+
+from pygim import utils
 
 __all__ = ("quick_timer", "quick_profile")
 
@@ -44,14 +45,13 @@ def quick_timer(title="Code block", *, printer=print, print_on_start=True):
         with quick_timer(title="Slow code"):
             slow_code()
     """
-    start = time.time()
+    # pygim.utils.QuickTimer measures, on the monotonic clock; these hooks say it as this always has.
+    report = utils.Report.hooks()
     if print_on_start:
-        printer(f"{title} started...")
-    try:
+        report.on_timer_started(lambda name: printer(f"{name} started..."))
+    report.on_finished(lambda snapshot: printer(f"{snapshot.name} executed in {snapshot.total.seconds:.2f} seconds!"))
+    with utils.QuickTimer(str(title), report=report):   # any object's text, as before it was a native timer
         yield
-    finally:
-        end = time.time()
-        printer(f"{title} executed in {end - start:.2f} seconds!")
 
 
 @contextmanager

@@ -11,7 +11,7 @@
 //     file path costs eight bytes plus its share of the unique names;
 //   * anchors as root rows: the non-segment part of a uri (absolute flag,
 //     authority) is an interned key whose row has no parent.
-// A path is an index. Views (adapter/pathset.h) are (table, index) and copy
+// A path is an index. Views (pathview.h, pathset.h) are (table, index) and copy
 // nothing; the table is append-only, so an index never dangles.
 //
 // Semantics come from core.h, not from string tricks: a strategy's tokenise()
@@ -53,6 +53,8 @@
 // The anchor key is one flags byte (0x40 | absolute | authority << 1, so "@"
 // relative, "A" absolute, "B"/"C" with an authority) followed by the
 // authority text: `anchor_at(row)` decodes it back.
+//
+// CORE layer: pybind-free.
 
 #include <cstddef>
 #include <cstdint>
@@ -93,13 +95,17 @@ public:
     constexpr basic_path_table() = default;
 
     /// Room for `rows` rows and `segments` distinct segments without
-    /// rehashing (a fresh table's rows run ~2-3x the path count, its
-    /// distinct segments about 1x — adapter/pathset.h's reserve() applies
-    /// that rule). Existing ids are kept.
+    /// rehashing (reserve_paths sizes both from a count of paths). Existing
+    /// ids are kept.
     constexpr void reserve(std::size_t rows, std::size_t segments) {
         m_trie.reserve(rows);
         m_segments.reserve(segments, 0);
     }
+    /// A fresh table's rows run two to three a path, its distinct segments about one.
+    static constexpr std::size_t rows_per_path = 3;
+    /// Room for `paths` more paths, as a fresh table grows: its hash tables sized once instead of
+    /// doubling their way up (14% off a million-path build).
+    constexpr void reserve_paths(std::size_t paths) { reserve(size() + rows_per_path * paths, segments().size() + paths); }
 
     // ── insertion (find-or-add), from text, from a value, from another table ──
 
@@ -162,7 +168,7 @@ public:
     ///     add(3)  -> a new row in u for a/b/c.yaml, under u's a/b
     ///
     /// This is how PathSet unites or intersects two sets over different
-    /// tables (adapter/pathset.h): mapped once, never rendered and re-parsed.
+    /// tables (pathset.h): mapped once, never rendered and re-parsed.
     class row_map {
     public:
         row_map(const basic_path_table& in, const basic_path_table& from, basic_path_table* into = nullptr)
@@ -394,7 +400,18 @@ public:
     /// the to_list row), 35% under the two-string version it replaced.
     template <class Strategy>
     [[nodiscard]] constexpr std::string render(std::uint32_t r) const {
-        return m_trie.with_chain(r, [&](const std::uint32_t* rows, std::size_t n) {
+        std::string out;
+        render_into<Strategy>(r, out);
+        return out;
+    }
+
+    /// The same text written into `out`, replacing what it held: a caller that renders many rows in
+    /// turn reuses one string's room (two of them order a sort's paths without allocating).
+    ///
+    ///     std::string s;  t.render_into<posix_strategy>(6, s);   // s == "/x"
+    template <class Strategy>
+    constexpr void render_into(std::uint32_t r, std::string& out) const {
+        m_trie.with_chain(r, [&](const std::uint32_t* rows, std::size_t n) {
             const anchor_info a = anchor_at(rows[n - 1]);
             // The common shape — no authority, no anchor-part segments — is
             // rendered in one pass into a string sized up front; its anchor
@@ -407,10 +424,9 @@ public:
                 if (f & anchor_bit) plain = false;
                 else tail_len += m_segments[f].size() + 1;
             }
-            std::string out;
             if (plain) {
                 if (std::is_constant_evaluated()) out = plain_anchor<Strategy>(a.absolute);
-                else out = cached_plain_anchor<Strategy>(a.absolute);
+                else out.assign(cached_plain_anchor<Strategy>(a.absolute));
                 out.reserve(out.size() + tail_len);
             } else {
                 uri head;
@@ -433,7 +449,6 @@ public:
                 out += m_segments[f];
             }
             if (out.empty()) out = ".";
-            return out;
         });
     }
 

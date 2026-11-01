@@ -2,6 +2,7 @@
 // ODBC error-handling utility.
 // Shared by BCP pipeline, backend, and connection pool.
 
+#include "../../core/persistence_error.h"
 #include <format>
 #include <stdexcept>
 #include <string>
@@ -49,7 +50,7 @@ inline void raise_if_error(SQLRETURN ret, SQLSMALLINT type,
 
     auto diag = collect_diagnostics(type, handle);
     if (!diag.empty()) {
-        throw std::runtime_error(std::format("{} failed: {}", what, diag));
+        throw pygim::core::persistence_error(std::format("{} failed: {}", what, diag));
     }
 
     const char* code_hint = "";
@@ -58,7 +59,7 @@ inline void raise_if_error(SQLRETURN ret, SQLSMALLINT type,
     else if (ret == SQL_NO_DATA)        code_hint = " (SQL_NO_DATA)";
     else if (ret == SQL_NEED_DATA)      code_hint = " (SQL_NEED_DATA)";
 
-    throw std::runtime_error(
+    throw pygim::core::persistence_error(
         std::format("{} failed (no diagnostics{})", what, code_hint));
 }
 

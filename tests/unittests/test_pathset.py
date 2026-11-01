@@ -1,9 +1,10 @@
 # -*- coding: utf-8 -*-
 """The set-like surface of pygim.PathSet — what the former pygim.pathset module
 offered, now over one table: construction from one path or many, bool/==/in,
-+ and - with paths or sets, clone, cwd, read_all_files, match_pattern, and the
++ and - with paths or sets, clone, cwd, read_all_files, sizes, match_pattern, and the
 Filter / Query algebra (ext, name, absolute; & | ~; ps & f)."""
 
+import fnmatch
 import gc
 import os
 
@@ -45,7 +46,7 @@ def test_equality(temp_files):
     assert a == a and a == PathSet(temp_files) and a != PathSet([])
     assert PathSet(reversed(temp_files)) == a                     # order does not matter
     assert a != PathSet(temp_files[:2])
-    other_table = PathSet([str(p) for p in temp_files])           # its own table: compared by chain
+    other_table = PathSet(temp_files)                             # its own table: compared by chain
     assert other_table == a and a == other_table
     assert PathSet(["x/y", "x//y/"]) == PathSet("x/y")            # spellings collapse
 
@@ -58,7 +59,7 @@ def test_membership(temp_files):
 
 def test_subtraction(temp_dir, temp_files):
     files = PathSet(temp_files)
-    files -= str(temp_dir / "readme.txt")                         # one path: a new set, the name rebound
+    files -= temp_dir / "readme.txt"                              # one path: a new set, the name rebound
     assert len(files) == 2
     files -= PathSet(temp_dir / "readme.rst")
     assert len(files) == 1 and files[0].name == "AUTHORS.rst"
@@ -83,7 +84,7 @@ def test_cloning(temp_files):
 def test_modification_after_cloning(temp_dir, temp_files):
     files = PathSet(temp_files)
     cloned = files.clone()
-    files -= str(temp_dir / "readme.txt")
+    files -= temp_dir / "readme.txt"
     assert len(files) == 2 and len(cloned) == 3
 
 
@@ -98,6 +99,30 @@ def test_extension_filter_selects_matching_files(temp_files):
     assert isinstance(filtered, PathSet) and len(filtered) == 2
     assert all(v.suffix == ".rst" for v in filtered)
     assert PathSet(temp_files).filter(ext(".rst")) == filtered
+
+
+SUFFIXED = ["a.h", "b.CPP", "c.py", "d.Hpp", "e.tar.c", "f", ".h", "g.pyi", "h.PY", "i.c++", "j.ç"]
+
+
+def test_ext_takes_several_suffixes_and_any_case_on_request():
+    names = lambda f: [p.name for p in PathSet(SUFFIXED) & f]
+    assert names(ext(".h", ".cpp")) == ["a.h"]
+    assert names(ext(".h", ".cpp", ".hpp", case_sensitive=False)) == ["a.h", "b.CPP", "d.Hpp"]
+    assert names(ext(".C", case_sensitive=False)) == ["e.tar.c"]            # the final suffix only
+    assert names(ext(".Ç", case_sensitive=False)) == []                     # ASCII letters fold, no others
+    assert names(ext("")) == ["f", ".h"]                                     # pathlib: ".h" has no suffix
+    with pytest.raises(TypeError, match="one suffix or more"):
+        ext()
+    with pytest.raises(TypeError, match="as str, not bool"):
+        ext(".py", True)                                                    # case_sensitive is keyword-only
+
+
+def test_ext_of_a_languages_suffixes_finds_what_language_of_finds():
+    """The Filter similarity's files are chosen by: ext(*LANGUAGES[l]["exts"], case_sensitive=False)."""
+    similarity = pytest.importorskip("pygim.similarity")
+    for language, record in similarity.LANGUAGES.items():
+        chosen = [p.name for p in PathSet(SUFFIXED) & ext(*record["exts"], case_sensitive=False)]
+        assert chosen == [n for n in SUFFIXED if similarity.language_of(n) == language], language
 
 
 def test_query_is_lazy_and_keeps_its_source_alive(temp_files):
@@ -132,7 +157,7 @@ def test_filters_read_the_table_not_the_filesystem():
     # pathlib's is_absolute() needs a drive on Windows: anchor the path on the current one.
     absp = str(pathlib.PurePath(pathlib.Path.cwd().anchor, "etc", "a.yaml"))
     ps = PathSet([absp, "rel/b.yaml", "rel/c.json"])              # none of these exist on disk
-    assert ps.filter(absolute()).to_list() == [absp]
+    assert [os.fspath(p) for p in ps.filter(absolute())] == [absp]
     assert len(ps & ext(".yaml") & ~absolute()) == 1
     assert ps.filter(name("?.json")) == PathSet("rel/c.json")
 
@@ -148,6 +173,33 @@ def test_read_all_files(temp_dir, temp_files):
     (temp_dir / "readme.rst").write_text("world")
     texts = PathSet([temp_dir / "readme.txt", temp_dir / "readme.rst", temp_dir]).read_all_files()
     assert texts == ["hello", "world"]                            # the directory is skipped
+
+
+def test_sizes_are_each_members_size_in_member_order(temp_dir, temp_files):
+    """What path.size() gives each member, in member order — and the OSError it raises, naming the member."""
+    for n, f in enumerate(temp_files):
+        f.write_bytes(b"x" * (10 * n + 1))
+    members = PathSet(list(reversed(temp_files)))
+    assert members.sizes() == [p.size() for p in members] == [21, 11, 1]
+    assert PathSet([]).sizes() == []
+    with pytest.raises(FileNotFoundError) as missing:
+        PathSet([temp_files[0], temp_dir / "gone.txt"]).sizes()
+    assert missing.value.filename == os.fspath(temp_dir / "gone.txt")
+    with pytest.raises(IsADirectoryError):                       # a folder has no size, on every system
+        PathSet([temp_dir]).sizes()
+    with pytest.raises(IsADirectoryError):                       # MSVC's std::filesystem answered one
+        pygim.path(temp_dir).size()
+
+
+FNMATCH_PATTERNS = ["*.py", "?.py", "[ab]", "[!a]*", "[a-c]?", "[]a]", "[!]a]", "[a-]", "[-a]", "[c-a]", "[ab", "x[!]", "[[]",
+                    "*[!.]*", "[é]", "[à-ê]x", "??", "*?é", "a*b*c"]
+FNMATCH_NAMES = ["a.py", "é.py", "ab.py", "a", "b", "-", "]", "[ab", "x[!]", "[", "bx", "éx", "é", "aé", "abc", "a.b.c", ".x", ""]
+
+
+@pytest.mark.parametrize("pattern", FNMATCH_PATTERNS)
+def test_match_pattern_reads_a_segment_as_fnmatch_does(pattern):
+    """`[seq]` as fnmatch reads it, `?` one character (D49): pathlib's glob matches a name so."""
+    assert [n for n in FNMATCH_NAMES if match_pattern(pattern, n)] == [n for n in FNMATCH_NAMES if fnmatch.fnmatchcase(n, pattern)]
 
 
 def test_match_pattern():

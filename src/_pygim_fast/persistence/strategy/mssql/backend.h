@@ -5,9 +5,10 @@
 
 #pragma once
 
+#include "../../core/persistence_error.h"
 #include "../../core/backend_policy.h"
 #include "../../../utils/logging.h"
-#include "../../../utils/core_utils.h"
+#include "../../../utils/chars.h"
 #include "dialect.h"
 #include "odbc_error.h"
 #include "bcp/bcp_api.h"   // SQL_COPT_SS_BCP, SQL_BCP_ON
@@ -27,7 +28,7 @@ inline constexpr int kDefaultPacketSize = 16384;
                                                      int packet_size = kDefaultPacketSize)
 {
     // Case-insensitive, whitespace-insensitive search for "packetsize="
-    auto lower = to_lower_copy(std::string(conn_str));
+    auto lower = chars::lower(conn_str);
     std::erase(lower, ' ');
 
     if (lower.contains("packetsize="))
@@ -86,19 +87,19 @@ struct OdbcConnection {
 
         // 1. Allocate environment handle + set ODBC 3.x
         if (SQLAllocHandle(SQL_HANDLE_ENV, SQL_NULL_HANDLE, &m_env) != SQL_SUCCESS)
-            throw std::runtime_error("OdbcConnection: failed to alloc env handle");
+            throw pygim::core::persistence_error("OdbcConnection: failed to alloc env handle");
         if (!SQL_SUCCEEDED(SQLSetEnvAttr(m_env, SQL_ATTR_ODBC_VERSION,
                         reinterpret_cast<SQLPOINTER>(SQL_OV_ODBC3), 0))) {
             SQLFreeHandle(SQL_HANDLE_ENV, m_env);
             m_env = SQL_NULL_HENV;
-            throw std::runtime_error("Failed to set ODBC version");
+            throw pygim::core::persistence_error("Failed to set ODBC version");
         }
 
         // 2. Allocate connection handle
         if (SQLAllocHandle(SQL_HANDLE_DBC, m_env, &m_dbc) != SQL_SUCCESS) {
             SQLFreeHandle(SQL_HANDLE_ENV, m_env);
             m_env = SQL_NULL_HENV;
-            throw std::runtime_error("OdbcConnection: failed to alloc dbc handle");
+            throw pygim::core::persistence_error("OdbcConnection: failed to alloc dbc handle");
         }
 
         // 3. Enable BCP (MUST be set BEFORE SQLDriverConnect)
@@ -110,7 +111,7 @@ struct OdbcConnection {
             SQLFreeHandle(SQL_HANDLE_ENV, m_env);
             m_dbc = SQL_NULL_HDBC;
             m_env = SQL_NULL_HENV;
-            throw std::runtime_error("OdbcConnection: failed to enable BCP");
+            throw pygim::core::persistence_error("OdbcConnection: failed to enable BCP");
         }
 
         // 4. Connect via SQLDriverConnect

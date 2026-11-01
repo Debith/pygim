@@ -1,103 +1,49 @@
 #pragma once
 
+#include <concepts>
+#include <cstddef>
 #include <functional>
 #include <stdexcept>
+#include <string_view>
 #include <utility>
 #include <vector>
 
+#include "../../mapping/bucket_storage.h"
 #include "../../mapping/hash_storage.h"
+#include "../../utils/hooks.h"
 #include "../../mapping/storage.h"
 
 namespace pygim::core {
 
 /*
- * HooksBundle and NoHooks are policy types consumed by RegistryCore.
+ * HooksBundle and NoHooks are the registry's hook policies, built on the one hooks mechanism
+ * (utils/hooks.h) over the registry's three events:
  *
- * - HooksBundle stores user-provided callbacks and executes them on lifecycle events.
- * - NoHooks provides the same API surface but compiles to no-ops — and keeps the
+ * - HooksBundle stores user-provided callbacks and runs them on lifecycle events.
+ * - NoHooks has the same API surface but compiles to no-ops — and keeps the
  *   registry a literal type, so a NoHooks registry over flat_storage can be
  *   built and queried in constant evaluation.
  *
  * Usage example:
  *   using Hooks = HooksBundle<MyKey, MyValue, MyPostPayload>;
  *   Hooks hooks;
- *   hooks.add_on_register([](const MyKey&, const MyValue&) {});
+ *   hooks.add<register_event<MyKey, MyValue>>([](const MyKey&, const MyValue&) {});
  */
-template<class K, class V, class PostArg>
-struct HooksBundle {
-    using OnRegister = std::function<void(const K&, const V&)>;
-    using OnPre = std::function<void(const K&, V&)>;
-    using OnPost = std::function<void(const K&, const PostArg&)>;
-
-    std::vector<OnRegister> on_register;
-    std::vector<OnPre> on_pre;
-    std::vector<OnPost> on_post;
-
-    /**
-     * \brief Execute all register hooks for key/value.
-     * \param[in] key Target key.
-     * \param[in] value Value being inserted/overridden.
-     * \return void.
-     * \note Exists to centralize lifecycle notification behavior.
-     */
-    void run_register(const K& key, const V& value) { for (auto& hook : on_register) hook(key, value); }
-    /**
-     * \brief Execute pre-access hooks before mutable reads.
-     * \param[in] key Lookup key.
-     * \param[in,out] value Value that may be observed/mutated by hook policy.
-     * \return void.
-     * \note Exists to support instrumentation or lazy refresh paths.
-     */
-    void run_pre(const K& key, V& value) { for (auto& hook : on_pre) hook(key, value); }
-    /**
-     * \brief Execute post hooks with user payload.
-     * \param[in] key Target key.
-     * \param[in] payload Post-event payload.
-     * \return void.
-     * \note Exists for out-of-band notifications after core operations.
-     */
-    void run_post(const K& key, const PostArg& payload) { for (auto& hook : on_post) hook(key, payload); }
-
-    /**
-     * \brief Add register-phase callback.
-     * \param[in] hook Callback accepting `(key, value)`.
-     * \return void.
-     */
-    void add_on_register(OnRegister hook) { on_register.push_back(std::move(hook)); }
-    /**
-     * \brief Add pre-access callback.
-     * \param[in] hook Callback accepting `(key, value&)`.
-     * \return void.
-     */
-    void add_on_pre(OnPre hook) { on_pre.push_back(std::move(hook)); }
-    /**
-     * \brief Add post callback.
-     * \param[in] hook Callback accepting `(key, payload)`.
-     * \return void.
-     */
-    void add_on_post(OnPost hook) { on_post.push_back(std::move(hook)); }
-};
+/// An entry is added or overridden: (key, value).
+template<class K, class V>
+struct register_event { using signature = void(const K&, const V&); };
+/// A mutable lookup, before the value is returned: (key, value&).
+template<class K, class V>
+struct pre_access_event { using signature = void(const K&, V&); };
+/// Fired by post(key, payload): (key, payload).
+template<class K, class PostArg>
+struct post_event { using signature = void(const K&, const PostArg&); };
 
 template<class K, class V, class PostArg>
-struct NoHooks {
-    template<class... Args>
-    constexpr void run_register(Args&&...) {}
+using HooksBundle = pygim::hooks<register_event<K, V>, pre_access_event<K, V>, post_event<K, PostArg>>;
 
-    template<class... Args>
-    constexpr void run_pre(Args&&...) {}
-
-    template<class... Args>
-    constexpr void run_post(Args&&...) {}
-
-    template<class F>
-    constexpr void add_on_register(F&&) {}
-
-    template<class F>
-    constexpr void add_on_pre(F&&) {}
-
-    template<class F>
-    constexpr void add_on_post(F&&) {}
-};
+template<class K, class V, class PostArg>
+using NoHooks = pygim::no_hooks<register_event<K, V>, pre_access_event<K, V>, post_event<K, PostArg>>;
 
 /*
  * RegistryCore is a pybind-free storage and policy engine, written against the
@@ -112,6 +58,9 @@ struct NoHooks {
  *   a generated table), then queried by static_assert and at run time alike.
  *   A duplicate registration is a thrown exception, which in constant evaluation
  *   is a build error: the uniqueness of the set is proven, not checked at import.
+ * - Storage = mapping::bucket_storage<...>  (StaticWordRegistry): the same, for
+ *   short ASCII words read on a hot path (a reader's keywords, punctuators, node
+ *   kinds): a word is compared only with those of its first byte and length.
  *
  * What the two phases can NOT share is population: a compile-time registry must
  * receive its complete set in one expression (standard C++ has no cross-file
@@ -162,7 +111,7 @@ public:
      * \note Exists for raw insert behavior when caller controls duplicate policy externally.
      */
     constexpr void register_value(const key_type& key, value_type value) {
-        m_hooks.run_register(key, value);
+        m_hooks.template run<register_event<Key, Value>>(key, value);
         if (m_store.find(key) == nullptr) m_store.insert(key, std::move(value));
     }
 
@@ -174,7 +123,7 @@ public:
      * \note Exists for explicit replace behavior independent of strict override checks.
      */
     constexpr void upsert_value(const key_type& key, value_type value) {
-        m_hooks.run_register(key, value);
+        m_hooks.template run<register_event<Key, Value>>(key, value);
         m_store.insert(key, std::move(value));
     }
 
@@ -194,7 +143,7 @@ public:
             if (!override_existing) {
                 throw std::runtime_error("Duplicate key registration (use override=True)");
             }
-            m_hooks.run_register(key, value);
+            m_hooks.template run<register_event<Key, Value>>(key, value);
             *existing = std::move(value);
             return;
         }
@@ -212,8 +161,18 @@ public:
      * \return `true` when key exists, else `false`.
      * \note Exists to support fast existence checks without lookup side effects.
      */
-    [[nodiscard]] constexpr bool contains(const key_type& key) const {
-        return m_store.find(key) != nullptr;
+    [[nodiscard]] constexpr bool contains(const key_type& key) const { return m_store.contains(key); }   // the engine's: no pointer compared
+
+    /**
+     * \brief The value at `key`, or `fallback` (dict.get), without pre-hook side effects.
+     * \param[in] key Key to find.
+     * \param[in] fallback Returned when `key` is absent.
+     * \return A copy of the value, or `fallback`.
+     * \note Through the engine's own value_or when it has one, so a constexpr table on the
+     *       bucketed engine answers without comparing a pointer (a sanitizer build needs that).
+     */
+    [[nodiscard]] constexpr value_type value_or(const key_type& key, value_type fallback) const {
+        return m_store.value_or(key, std::move(fallback));
     }
 
     /**
@@ -227,7 +186,7 @@ public:
         if (found == nullptr) {
             return nullptr;
         }
-        m_hooks.run_pre(key, *found);
+        m_hooks.template run<pre_access_event<Key, Value>>(key, *found);
         return found;
     }
 
@@ -249,7 +208,7 @@ public:
      * \note Exists so callers can emit post events independently of get/register APIs.
      */
     constexpr void post(const key_type& key, const PostArg& payload) {
-        m_hooks.run_post(key, payload);
+        m_hooks.template run<post_event<Key, PostArg>>(key, payload);
     }
 
     /**
@@ -262,7 +221,8 @@ public:
 
     /**
      * \brief Return snapshot of all keys.
-     * \return Vector containing all current keys (key-sorted when `ordered`).
+     * \return Vector containing all current keys, in the storage's items() order: key-sorted
+     *         (flat_storage), insertion (bucket_storage, until an erase), unspecified (hash_storage).
      * \note Exists for introspection and debug/test tooling.
      */
     [[nodiscard]] constexpr std::vector<key_type> keys() const {
@@ -284,7 +244,7 @@ public:
      * \return void.
      */
     void add_on_register(std::function<void(const key_type&, const value_type&)> hook) {
-        m_hooks.add_on_register(std::move(hook));
+        m_hooks.template add<register_event<Key, Value>>(std::move(hook));
     }
 
     /**
@@ -293,7 +253,7 @@ public:
      * \return void.
      */
     void add_on_pre(std::function<void(const key_type&, value_type&)> hook) {
-        m_hooks.add_on_pre(std::move(hook));
+        m_hooks.template add<pre_access_event<Key, Value>>(std::move(hook));
     }
 
     /**
@@ -302,7 +262,7 @@ public:
      * \return void.
      */
     void add_on_post(std::function<void(const key_type&, const PostArg&)> hook) {
-        m_hooks.add_on_post(std::move(hook));
+        m_hooks.template add<post_event<Key, PostArg>>(std::move(hook));
     }
 
 private:
@@ -321,5 +281,12 @@ using DynamicRegistryCore =
 template<class Key, class Value, class PostArg = Value>
 using StaticRegistryCore =
     RegistryCore<Key, Value, mapping::flat_storage<Key, Value>, NoHooks<Key, Value, PostArg>, PostArg>;
+
+// The compile-time registry of short ASCII words read on a hot path — a reader's keywords and
+// punctuators: the bucketed engine (mapping/bucket_storage.h), a word compared only with those of
+// its first byte and length. At most `Capacity` words.
+template<class Value, std::size_t Capacity>
+using StaticWordRegistry =
+    RegistryCore<std::string_view, Value, mapping::bucket_storage<Value, Capacity>, NoHooks<std::string_view, Value, Value>, Value>;
 
 } // namespace pygim::core

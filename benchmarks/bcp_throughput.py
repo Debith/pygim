@@ -23,18 +23,21 @@ Modes:
 
 from __future__ import annotations
 
-import json
 import math
 import os
 import platform
 import sys
-import time
+import time  # time.sleep between runs; the timing is pygim's QuickTimer
 from datetime import date as py_date
 from datetime import datetime, timezone
 from decimal import Decimal
 
 import click
+import pyarrow as pa
+
 import pygim
+from pygim import datagen
+from pygim.utils import QuickTimer
 
 print(f"PID: {os.getpid()}")
 
@@ -60,7 +63,7 @@ def default_connection_string() -> str:
     )
 
 
-# ── Dataset schemas (for pygim.create_df C++ data generator) ─────────────────
+# ── Dataset schemas (for pygim.datagen, the C++ data generator) ─────────────────
 
 _SCHEMA_SIMPLE = {
     "id": "serial",
@@ -288,9 +291,9 @@ def run_write(
     payload_bytes = estimate_size_bytes(df)
     nrows = len(df)
 
-    t0 = time.perf_counter()
-    metrics = store.save(df, table)
-    elapsed = time.perf_counter() - t0
+    with QuickTimer.silent("write") as writing:
+        metrics = store.save(df, table)
+    elapsed = writing.total.seconds
 
     mb_s = (payload_bytes / 1_048_576) / elapsed if elapsed > 0 else 0.0
 
@@ -322,9 +325,9 @@ def run_load(
         conn_str, format="polars", block_size=block_size, packet_size=packet_size
     )
 
-    t0 = time.perf_counter()
-    df = store.load(table, load_workers=load_workers)
-    elapsed = time.perf_counter() - t0
+    with QuickTimer.silent("load") as loading:
+        df = store.load(table, load_workers=load_workers)
+    elapsed = loading.total.seconds
 
     nrows = len(df)
     try:
@@ -349,8 +352,6 @@ def run_load(
 
 
 def _polars_row_to_pydict(df, idx: int) -> dict:
-    import pyarrow as pa
-
     if isinstance(df, pa.Table):
         return {name: df.column(name)[idx].as_py() for name in df.column_names}
     return {col: df[col][idx] for col in df.columns}
@@ -482,7 +483,6 @@ def verify_round_trip(
     # 2. Column names
     cursor.execute(f"SELECT TOP 0 * FROM {table}")
     db_cols = [d[0] for d in cursor.description]
-    import pyarrow as pa
 
     src_cols = (
         list(source_df.column_names)
@@ -697,15 +697,14 @@ def _system_info() -> dict:
         "machine": platform.machine(),
         "cpu_count": os.cpu_count(),
         "python": platform.python_version(),
-        "node": platform.node(),
-    }
+    }   # never which machine it was: no hostname (Debith, 2026-10-31)
 
 
 def save_baseline(
     results: list[dict],
     rows: int,
     workers: int,
-    path: str,
+    out: pygim.path,
     *,
     batch_size: int = 100_000,
     block_size: int = 4096,
@@ -739,18 +738,16 @@ def save_baseline(
         },
         "results": by_key,
     }
-    with open(path, "w") as f:
-        json.dump(baseline, f, indent=2)
-    click.echo(f"\nBaseline saved to {path} ({len(by_key)} entries)")
+    out.write(baseline)   # pygim's own JSON engine
+    click.echo(f"\nBaseline saved to {out} ({len(by_key)} entries)")
 
 
 def check_regression(
     results: list[dict],
-    baseline_path: str,
+    baseline_in: tuple[pygim.path, dict],
     threshold_pct: float,
 ) -> bool:
-    with open(baseline_path) as f:
-        baseline = json.load(f)
+    baseline_path, baseline = baseline_in   # read when the option was: a bad file stops the run before it starts
 
     base_results = baseline["results"]
     base_sys = baseline.get("system", {})
@@ -760,7 +757,7 @@ def check_regression(
     click.echo("Regression check against baseline")
     click.echo(f"  Baseline: {baseline_path}")
     click.echo(f"  Created:  {base_ts}")
-    click.echo(f"  Machine:  {base_sys.get('node', '?')} ({base_sys.get('os', '?')})")
+    click.echo(f"  Machine:  {base_sys.get('machine', '?')}, {base_sys.get('cpu_count', '?')} CPUs ({base_sys.get('os', '?')})")
     click.echo(f"  Threshold: {threshold_pct:.0f}%")
     click.echo(f"{'=' * 72}")
 
@@ -808,6 +805,32 @@ def check_regression(
 
 
 # ── CLI ──────────────────────────────────────────────────────────────────────
+
+
+def baseline_to_write(ctx, param, value):
+    """--save-baseline as the run writes it: a pygim path, refused now when its folder is missing — at
+    the start, not after every profile has run."""
+    if value is None:
+        return None
+    out = pygim.path(value)
+    if not out.parent.is_dir():
+        raise click.BadParameter(f"{out.parent} is not a folder")
+    return out
+
+
+def baseline_to_check(ctx, param, value):
+    """--check-regression read now, once: (its path, its baseline). One that is missing, not JSON, or
+    holds no results is refused before anything is measured."""
+    if value is None:
+        return None
+    named = pygim.path(value)
+    try:
+        baseline = named.read()   # pygim's own JSON engine
+    except (OSError, ValueError) as e:
+        raise click.BadParameter(f"{named}: {e}")
+    if not isinstance(baseline, dict) or not isinstance(baseline.get("results"), dict):
+        raise click.BadParameter(f"{named} holds no baseline: no results in it")
+    return named, baseline
 
 
 @click.command()
@@ -900,14 +923,16 @@ def check_regression(
 @click.option(
     "--save-baseline",
     "baseline_out",
-    type=click.Path(),
+    type=click.Path(dir_okay=False),
+    callback=baseline_to_write,
     default=None,
     help="Save results as JSON baseline file",
 )
 @click.option(
     "--check-regression",
     "baseline_in",
-    type=click.Path(exists=True),
+    type=click.Path(exists=True, dir_okay=False),
+    callback=baseline_to_check,
     default=None,
     help="Compare against saved baseline; exit 1 on regression",
 )
@@ -971,16 +996,16 @@ def bench(
     # ── Generate data ────────────────────────────────────────────────────
     data: dict[str, object] = {}
     if mode in ("write", "both"):
+        generating = QuickTimer.silent("generate")   # a lap a profile
         for pname in profiles:
             profile = PROFILES[pname]
             click.echo(
                 f"Generating {rows:,} rows for [{pname}] ({profile['columns']} cols) …"
             )
-            t0 = time.perf_counter()
-            df = pygim.create_df(profile["schema"], rows=rows, format="arrow")
-            gen_s = time.perf_counter() - t0
+            with generating.lap(pname) as lap:
+                df = pa.table(datagen.generate(profile["schema"], rows=rows))
             size_mb = estimate_size_bytes(df) / 1_048_576
-            click.echo(f"  → {size_mb:.1f} MB in {gen_s:.2f}s")
+            click.echo(f"  → {size_mb:.1f} MB in {lap.took.seconds:.2f}s")
             data[pname] = df
 
     do_write = mode in ("write", "both")

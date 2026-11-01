@@ -12,11 +12,15 @@
 //
 // Everything here is constexpr and pybind-free, so the RFC behaviour is
 // proven at compile time in tests/static/pathlike_core_proofs.cpp.
+//
+// CORE layer: pybind-free.
 
 #include <cstddef>
 #include <string>
 #include <string_view>
 #include <vector>
+
+#include "../utils/chars.h"
 
 namespace pygim::pathlike {
 
@@ -34,12 +38,8 @@ struct uri {
     constexpr bool operator==(const uri&) const = default;
 
     // ── character classes (§2) ────────────────────────────────────────────
-    [[nodiscard]] static constexpr bool is_alpha(char c) noexcept {
-        return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z');
-    }
-    [[nodiscard]] static constexpr bool is_digit(char c) noexcept { return c >= '0' && c <= '9'; }
     [[nodiscard]] static constexpr bool is_unreserved(char c) noexcept {
-        return is_alpha(c) || is_digit(c) || c == '-' || c == '.' || c == '_' || c == '~';
+        return chars::is_alnum(c) || c == '-' || c == '.' || c == '_' || c == '~';
     }
     [[nodiscard]] static constexpr bool is_sub_delim(char c) noexcept {
         for (char d : std::string_view{"!$&'()*+,;="}) {
@@ -70,19 +70,13 @@ struct uri {
         return out;
     }
 
-    [[nodiscard]] static constexpr int hex_value(char c) noexcept {
-        if (c >= '0' && c <= '9') return c - '0';
-        if (c >= 'a' && c <= 'f') return 10 + (c - 'a');
-        if (c >= 'A' && c <= 'F') return 10 + (c - 'A');
-        return -1;
-    }
 
     // Decodes "%XX" triplets; malformed escapes are kept literally (as urllib does).
     [[nodiscard]] static constexpr std::string percent_decode(std::string_view s) {
         std::string out;
         for (std::size_t i = 0; i < s.size(); ++i) {
             if (s[i] == '%' && i + 2 < s.size()) {
-                const int hi = hex_value(s[i + 1]), lo = hex_value(s[i + 2]);
+                const int hi = chars::hex_value(s[i + 1]), lo = chars::hex_value(s[i + 2]);
                 if (hi >= 0 && lo >= 0) {
                     out += static_cast<char>(hi * 16 + lo);
                     i += 2;
@@ -97,31 +91,13 @@ struct uri {
     // ── scheme (§3.1): ALPHA *( ALPHA / DIGIT / "+" / "-" / "." ) ":" ─────
     // The scheme of `s`, or "" when `s` has none.
     [[nodiscard]] static constexpr std::string_view scheme_of(std::string_view s) noexcept {
-        if (s.empty() || !is_alpha(s.front())) return {};
+        if (s.empty() || !chars::is_alpha(s.front())) return {};
         for (std::size_t i = 1; i < s.size(); ++i) {
             const char c = s[i];
             if (c == ':') return s.substr(0, i);
-            if (!(is_alpha(c) || is_digit(c) || c == '+' || c == '-' || c == '.')) return {};
+            if (!(chars::is_alnum(c) || c == '+' || c == '-' || c == '.')) return {};
         }
         return {};
-    }
-
-    // ASCII case folding — the only case folding a URI (or a path key) needs.
-    [[nodiscard]] static constexpr char to_lower(char c) noexcept {
-        return (c >= 'A' && c <= 'Z') ? static_cast<char>(c - 'A' + 'a') : c;
-    }
-    [[nodiscard]] static constexpr char to_upper(char c) noexcept {
-        return (c >= 'a' && c <= 'z') ? static_cast<char>(c - 'a' + 'A') : c;
-    }
-    [[nodiscard]] static constexpr std::string ascii_lower(std::string_view s) {
-        std::string out(s);
-        for (char& c : out) c = to_lower(c);
-        return out;
-    }
-    [[nodiscard]] static constexpr std::string ascii_upper(std::string_view s) {
-        std::string out(s);
-        for (char& c : out) c = to_upper(c);
-        return out;
     }
 
     // ── decomposition (Appendix B) ────────────────────────────────────────
@@ -233,7 +209,7 @@ struct uri {
     // Scheme and host are case-insensitive (§6.2.2.1); the userinfo and port are not.
     [[nodiscard]] constexpr uri normalized() const {
         uri u = *this;
-        u.scheme = ascii_lower(u.scheme);
+        u.scheme = chars::lower(u.scheme);   // ASCII case folding: the only folding a URI needs
         if (u.has_authority) {
             const std::size_t at = u.authority.find('@');
             const std::size_t host_start = at == std::string::npos ? 0 : at + 1;
@@ -245,7 +221,7 @@ struct uri {
                 const std::size_t colon = u.authority.find(':', host_start);
                 if (colon != std::string::npos) host_end = colon;
             }
-            for (std::size_t i = host_start; i < host_end; ++i) u.authority[i] = to_lower(u.authority[i]);
+            for (std::size_t i = host_start; i < host_end; ++i) u.authority[i] = chars::to_lower(u.authority[i]);
         }
         u.segments = remove_dot_segments(u.segments);
         return u;

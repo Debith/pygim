@@ -1,7 +1,9 @@
+import gc
+
 import pytest
 
 from pygim import Container as TopLevelContainer
-from pygim.ioc import Container
+from pygim.ioc import Container, ServiceDescriptor
 
 
 @pytest.fixture
@@ -200,7 +202,7 @@ def test_invalid_inputs_raise(container):
     with pytest.raises(TypeError):
         container.register(IService, lambda: object(), autowire=True)
 
-    with pytest.raises(RuntimeError):
+    with pytest.raises(ValueError):
         container.register(IService, lambda: object(), lifecycle="scoped")
 
 
@@ -337,7 +339,7 @@ def test_resolve_missing_key_error_names_key(container):
     class IService:
         pass
 
-    with pytest.raises(RuntimeError, match="No provider for key.*IService"):
+    with pytest.raises(KeyError, match="No provider for key.*IService"):
         container.resolve(IService)
 
 
@@ -345,7 +347,7 @@ def test_describe_missing_key_error_names_key(container):
     class IService:
         pass
 
-    with pytest.raises(RuntimeError, match="No provider for key.*IService"):
+    with pytest.raises(KeyError, match="No provider for key.*IService"):
         container.describe(IService)
 
 
@@ -369,7 +371,7 @@ def test_autowire_missing_typed_dependency_raises(container):
 
     container.register(NeedsDatabase, NeedsDatabase, autowire=True)
 
-    with pytest.raises(RuntimeError, match="No provider registered for autowired dependency 'database'"):
+    with pytest.raises(KeyError, match="No provider registered for autowired dependency 'database'"):
         container.resolve(NeedsDatabase)
 
 
@@ -430,31 +432,31 @@ def test_autowire_dependency_registered_later_is_injected(container):
 
 
 def test_autowire_introspection_is_cached(container):
-    import inspect as inspect_module
-    from unittest.mock import patch
+    # Reading the constructor asks the class for its __init__ once, whichever way it is read (its
+    # code object, or inspect for other shapes); constructing an instance never asks (type_call
+    # takes the slot), so a metaclass counting the asks counts the readings.
+    asked = []
+
+    class Counting(type):
+        def __getattribute__(cls, name):
+            if name == "__init__":
+                asked.append(name)
+            return super().__getattribute__(name)
 
     class Dep:
         pass
 
-    class Service:
+    class Service(metaclass=Counting):
         def __init__(self, dep: Dep):
             self.dep = dep
 
     container.register(Dep, Dep)
     container.register(Service, Service, autowire=True)
 
-    real_signature = inspect_module.signature
-    calls = []
+    container.resolve(Service)
+    container.resolve(Service)
 
-    def counting_signature(*args, **kwargs):
-        calls.append(args)
-        return real_signature(*args, **kwargs)
-
-    with patch("inspect.signature", counting_signature):
-        container.resolve(Service)
-        container.resolve(Service)
-
-    assert len(calls) == 1  # reflection ran once; the plan replays from cache
+    assert len(asked) == 1  # reflection ran once; the plan replays from cache
 
 
 def test_registration_decorator_is_reusable():
@@ -488,8 +490,6 @@ def test_registration_decorator_is_reusable():
 
 
 def test_registration_decorator_keeps_container_alive():
-    import gc
-
     class IService:
         pass
 
@@ -551,8 +551,6 @@ def test_capacity_and_repr():
 
 
 def test_service_descriptor_construction_and_lifecycle_property():
-    from pygim.ioc import ServiceDescriptor
-
     class IService:
         pass
 
@@ -568,9 +566,34 @@ def test_service_descriptor_construction_and_lifecycle_property():
     assert descriptor.autowire is False
 
 
-def test_service_descriptor_is_read_only():
-    from pygim.ioc import ServiceDescriptor
+def test_a_descriptor_equals_one_built_from_the_same_parts(container):
+    """A registration is a value: what one is expected to be is built and compared, not read back
+    part by part. Debith on PR #39, of an example reading a query's parts: "This could be q == Query(...)"."""
+    class IService:
+        pass
 
+    class Service(IService):
+        pass
+
+    container.register(IService, Service, name="primary", lifecycle="singleton")
+    described = container.describe((IService, "primary"))
+    assert described == ServiceDescriptor(IService, Service, lifecycle="singleton", name="primary")
+    assert described != ServiceDescriptor(IService, Service, name="primary")            # transient
+    assert described != ServiceDescriptor(IService, Service, lifecycle="singleton")     # no name
+    assert described != ServiceDescriptor(IService, Service, lifecycle="singleton", name="primary", autowire=True)
+    assert described != "IService"
+
+
+def test_a_descriptor_shows_how_it_was_made():
+    class Service:
+        pass
+
+    made = ServiceDescriptor(Service, Service, lifecycle="singleton", name="x")
+    assert repr(made) == f"ServiceDescriptor({Service!r}, {Service!r}, lifecycle='singleton', name='x')"
+    assert repr(ServiceDescriptor(Service, Service)) == f"ServiceDescriptor({Service!r}, {Service!r})"
+
+
+def test_service_descriptor_is_read_only():
     class IService:
         pass
 

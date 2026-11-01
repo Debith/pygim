@@ -65,6 +65,30 @@ WITH_CASES = [
 ]
 
 
+# relative_to: (path, base) pairs; a pair pathlib refuses becomes a not_relative fact. None differs
+# only by letter case: PureWindowsPath compares casefolded, pygim compares as `==` does, exactly.
+RELATIVE_PAIRS = [
+    ("/a/b/c.yaml", "/a"), ("/a/b", "/a/"), ("a/b/c", "a"), ("a/b", "a/b"), ("/a", "/"), ("a/../b", "a"),
+    ("a/b", ""), ("a/b", "."), ("/ab/c", "/a"), ("/a/b", "a"), ("a/b", "/a"), ("a", "a/b"), ("x/y", "a"),
+]
+WINDOWS_RELATIVE_PAIRS = [
+    ("C:\\a\\b", "C:\\a"), ("C:\\a\\b", "C:\\"), ("C:\\a\\b", "D:\\a"), ("C:\\a", "C:\\a"), ("C:\\a\\b", "a"),
+    ("\\\\srv\\share\\x\\y", "\\\\srv\\share"), ("\\\\srv\\share\\x", "\\\\srv\\other"),
+]
+
+
+def relative_facts(kind: str, cls, pairs) -> list[str]:
+    out = []
+    for s, base in pairs:
+        try:
+            want = str(cls(s).relative_to(base))
+        except ValueError:
+            out.append(f"static_assert({kind}::not_relative({cpp_str(s)}, {cpp_str(base)}));")
+        else:
+            out.append(f"static_assert({kind}::relative_to_is({cpp_str(s)}, {cpp_str(base)}, {cpp_str(want)}));")
+    return out
+
+
 def join_facts(kind: str, cls, pairs) -> list[str]:
     out = []
     for base, other in pairs:
@@ -135,6 +159,10 @@ def render() -> str:
         "    static consteval bool with_name_is(std::string_view s, std::string_view n, std::string_view want) { B f(s); B r = f.with_name(n); return r.fspath() == want; }",
         "    static consteval bool with_suffix_is(std::string_view s, std::string_view x, std::string_view want) { B f(s); B r = f.with_suffix(x); return r.fspath() == want; }",
         "    static consteval bool with_stem_is(std::string_view s, std::string_view x, std::string_view want) { B f(s); B r = f.with_stem(x); return r.fspath() == want; }",
+        "    static consteval bool relative_to_is(std::string_view s, std::string_view b, std::string_view want) {",
+        "        B f(s); B base(b); const auto r = f.relative_to(base); return r.has_value() && r->fspath() == want && f.is_relative_to(base);",
+        "    }",
+        "    static consteval bool not_relative(std::string_view s, std::string_view b) { B f(s); B base(b); return !f.relative_to(base) && !f.is_relative_to(base); }",
         "    static consteval bool same(const std::vector<std::string>& got, std::initializer_list<std::string_view> want) {",
         "        if (got.size() != want.size()) return false;",
         "        std::size_t i = 0;",
@@ -155,11 +183,13 @@ def render() -> str:
     ]
     for s in COMMON + POSIX_ONLY:
         lines += [f"// {s!r}", *facts("px", PurePosixPath, s)]
-    lines += ["// joining", *join_facts("px", PurePosixPath, JOIN_PAIRS), "// with_name / with_suffix / with_stem", *with_facts("px", PurePosixPath)]
+    lines += ["// joining", *join_facts("px", PurePosixPath, JOIN_PAIRS), "// with_name / with_suffix / with_stem", *with_facts("px", PurePosixPath),
+              "// relative_to", *relative_facts("px", PurePosixPath, RELATIVE_PAIRS)]
     lines += ["", "// ── PureWindowsPath ────────────────────────────────────────────────────────"]
     for s in COMMON + WINDOWS_ONLY:
         lines += [f"// {s!r}", *facts("wx", PureWindowsPath, s)]
-    lines += ["// joining", *join_facts("wx", PureWindowsPath, JOIN_PAIRS + WINDOWS_JOIN_PAIRS), "// with_name / with_suffix / with_stem", *with_facts("wx", PureWindowsPath)]
+    lines += ["// joining", *join_facts("wx", PureWindowsPath, JOIN_PAIRS + WINDOWS_JOIN_PAIRS), "// with_name / with_suffix / with_stem", *with_facts("wx", PureWindowsPath),
+              "// relative_to", *relative_facts("wx", PureWindowsPath, RELATIVE_PAIRS + WINDOWS_RELATIVE_PAIRS)]
     lines += ["", "[[maybe_unused]] constexpr bool kParityProofsCompiled = true;", "", "}  // namespace", ""]
     return "\n".join(lines)
 

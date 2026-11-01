@@ -1,13 +1,17 @@
 """Shared benchmark helpers: timing that is honest about what is alive, a
-synthetic path corpus, and RSS.
+synthetic path corpus, RSS, and the command line's folders.
 
 Import from a benchmark next to this file (``from _bench import best, corpus``).
 """
 
+import argparse
 import gc
-import os
 import random
-import time
+import sys
+
+from pygim import path
+from pygim.utils import QuickTimer
+from pygim.utils import rss_mb  # the benchmarks import it from here: one syscall, every platform
 
 REPS = 3
 
@@ -19,9 +23,9 @@ def best(fn, reps=REPS):
     for _ in range(reps):
         gc.collect()
         gc.disable()
-        t0 = time.perf_counter()
-        r = fn()
-        t_best = min(t_best, time.perf_counter() - t0)
+        with QuickTimer.silent() as timer:   # pygim's own timer, on the monotonic clock (D83)
+            r = fn()
+        t_best = min(t_best, timer.total.seconds)
         gc.enable()
     return t_best, r
 
@@ -34,9 +38,9 @@ def best_fresh(fn, reps=REPS):
         r = None
         gc.collect()
         gc.disable()
-        t0 = time.perf_counter()
-        r = fn()
-        t_best = min(t_best, time.perf_counter() - t0)
+        with QuickTimer.silent() as timer:
+            r = fn()
+        t_best = min(t_best, timer.total.seconds)
         gc.enable()
     return t_best, r
 
@@ -45,19 +49,27 @@ def ns(seconds, n):
     return seconds / n * 1e9
 
 
-def rss_mb():
-    """The process's resident set size in MiB: pygim.utils.rss_mb (one syscall,
-    every platform), with the procfs read as the fallback for an unbuilt tree."""
+def folder(text):
+    """A folder named on the command line, as the whole run uses it: a pygim path, ``~`` expanded and
+    resolved here, where it is read, and refused here when it is no folder — before anything is
+    measured, and never resolved again below. An argparse ``type=``, or ``argument("--root", folder)``."""
+    named = path(text).expanduser().resolve()
+    if not named.is_dir():
+        raise argparse.ArgumentTypeError(f"{text} is not a folder")
+    return named
+
+
+def argument(name, convert=str):
+    """The value after *name* on the command line, converted at once (``argument("--root", folder)``);
+    None when it is not given. A value *convert* refuses ends the run before anything is measured."""
+    if name not in sys.argv[:-1]:
+        return None
     try:
-        from pygim.utils import rss_mb as _rss
-        return _rss()
-    except ImportError:
-        pass
-    try:
-        with open("/proc/self/statm") as f:
-            return int(f.read().split()[1]) * os.sysconf("SC_PAGE_SIZE") / 2**20
-    except OSError:
-        return float("nan")
+        return convert(sys.argv[sys.argv.index(name) + 1])
+    except argparse.ArgumentTypeError as e:
+        sys.exit(f"{name}: {e}")
+
+
 
 
 def corpus(n, seed=1):

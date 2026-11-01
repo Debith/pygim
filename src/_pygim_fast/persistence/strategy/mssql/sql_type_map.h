@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include "../../core/persistence_error.h"
 #include <arrow/type.h>
 #include <arrow/type_fwd.h>
 
@@ -118,7 +119,7 @@ struct TypeMapping {
         return {arrow::fixed_size_binary(16), SQL_C_GUID, 16};
 
     default:
-        throw std::runtime_error(
+        throw pygim::core::persistence_error(
             "sql_type_map: unsupported SQL type " + std::to_string(sql_type));
     }
 }

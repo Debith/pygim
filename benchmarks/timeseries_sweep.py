@@ -18,7 +18,9 @@ from bcp_throughput import (
     PROFILES,
     estimate_size_bytes,
 )
-import pygim
+import pyarrow as pa
+
+from pygim import datagen
 
 
 def _require(mod):
@@ -51,7 +53,7 @@ def sweep(conn, rows):
 
     # Generate data once
     click.echo(f"Generating {rows:,} timeseries rows …")
-    df = pygim.create_df(profile["schema"], rows=rows, format="arrow")
+    df = pa.table(datagen.generate(profile["schema"], rows=rows))
     click.echo(f"  → {estimate_size_bytes(df) / 1_048_576:.1f} MB")
 
     # ── Write sweep ──────────────────────────────────────────────

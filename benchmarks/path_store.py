@@ -8,15 +8,15 @@ Sections:
    pathlib.PurePath(s).
 2. **derived** — p.parent and p / "x", by row.
 3. **memory** — the table's bytes per path, and RSS per handle.
+4. **compare** — sorted() and set() of N paths (the comparison and hash slots), vs
+   pathlib's, whose caches are warm after the first pass.
 
 Run:  python benchmarks/path_store.py [--no-save]
 Each run appends its raw measurements + environment metadata to
 ``results/path_store.jsonl`` (see ``_results.py``).
 """
 
-import gc
-import os
-import pathlib
+import pathlib  # the reference: pathlib.PurePath's memory and speed against path()
 
 from tabulate import tabulate
 
@@ -80,6 +80,26 @@ def bench_derived(strs):
     return raw
 
 
+def bench_compare(strs):
+    rows, raw = [], {}
+
+    def rec(label, fn):
+        t, _ = best(fn)
+        raw[label] = {"seconds": t}
+        rows.append([label, f"{t * 1e3:,.0f}"])
+
+    st = pathlike.PathStore()
+    objs = [path(s, store=st) for s in strs]
+    pl_objs = [pathlib.PurePath(s) for s in strs]
+    rec("sorted(PurePath list)", lambda: sorted(pl_objs))
+    rec("sorted(path list)", lambda: sorted(objs))
+    rec("set(PurePath list)", lambda: set(pl_objs))
+    rec("set(path list)", lambda: set(objs))
+    print(f"\n## 4. compare, {N:,} paths (ms for the list, best of {REPS})\n")
+    print(tabulate(rows, headers=["operation", "ms"], tablefmt="github"))
+    return raw
+
+
 _MEM_PROBE = """
 import gc, os, sys
 sys.path.insert(0, {bench_dir!r})
@@ -108,7 +128,7 @@ def bench_memory():
     import subprocess
     import sys
 
-    bench_dir = str(pathlib.Path(__file__).resolve().parent)
+    bench_dir = str(pygim.path(__file__).resolve().parent)
 
     def probe(variant):
         out = subprocess.run([sys.executable, "-c", _MEM_PROBE.format(bench_dir=bench_dir, n=N, variant=variant)],
@@ -129,7 +149,8 @@ def bench_memory():
 def main():
     strs = corpus(N)
     print(f"engines {[e.name for e in pathlike.ENGINES]}")
-    sections = {"construct": bench_construct(strs), "derived": bench_derived(strs), "memory": bench_memory()}
+    sections = {"construct": bench_construct(strs), "derived": bench_derived(strs), "memory": bench_memory(),
+                "compare": bench_compare(strs)}
     if wants_save():
         print(f"\nRun recorded -> {save('path_store', sections, reps=REPS)}")
 

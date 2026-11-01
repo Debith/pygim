@@ -15,16 +15,18 @@
 #include <arrow/builder.h>
 #include <arrow/c/bridge.h>
 
-#include <algorithm>
-#include <cctype>
 #include <cstdint>
-#include <cstdio>
 #include <cstring>
+#include <format>
+#include <iterator>
 #include <memory>
 #include <stdexcept>
 #include <string>
 #include <utility>  // std::unreachable (C++23)
 #include <vector>
+
+#include "../utils/chars.h"
+#include "../utils/hash.h"
 
 namespace pygim::datagen {
 
@@ -46,33 +48,50 @@ namespace pygim::datagen {
 
 // ── Fast PRNG (xorshift64*) ────────────────────────────────────────────────
 
+/// A seed as SplitMix64's first step makes it: its golden gamma added, then the finaliser
+/// (hash::mix64), a bijection that spreads one changed bit over all 64, so neighbouring seeds start
+/// far apart.
+[[nodiscard]] constexpr uint64_t mix_seed(uint64_t seed) noexcept { return hash::mix64(seed + 0x9E3779B97F4A7C15ull); }
+static_assert(mix_seed(42) != mix_seed(43) && mix_seed(0) != 0);
+
 struct Xorshift64 {
     uint64_t state;
 
-    explicit Xorshift64(uint64_t seed = 42) noexcept
-        : state(seed | 1)  // guarantee non-zero
+    /// Found 2026-10-31: the state was seed | 1, so every even seed made what the odd one after it
+    /// made. Mixed, every seed is its own stream; the one seed that mixes to 0 (a stuck state)
+    /// starts from the mix of 0.
+    constexpr explicit Xorshift64(uint64_t seed = 42) noexcept
+        : state(mix_seed(seed) != 0 ? mix_seed(seed) : mix_seed(0))
     {}
 
-    uint64_t next() noexcept {
-        state ^= state << 13;
-        state ^= state >> 7;
-        state ^= state << 17;
-        return state;
+    /// xorshift64*: the shifts, then a multiply that makes the high bits the best ones.
+    constexpr uint64_t next() noexcept {
+        state ^= state >> 12;
+        state ^= state << 25;
+        state ^= state >> 27;
+        return state * 0x2545F4914F6CDD1Dull;
     }
 
     /// Uniform value in [lo, hi] (inclusive).
-    int64_t range_i64(int64_t lo, int64_t hi) noexcept {
+    constexpr int64_t range_i64(int64_t lo, int64_t hi) noexcept {
         auto span = static_cast<uint64_t>(hi - lo) + 1;
         return lo + static_cast<int64_t>(next() % span);
     }
 
     /// Uniform double in [0, 1).
-    double unit_double() noexcept {
+    constexpr double unit_double() noexcept {
         return static_cast<double>(next() >> 11) * 0x1.0p-53;
     }
 
-    bool coin(double p) noexcept { return unit_double() < p; }
+    constexpr bool coin(double p) noexcept { return unit_double() < p; }
+    /// One fair bit: the top one, xorshift64*'s best.
+    constexpr bool bit() noexcept { return (next() >> 63) != 0; }
 };
+static_assert([] {
+    Xorshift64 a(42), b(43), again(42);
+    const uint64_t first = a.next();
+    return first != b.next() && first == again.next() && a.unit_double() < 1.0 && a.range_i64(-3, 3) >= -3;
+}());
 
 // ── Column type identification ──────────────────────────────────────────────
 
@@ -89,9 +108,7 @@ enum class ColType {
 /// Parse a user-provided type string into a ColType.
 /// Accepts Arrow names, SQL names, and common aliases (case-insensitive).
 inline ColType parse_type(const std::string& s) {
-    std::string t(s.size(), '\0');
-    std::transform(s.begin(), s.end(), t.begin(),
-                   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    const std::string t = chars::lower(s);   // ASCII case: a locale (Turkish: I to a dotless i) never decides
 
     // ── Integer types ───────────────────────────────────────────────────
     if (t == "int8"   || t == "tinyint")                     return ColType::Int8;
@@ -208,7 +225,7 @@ inline std::shared_ptr<arrow::Array> gen_bool(
         if (null_frac > 0.0 && rng.coin(null_frac))
             DATAGEN_THROW_NOT_OK(b.AppendNull());
         else
-            DATAGEN_THROW_NOT_OK(b.Append(static_cast<bool>(rng.next() & 1)));
+            DATAGEN_THROW_NOT_OK(b.Append(rng.bit()));
     }
     std::shared_ptr<arrow::Array> out;
     DATAGEN_FINISH(b, out);
@@ -240,15 +257,18 @@ inline std::shared_ptr<arrow::Array> gen_string(
     DATAGEN_THROW_NOT_OK(b.Reserve(rows));
     DATAGEN_THROW_NOT_OK(b.ReserveData(rows * avg_len));
 
-    char buf[128];
+    // "<name>_<row, 7 digits>", the name written once. Found 2026-10-31: the text went into 128
+    // bytes and was appended at the length snprintf would have written, so a name of 120
+    // characters or more was read past its buffer.
+    std::string text = col_name + '_';
+    const std::size_t prefix = text.size();
     for (int64_t i = 0; i < rows; ++i) {
         if (null_frac > 0.0 && rng.coin(null_frac)) {
             DATAGEN_THROW_NOT_OK(b.AppendNull());
         } else {
-            int len = std::snprintf(buf, sizeof(buf), "%s_%07lld",
-                                    col_name.c_str(),
-                                    static_cast<long long>(i));
-            DATAGEN_THROW_NOT_OK(b.Append(buf, len));
+            text.resize(prefix);
+            std::format_to(std::back_inserter(text), "{:07}", i);
+            DATAGEN_THROW_NOT_OK(b.Append(text));
         }
     }
     std::shared_ptr<arrow::Array> out;

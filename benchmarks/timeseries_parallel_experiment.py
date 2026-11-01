@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import os
 import sys
-import time
 import click
 
 sys.path.insert(0, os.path.dirname(__file__))
@@ -20,7 +19,10 @@ from bcp_throughput import (
     estimate_size_bytes,
     default_connection_string,
 )
-import pygim
+import pyarrow as pa
+
+from pygim import datagen
+from pygim.utils import QuickTimer
 
 
 # ── Table DDLs ───────────────────────────────────────────────────────────────
@@ -81,7 +83,7 @@ def _run_write_with_hint(
     """Write using specific table_hint."""
     from pygim.persistence import acquire_datastore
 
-    _ = acquire_datastore(
+    store = acquire_datastore(
         conn_str,
         format="polars",
         batch_size=batch_size,
@@ -92,8 +94,11 @@ def _run_write_with_hint(
     payload_bytes = estimate_size_bytes(df)
     nrows = len(df)
 
-    t0 = time.perf_counter()
-    elapsed = time.perf_counter() - t0
+    # Found 2026-10-31: the store was made and never written to, so this timed an empty interval
+    # and every result it reported measured nothing.
+    with QuickTimer.silent("save") as saving:
+        store.save(df, table)
+    elapsed = saving.total.seconds
 
     mb_s = (payload_bytes / 1_048_576) / elapsed if elapsed > 0 else 0.0
     return {
@@ -156,8 +161,8 @@ def experiment(conn, rows, iters):
     schema_no_id = {"ts": "timestamp", "data": "float64"}
     schema_with_id = {"id": "serial", "ts": "timestamp", "data": "float64"}
     click.echo(f"Generating {rows:,} timeseries rows (2 variants) …")
-    df = pygim.create_df(schema_no_id, rows=rows, format="arrow")
-    df_with_id = pygim.create_df(schema_with_id, rows=rows, format="arrow")
+    df = pa.table(datagen.generate(schema_no_id, rows=rows))
+    df_with_id = pa.table(datagen.generate(schema_with_id, rows=rows))
     click.echo(f"  → no-id: {estimate_size_bytes(df) / 1_048_576:.1f} MB")
     click.echo(f"  → with-id: {estimate_size_bytes(df_with_id) / 1_048_576:.1f} MB\n")
 

@@ -24,13 +24,13 @@ This example demonstrates:
 import os
 import shutil
 import tempfile
-from pathlib import Path
+from pathlib import Path   # a set takes a str, a pathlib path and a pygim path alike (section 1)
 
 import pygim
 from pygim.pathlike import PathSet, ext, match_pattern, name
 
 # A scratch directory with a few real files keeps the example self-contained.
-workdir = Path(tempfile.mkdtemp(prefix="pygim_pathset_example_"))
+workdir = pygim.path(tempfile.mkdtemp(prefix="pygim_pathset_example_"))
 (workdir / "readme.txt").write_text("hello")
 (workdir / "notes.txt").write_text("world")
 (workdir / "logo.png").write_text("<binary>")
@@ -43,9 +43,9 @@ try:
     # Iteration yields path objects over the set's table (name, suffix, parent,
     # ==, hash all read by row; typed by extension like any path).
     files = PathSet([
-        workdir / "readme.txt",
+        Path(workdir / "readme.txt"),
         str(workdir / "notes.txt"),
-        pygim.path(workdir / "logo.png"),
+        workdir / "logo.png",
     ])
 
     assert len(files) == 3
@@ -53,13 +53,14 @@ try:
     assert all(isinstance(os.fspath(v), str) and v.name for v in files)
 
     # It is a *set*: duplicates collapse, and equal members mean equal sets.
-    assert PathSet([workdir / "readme.txt", workdir / "readme.txt"]) == PathSet(workdir / "readme.txt")
+    readme = workdir / "readme.txt"
+    assert PathSet([readme, readme]) == PathSet(readme)
     assert not PathSet([])  # an empty set is falsy
 
     # Membership accepts strings, Path objects, files and views.
     assert str(workdir / "readme.txt") in files
-    assert (workdir / "logo.png") in files
-    assert pygim.path(workdir / "notes.txt") in files
+    assert Path(workdir / "logo.png") in files
+    assert workdir / "notes.txt" in files
 
     # ------------------------------------------------------------------------
     # 2. Subtracting and cloning
@@ -67,7 +68,8 @@ try:
     # A set is a value. `files -= x` computes a new set and rebinds the name,
     # so anything else holding the old set keeps seeing the old members.
     snapshot = files.clone()          # a distinct object, the same members
-    assert snapshot == files and snapshot is not files
+    assert snapshot == files
+    assert snapshot is not files
 
     files -= str(workdir / "logo.png")  # remove one path by string
     assert len(files) == 2
@@ -78,7 +80,8 @@ try:
     assert len(files) == 1
 
     # And + is the union, taking a PathSet or path(s).
-    assert len(files + snapshot) == 3 and len(files + [workdir / "logo.png"]) == 2
+    assert len(files + snapshot) == 3
+    assert len(files + [workdir / "logo.png"]) == 2
 
     # ------------------------------------------------------------------------
     # 3. Filters and lazy queries
@@ -87,8 +90,9 @@ try:
     # combine them. `ps & f` is a Query — nothing runs until eval(), len()
     # or iteration.
     txt = snapshot & ext(".txt")                 # a Query
-    assert len(txt) == 2 and all(v.suffix == ".txt" for v in txt)
-    assert (snapshot & ~ext(".txt")).eval().to_list() == [str(workdir / "logo.png")]
+    assert len(txt) == 2
+    assert all(v.suffix == ".txt" for v in txt)
+    assert [os.fspath(p) for p in (snapshot & ~ext(".txt")).eval()] == [str(workdir / "logo.png")]
     assert len(snapshot & (ext(".txt") | ext(".png"))) == 3
     assert len(snapshot & name("read*")) == 1
     assert snapshot.filter(ext(".png")) == PathSet(workdir / "logo.png")

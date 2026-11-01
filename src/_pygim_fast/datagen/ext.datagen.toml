@@ -1,4 +1,4 @@
 [extension]
-module = "datagen"
+module = "_datagen"
 sources = ["bindings.cpp"]
 deps = ["arrow"]

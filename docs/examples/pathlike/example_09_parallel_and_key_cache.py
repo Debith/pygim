@@ -17,12 +17,11 @@ This example demonstrates:
 import json
 import tempfile
 from concurrent.futures import ThreadPoolExecutor
-from pathlib import Path
 
 import pygim
 
 tmp = tempfile.TemporaryDirectory()
-root = Path(tmp.name)
+root = pygim.path(tmp.name)
 
 # ----------------------------------------------------------------------------
 # 1. Parallel reads: I/O + parsing overlap across threads
@@ -31,7 +30,7 @@ files = []
 for i in range(16):
     fp = root / f"bulk_{i:02d}.json"
     fp.write_text(json.dumps({"i": i, "rows": [{"n": j} for j in range(50)]}))
-    files.append(pygim.path(fp))
+    files.append(fp)
 
 with ThreadPoolExecutor(max_workers=8) as ex:
     results = list(ex.map(lambda f: f.read(), files))
@@ -43,11 +42,11 @@ assert all(results[i]["i"] == i for i in range(16))
 records = root / "records.json"
 records.write_text(json.dumps([{"id": i, "name": "x"} for i in range(100)]))
 
-#                                        ┌─ key_cache: max distinct interned
-#                                        │  keys (0 = off, -1 = unbounded)
-#                                        ▼
-interned = pygim.path(records).read(key_cache=-1)
-plain = pygim.path(records).read(key_cache=0)
+#                       ┌─ key_cache: max distinct interned
+#                       │  keys (0 = off, -1 = unbounded)
+#                       ▼
+interned = records.read(key_cache=-1)
+plain = records.read(key_cache=0)
 assert interned == plain
 
 # ----------------------------------------------------------------------------

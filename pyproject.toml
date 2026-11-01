@@ -6,6 +6,7 @@ backend-path = []
 [project]
 name = "pygim"
 dynamic = ["version", "dependencies"]
+requires-python = ">=3.10"
 description = "Full Python Gimmicks project with all of its sub-projects."
 readme = "README.rst"
 classifiers = [
@@ -13,7 +14,6 @@ classifiers = [
   "Intended Audience :: Developers",
   "Programming Language :: Python",
   "Programming Language :: Python :: 3",
-  "Programming Language :: Python :: 3.9",
   "Programming Language :: Python :: 3.10",
   "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12",
@@ -43,6 +43,8 @@ dev = [
   'pybind11',
   'pyodbc',
   'ruff',
+  'markdown',
+  'docutils',
 ]
 
 test = [
@@ -56,6 +58,16 @@ test = [
   # as a merge gate (test_differential_oracles_installed_in_ci enforces it).
   'pyyaml',
   'tomli; python_version < "3.11"',
+  # `oo docs serve` renders Markdown pages; the docs-serve tests assert the rendering.
+  'markdown',
+  # README.rst is PyPI's project page; the readme test renders it as strictly as
+  # the release's twine check --strict, so a pull request fails before a release does.
+  'docutils',
+]
+
+# `oo docs serve`: Markdown pages rendered on the fly (Mermaid fences become diagrams).
+docs = [
+  'markdown',
 ]
 
 pandas = [

@@ -28,23 +28,47 @@ line says so in its description and why.
 ## What proves it
 
 - **Every invariant is a compile-time proof.** A law stated in a comment is a
-  `static_assert` in `tests/static/*_proofs.cpp`, wired into an extension's
-  sources so a build that breaks it does not link. Laws are proven over more
+  `static_assert` in `tests/static/*_proofs.cpp`. The proof files are wired
+  into an extension's sources, so they compile whenever the extension does —
+  a change that breaks a law fails that compile, and the extension does not
+  link. Laws are proven over more
   than one instantiation (both engines, several widths).
 - **The Python surface has unit tests** in `tests/unittests/`, including the
   edge corpus, cross-platform cases (a Windows path needs a drive to be
   absolute), and parity against the reference the feature mirrors (pathlib,
   the previous module's behaviour) where one exists.
+- **A test names its own world.** Nothing a test reads may come from the machine it runs on —
+  not the user's configuration, a shared directory, a running service, the clock or the working
+  directory. If a test does read the machine, its passing depends on the machine's state, and a
+  green run says only that this machine happens to be in the right state — not that the code is
+  right. Where a real dependency *is* the thing under test (a real server over real pipes, a
+  real database), it runs against test data it created: a temporary directory, a throwaway
+  database, a local container. A test pointed at live data does not merely fail; it writes into
+  someone's work.
 - **A performance claim is a measurement.** Every number in a changelog,
   docstring or design note comes from a benchmark under `benchmarks/`,
   recorded through `_results.py` against the commit. An optimisation is
-  justified by a same-process A/B (old and new compiled side by side), never
-  by comparing runs on a machine whose load drifts.
+  justified by an A/B in one process: the old and the new code are compiled
+  side by side and measured in the same run, so whatever the machine is doing
+  weighs on both alike. It is never justified by comparing separate runs,
+  because the machine's load drifts between them, and the difference measured
+  may be the drift, not the code.
+- **The whole suite runs in half a second** (Debith, 2026-10-02: one second "for entire pytest test
+  suite"; 2026-10-30: "there is no reason tests take longer than 500ms ... whole suite, actually").
+  It does not yet: 21.6 s on 2026-10-30, of which pytest's own floor is about 2 s — 1,283 processes
+  the tests start took 5.2 s and sleeps 0.84 s. A test waits on nothing it does not need — a sleep,
+  a poll interval, a thread spinning until the GIL is taken from it, a second process where one
+  call does — and parallel workers are no answer. Meanwhile no single test may take what the whole
+  suite is allowed: `tests/conftest.py` fails one over half a second, its fixtures with it, naming
+  its time. Only a test that waits on a service outside the project is marked `outside_service`.
+  `PYGIM_TEST_TIME_SCALE` stretches that limit and 0 turns it off: a sanitizer's run, and CI until a
+  run there has measured its runners.
 - **A test that reads the repository skips without it.** CI removes `src/` and
   tests the installed package; a source-tree check (layering, stubs) must
   `skip` when the tree is absent rather than fail. A memory or timing
-  measurement runs on a fresh heap (a subprocess), never against a heap that
-  remembers what an earlier test freed.
+  measurement runs on a fresh heap, which means in a subprocess: the test
+  process's own heap still holds what earlier tests allocated and freed, and
+  a measurement taken on it measures that history too.
 - **CI is green on the full matrix** (3 OS x every supported Python) before
   the work is called done; after a push, the run is watched, not assumed.
   Compiler flags are per-extension `flags_if_supported`; there is no
@@ -70,6 +94,52 @@ line says so in its description and why.
 - **The changelog bullet describes what ships**, not the path to it, and says
   BREAKING when it is.
 
+## How it is wired
+
+Configuration is read in one place — the composition root — and passed down as a value. For the
+commands that is `cli_oo`, which calls `_pygim._config.from_process`, and nothing below it looks at
+the environment, the working directory or the platform. `_pygim._config.read` is the only function
+that inspects environment variables at all.
+
+Three rules follow, and the first is a test rather than a convention (`test_layering.py`):
+
+- **Nothing reads configuration except the wiring.** A component that reads the environment cannot
+  be built in a test without arranging the machine around it, and a test that has to arrange the
+  machine is no longer exercising the code that ships.
+- **A constructor sets values.** No logic, no loops, no IO. Anything that must be read is read by
+  a builder, which hands the object plain values.
+- **Tests wire with the same function production uses.** What differs is the `Environment` passed
+  in. The `Environment` is configuration, and configuration is exactly what is meant to differ
+  between a test and production.
+
+Environment variables are legitimate at a process boundary: a reloading server cannot pass an
+argument to its own successor, so what the next process must know travels in the environment.
+And the boundary is the wiring, never one layer in.
+
+## What it leaves behind
+
+An operation is not done when it returns the right answer; it is done when what it wrote is right
+and what it did not write is absent. For anything that refuses, a test says so explicitly: after the
+refused call, everything it could have written is byte-identical to what it was before it.
+Check it through the application, wired as its interfaces wire it: each step builds a fresh
+application through the composition root and calls the operation directly, so what was written is
+opened anew at every step, as a process would open it. That matters because of where defects hide: a
+test that holds one handle open across its steps never sees what opening it does, and that is where
+the defects that survive such tests have lived. What only a process can show — exit codes, stdin,
+framing over pipes — is an integration test's.
+
+## What it looks like
+
+- **Output is read at a glance.** Anything a person reads — a command's output, a served page —
+  gets a visible title, indentation that means something, and a blank line where the subject
+  changes. Colour marks the few things worth acting on and is never the only signal: every
+  coloured thing carries a word as well, because roughly one man in twelve cannot tell red from
+  green (WCAG 2.2, Use of Color).
+- **Colour is conditional output.** Off when the stream is not a terminal, when `NO_COLOR` is set
+  to any value, when `TERM=dumb`, or when `--no-color` is passed — checked for stdout and stderr
+  separately. The result goes to stdout, logs and errors to stderr, so a pipe carries the answer
+  and the person still sees the rest (clig.dev, Output).
+
 ## What it says when it fails
 
 - **Every error names its subject.** A parse error carries the file and the
@@ -84,7 +154,9 @@ line says so in its description and why.
 
 - **A store, a set, a table reports its exact bytes** under the same `bytes`
   key in `stats()`; process-wide memory (`pygim.utils.rss_bytes`) is a
-  benchmark probe, never a per-object size.
+  benchmark probe, never a per-object size: it measures the whole process, so
+  its number includes everything else the process holds and cannot be read as
+  the size of one object.
 - **Lifetime and threading are stated** in the header: what is append-only,
   who is the single writer, what holds the GIL, what a handle keeps alive.
 - **Commits explain why**, carry the co-author trailer, and never bundle

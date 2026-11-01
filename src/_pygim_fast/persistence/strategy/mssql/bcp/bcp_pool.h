@@ -4,6 +4,7 @@
 // Connections are established in parallel to minimize setup latency.
 // Not thread-safe for pool management — designed for create-once, use-parallel.
 
+#include "../../../core/persistence_error.h"
 #include "bcp_api.h"
 #include "../odbc_error.h"
 
@@ -92,20 +93,20 @@ private:
     {
         // 1. Allocate environment handle
         if (SQLAllocHandle(SQL_HANDLE_ENV, SQL_NULL_HANDLE, &c.env) != SQL_SUCCESS)
-            throw std::runtime_error(
+            throw pygim::core::persistence_error(
                 "BcpConnectionPool: failed to alloc env handle #" + std::to_string(index));
         if (!SQL_SUCCEEDED(SQLSetEnvAttr(c.env, SQL_ATTR_ODBC_VERSION,
                         reinterpret_cast<SQLPOINTER>(SQL_OV_ODBC3), 0))) {
             SQLFreeHandle(SQL_HANDLE_ENV, c.env);
             c.env = SQL_NULL_HENV;
-            throw std::runtime_error("Failed to set ODBC version");
+            throw pygim::core::persistence_error("Failed to set ODBC version");
         }
 
         // 2. Allocate connection handle
         if (SQLAllocHandle(SQL_HANDLE_DBC, c.env, &c.dbc) != SQL_SUCCESS) {
             SQLFreeHandle(SQL_HANDLE_ENV, c.env);
             c.env = SQL_NULL_HENV;
-            throw std::runtime_error(
+            throw pygim::core::persistence_error(
                 "BcpConnectionPool: failed to alloc dbc handle #" + std::to_string(index));
         }
 
@@ -115,7 +116,7 @@ private:
             reinterpret_cast<SQLPOINTER>(SQL_BCP_ON), SQL_IS_UINTEGER);
         if (!SQL_SUCCEEDED(attr_ret)) {
             cleanup_connection(c);
-            throw std::runtime_error(
+            throw pygim::core::persistence_error(
                 "BcpConnectionPool: failed to enable BCP on connection #"
                 + std::to_string(index));
         }

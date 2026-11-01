@@ -15,6 +15,8 @@ import sys
 
 import pytest
 
+from pygim.pathlike import ext, path
+
 SETUP_PY = pathlib.Path(__file__).resolve().parents[2] / "setup.py"
 
 
@@ -29,7 +31,7 @@ def _extract(*names):
     ]
     assert len(wanted) == len(names), f"setup.py no longer defines all of {names}"
     ns = {"os": os, "sys": sys}
-    exec(compile(ast.Module(body=wanted, type_ignores=[]), str(SETUP_PY), "exec"), ns)
+    exec(compile(ast.Module(body=wanted, type_ignores=[]), SETUP_PY, "exec"), ns)
     return ns
 
 
@@ -158,11 +160,9 @@ def test_no_availability_conditional_compilation():
     opt-in flags with environment-independent defaults remain allowed —
     see docs/design/cpp_runtime_linking.md.
     """
-    fast = SETUP_PY.parent / "src" / "_pygim_fast"
+    fast = path(SETUP_PY.parent / "src" / "_pygim_fast")
     offenders = []
-    for f in list(fast.rglob("*.h")) + list(fast.rglob("*.cpp")):
-        if "third_party" in f.parts:
-            continue  # vendored code is exempt
+    for f in fast.pathset("**/*", kind="file", skip=["third_party"]).filter(ext(".h", ".cpp")):   # vendored code is exempt
         text = f.read_text(encoding="utf-8", errors="ignore")
         for banned in ("__has_include", "#ifdef VERSION_INFO"):
             if banned in text:
@@ -247,7 +247,7 @@ def test_header_dependencies_follow_quoted_includes_across_directories(tmp_path)
     (shared / "core.h").write_text('#include <string>\n#include "storage.h"\n')
     (shared / "storage.h").write_text("#pragma once\n")
     (gen / "generated.h").write_text('#include "local.h"\n')                                 # resolvable via a search dir only
-    deps = ns["_header_dependencies"]([str(ext / "bindings.cpp")], [ext, gen])
+    deps = ns["_header_dependencies"]([ext / "bindings.cpp"], [ext, gen])
     assert deps == sorted(str(p.resolve()) for p in [ext / "local.h", shared / "core.h", shared / "storage.h", gen / "generated.h"])
 
 

@@ -1,5 +1,7 @@
 # -*- coding: utf-8 -*-
-""" """
+"""Error messages pygim's exceptions share."""
+
+import pathlib
 
 __all__ = ("type_error_msg", "file_error_msg")
 
@@ -45,4 +47,19 @@ def type_error_msg(obj_or_type, expected_type):
 
 
 def file_error_msg(filename, msg="not found"):
-    return f"Expected filename `{str(filename.resolve().absolute())}` {msg}!"
+    """
+    Returns a formatted error message naming a file by its absolute, resolved path.
+
+    Parameters
+    ----------
+    filename : str or os.PathLike
+        The file the message is about.
+    msg : str
+        What is wrong with it (default: "not found").
+
+    Examples
+    --------
+    >>> file_error_msg(pathlib.Path("/tmp/x.txt"))  # doctest: +SKIP
+    'Expected filename `/tmp/x.txt` not found!'
+    """
+    return f"Expected filename `{pathlib.Path(filename).resolve()}` {msg}!"

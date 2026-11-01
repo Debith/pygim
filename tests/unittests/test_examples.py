@@ -1,0 +1,121 @@
+# -*- coding: utf-8 -*-
+"""docs/examples: every example runs and ends with its OK line, and every argument callout stands
+over its argument (docs/examples/README.md's conventions, #149). No CI step ran the examples, so
+their asserts never ran there; a callout a column off pointed at the wrong argument."""
+
+import os
+import re
+import runpy
+import sys
+
+import pytest
+
+from pygim import code, pathlike
+
+ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "docs", "examples")
+EXAMPLES = sorted(pathlike.path(os.path.normpath(ROOT)).pathset("*/example_*.py"))   # in order: stable test ids
+IDS = [f"{p.parent.name}/{p.stem}" for p in EXAMPLES]
+
+
+@pytest.mark.parametrize("example", EXAMPLES, ids=IDS)
+def test_the_example_runs_to_its_ok_line(example, capsys):
+    try:
+        runpy.run_path(example, run_name="__main__")
+    except ModuleNotFoundError as e:
+        if e.name in sys.modules and sys.modules[e.name] is None:   # halted on purpose (run_tests_under_sanitizers.py)
+            pytest.skip(f"{e.name} cannot load in this run")
+        raise
+    said = capsys.readouterr().out.strip().splitlines()
+    assert said and " OK" in said[-1], said[-3:]
+
+
+def argument_starts(code):
+    """Where each argument of a call in `code` starts: after "(" or ", "."""
+    return [k for k in range(1, len(code)) if code[k] not in " )" and (code[k - 1] == "(" or code[k - 2:k] == ", ")]
+
+
+def misplaced_callouts(path):
+    """Each `┌─ NAME:` callout (or `└─ NAME:` below its code) whose column, carried down by │ to
+    its ▼ (up to its ▲), is not where its argument starts: `NAME=`, NAME itself, or the positional
+    argument nearest. A callout of other words than `NAME:` points at what it says, unchecked."""
+    lines = path.read_text(encoding="utf-8").split("\n")
+    found = []
+    for i, line in enumerate(lines):
+        for m in re.finditer(r"([┌└])─ (\w+):", line):
+            col, name = m.start(), m.group(2)
+            step, marker = (1, "▼") if m.group(1) == "┌" else (-1, "▲")
+            j = i + step
+            while 0 <= j < len(lines) and lines[j][col:col + 1] == "│":
+                j += step
+            if not (0 <= j < len(lines)) or lines[j][col:col + 1] != marker:
+                found.append(f"{path.name}:{i + 1}: {name}'s line does not reach a {marker} at column {col}")
+                continue
+            code_at = j + step
+            while 0 <= code_at < len(lines) and lines[code_at].lstrip().startswith("#"):
+                code_at += step
+            code = lines[code_at] if 0 <= code_at < len(lines) else ""
+            keyword = re.search(rf"\b{re.escape(name)}=", code)
+            if keyword or code.startswith(name, col):
+                want = keyword.start() if keyword else col
+            else:
+                starts = argument_starts(code)
+                want = min(starts, key=lambda k: abs(k - col)) if starts else None
+            if want != col:
+                found.append(f"{path.name}:{i + 1}: {name} at column {col}, its argument at {want}: {code.strip()}")
+    return found
+
+
+@pytest.mark.parametrize("example", EXAMPLES, ids=IDS)
+def test_each_argument_callout_stands_over_its_argument(example):
+    assert misplaced_callouts(example) == []
+
+
+@pytest.mark.parametrize("example", EXAMPLES, ids=IDS)
+def test_each_line_is_under_a_hundred_characters(example):
+    """An example is read before it is run (#149): 32 lines in 9 examples ran to 126 characters."""
+    lines = example.read_text(encoding="utf-8").split("\n")
+    assert [f"{n}: {len(line)}" for n, line in enumerate(lines, 1) if len(line) > 99] == []
+
+
+@pytest.mark.parametrize("example", EXAMPLES, ids=IDS)
+def test_each_assert_states_one_fact(example):
+    """Debith on PR #37: "These asserts makes this file hard to read" — `assert a and b` is two facts
+    a reader must take apart, and a failure names neither (#149). Found by pygim's own parser."""
+    tree = code.parse_source(example.read_text(encoding="utf-8"), example)
+    compound = [node.lineno for node in tree.find("Assert")
+                if node.field("test").kind == "BoolOp" and node.field("test").field("op") == "And"]
+    assert compound == []
+
+
+def unused_imports(source, where):
+    """The names `source` imports and never reads: an import binds its alias, or its name's first part."""
+    tree = code.parse_source(source, where)
+    read = {node.field("id") for node in tree.find("Name")}
+    bound = [alias.field("asname") or alias.field("name").split(".")[0]
+             for node in [*tree.find("Import"), *tree.find("ImportFrom")] for alias in node.field("names")]
+    return [name for name in bound if name not in read]
+
+
+@pytest.mark.parametrize("example", EXAMPLES, ids=IDS)
+def test_each_import_is_used(example):
+    """An import is a question its reader asks — "Is this needed..?" (Debith on PR #39) — so an example
+    imports only what it uses. Found 2026-11-01 by sweeping for it: utils/example_01 imported gc and
+    never used it."""
+    assert unused_imports(example.read_text(encoding="utf-8"), example) == []
+
+
+@pytest.mark.parametrize("example", EXAMPLES, ids=IDS)
+def test_pathlib_is_imported_only_with_its_purpose(example):
+    """One file or folder is a pygim path and many a PathSet (README): pathlib is there only where
+    an example compares with it, and its import says so. Debith on PR #39: "again asking if we need
+    this, if so, add a comment of the purpose"."""
+    lines = example.read_text(encoding="utf-8").split("\n")
+    assert [f"{n}: {line}" for n, line in enumerate(lines, 1)
+            if re.match(r"(import pathlib|from pathlib import)\b", line) and "#" not in line] == []
+
+
+def test_every_example_has_a_row_in_the_index():
+    """docs/examples/README.md lists every example (pathlike's example_10 had no row until 2026-10-30)."""
+    index = (pathlike.path(ROOT) / "README.md").read_text(encoding="utf-8")
+    assert [f"{p.parent.name}/{p.name}" for p in EXAMPLES if f"({p.parent.name}/{p.name})" not in index] == []
+

@@ -18,7 +18,6 @@ This example demonstrates:
 
 import gc
 import tempfile
-from pathlib import Path
 
 import pygim
 from pygim.pathlike import PathSet, PathStore, default_store, yamlpath
@@ -34,7 +33,8 @@ assert isinstance(p, yamlpath)                  # typed by extension, as always
 #              ▼
 mine = PathStore()
 q = pygim.path("etc/app/config.yaml", store=mine)
-assert q.store == mine and q.store != p.store
+assert q.store == mine
+assert q.store != p.store
 
 # ----------------------------------------------------------------------------
 # 2. Derived paths inherit the table of the path they came from
@@ -49,7 +49,9 @@ assert mine.stats()["rows"] == rows_before + 0
 # ----------------------------------------------------------------------------
 # 3. Equal by value across stores; identity is not promised
 # ----------------------------------------------------------------------------
-assert p == q and hash(p) == hash(q)             # the same path, two tables
+# the same path, two tables
+assert p == q
+assert hash(p) == hash(q)
 assert pygim.path("etc//app/./config.yaml") == p # spellings collapse to one row
 assert len({p, q, pygim.path("etc/app/config.yaml")}) == 1
 # two handles on one row are equal — whether they are the same object is
@@ -60,7 +62,8 @@ assert len({p, q, pygim.path("etc/app/config.yaml")}) == 1
 # ----------------------------------------------------------------------------
 ps = PathSet(["etc/app/config.yaml", "etc/app/secrets.toml", "var/log"], store=mine)
 assert q in ps                                   # a bit test: same table, same row
-assert ps[0] == q and ps[0].store == mine
+assert ps[0] == q
+assert ps[0].store == mine
 assert ps.stats()["rows"] == mine.stats()["rows"]
 
 # ----------------------------------------------------------------------------
@@ -71,14 +74,18 @@ assert ps.stats()["rows"] == mine.stats()["rows"]
 # store and drops it — the default table never sees the traffic.
 with tempfile.TemporaryDirectory() as tmp:
     for name in ("a.yaml", "b.yaml"):
-        (Path(tmp) / name).write_text("k: 1")
+        (pygim.path(tmp) / name).write_text("k: 1")
+    rows_before = default_store().stats()["rows"]
     job = PathStore()
     root = pygim.path(tmp, store=job)
     hits = root.glob("*.yaml")                   # rows of `job`, typed, pin inherited
-    assert all(h.store == job for h in hits) and len(hits) == 2
-    assert default_store().stats()["rows"] == default_store().stats()["rows"]  # untouched by the walk
+    assert all(h.store == job for h in hits)
+    assert len(hits) == 2
+    # the default table is untouched by the walk
+    assert default_store().stats()["rows"] == rows_before
     stats = job.stats()
-    assert set(stats) == {"rows", "segments", "bytes"} and stats["bytes"] > 0
+    assert set(stats) == {"rows", "segments", "bytes"}
+    assert stats["bytes"] > 0
     del job, root, hits                          # the last handles go: the table with them
     gc.collect()
 

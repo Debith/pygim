@@ -17,7 +17,7 @@ This example demonstrates:
 - Introspection: ``len``, ``in``, ``registered_keys``, ``describe``, ``repr``
 """
 
-from pygim.ioc import Container
+from pygim.ioc import Container, ServiceDescriptor
 
 # A container can reserve space upfront to avoid rehashing while you
 # register services in bulk.
@@ -52,16 +52,17 @@ class CachedRepository(Repository):
 # ----------------------------------------------------------------------------
 # A transient service is constructed anew on every resolve.
 #
-#                   ┌─ interface: what call sites ask for; also the lookup key
-#                   │           ┌─ provider: how to build it (a class or any
-#                   │           │  zero-arg callable returning an instance)
-#                   ▼           ▼
+#                  ┌─ interface: what call sites ask for; also the lookup key
+#                  │           ┌─ provider: how to build it (a class or any
+#                  │           │  zero-arg callable returning an instance)
+#                  ▼           ▼
 container.register(Repository, MemoryRepository)
 
 first = container.resolve(Repository)
 second = container[Repository]  # container[key] is shorthand for resolve()
 
-assert isinstance(first, Repository) and isinstance(second, Repository)
+assert isinstance(first, Repository)
+assert isinstance(second, Repository)
 assert first is not second, "transient => a fresh instance per resolve"
 
 # ----------------------------------------------------------------------------
@@ -76,10 +77,10 @@ container.register(Repository, CachedRepository,
 #                  └─ name: optional label to distinguish variants of the same
 #                     interface; it becomes part of the lookup key
 
-#                              ┌─ interface: the contract, as before
-#                              │           ┌─ name: the variant to fetch;
-#                              │           │  (interface, name) is the full key
-#                              ▼           ▼
+#                             ┌─ interface: the contract, as before
+#                             │           ┌─ name: the variant to fetch;
+#                             │           │  (interface, name) is the full key
+#                             ▼           ▼
 cached_a = container.resolve((Repository, "cached"))
 cached_b = container.resolve((Repository, "cached"))
 
@@ -155,10 +156,11 @@ keys = [tuple(key) for key in container.registered_keys()]
 assert (Repository, "cached") in keys
 assert (Repository, None) in keys
 
-# describe(key) exposes the stored ServiceDescriptor without resolving.
+# describe(key) exposes the stored ServiceDescriptor without resolving: a value, so the
+# registration a test expects is built and compared.
 descriptor = container.describe((Repository, "cached"))
-assert descriptor.provider is CachedRepository
-assert descriptor.lifecycle == "singleton"
-assert descriptor.name == "cached"
+expected = ServiceDescriptor(Repository, CachedRepository, lifecycle="singleton", name="cached")
+assert descriptor == expected
+assert descriptor.lifecycle == "singleton"     # and each part reads back
 
 print("IoC basic container example OK:", container)

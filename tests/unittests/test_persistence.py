@@ -4,19 +4,12 @@ import uuid
 
 import pytest
 
-# The persistence extensions are mandatory parts of the library: if they are
+# The persistence extension is a mandatory part of the library: if it is
 # missing, this module must fail to import rather than silently skip.
-# (tests/conftest.py preloads Arrow so the raw extension resolves libarrow.)
-from pygim import _persistence_test
+# (tests/conftest.py preloads Arrow so the extension resolves libarrow.)
+# Everything here goes through the public module, the way a user reaches it.
 from pygim import persistence as _persistence_module
-
-LocalDataStore = _persistence_test.DataStore
-Query = _persistence_test.Query
-MssqlDialect = _persistence_test.MssqlDialect
-LocalFormat = _persistence_test.Format
-
-acquire_datastore = _persistence_module.acquire_datastore
-Format = _persistence_module.Format
+from pygim.persistence import Format, MssqlDialect, Query, acquire_datastore
 
 
 # ─── Fixtures ────────────────────────────────────────────────────────────────
@@ -29,7 +22,7 @@ def fmt(request):
 
 @pytest.fixture
 def repo(fmt):
-    return LocalDataStore("test_conn", format=fmt, pool_size=2)
+    return acquire_datastore("test_conn", format=fmt, pool_size=2)
 
 
 @pytest.fixture
@@ -107,11 +100,6 @@ def test_load_with_query_fails_without_odbc(repo):
         repo.load(q, load_workers=1)
 
 
-def test_invalid_format():
-    with pytest.raises(ValueError, match="Unknown format"):
-        LocalDataStore("conn", format="arrow", pool_size=1)
-
-
 # ─── Adapter: Transforms ────────────────────────────────────────────────────
 
 
@@ -167,7 +155,7 @@ def test_multiple_transforms(repo):
 
 @pytest.mark.parametrize("pool_size", [1, 8])
 def test_pool_size(pool_size):
-    r = LocalDataStore("conn", format="polars", pool_size=pool_size)
+    r = acquire_datastore("conn", format="polars", pool_size=pool_size)
     assert REPR_RE.match(repr(r))
 
 
@@ -176,24 +164,24 @@ def test_pool_size(pool_size):
 
 @pytest.mark.parametrize("batch_size", [1, 50_000, 500_000])
 def test_batch_size_accepted(batch_size):
-    r = LocalDataStore("conn", format="polars", batch_size=batch_size)
+    r = acquire_datastore("conn", format="polars", batch_size=batch_size)
     assert REPR_RE.match(repr(r))
 
 
 @pytest.mark.parametrize("table_hint", ["TABLOCK", "NOLOCK", ""])
 def test_table_hint_accepted(table_hint):
-    r = LocalDataStore("conn", format="polars", table_hint=table_hint)
+    r = acquire_datastore("conn", format="polars", table_hint=table_hint)
     assert REPR_RE.match(repr(r))
 
 
 @pytest.mark.parametrize("bcp_workers", [1, 4, 8])
 def test_bcp_workers_accepted(bcp_workers):
-    r = LocalDataStore("conn", format="polars", bcp_workers=bcp_workers)
+    r = acquire_datastore("conn", format="polars", bcp_workers=bcp_workers)
     assert REPR_RE.match(repr(r))
 
 
 def test_all_new_params_combined():
-    r = LocalDataStore(
+    r = acquire_datastore(
         "conn",
         format="polars",
         pool_size=2,
@@ -247,6 +235,35 @@ def test_query_multiple_selects():
     assert q.columns == ["a", "b"]
 
 
+def test_a_query_built_from_its_parts_equals_the_one_the_builder_made():
+    """A query is a value: what a test expects is built and compared, not read back field by field.
+    Debith on PR #39, of the example's five asserts on q's parts: "This could be q == Query(...)"."""
+    built = Query().select("id").select("name").from_table("dbo.users").where("active = 1").limit(10)
+    assert built == Query(columns=["id", "name"], table="dbo.users", where="active = 1", limit=10)
+
+
+def test_queries_differ_by_any_part():
+    q = Query(columns=["id"], table="t", where="x > 1", limit=5)
+    assert q != Query(columns=["id"], table="t", where="x > 1")
+    assert q != Query(columns=["id", "name"], table="t", where="x > 1", limit=5)
+    assert Query("SELECT 1") == Query(raw_sql="SELECT 1")
+    assert Query("SELECT 1") != Query()
+    assert Query() != "SELECT 1"
+
+
+def test_raw_sql_is_never_given_with_parts():
+    """Raw SQL is the whole query: every dialect passes it through, so a part beside it would be
+    ignored without a word."""
+    with pytest.raises(ValueError, match="raw SQL or its parts, not both"):
+        Query("SELECT 1", table="t")
+
+
+def test_a_query_shows_its_parts():
+    assert repr(Query(columns=["id"], table="t", limit=5)) == "Query(columns=['id'], table='t', limit=5)"
+    assert repr(Query("SELECT 1")) == "Query('SELECT 1')"
+    assert repr(Query()) == "Query()"
+
+
 # ─── Dialect ─────────────────────────────────────────────────────────────────
 
 
@@ -265,13 +282,6 @@ def test_dialect_render_with_columns(dialect):
     assert dialect.render(q) == "SELECT [col1], [col2] FROM [t]"
 
 
-def test_dialect_render_raw_sql(dialect):
-    # Raw query is rendered structurally (not passed through) in current impl
-    q = Query("SELECT * FROM foo")
-    result = dialect.render(q)
-    assert isinstance(result, str)
-
-
 def test_dialect_quote_identifier(dialect):
     assert dialect.quote_identifier("name") == "[name]"
 
@@ -282,6 +292,30 @@ def test_dialect_quote_identifier_escaping(dialect):
 
 def test_dialect_quote_identifier_space(dialect):
     assert dialect.quote_identifier("my col") == "[my col]"
+
+
+# ─── Public Query and dialect: plain values, no session, no database ────────
+
+
+def test_query_and_dialect_are_public():
+    assert {"Query", "MssqlDialect"} <= set(_persistence_module.__all__)
+
+
+def test_a_query_renders_without_a_session_or_a_database():
+    q = Query().select("id").from_table("dbo.users").where("id > 5").limit(10)
+    assert MssqlDialect().render(q) == "SELECT TOP 10 [id] FROM [dbo].[users] WHERE id > 5"
+
+
+def test_raw_sql_renders_unchanged():
+    """A raw query is SQL already: render passes it through, as load does (core::build_sql).
+    Rendering the dialect directly gave 'SELECT * FROM []'."""
+    assert MssqlDialect().render(Query("SELECT 1")) == "SELECT 1"
+
+
+def test_a_public_query_reaches_the_store():
+    store = acquire_datastore("conn", format="polars", pool_size=1)
+    with pytest.raises(RuntimeError, match="SQLDriverConnect"):
+        store.load(Query().from_table("users"), load_workers=1)
 
 
 # ─── Integration: Production API ─────────────────────────────────────────────
@@ -303,11 +337,12 @@ def test_acquire_datastore_invalid_format():
         acquire_datastore("conn", format="arrow")
 
 
+@pytest.mark.outside_service   # a live SQL Server: its first login after idling took 1.1 s
 def test_acquire_datastore_live_round_trip():
     pyodbc = pytest.importorskip("pyodbc")
+    conn_str = _integration_conn_str(pyodbc)   # first: no server is a skip, whatever else is missing
     import polars as pl  # hard dependency of pygim: must be present wherever pygim imports
 
-    conn_str = _integration_conn_str(pyodbc)
     table_name = f"pygim_persist_{uuid.uuid4().hex[:8]}"
     qualified_table = f"dbo.{table_name}"
     df = pl.DataFrame(
@@ -369,14 +404,6 @@ def test_format_values():
     assert Format.polars != Format.pandas
 
 
-def test_format_from_both_modules():
-    # Enums are defined in separate C++ modules; compare by name/value
-    assert Format.polars.name == LocalFormat.polars.name
-    assert Format.pandas.name == LocalFormat.pandas.name
-    assert Format.polars.value == LocalFormat.polars.value
-    assert Format.pandas.value == LocalFormat.pandas.value
-
-
 # ─── Protocol Conformance ────────────────────────────────────────────────────
 
 
@@ -384,7 +411,7 @@ def test_datastore_satisfies_repository_protocol():
     """DataStore structurally satisfies the Repository protocol from interfaces.py."""
     from pygim.core.protocols import Repository as RepositoryProtocol
 
-    store = LocalDataStore("test_conn", format="polars", pool_size=1)
+    store = acquire_datastore("test_conn", format="polars", pool_size=1)
     assert isinstance(store, RepositoryProtocol), (
         "DataStore must satisfy the Repository protocol (load + save)"
     )
@@ -397,11 +424,14 @@ def test_public_module_reexports():
     """Verify pygim.persistence re-exports match the compiled extension."""
     from pygim.persistence import DataStore as PubDataStore
     from pygim.persistence import Format as PubFormat
+    from pygim.persistence import MssqlDialect as PubMssqlDialect
+    from pygim.persistence import Query as PubQuery
     from pygim.persistence import acquire_datastore as pub_acquire
 
     # Must be the exact same objects as the direct extension imports
     assert PubDataStore is _persistence_module.DataStore
     assert pub_acquire is _persistence_module.acquire_datastore
+    assert PubQuery is Query and PubMssqlDialect is MssqlDialect
 
     # Enum values should match across modules
     assert PubFormat.polars.name == Format.polars.name

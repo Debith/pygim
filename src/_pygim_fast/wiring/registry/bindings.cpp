@@ -1,11 +1,13 @@
 #include <pybind11/functional.h>
 #include <pybind11/pybind11.h>
 
+#include "../common/adapter_errors.h"
 #include "adapter.h"
 
 namespace py = pybind11;
 
 PYBIND11_MODULE(registry, m) {
+    pygim::wiring::detail::register_wiring_errors();   // a missing key is KeyError
     py::enum_<pygim::KeyPolicyKind>(m, "KeyPolicyKind")
         .value("qualname", pygim::KeyPolicyKind::Qualname)
         .value("identity", pygim::KeyPolicyKind::Identity)

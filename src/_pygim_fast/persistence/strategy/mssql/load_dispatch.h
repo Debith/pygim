@@ -4,6 +4,7 @@
 
 #pragma once
 
+#include "../../core/persistence_error.h"
 #include "fetch_buffer.h"
 #include "../../core/arrow_builder.h"
 
@@ -181,7 +182,7 @@ build_column_dispatch(const std::shared_ptr<arrow::Schema>& schema,
 
         BlockAppendFn fn = (idx < append_dispatch.size()) ? append_dispatch[idx] : nullptr;
         if (!fn) [[unlikely]] {
-            throw std::runtime_error(
+            throw pygim::core::persistence_error(
                 "load_dispatch: unsupported Arrow type "
                 + std::to_string(static_cast<int>(type_id))
                 + " for column " + schema->field(i)->name());

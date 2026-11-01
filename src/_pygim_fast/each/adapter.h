@@ -1,120 +1,96 @@
-// each_proxy.hpp – C++ implementation of Python‑side helpers `Proxy` and `each`
-// ---------------------------------------------------------------------------
-// This header **contains the full implementation** so that a standalone
-// translation unit (bindings.cpp) only has to expose the classes to Python
-// with pybind11.  Keeping implementation in the header avoids a separate
-// library build step and lets the compiler inline everything when possible.
-//
-// Design notes
-// ------------
-// • `Proxy` mirrors the behaviour of the original `_proxy` Python class:
-//   it stores a Python iterable, fans out attribute access or method calls
-//   to every element, and returns a `py::list` of results.  The *last*
-//   method name accessed is cached until the subsequent `__call__`.
-// • `Each` plays the same dual role as the original `each` helper:
-//   – When constructed with an `iterable` it acts as a *factory* returning
-//     a `Proxy` on first attribute access.
-//   – When declared as a **descriptor** on an *iterable* Python class
-//     (via `each = each()` in the class body) it keeps a **per‑instance**
-//     proxy in a `weakref.WeakKeyDictionary`, guaranteeing:
-//         · one proxy per live instance,
-//         · no memory leaks (entry vanishes when the instance dies),
-//         · never calling the wrong object even if CPython re‑uses an
-//           `id()` value.
-//
-// The implementation relies only on the public pybind11 C++ API and core
-// Python types, so it is ABI‑stable across CPython versions.
-// ---------------------------------------------------------------------------
 #pragma once
+// each/adapter.h — `each`: an attribute read or a method call broadcast over the elements of an
+// iterable, as a factory (`each(items).name`) or as a descriptor (`each = each()` in the body of
+// an iterable class: `group.each.name`).
+//
+//     each([a, b]).value          -> [a.value, b.value]
+//     each([a, b]).scale(2)       -> [a.scale(2), b.scale(2)]
+//     group.each is group.each    -> True: one proxy per live instance
+//
+// A Proxy fans one name out: if the first element's attribute is callable it waits for the call
+// (`__call__` then calls it on every element), otherwise it returns the list of values. A
+// descriptor keeps one proxy per live instance in a table of its own, keyed by the instance: a
+// weakref's callback evicts the entry as the instance dies, and the proxy holds the instance
+// weakly too, so caching it never keeps the instance alive (#246). A generator is refused: the
+// broadcast walks the elements twice.
+//
+// ADAPTER layer (pybind11).
 
+#include <memory>
 #include <optional>
 #include <string>
-#include <memory>
+#include <unordered_map>
+#include <utility>
 #include <vector>
 
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
+
 #include "../utils/adapter_utils.h"
 
 namespace py = pybind11;
-
-// Forward declaration so `Each` can return it.
-class Proxy;
 
 // ---------------------------------------------------------------------------
 //                               Proxy helper
 // ---------------------------------------------------------------------------
 class Proxy : public std::enable_shared_from_this<Proxy> {
 public:
-    //! Construct a proxy bound to a given Python iterable.
-    explicit Proxy(const py::object &iterable)
-        : m_iterable(iterable), m_funcName(std::nullopt) {}
+    /// A proxy over `iterable`, held: each(iterable)'s.
+    [[nodiscard]] static std::shared_ptr<Proxy> holding(py::object iterable) {
+        return std::shared_ptr<Proxy>(new Proxy(std::move(iterable), py::none()));
+    }
+    /// A proxy over the object `weak` refers to, held weakly: a descriptor's, cached by its instance.
+    [[nodiscard]] static std::shared_ptr<Proxy> watching(py::object weak) {
+        return std::shared_ptr<Proxy>(new Proxy(py::none(), std::move(weak)));
+    }
 
-    // ---------------------------------------------------------------------
-    // Python special methods exposed via pybind11
-    // ---------------------------------------------------------------------
-
-    /** __getattr__(name) – broadcast attribute lookup or prepare method call
-     *
-     * Behaviour mirrors the original Python version:
-     *   • If *any* element lacks the attribute, an AttributeError is thrown
-     *     immediately (simpler than collecting error objects).
-     *   • If the attribute on the *first* element is **callable**, we assume
-     *     method broadcast semantics (matching the original helper) – we
-     *     cache `name` in `m_funcName` and return *self* so Python will next
-     *     invoke `__call__`.
-     *   • Otherwise we build a `py::list` with the attribute from every
-     *     element and return it.
-     */
-    py::object getattr(const std::string &name) {
+    /// __getattr__(name): every element's attribute `name`, as a list; or, when the first
+    /// element's is callable, this proxy, ready for the call that broadcasts it. An element
+    /// without the attribute is an AttributeError.
+    py::object getattr(const std::string& name) {
+        const py::object items = iterable();
+        const py::str key(name);
         std::vector<py::object> collected;
-
-        for (const py::handle &item : m_iterable) {
-            if (!py::hasattr(item, name.c_str())) {
-                std::ostringstream msg;
-                msg << '\'' << py::str(py::type::of(item)).cast<std::string>()
-                    << "' object has no attribute '" << name << '\'';
-                throw py::attribute_error(msg.str());
-            }
-
-            py::object attr = item.attr(name.c_str());
-            if (py::isinstance<py::function>(attr) ||
-                py::isinstance<py::cpp_function>(attr) ||
-                PyCallable_Check(attr.ptr())) {
-
-                m_funcName = name;                         // enter "method" mode
+        for (const py::handle& item : items) {
+            py::object attr = optional_attribute(item, key);   // asked once
+            if (!attr) attr = py::getattr(item, key);           // it has none: Python's own AttributeError, in its words
+            if (PyCallable_Check(attr.ptr())) {
+                m_method = name;   // method mode: __call__ comes next
                 return py::cast(shared_from_this());
             }
-            collected.emplace_back(std::move(attr));      // data attribute
+            collected.emplace_back(std::move(attr));
         }
-
         return collected.empty() ? py::none() : py::cast(collected);
     }
 
-    /** __call__(*args, **kwargs) – broadcast previously cached method */
-    py::list call(py::args args, py::kwargs kwargs) {
-        if (!m_funcName) {
-            throw py::type_error("Proxy object is not in callable mode (missing attribute access)");
-        }
-
+    /// __call__(*args, **kwargs): the method named last called on every element, in order.
+    py::list call(const py::args& args, const py::kwargs& kwargs) {
+        if (!m_method) throw py::type_error("Proxy object is not in callable mode (missing attribute access)");
+        const std::string method = std::exchange(m_method, std::nullopt).value();   // once: no accidental reuse
         py::list results;
-        for (const py::handle &item : m_iterable) {
-            py::object method = item.attr(m_funcName.value().c_str());
-            results.append(method(*args, **kwargs));
-        }
-
-        // Clear cached function name to avoid accidental reuse.
-        m_funcName.reset();
+        for (const py::handle& item : iterable()) results.append(item.attr(method.c_str())(*args, **kwargs));
         return results;
     }
 
-    std::string representation() const {
-        return "<Each-proxy bound to " + py::repr(m_iterable).cast<std::string>() + ">";
+    [[nodiscard]] std::string representation() const {
+        const py::object items = m_weak.is_none() ? m_iterable : m_weak();
+        return "<Each-proxy bound to " + py::repr(items).cast<std::string>() + ">";
     }
 
 private:
-    py::object m_iterable;                     //!< Bound Python iterable
-    std::optional<std::string> m_funcName;    //!< Last looked‑up callable attr
+    Proxy(py::object iterable, py::object weak) : m_iterable(std::move(iterable)), m_weak(std::move(weak)) {}
+
+    // What it broadcasts over: the iterable held, or the one watched while it lives.
+    [[nodiscard]] py::object iterable() const {
+        if (m_weak.is_none()) return m_iterable;
+        py::object items = m_weak();
+        if (items.is_none()) throw py::value_error("the instance this each-proxy was bound to is gone");
+        return items;
+    }
+
+    py::object m_iterable;                 // each(iterable)'s, held; None for a descriptor's
+    py::object m_weak;                     // a descriptor's instance, by a plain weakref; None otherwise
+    std::optional<std::string> m_method;   // the callable attribute read last, until it is called
 };
 
 // ---------------------------------------------------------------------------
@@ -122,107 +98,69 @@ private:
 // ---------------------------------------------------------------------------
 class Each {
 public:
-    /**
-     * Factory‑mode constructor (iterable provided) **or** descriptor‑mode
-     * default constructor (iterable = None).
-     */
-    explicit Each(const py::object &iterable = py::none())
-        : m_iterable(iterable), m_weakDict(py::module_::import("weakref")
-                                              .attr("WeakKeyDictionary")()) {}
+    /// Factory mode (`each(iterable)`), or a descriptor (`each()`: iterable None).
+    explicit Each(const py::object& iterable = py::none()) : m_iterable(iterable) {}
 
     // --------------------------- factory mode --------------------------- //
 
-    // ---------- Each::getattr (factory mode path only) ------------------------
-    py::object getattr(const std::string &name) {
-        if (m_iterable.is_none()) {
-            throw std::runtime_error(
-                "Direct use: call each(iterable).attr");
-        }
-        if (is_dunder(name))
-            throw py::attribute_error("Cannot access dunder attributes with `each`");
-
-        // Allocate the proxy on the heap so its lifetime is managed by Python.
-        auto proxy_sp = std::make_shared<Proxy>(m_iterable);
-        return proxy_sp->getattr(name);    // returns the proxy or list
+    py::object getattr(const std::string& name) {
+        if (m_iterable.is_none()) throw std::runtime_error("Direct use: call each(iterable).attr");
+        if (pygim::is_dunder(name)) throw py::attribute_error("Cannot access dunder attributes with `each`");
+        return Proxy::holding(m_iterable)->getattr(name);
     }
 
     // --------------------------- descriptor hooks ----------------------- //
-    void set_name(const py::object &owner, const std::string &name) {
-        // The owner's *instances* must be iterable, i.e. the class defines
-        // __iter__. The class object itself is iterable only when its
-        // metaclass is, so isinstance<py::iterable>(owner) would reject
-        // every ordinary class.
-        if (!py::hasattr(owner, "__iter__")) {
-            throw py::type_error("`each` can only be placed on iterable classes");
-        }
+
+    /// __set_name__: the owner's instances must be iterable, i.e. the class defines __iter__ (the
+    /// class object itself is iterable only when its metaclass is).
+    void set_name(const py::object& owner, const std::string& name) {
+        if (!has_attribute(owner, interned<"__iter__">())) throw py::type_error("`each` can only be placed on iterable classes");
         m_name = name;
     }
 
-    /**
-     * __get__(instance, owner) – provide per‑instance proxy with caching.
-     *
-     * *One* proxy per live instance is cached in `m_weakDict`.  As soon as
-     * an instance is garbage‑collected, the key evaporates and the proxy
-     * becomes unreachable, so we never keep dead objects alive or risk
-     * returning a proxy bound to the wrong object after `id()` reuse.
-     */
-    py::object get(const py::object &instance, const py::object & /*owner*/) {
-        if (instance.is_none()) {
-            return py::cast(this);  // accessed via class, return descriptor
-        }
-        if (!py::isinstance<py::iterable>(instance)) {
-            throw py::type_error("`each` can only be used on iterable instances");
-        }
-        if (is_generator(instance)) {
-            // NOTE: We deliberately reject **generator objects** here.
-            //
-            // Generators are *single-pass* iterators: once you consume a value,
-            // it is gone forever and the generator's internal state has advanced.
-            // The proxy logic needs to traverse the collection multiple times:
-            //
-            //   • first pass – probe each element to see whether `name` exists and
-            //     whether it is callable;
-            //   • second pass – (if it is callable) invoke that attribute on every
-            //     element, or (if it is data) gather the attribute values.
-            //
-            // With a generator the second pass would see **zero** elements,
-            // yielding wrong or empty results.  Fixing that would require forcing
-            // full materialisation (e.g. `list(gen)` or a tee/peekable wrapper),
-            // which defeats the whole point of using a lazy generator in the first
-            // place and risks large, unbounded memory use.
-            //
-            // Rather than surprise the caller with silent consumption or
-            // inconsistent behaviour, we raise an explicit error and document that
-            // the helper expects a *re-iterable* container such as a list, tuple,
-            // set, or any custom class that can be traversed repeatedly.
-            throw py::type_error("`each` cannot be used on generator instances");
-        }
+    /// __get__(instance, owner): the descriptor through the class; else the instance's one proxy,
+    /// made at its first read and kept while the instance lives.
+    py::object get(const py::object& instance, const py::object& /*owner*/) {
+        if (instance.is_none()) return py::cast(this);
+        if (!py::isinstance<py::iterable>(instance)) throw py::type_error("`each` can only be used on iterable instances");
+        // A generator is walked once: the broadcast walks twice (to probe, then to call or gather).
+        if (is_generator(instance)) throw py::type_error("`each` cannot be used on generator instances");
 
-        // m_weakDict.get(instance) or None
-        py::object maybe_proxy = m_weakDict.attr("get")(instance, py::none());
-        if (!maybe_proxy.is_none()) {
-            return maybe_proxy;
-        }
-
-        // -----------------------------  why we create & cache  ----------------------------
-        // We allocate *one* Proxy per live instance and store it in the
-        // WeakKeyDictionary to guarantee:
-        //  • Identity semantics: `inst.each is inst.each`.
-        //  • Automatic cleanup: entry removed when `instance` dies.
-        //  • Safety: if CPython reuses an address, the old entry is already
-        //    gone, so we create a fresh Proxy bound to the new object.
-        // ----------------------------------------------------------------------------------
-        auto proxy_sp = std::make_shared<Proxy>(instance);
-        py::object proxy_obj = py::cast(proxy_sp);
-        m_weakDict.attr("__setitem__")(instance, proxy_obj);
-        return proxy_obj;
+        PyObject* key = instance.ptr();
+        if (const auto known = m_proxies.find(key); known != m_proxies.end()) return known->second.proxy();
+        // The table's weakref evicts the entry as the instance dies, before its address can be
+        // reused; only the table holds it, so its callback never outlives this descriptor. The
+        // proxy watches the instance through a plain weakref of its own.
+        const py::cpp_function evict([this, key](const py::handle&) { m_proxies.erase(key); });
+        const py::object evicting = steal(PyWeakref_NewRef(key, evict.ptr()));   // TypeError for an instance with no weakref slot
+        const py::object plain = steal(PyWeakref_NewRef(key, nullptr));
+        py::object proxy = py::cast(Proxy::watching(plain));
+        m_proxies.emplace(key, cached(evicting, proxy));
+        return proxy;
     }
 
-    std::string representation() const {
+    [[nodiscard]] std::string representation() const {
         return "<Each bound to " + py::repr(m_iterable).cast<std::string>() + ">";
     }
+
 private:
-    py::object m_iterable;     //!< Iterable for factory mode; None in descriptor mode
-    py::object m_weakDict;    //!< Python weakref.WeakKeyDictionary
-    std::string m_name;        //!< Name of the attribute on the owner class (debug)
+    // An instance's proxy, and the weakref whose callback evicts it.
+    class cached {
+    public:
+        cached(py::object evicting, py::object proxy) noexcept : m_evicting(std::move(evicting)), m_proxy(std::move(proxy)) {}
+        [[nodiscard]] const py::object& proxy() const noexcept { return m_proxy; }
+
+    private:
+        py::object m_evicting;   // kept for its callback
+        py::object m_proxy;
+    };
+
+    [[nodiscard]] static py::object steal(PyObject* made) {
+        if (made == nullptr) throw py::error_already_set();
+        return py::reinterpret_steal<py::object>(made);
+    }
+
+    py::object m_iterable;                              // factory mode's; None for a descriptor
+    std::unordered_map<PyObject*, cached> m_proxies;    // a descriptor's: each live instance's proxy
+    std::string m_name;                                 // the owner's attribute it is (for messages)
 };

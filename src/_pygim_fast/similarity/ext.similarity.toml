@@ -1,0 +1,24 @@
+[extension]
+module = "_similarity"
+# Results are Arrow tables built in C++ (adapter/tables.h).
+deps = ["arrow"]
+# add_files() reads through pathlike's batch_read.h, whose path class is written against C++26.
+std = "c++26"
+# tests/static/similarity_proofs.cpp holds the compile-time proofs of the
+# core and the C++ frontend: wired into the sources so every build proves them.
+sources = [
+  "adapter/bindings.cpp",
+  "../../../tests/static/similarity_proofs.cpp",
+]
+
+# The language registry is OPEN: every header in adapter/languages/ is one
+# language. The build globs the directory into
+# build/gen/similarity/similarity_languages.gen.h
+# (`using Languages = language_list<languages::cpp, languages::python>`), which
+# bindings.cpp consumes. Adding a language = adding a header here.
+[extension.typelist]
+glob = "adapter/languages/*.h"
+header = "similarity_languages.gen.h"
+namespace = "pygim::similarity::languages"
+template = "pygim::similarity::language_list"
+alias = "pygim::similarity::Languages"

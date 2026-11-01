@@ -14,8 +14,6 @@ This example demonstrates:
 - Why a second measurement in the same process may not move
 """
 
-import gc
-
 from pygim import utils
 
 # ----------------------------------------------------------------------------
@@ -23,7 +21,8 @@ from pygim import utils
 # ----------------------------------------------------------------------------
 now = utils.rss_bytes()                      # what the OS holds for us right now
 peak = utils.peak_rss_bytes()                # the high-water mark so far
-assert now > 0 and peak >= now
+assert now > 0
+assert peak >= now
 assert abs(utils.rss_mb() - now / 2**20) < 1.0
 
 # ----------------------------------------------------------------------------
@@ -55,5 +54,6 @@ assert peak_after >= after
 # that remembers everything freed before; benchmarks/path_store.py measures
 # every variant in its own subprocess for exactly this reason.
 
-print(f"process memory example OK: {utils.rss_mb():.1f} MiB now, {utils.peak_rss_mb():.1f} MiB peak; "
+print(f"process memory example OK: {utils.rss_mb():.1f} MiB now, "
+      f"{utils.peak_rss_mb():.1f} MiB peak; "
       f"a fresh 64 MiB block cost {(after - before) / 2**20:.0f} MiB")

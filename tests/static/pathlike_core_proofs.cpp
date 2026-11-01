@@ -21,12 +21,13 @@
 
 #include <array>
 #include <initializer_list>
+#include <optional>
+#include <string>
 #include <string_view>
 
 namespace {
 
 using namespace pygim::pathlike;
-using pygim::pathlike::detail::glob_match;
 
 // ── Synthetic descriptors (metadata only: the registry never needs load/write) ──
 struct alpha {
@@ -185,7 +186,7 @@ static_assert(!engine_list<label_is_name>::no_duplicate_selectors());
 
 // ── The case-fold chain, generated from the table ──────────────────────────
 static_assert(Good::case_folding_is_exact());
-static_assert(Good::for_ext(uri::ascii_lower(".AA")) == &alpha::info && Good::for_ext(".AA") == nullptr &&
+static_assert(Good::for_ext(pygim::chars::lower(".AA")) == &alpha::info && Good::for_ext(".AA") == nullptr &&
               Good::for_ext("aa") == nullptr && Good::for_ext(".aa ") == nullptr &&
               Good::from_name("ALPHA") == nullptr && Good::from_name(".alpha") == nullptr);
 
@@ -325,8 +326,8 @@ static_assert(px_equal("a/b/", "a//b") && px_equal("./a/b", "a/b") && !px_equal(
 static_assert(px_parents("a/b/c") == 2 && px_parents("/a/b") == 2 && px_parents("a") == 0 && px_parents("/") == 0);
 
 // ── core.h helpers ─────────────────────────────────────────────────────────
-static_assert(uri::ascii_lower(".YAML") == ".yaml" && uri::ascii_upper(".yaml") == ".YAML" && uri::ascii_lower("") == "");
-static_assert(sv_list{}.empty() && !alpha::info.exts.empty() && alpha::info.exts.size() == 2 &&
+static_assert(pygim::chars::lower(".YAML") == ".yaml" && pygim::chars::upper(".yaml") == ".YAML" && pygim::chars::lower("") == "");
+static_assert(pygim::string_list{}.empty() && !alpha::info.exts.empty() && alpha::info.exts.size() == 2 &&
               alpha::info.owns(".aa") && !alpha::info.owns(".b") && alpha::info.selects("al") &&
               !alpha::info.selects("beta"));
 
@@ -336,6 +337,16 @@ static_assert(glob_match("*", "anything") && glob_match("*.yaml", "a.yaml") &&
               glob_match("*.tar.*", "x.tar.gz") && glob_match("**", "name"));
 static_assert(!glob_match("*.yaml", "a.yml") && !glob_match("a?c", "ac") &&
               !glob_match("", "x") && !glob_match("b*", "abc") && glob_match("", ""));
+// [seq] as fnmatch reads it (pathlib's glob, D49): a ']' first is a member, a '-' first or last is one,
+// a reversed range holds nothing, an unclosed '[' is a plain '[', '!' first negates; a character is a
+// UTF-8 code point for `?`, a class and a `*` alike; any case folds ASCII letters only.
+static_assert(glob_match("[]a]", "]") && glob_match("[]a]", "a") && !glob_match("[!]a]", "]") && glob_match("[!]a]", "b"));
+static_assert(glob_match("[a-]", "-") && glob_match("[-a]", "-") && !glob_match("[c-a]", "b") && !glob_match("[c-a]", "c"));
+static_assert(glob_match("[ab", "[ab") && !glob_match("[ab", "a") && glob_match("x[!]", "x[!]") && glob_match("[[]", "["));
+static_assert(glob_match("[é]", "é") && glob_match("[à-ê]", "é") && !glob_match("??", "é") && glob_match("*?", "é") &&
+              glob_match("*é", "aé") && !glob_match("*?é", "é"));
+static_assert(glob_match("[A-C]", "b", false) && !glob_match("[A-C]", "b") && glob_match("ä*", "ä.py", false) &&
+              !glob_match("Ä*", "ä.py", false));
 
 #if PYGIM_PATHLIKE_REFLECTION
 // ── Reflection helpers (P2996), on the synthetic descriptors ───────────────
@@ -355,7 +366,7 @@ static_assert(engine_list<>::size == 0 && names_match_identifiers(engine_list<>{
 // ── The path table's laws, in constant evaluation (over the flat interner) ──
 // value(row) is the uri file(text) holds, hash(row) is that file's hash,
 // render(row) is its fspath, text and value meet at ONE row, and the table's
-// parent is pathlib's parent — the facts adapter/pathset.h and adapter/pathview.h
+// parent is pathlib's parent — the facts adapter/pathset_bindings.h and adapter/path_bindings.h
 // rely on (docs/design/pathset_storage.md).
 template <class Strategy>
 consteval bool table_agrees_with_file(std::string_view text) {
@@ -364,6 +375,9 @@ consteval bool table_agrees_with_file(std::string_view text) {
     const basic_file<Strategy> f(text);
     bool ok = t.value(r) == f.value() && t.hash(r) == f.hash_value();
     ok = ok && t.template render<Strategy>(r) == f.fspath();
+    std::string reused = "a row rendered before, longer than most";   // render_into replaces what it held
+    t.template render_into<Strategy>(r, reused);
+    ok = ok && reused == f.fspath();
     ok = ok && t.template find<Strategy>(text) == r && t.template insert<Strategy>(f.value()) == r;
     ok = ok && t.template find<Strategy>(f.value()) == r && t.size() >= 1;
     const std::uint32_t p = t.parent(r);
@@ -378,6 +392,23 @@ static_assert(table_agrees_with_file<posix_strategy>("a/b/c.yaml") && table_agre
 static_assert(table_agrees_with_file<windows_strategy>("C:\\Users\\x.yaml") && table_agrees_with_file<windows_strategy>("\\\\srv\\share\\x") &&
               table_agrees_with_file<windows_strategy>("a\\b") && table_agrees_with_file<windows_strategy>("C:x") &&
               table_agrees_with_file<windows_strategy>("\\abs"));
+
+// expanduser with the homes given as data (platform::home_of asks the system): "~" and "~name"
+// replaced, every later part kept; a "~" further in, or under a root, left as it is.
+constexpr auto given_homes = [](std::string_view user) -> std::optional<std::string> {
+    if (user.empty()) return std::string("/home/someone");
+    if (user == "root") return std::string("/root");
+    return std::nullopt;
+};
+static_assert(basic_file<posix_strategy>("~/a/b").expanduser(given_homes).fspath() == "/home/someone/a/b" &&
+              basic_file<posix_strategy>("~").expanduser(given_homes).fspath() == "/home/someone" &&
+              basic_file<posix_strategy>("~root/x").expanduser(given_homes).fspath() == "/root/x" &&
+              basic_file<posix_strategy>("x/~").expanduser(given_homes).fspath() == "x/~" &&
+              basic_file<posix_strategy>("/~x").expanduser(given_homes).fspath() == "/~x");
+static_assert(basic_file<windows_strategy>("~\\a").expanduser([](std::string_view) -> std::optional<std::string> {
+                  return std::string("C:\\Users\\someone");
+              }).fspath() == "C:\\Users\\someone\\a" &&
+              basic_file<windows_strategy>("C:~x").expanduser(given_homes).fspath() == "C:~x");   // a drive: not expanded
 
 // Two spellings of one value are one row; two values are two rows; a shared
 // prefix is shared.
@@ -395,12 +426,26 @@ consteval bool table_hash_conses() {
 }
 static_assert(table_hash_conses());
 
-// The rule for `p / other` taking the row route (adapter/pathview.h): one plain component.
+// The rule for `p / other` taking the row route (pathview.h's join, path_table.h's child): one plain component.
 using pygim::pathlike::detail::plain_component;
 static_assert(plain_component<posix_strategy>("c") && plain_component<posix_strategy>("..") && plain_component<posix_strategy>("x.yaml") &&
               plain_component<posix_strategy>("a b") && plain_component<posix_strategy>("a\\b"));   // a backslash is plain on POSIX
 static_assert(!plain_component<posix_strategy>("") && !plain_component<posix_strategy>(".") && !plain_component<posix_strategy>("c/d") &&
               !plain_component<posix_strategy>("/abs") && !plain_component<posix_strategy>("d:e") && !plain_component<posix_strategy>("C:"));
 static_assert(!plain_component<windows_strategy>("a\\b") && !plain_component<windows_strategy>("a/b") && plain_component<windows_strategy>("x.yaml"));
+
+// A glob pattern under each family's rules, on every system (docs/design/platform_boundary.md, D77):
+// Windows' separators and case are proven on Linux, where the glob's tests cannot reach them.
+static_assert([] {
+    const basic_glob_pattern<windows_strategy> w("pkg\\sub/*.PY");
+    return w.size() == 3 && w.segment(0) == "pkg" && w.segment(1) == "sub" && !w.case_sensitive() && w.matches(2, "a.py") &&
+           w.matches(2, "B.Py") && !w.matches(2, "a.pyc");
+}());
+static_assert([] {
+    const basic_glob_pattern<posix_strategy> p("pkg\\sub/*.PY");   // a backslash is part of a POSIX name
+    return p.size() == 2 && p.segment(0) == "pkg\\sub" && p.case_sensitive() && p.matches(1, "A.PY") && !p.matches(1, "a.py");
+}());
+static_assert(basic_glob_pattern<windows_strategy>("pkg\\").dirs_only() && !basic_glob_pattern<posix_strategy>("pkg\\").dirs_only());
+static_assert(basic_glob_pattern<windows_strategy>("*.py", true).case_sensitive() && !basic_glob_pattern<posix_strategy>("*.py", false).case_sensitive());
 
 }  // namespace

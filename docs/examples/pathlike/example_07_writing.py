@@ -16,17 +16,16 @@ This example demonstrates:
 import json
 import math
 import tempfile
-from pathlib import Path
 
 import pygim
 
 tmp = tempfile.TemporaryDirectory()
-root = Path(tmp.name)
+root = pygim.path(tmp.name)
 
 # ----------------------------------------------------------------------------
 # 1. Write YAML, read it back
 # ----------------------------------------------------------------------------
-out = pygim.path(root / "out.yaml")
+out = root / "out.yaml"
 out.write({"name": "job", "retries": 3, "ratio": 2.5, "active": True})
 assert out.read() == {"name": "job", "retries": 3, "ratio": 2.5, "active": True}
 
@@ -43,9 +42,9 @@ assert all(isinstance(v, str) for v in back["traps"])
 # ----------------------------------------------------------------------------
 # 3. JSON: real JSON out (stdlib agrees); non-finite floats refused
 # ----------------------------------------------------------------------------
-jout = pygim.path(root / "data.json")
+jout = root / "data.json"
 jout.write({"rows": [{"id": 1}, {"id": 2}]})
-assert json.loads((root / "data.json").read_text()) == {"rows": [{"id": 1}, {"id": 2}]}
+assert json.loads(jout.read_text()) == {"rows": [{"id": 1}, {"id": 2}]}
 
 try:
     jout.write({"v": math.inf})
@@ -55,7 +54,7 @@ else:
     raise AssertionError("Expected JSON write to reject infinity")
 
 # YAML has spellings for them, so there it round-trips:
-yml = pygim.path(root / "inf.yaml")
+yml = root / "inf.yaml"
 yml.write({"v": math.inf})
 assert yml.read() == {"v": math.inf}
 
@@ -66,7 +65,7 @@ assert yml.read() == {"v": math.inf}
 # null, so None is rejected — both loudly, at write time.
 import datetime
 
-tml = pygim.path(root / "cfg.toml")
+tml = root / "cfg.toml"
 tml.write({"title": "svc", "port": 8080, "day": datetime.date(2024, 1, 15)})
 assert tml.read() == {"title": "svc", "port": 8080, "day": datetime.date(2024, 1, 15)}
 

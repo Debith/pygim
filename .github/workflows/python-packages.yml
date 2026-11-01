@@ -3,11 +3,13 @@
 
 name: Python package
 
+# The matrix runs when a pull request into main is opened or updated, and on main itself. A push to
+# any other branch runs nothing: work in progress reaches CI when its pull request does.
 on:
   push:
-    branches: [ "main", "dev", "core/**", "copilot/**" ]
+    branches: [ "main" ]
   pull_request:
-    branches: [ "main", "dev" ]
+    branches: [ "main" ]
 
 jobs:
   build:
@@ -17,7 +19,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [macos-latest, ubuntu-latest, windows-latest]
-        python-version: ["3.9", "3.10", "3.11", "3.12", "3.13", "3.14"]
+        python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
 
     steps:
     - uses: actions/checkout@v4
@@ -26,8 +28,17 @@ jobs:
       with:
         python-version: ${{ matrix.python-version }}
 
+    - name: Use GCC 14 (Ubuntu 24.04)
+      if: matrix.os == 'ubuntu-24.04'
+      # Its default GCC 13 has no explicit object parameters (C++23's deducing this), which
+      # mapping/storage.h uses; 26.04's GCC has them.
+      run: |
+        sudo apt-get install -y g++-14
+        echo "CC=gcc-14" >> "$GITHUB_ENV"
+        echo "CXX=g++-14" >> "$GITHUB_ENV"
+
     - name: Install MSSQL ODBC Driver 18 (Linux)
-      if: matrix.os == 'ubuntu-latest'
+      if: startsWith(matrix.os, 'ubuntu')
       run: |
         curl -sSL https://packages.microsoft.com/keys/microsoft.asc \
           | sudo tee /etc/apt/trusted.gpg.d/microsoft.asc
@@ -93,5 +104,8 @@ jobs:
       shell: pwsh
 
     - name: Test with pytest
+      # No time budget a test (tests/conftest.py) until a run here has measured these runners.
+      env:
+        PYGIM_TEST_TIME_SCALE: "0"
       run: |
         pytest
