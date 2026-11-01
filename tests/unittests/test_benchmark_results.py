@@ -12,7 +12,7 @@ import subprocess
 
 import pytest
 
-from pygim import PathSet, path
+from pygim import path
 
 BENCHMARKS = pathlib.Path(__file__).resolve().parents[2] / "benchmarks"
 pytestmark = pytest.mark.skipif(not (BENCHMARKS / "_results.py").is_file(),
@@ -27,7 +27,7 @@ def results_module():
 
 
 def stored_records():
-    files = PathSet(path(str(BENCHMARKS / "results")).glob("*.jsonl"))   # pygim's own walker and reader
+    files = path(str(BENCHMARKS / "results")).pathset("*.jsonl", kind="file")   # pygim's own walker and reader
     return [(pathlib.Path(str(f)).name, json.loads(line))
             for f, text in zip(files.to_list(), files.read_all_files()) for line in text.splitlines() if line.strip()]
 
@@ -87,6 +87,7 @@ def test_a_corpus_is_named_by_its_checkout_and_below(tmp_path):
     (checkout / "Lib").mkdir(parents=True)
     subprocess.run(["git", "init", "-q", str(checkout)], check=True)
     (tmp_path / "loose").mkdir()
-    assert results.corpus(checkout / "Lib") == "cpython/Lib"
-    assert results.corpus(checkout) == "cpython"
-    assert results.corpus(str(tmp_path / "loose")) == "loose"   # outside a checkout: its own name
+    named = lambda folder: path(folder).resolve()                # as _bench.folder hands --root over
+    assert results.corpus(named(checkout / "Lib")) == "cpython/Lib"
+    assert results.corpus(named(checkout)) == "cpython"
+    assert results.corpus(named(tmp_path / "loose")) == "loose"   # outside a checkout: its own name

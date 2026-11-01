@@ -1,15 +1,18 @@
 # type: ignore
-"""Walking directories: iterdir, glob, rglob -- and the PathSet bridge.
+"""Walking directories: iterdir, glob, rglob -- and pathset(), for many paths.
 
 Traversal follows pathlib's vocabulary with two pygim twists: results are
 sorted and deduplicated (deterministic across platforms), and every result
-inherits the engine pin of the path that produced it.
+inherits the engine pin of the path that produced it. A path is one file or
+folder; many are a PathSet: pathset() walks as glob does and hands back the
+set, keeping only files or folders (kind=) and passing folders over (skip=).
 
 This example demonstrates:
 - glob patterns: * and ? within a component, / between components
 - rglob for recursive matching (** under the hood)
 - Engine-pin inheritance through traversal results
 - pathset(): glob results as a PathSet over the current store
+- pathset(kind=..., skip=...): files or folders only, named folders never entered
 """
 
 import os
@@ -73,6 +76,18 @@ assert ps[0] == pygim.path(os.fspath(ps[0]))
 assert ps[0].store == top.store
 assert len(ps & ext(".yaml")) == 2
 
-n_children = len(top.iterdir())
+# ----------------------------------------------------------------------------
+# 5. Many paths at once: files or folders only, folders passed over
+# ----------------------------------------------------------------------------
+#                           ┌─ kind: "file" as is_file() says, "dir" as is_dir() says; the
+#                           │  walk's listing tells, so no path is stat'ed for it
+#                           │            ┌─ skip: folders never entered or matched (globs)
+#                           ▼            ▼
+files = top.pathset("**/*", kind="file", skip=["sub"])
+assert [p.name for p in files] == ["a.yaml", "b.yml"]
+assert [p.name for p in top.pathset("**/*", kind="dir")] == ["sub"]
+assert files.sizes() == [len("k: 1"), len("k: 2")]   # each member's size, in member order
+
+n_children = len(top.pathset())
 tmp.cleanup()
 print("pathlike traversal example OK:", n_children, "children")

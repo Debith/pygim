@@ -166,12 +166,12 @@ inline Py_hash_t hash_slot(PyObject* self) noexcept {
     return h == -1 ? Py_hash_t(-2) : h;
 }
 
-/// What glob(pattern) finds under `root`, walked with the GIL released, touching only its own values.
-/// One that lists one directory at most (`src/*.py`) walks here. One that may list many — a `**`, or
-/// a wildcard before its last segment (`*/*/*.py`) — walks its first glob_head_start directories
-/// here too, and if it is still going, the rest on worker threads, owning Ctrl-C and SIGTERM (#272).
-[[nodiscard]] inline std::vector<file> glob_of(const file& root, std::string_view pattern, std::optional<bool> case_sensitive = std::nullopt) {
-    glob_pattern parsed(pattern, case_sensitive);   // a bad pattern raises before any thread starts; parsed once
+/// What a glob finds under `root`, walked with the GIL released, touching only its own values. The
+/// pattern is parsed by the caller, so a bad one raises before any thread starts. One that lists one
+/// directory at most (`src/*.py`) walks here. One that may list many — a `**`, or a wildcard before
+/// its last segment (`*/*/*.py`) — walks its first glob_head_start directories here too, and if it
+/// is still going, the rest on worker threads, owning Ctrl-C and SIGTERM (#272).
+[[nodiscard]] inline std::vector<file> glob_of(const file& root, glob_pattern parsed) {
     if (!parsed.lists_many_directories()) {
         const py::gil_scoped_release nogil;
         return root.glob(parsed);
@@ -576,14 +576,14 @@ py::class_<pathview> bind_path(engine_list<Es...> es, py::module_& m, const path
         .def("iterdir", [es](const pathview& v) { return wrap_all(es, v, v.value().iterdir()); },
              "The directory's children, sorted.")
         .def("glob", [es](const pathview& v, std::string_view p, std::optional<bool> case_sensitive) {
-                 return wrap_all(es, v, glob_of(v.value(), p, case_sensitive));
+                 return wrap_all(es, v, glob_of(v.value(), glob_pattern(p, case_sensitive)));
              }, py::arg("pattern"), py::kw_only(), py::arg("case_sensitive") = py::none(),
              "What pathlib's glob finds (recurse_symlinks=False): * ? and [seq] within a name (dot names too), "
              "** across directories, yielding the one it starts in and never going through a link; a trailing "
              "'/' keeps directories; '.' is dropped, '..' a step up. case_sensitive: None as the system "
              "(any case on Windows), False any case. Sorted and deduplicated; results inherit the engine pin.")
         .def("rglob", [es](const pathview& v, std::string_view p, std::optional<bool> case_sensitive) {
-                 return wrap_all(es, v, glob_of(v.value(), "**/" + std::string(p), case_sensitive));
+                 return wrap_all(es, v, glob_of(v.value(), glob_pattern("**/" + std::string(p), case_sensitive)));
              }, py::arg("pattern"), py::kw_only(), py::arg("case_sensitive") = py::none(),
              "glob('**/' + pattern): the pattern anywhere under this directory.");
 

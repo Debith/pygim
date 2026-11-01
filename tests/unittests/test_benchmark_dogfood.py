@@ -7,7 +7,7 @@ comment of the purpose of this import ... This comment applies all the benchmark
 
 import pytest
 
-from pygim import PathSet, path
+from pygim import path
 from pygim.code import parse_source
 
 # What pygim ships in place of each module.
@@ -24,7 +24,7 @@ OWN = {
 }
 
 ROOT = path(__file__).resolve().parent.parent.parent
-BENCHMARKS = PathSet(path(str(ROOT / "benchmarks")).glob("*.py")) if (ROOT / "benchmarks").is_dir() else PathSet([])
+BENCHMARKS = path(str(ROOT / "benchmarks")).pathset("*.py", kind="file")   # none in a tree without benchmarks/
 pytestmark = pytest.mark.skipif(not BENCHMARKS, reason="benchmarks/ not present (testing the installed package)")
 
 

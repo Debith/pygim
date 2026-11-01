@@ -67,7 +67,7 @@ def test_more_threads_than_members_starts_one_a_member(temp_dir):
     for m in members:
         m.write_text("x")
     seen, stop = [], threading.Event()
-    threads_now = lambda: sum(1 for _ in path("/proc/self/task").iterdir())   # native threads too
+    threads_now = lambda: len(path("/proc/self/task").pathset())   # native threads too
 
     def count():
         while not stop.is_set():

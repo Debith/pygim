@@ -138,8 +138,14 @@ class path(os.PathLike[str]):
         case_sensitive: None as the system (any case on Windows), False any case. Sorted and
         deduplicated; results inherit the engine pin."""
     def rglob(self, pattern: str, *, case_sensitive: bool | None = None) -> list[path]: ...
-    def pathset(self, pattern: str = "*", *, case_sensitive: bool | None = None) -> PathSet:
-        """The glob results as a PathSet over this path's table."""
+    def pathset(self, pattern: str = "*", *, case_sensitive: bool | None = None,
+                kind: Literal["file", "dir"] | None = None, skip: Iterable[str] = ()) -> PathSet:
+        """What glob(pattern) finds, as a PathSet over this path's table, for set algebra and Filter queries.
+        kind: 'file' keeps what is_file() says is a file, 'dir' what is_dir() says is a directory (a link
+        followed; the walk's listing tells, a link alone is stat'ed); None keeps every match.
+        skip: names of folders to pass over (globs, as the pattern's case_sensitive says): a folder so
+        named, or a link to one, is never entered or matched, nor is anything beneath it; a file so
+        named is kept. `path(root).pathset('**/*.py', kind='file', skip=['.git', 'build'])`."""
 
 
 class EngineInfo(NamedTuple):
@@ -187,6 +193,10 @@ class PathSet:
     def __add__(self, other: PathSet | PathLike | Iterable[PathLike]) -> PathSet: ...
     def read_all_files(self, *, threads: int | None = None) -> list[str]: ...
     def read_each(self, *, threads: int | None = None, ahead_bytes: int = 64 * 2**20) -> Iterator[FileContent]: ...
+    def sizes(self) -> list[int]:
+        """Each member's size in bytes, in member order, as path.size() gives it (a link followed); the
+        stats run with the GIL released. A member that is not there, or is not a file, raises the
+        OSError path.size() raises, naming it."""
     def count_union(self, other: PathSet) -> int: ...
     def count_intersection(self, other: PathSet) -> int: ...
     def count_difference(self, other: PathSet) -> int: ...
@@ -212,8 +222,9 @@ class Query:
     def __iter__(self) -> Iterator[path]: ...
 
 
-def ext(suffix: str) -> Filter:
-    """Filter: pathlib's final suffix equals `suffix` ('.yaml'; case-sensitive)."""
+def ext(*suffixes: str, case_sensitive: bool = True) -> Filter:
+    """Filter: pathlib's final suffix is one of `suffixes` ('.yaml'; ext('.h', '.cpp')), compared
+    exactly, or but for the case of ASCII letters when case_sensitive is False."""
 
 def name(glob: str) -> Filter:
     """Filter: the final component matches the glob (`*` and `?`)."""

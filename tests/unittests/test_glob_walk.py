@@ -3,6 +3,7 @@
 when the pattern may list many directories (pathlike/glob_walk.h, parallel_glob.h, D28), and Ctrl-C
 stops the walk cleanly."""
 
+import fnmatch
 import os
 import pathlib
 import subprocess
@@ -251,6 +252,61 @@ def test_pathset_of_a_recursive_pattern_holds_the_same_paths(temp_dir):
         sorted(os.fspath(p) for p in pygim.path(root).glob("**/*.py"))
 
 
+def in_a_skipped_folder(root, found, skip):
+    """The oracle for pathset's skip: whether *found* (as rel() names it) is, or lies beneath, a folder
+    — a directory or a link to one, as pathlib's is_dir() says — whose name one of *skip*'s globs matches."""
+    parts = [] if found == "." else found.split("/")
+    return any(part != ".." and any(fnmatch.fnmatchcase(part, g) for g in skip) and root.joinpath(*parts[:i + 1]).is_dir()
+               for i, part in enumerate(parts))
+
+
+def in_set(root, pattern, **options):
+    return [rel(p, root) for p in pygim.path(root).pathset(pattern, **options)]
+
+
+@pytest.mark.parametrize("pattern", list(PATHLIB))
+def test_pathset_keeps_the_kind_is_file_and_is_dir_say(temp_dir, pattern):
+    """kind='file' and kind='dir' keep the matches pathlib's is_file() and is_dir() say true of, a
+    link followed: a broken link is neither, a link to a folder is a dir."""
+    root = make_tree(temp_dir / "t")
+    assert in_set(root, pattern, kind="file") == [p for p in PATHLIB[pattern] if (root / p).is_file()]
+    assert in_set(root, pattern, kind="dir") == [p for p in PATHLIB[pattern] if (root / p).is_dir()]
+    assert in_set(root, pattern, kind=None) == in_set(root, pattern) == PATHLIB[pattern]
+
+
+SKIPS = [["sub"], ["pkg"], [".*"], ["link_to_pkg", "other"], ["loop"], ["d*", "x"], ["a.py", "b.txt"], ["*"]]
+
+
+@pytest.mark.parametrize("pattern", list(PATHLIB))
+def test_pathset_passes_over_the_folders_skip_names(temp_dir, pattern):
+    """A folder skip names — or a link to one — is neither entered nor matched, nor is anything beneath
+    it; a file of that name is kept (["a.py", "b.txt"] skips nothing). The folder the walk starts in
+    is never asked."""
+    root = make_tree(temp_dir / "t")
+    for skip in SKIPS:
+        expected = [p for p in PATHLIB[pattern] if not in_a_skipped_folder(root, p, skip)]
+        assert in_set(root, pattern, skip=skip) == expected, skip
+        assert in_set(root, pattern, skip=skip, kind="file") == [p for p in expected if (root / p).is_file()], skip
+
+
+def test_skip_matches_as_the_pattern_does(temp_dir):
+    """skip's globs take the pattern's case_sensitive; any iterable of names will do (a set, a tuple)."""
+    root = make_tree(temp_dir / "t")
+    assert in_set(root, "**/*.py", skip={"SUB"}) == PATHLIB["**/*.py"]
+    assert in_set(root, "**/*.py", skip=("SUB",), case_sensitive=False) == \
+        [p for p in sorted(PATHLIB["**/*.py"] + ["A.PY"]) if not p.startswith("pkg/sub/")]
+
+
+def test_pathset_refuses_a_kind_or_skip_it_cannot_take(temp_dir):
+    root = make_tree(temp_dir / "t")
+    with pytest.raises(ValueError, match="'file', 'dir' or None, not 'files'"):
+        pygim.path(root).pathset("*", kind="files")
+    with pytest.raises(TypeError, match="not one string"):
+        pygim.path(root).pathset("*", skip="build")     # iterated, it would skip folders named b, u, i, l and d
+    with pytest.raises(TypeError, match="as str, not int"):
+        pygim.path(root).pathset("*", skip=[1])
+
+
 def test_a_wide_tree_matches_os_walk(temp_dir):
     """Many directories, so the walk runs on several threads; the files made here are the oracle (no
     links: what os.walk would list, without walking by hand)."""
@@ -264,6 +320,23 @@ def test_a_wide_tree_matches_os_walk(temp_dir):
             expected.append(os.path.join(sub, f"f{f}.py"))
         (sub / "skip.txt").write_text("x")
     assert [os.fspath(p) for p in pygim.path(root).glob("**/*.py")] == sorted(expected)
+
+
+def test_a_wide_walk_keeps_kind_and_skip_on_every_thread(temp_dir):
+    """The parallel walk runs glob_step's rules on each thread: kind and skip hold there as on one."""
+    root = temp_dir / "wide"
+    expected = []
+    for d in range(120):
+        sub = root / f"p{d % 7}" / f"m{d}"
+        (sub / "build" / "deep").mkdir(parents=True)
+        (sub / "build" / "deep" / "f.py").write_text("x")      # beneath a skipped folder: never found
+        for f in range(15):
+            (sub / f"f{f}.py").write_text("x")
+            expected.append(os.path.join(sub, f"f{f}.py"))
+    walked = pygim.path(root).pathset("**/*", kind="file", skip=["build"])
+    assert [os.fspath(p) for p in walked] == sorted(expected)
+    assert [os.fspath(p) for p in pygim.path(root).pathset("**/build/", kind="dir")] == \
+        sorted(os.path.join(root, f"p{d % 7}", f"m{d}", "build") for d in range(120))
 
 
 CHILD = POOL_THREADS + r"""

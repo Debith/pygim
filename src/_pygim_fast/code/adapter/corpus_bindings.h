@@ -349,6 +349,13 @@ private:
     return i;
 }
 
+// pygim.pathlike's PathSet, looked up once, at the first Corpus.files: many files are handed over as
+// one set, as pathlike holds them. pygim.pathlike is loaded by then (pygim imports it first).
+[[nodiscard]] inline py::object& pathset_type() {
+    PYBIND11_CONSTINIT static py::gil_safe_call_once_and_store<py::object> found;
+    return found.call_once_and_store_result([] { return py::module_::import("pygim.pathlike").attr("PathSet"); }).get_stored();
+}
+
 }  // namespace detail
 
 /// Corpus, Tree, Node, parse() and parse_source() on `m`.
@@ -403,8 +410,8 @@ inline void register_corpus(py::module_& m) {
         .def_property_readonly("files", [](const corpus& c) {
                  py::list out;
                  for (const corpus_file& f : c.files()) out.append(pathlike::str_from_text(f.path()));
-                 return out;
-             }, "Every file's path, sorted.")
+                 return detail::pathset_type()(out);
+             }, "Every file, parsed or not, as a PathSet in path order (corpus[i] is files[i]'s tree).")
         .def_property_readonly("errors", [](const corpus& c) {
                  std::vector<py::tuple> out;
                  for (const corpus_file& f : c.files()) {

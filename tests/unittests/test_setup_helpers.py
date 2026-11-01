@@ -15,6 +15,8 @@ import sys
 
 import pytest
 
+from pygim.pathlike import ext, path
+
 SETUP_PY = pathlib.Path(__file__).resolve().parents[2] / "setup.py"
 
 
@@ -158,11 +160,9 @@ def test_no_availability_conditional_compilation():
     opt-in flags with environment-independent defaults remain allowed —
     see docs/design/cpp_runtime_linking.md.
     """
-    fast = SETUP_PY.parent / "src" / "_pygim_fast"
+    fast = path(str(SETUP_PY.parent / "src" / "_pygim_fast"))
     offenders = []
-    for f in list(fast.rglob("*.h")) + list(fast.rglob("*.cpp")):
-        if "third_party" in f.parts:
-            continue  # vendored code is exempt
+    for f in fast.pathset("**/*", kind="file", skip=["third_party"]).filter(ext(".h", ".cpp")):   # vendored code is exempt
         text = f.read_text(encoding="utf-8", errors="ignore")
         for banned in ("__has_include", "#ifdef VERSION_INFO"):
             if banned in text:

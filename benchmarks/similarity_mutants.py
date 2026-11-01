@@ -18,6 +18,7 @@ appends its raw measurements + environment metadata to
 ``results/similarity_mutants.jsonl`` (see ``_results.py``).
 """
 
+import argparse
 import ast  # edits and unparses the stdlib's functions: pygim.code reads trees, writes no source
 import copy
 import random
@@ -28,21 +29,21 @@ import sysconfig
 import pyarrow.compute as pc
 from tabulate import tabulate
 
-from pygim import path, similarity
+from pygim import similarity
+from _bench import folder
 from _results import corpus, save, wants_save
 
 SAMPLE = 600
+TESTDIRS = ("test", "tests", "idle_test")
 UNRELATED = 1_000
 EDITS = ("flip operator", "rename attribute", "drop statement", "duplicate statement")
 
 
 def functions(root):
     out = []
-    for p in root.rglob("*.py"):   # sorted already, in pathlib's order
-        if any(x in ("test", "tests", "idle_test") for x in p.parts):
-            continue
+    for content in root.pathset("**/*.py", kind="file", skip=TESTDIRS).read_each():   # sorted already, in pathlib's order
         try:
-            tree = ast.parse(p.read_bytes())
+            tree = ast.parse(bytes(content))
         except (SyntaxError, ValueError):
             continue
         out += [n for n in tree.body if isinstance(n, ast.FunctionDef) and 30 <= sum(1 for _ in ast.walk(n)) <= 400]
@@ -93,7 +94,10 @@ def score(a, b):
 
 def main():
     args = [a for a in sys.argv[1:] if not a.startswith("--")]
-    root = path(args[0] if args else sysconfig.get_paths()["stdlib"])
+    try:
+        root = folder(args[0] if args else sysconfig.get_paths()["stdlib"])
+    except argparse.ArgumentTypeError as e:
+        sys.exit(str(e))
     fns = functions(root)
     rnd = random.Random(7)
     unrelated = sorted(score(fns[i], fns[j]) for i, j in

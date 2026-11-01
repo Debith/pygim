@@ -704,7 +704,7 @@ def save_baseline(
     results: list[dict],
     rows: int,
     workers: int,
-    path: str,
+    out: pygim.path,
     *,
     batch_size: int = 100_000,
     block_size: int = 4096,
@@ -738,16 +738,16 @@ def save_baseline(
         },
         "results": by_key,
     }
-    pygim.path(path).write(baseline)   # pygim's own JSON engine
-    click.echo(f"\nBaseline saved to {path} ({len(by_key)} entries)")
+    out.write(baseline)   # pygim's own JSON engine
+    click.echo(f"\nBaseline saved to {out} ({len(by_key)} entries)")
 
 
 def check_regression(
     results: list[dict],
-    baseline_path: str,
+    baseline_in: tuple[pygim.path, dict],
     threshold_pct: float,
 ) -> bool:
-    baseline = pygim.path(baseline_path).read()
+    baseline_path, baseline = baseline_in   # read when the option was: a bad file stops the run before it starts
 
     base_results = baseline["results"]
     base_sys = baseline.get("system", {})
@@ -805,6 +805,32 @@ def check_regression(
 
 
 # ── CLI ──────────────────────────────────────────────────────────────────────
+
+
+def baseline_to_write(ctx, param, value):
+    """--save-baseline as the run writes it: a pygim path, refused now when its folder is missing — at
+    the start, not after every profile has run."""
+    if value is None:
+        return None
+    out = pygim.path(value)
+    if not out.parent.is_dir():
+        raise click.BadParameter(f"{out.parent} is not a folder")
+    return out
+
+
+def baseline_to_check(ctx, param, value):
+    """--check-regression read now, once: (its path, its baseline). One that is missing, not JSON, or
+    holds no results is refused before anything is measured."""
+    if value is None:
+        return None
+    named = pygim.path(value)
+    try:
+        baseline = named.read()   # pygim's own JSON engine
+    except (OSError, ValueError) as e:
+        raise click.BadParameter(f"{named}: {e}")
+    if not isinstance(baseline, dict) or not isinstance(baseline.get("results"), dict):
+        raise click.BadParameter(f"{named} holds no baseline: no results in it")
+    return named, baseline
 
 
 @click.command()
@@ -897,14 +923,16 @@ def check_regression(
 @click.option(
     "--save-baseline",
     "baseline_out",
-    type=click.Path(),
+    type=click.Path(dir_okay=False),
+    callback=baseline_to_write,
     default=None,
     help="Save results as JSON baseline file",
 )
 @click.option(
     "--check-regression",
     "baseline_in",
-    type=click.Path(exists=True),
+    type=click.Path(exists=True, dir_okay=False),
+    callback=baseline_to_check,
     default=None,
     help="Compare against saved baseline; exit 1 on regression",
 )

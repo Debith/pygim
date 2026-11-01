@@ -34,7 +34,7 @@ from pygim import persistence
 from pygim.core.explib import GimError
 from pygim.factory import Factory
 from pygim.ioc import Container
-from pygim.pathlike import PathSet, path
+from pygim.pathlike import ext, path
 from pygim.persistence import acquire_datastore
 from pygim.registry import KeyPolicyKind, Registry
 
@@ -55,7 +55,7 @@ _NOT_CODE = re.compile(r'//[^\n]*|/\*.*?\*/|R"(?P<d>[^(\s]*)\(.*?\)(?P=d)"|"(?:\
 def _first_party():
     """Every first-party C++ file as (path, code), walked and read through pygim's own PathSet as
     test_layering's `sources` does. Vendored code is not ours to hold to these rules."""
-    found = PathSet(path(str(FAST)).rglob("*.h")) | PathSet(path(str(FAST)).rglob("*.cpp"))
+    found = path(str(FAST)).pathset("**/*", kind="file").filter(ext(".h", ".cpp"))
     members, texts = found.to_list(), found.read_all_files()
     assert len(members) == len(texts), "a member was not a regular file; the two lists no longer align"
     assert len(members) >= 50, f"only {len(members)} C++ files under {FAST}: a rule checked over nothing passes"

@@ -67,7 +67,7 @@ import socketserver
 import urllib.parse
 
 import pygim
-from pygim.pathlike import PathStore
+from pygim.pathlike import PathStore, ext
 from _pygim._cli import _commenter
 
 __all__ = ["ServeError", "Watch", "blocks_of", "history_of", "make_server", "materialize_markdown", "read_state",
@@ -330,13 +330,12 @@ def _upload_target(root, qs):
 
 
 def site_pages(root):
-    """The site's pages as a PathSet over *root*'s table: every ``*.html`` and
-    ``*.md`` under the root except the notes directory. Two calls on the same
-    root are two sets over one table, so they subtract and intersect at bit
-    speed."""
+    """The site's pages as a PathSet over *root*'s table: every ``.html`` and
+    ``.md`` file under the root, in one walk that never enters the notes folder.
+    Two calls on the same root are two sets over one table, so they subtract
+    and intersect at bit speed."""
     notes = COMMENTS_REL.split("/")[0]
-    pages = root.pathset("**/*.html") | root.pathset("**/*.md")
-    return pages - (root.pathset(notes + "/**/*.html") | root.pathset(notes + "/**/*.md"))
+    return root.pathset("**/*", kind="file", skip=[notes]).filter(ext(".html", ".md"))
 
 
 def listed_pages(root):
@@ -855,9 +854,9 @@ def _changed_since_read(root) -> set:
     notes = root / READ_REL
     if not notes.is_dir():
         return set()
-    base, changed = os.fspath(notes), set()
-    for mark in notes.pathset("**/*.json"):
-        source = root / os.fspath(mark)[len(base) + 1: -len(".json")]
+    marks, changed = notes.pathset("**/*.json", kind="file"), set()
+    for mark, named in zip(marks, marks.relative_to(notes)):   # the same members, in order
+        source = root / named.with_suffix("")                 # a.md.json marks a.md
         try:
             if source.is_file() and _page_text(source) != mark.read().get("text"):
                 changed.add(os.fspath(source))
@@ -910,9 +909,10 @@ def _listing(root, folder, url_path: str) -> str:
         return tag("read", read, "changed since read") + tag("git", git, "not committed")
 
     rows = [] if folder == root else ['<li class="dir"><a href="../">../</a></li>']
-    for entry in sorted(folder.pathset("*"), key=lambda p: (not p.is_dir(), p.name.lower())):
+    folders, by_name = folder.pathset("*", kind="dir"), lambda p: p.name.lower()   # the listing tells: no stat a row
+    for entry in [*sorted(folders, key=by_name), *sorted(folder.pathset("*") - folders, key=by_name)]:
         path, name = os.fspath(entry), entry.name
-        if entry.is_dir():
+        if entry in folders:
             inside = path + os.sep
             marks = tags(sum(p.startswith(inside) for p in read_changed), sum(p.startswith(inside) for p in uncommitted))
             rows.append(f'<li class="dir"><a href="{urllib.parse.quote(name)}/">{html.escape(name)}/</a>{marks}</li>')

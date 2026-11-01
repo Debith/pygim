@@ -115,7 +115,7 @@ def test_a_refused_file_raises_in_its_place_and_ends_the_reading(temp_dir):
 
 def threads_running():
     """The process's threads, native ones included: one entry each in /proc/self/task."""
-    return sum(1 for _ in path("/proc/self/task").iterdir())
+    return len(path("/proc/self/task").pathset())
 
 
 @pytest.mark.skipif(not os.path.isdir("/proc/self/task"), reason="counting threads needs /proc")
@@ -123,7 +123,7 @@ def test_stopping_early_leaves_no_thread_behind(temp_dir):
     for i in range(500):
         (temp_dir / f"f{i}.txt").write_bytes(b"y" * 4096)
     before = threads_running()
-    reading = PathSet(path(temp_dir).glob("*.txt")).read_each(threads=8, ahead_bytes=4096)   # the readers wait for room, so they are there to count
+    reading = path(temp_dir).pathset("*.txt").read_each(threads=8, ahead_bytes=4096)   # the readers wait for room, so they are there to count
     next(reading), next(reading)
     assert threads_running() > before        # the readers are running ...
     del reading
@@ -138,7 +138,7 @@ def test_two_threads_on_one_iterator_share_it_or_are_told_it_is_busy(temp_dir):
     the same turn, and one waited for ever for a result the other had taken."""
     for i in range(400):
         (temp_dir / f"f{i:03d}.txt").write_bytes(b"z" * 20000)
-    reading = PathSet(path(temp_dir).glob("*.txt")).read_each(threads=2, ahead_bytes=1)
+    reading = path(temp_dir).pathset("*.txt").read_each(threads=2, ahead_bytes=1)
     taken, told = [], []
 
     def drain():

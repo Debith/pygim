@@ -32,7 +32,7 @@ from urllib.parse import urlparse
 from urllib.request import url2pathname
 
 from pygim.code import parse_source
-from pygim.pathlike import PathSet, path
+from pygim.pathlike import PathSet, ext, name, path
 
 # Where a project keeps code it offers to an importer, in the order a reader would look.
 SOURCE = ("src", ".")
@@ -208,22 +208,20 @@ def python_files(root: Path) -> List[Tuple[str, str]]:
 
     Walked and read by pygim's own path table: a tool whose whole subject is using what a project
     ships would be a poor joke if it walked the tree with pathlib. What is not the project's
-    (NOT_OURS: build output, vendored code) is left out before anything is read, and at the top
-    of the tree before anything is walked (a checkout's .git and build/ were most of the walk). The reads pair
-    each text with the file it came from (read_each names it), so a file removed between the walk
-    and the read is only absent, and one that is not UTF-8 is read with its bad bytes replaced:
-    neither takes the rest of the project with it.
+    (NOT_OURS: build output, vendored code) is never walked into, at any depth (a checkout's .git
+    and build/ were most of the walk). The reads pair each text with the file it came from
+    (read_each names it), so a file removed between the walk and the read is only absent, and one
+    that is not UTF-8 is read with its bad bytes replaced: neither takes the rest of the project with it.
     """
+    return _texts_of(path(str(root)).pathset("**/*.py", kind="file", skip=NOT_OURS), root)
 
-    top = path(str(root))
-    walked = PathSet(top.glob("*.py"))
-    for entry in top.iterdir():   # NOT_OURS at the top (.git, build, .venv) is never walked into
-        if entry.name not in NOT_OURS and entry.is_dir():
-            walked = walked + PathSet(entry.rglob("*.py"))
-    ours = {str(p): "/".join(member.parts) for member, p in zip(walked.relative_to(str(root)), walked)   # the same members, in order
-            if not (NOT_OURS & set(member.parts))}
-    return [(ours[str(content.path)], str(memoryview(content), "utf-8", "replace"))
-            for content in PathSet(list(ours)).read_each()]
+
+def _texts_of(found: PathSet, root: Path) -> List[Tuple[str, str]]:
+    """Each member of *found* that is a file, as its path relative to *root* (``/`` between its parts)
+    with its text — bytes that are not UTF-8 replaced — in member order; a member that is gone by the
+    time it is read is only absent (read_each pairs each text with its member)."""
+    named = {str(p): "/".join(member.parts) for member, p in zip(found.relative_to(str(root)), found)}   # the same members, in order
+    return [(named[str(content.path)], str(memoryview(content), "utf-8", "replace")) for content in found.read_each()]
 
 
 def ships_in(root: Path) -> List[str]:
@@ -235,22 +233,16 @@ def ships_in(root: Path) -> List[str]:
     application, a folder of scripts) gets an empty list, which is the right answer, not an error.
     """
 
+    private = (".*", "_*")   # folders whose names say they are not for importers
     names: List[str] = []
     for source in SOURCE:
-        here = path(str(root)) / source
-        if not here.is_dir():
-            continue
-        for child in sorted(here.iterdir(), key=str):
-            if (not child.is_dir() or child.name.startswith((".", "_"))
-                    or child.name in NOT_SHIPPED or not (child / "__init__.py").exists()):
-                continue
-            inside = child.iterdir()
-            names.append(child.name)
-            names.extend(f"{child.name}.{part}" for part in sorted(
-                {member.name.split(".")[0] for member in inside
-                 if member.suffix in (".py", ".so", ".pyd") and not member.name.startswith("_")}
-                | {member.name for member in inside if member.is_dir()
-                   and not member.name.startswith((".", "_")) and (member / "__init__.py").exists()}))
+        for init in (path(str(root)) / source).pathset("*/__init__.py", kind="file", skip=(*private, *NOT_SHIPPED)):
+            package = init.parent
+            modules = package.pathset("*", kind="file") & ext(".py", ".so", ".pyd") & ~name("_*")
+            subpackages = package.pathset("*/__init__.py", kind="file", skip=private)
+            names.append(package.name)
+            names.extend(f"{package.name}.{part}" for part in sorted(
+                {module.name.split(".")[0] for module in modules} | {sub.parent.name for sub in subpackages}))
     return sorted(set(names))
 
 
@@ -491,20 +483,17 @@ def text_files(root: Path) -> List[Tuple[str, str]]:
     environments and caches are left out by the project's own rules rather than by a guess; outside
     one, the walk falls back to everything not in `NOT_OURS`. Read by pygim's path table either way.
 
-    Only regular files are read. A tracked file deleted from disk is still listed by git, and the walk
-    lists folders; `read_all_files` skips both, its list no longer lined up with the members, and the
-    whole result was dropped — so mid-work, with one file removed, nothing was read at all.
+    Only regular files are read, and each text is paired with its file: a tracked file deleted from
+    disk, which git still lists, is only absent. (Read with `read_all_files`, its list no longer lined
+    up with the members and the whole result was dropped — so mid-work, with one file removed,
+    nothing was read at all.)
     """
-    here = path(str(root))
     listed = git(["ls-files", "-z"], Path(root))
-    named = (here / n for n in listed.split("\0") if n) if listed is not None else here.rglob("*")
-    found = PathSet([p for p in named if p.name.endswith(TEXT)
-                     and not (NOT_OURS & set(p.relative_to(here).parts)) and p.is_file()])   # skipped before any read
-    texts = found.read_all_files()
-    if len(found) != len(texts):                  # a file removed between the check and the read
-        return []
-    return [("/".join(member.parts), text if isinstance(text, str) else text.decode("utf-8", "replace"))
-            for member, text in zip(found.relative_to(str(root)), texts)]      # the same members, in order
+    if listed is None:
+        found = path(str(root)).pathset("**/*", kind="file", skip=NOT_OURS)
+    else:   # git's names, NOT_OURS's folders left out (a vendored third_party/ is tracked): text, not paths, until here
+        found = PathSet([str(Path(root) / n) for n in listed.split("\0") if n and not NOT_OURS.intersection(n.split("/")[:-1])])
+    return _texts_of(found.filter(ext(*TEXT)), root)
 
 
 CONDA_ROOTS = ("miniconda3", "anaconda3", "miniforge3", "mambaforge", ".conda")
@@ -562,7 +551,7 @@ def environments(root: Path, home: Path) -> List[Host]:
         if (conda / "conda-meta").is_dir():
             candidates.append((Path(str(conda)), "conda env", "base"))
         if (conda / "envs").is_dir():
-            candidates += [(Path(str(env)), "conda env", env.name) for env in (conda / "envs").iterdir()]
+            candidates += [(Path(str(env)), "conda env", env.name) for env in (conda / "envs").pathset("*", kind="dir")]
     candidates += [(root / name, "venv", name) for name in LOCAL_ENVS if (here / name / "pyvenv.cfg").is_file()]
     named = ""
     environment = here / "environment.yml"
@@ -574,9 +563,8 @@ def environments(root: Path, home: Path) -> List[Host]:
     hosts: List[Host] = []
     for prefix, kind, name in candidates:
         seen, installs, owned = set(), [], []
-        records = [record for layout in SITE_PACKAGES
-                   for record in path(str(prefix)).glob(layout + "/*.dist-info/direct_url.json")]
-        for record in records:
+        records = [path(str(prefix)).pathset(layout + "/*.dist-info/direct_url.json", kind="file") for layout in SITE_PACKAGES]
+        for record in (record for found in records for record in found):
             real = record.resolve()
             if str(real) in seen:                 # lib/python3.1 may be a link to lib/python3.12
                 continue
@@ -623,9 +611,8 @@ def _python_version(prefix: Path) -> str:
             key, _, value = line.partition("=")
             if key.strip() in ("version", "version_info"):
                 return ".".join(value.strip().split(".")[:2])
-    if (env / "conda-meta").is_dir():
-        for record in (env / "conda-meta").glob("python-3*.json"):
-            return ".".join(record.name[len("python-"):].split(".")[:2])
+    for record in (env / "conda-meta").pathset("python-3*.json", kind="file"):   # none when there is no conda-meta
+        return ".".join(record.name[len("python-"):].split(".")[:2])
     return ""
 
 

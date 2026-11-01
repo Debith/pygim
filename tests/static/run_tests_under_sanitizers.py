@@ -125,10 +125,10 @@ def main():
         print(built.stdout[-3000:] + built.stderr[-3000:])
         print("the instrumented build failed")
         return 1
-    for objects in (out / "build").glob("temp*"):   # a gigabyte of objects; build/lib's modules say what is up to date
+    for objects in (out / "build").pathset("temp*", kind="dir"):   # a gigabyte of objects; build/lib's modules say what is up to date
         shutil.rmtree(str(objects), ignore_errors=True)
     reports = out / "sanitizer-report"   # a report goes to a file: pytest holds stderr, and a halt loses it
-    for stale in out.glob("sanitizer-report.*"):
+    for stale in out.pathset("sanitizer-report.*", kind="file"):
         stale.unlink()
     options = {name: f"{value}:log_path={reports}" for name, value in OPTIONS.items()}
     suppressions = out / "tsan-suppressions.txt"
@@ -149,7 +149,7 @@ def main():
     tested = {**os.environ, **options, **ENVIRONMENT, "PYTHONPATH": python_path, "PYGIM_SANITIZED": args.sanitizer,
               "PYGIM_TEST_TIME_SCALE": "0"}
     code = subprocess.run(command, cwd=str(out), env=tested).returncode
-    for report in sorted(out.glob("sanitizer-report.*")):
+    for report in out.pathset("sanitizer-report.*", kind="file"):   # sorted already
         print(f"--- {report}\n{report.read_bytes().decode(errors='replace')[:20000]}")
     return code
 

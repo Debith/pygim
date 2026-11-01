@@ -14,6 +14,9 @@
 // on Windows, or as case_sensitive says. Unreadable directories are passed over. Not pathlib's:
 // recurse_symlinks=True (pathlib follows a link loop until the OS refuses, at 40 links); matching
 // any case folds ASCII letters only (pathlib's os.path.normcase folds all of Unicode on Windows).
+// Beyond pathlib, for path.pathset(): a walk may keep only what is_file() — or is_dir() — says of
+// its matches (glob_kind; the listing's kind, a stat for a link only), and may skip folders by name
+// (glob_pattern's skip: never entered, never matched, nor anything beneath them).
 //
 // The walk is a set of glob_tasks, each a directory and the segment its entries are matched
 // against; how they run is the caller's: file::glob (core.h) runs them one after another,
@@ -153,16 +156,25 @@ public:
     using std::invalid_argument::invalid_argument;
 };
 
+/// Which of its matches a walk keeps: every one, or those pathlib's is_file() — or is_dir() — says
+/// true of, a link followed (a broken link, a FIFO or a socket is neither).
+enum class glob_kind { any, file, directory };
+
 /// A glob pattern as its segments, read as pathlib reads one under Rules (path_rules.h): split on
 /// Rules' separators ('/', and a backslash under Windows'), a `.` segment dropped, a run of `**` one
 /// segment, a trailing separator keeping directories only. Matched case-sensitively unless told
 /// otherwise — or, untold, as Rules say (Windows' names do not differ by case). An empty pattern, or
-/// one of `.` alone, is std::invalid_argument; one that is not relative, glob_unsupported.
+/// one of `.` alone, is std::invalid_argument; one that is not relative, glob_unsupported. Beyond
+/// pathlib: `kind`, the matches kept; `skip`, globs naming folders the walk passes over — one so
+/// named, or a link to one, is never entered or matched, nor is anything beneath it.
+///
+///     basic_glob_pattern<posix_strategy>("**/*.py", std::nullopt, glob_kind::file, {"build", ".*"})
 template <class Rules>
 class basic_glob_pattern {
 public:
-    constexpr explicit basic_glob_pattern(std::string_view pattern, std::optional<bool> case_sensitive = std::nullopt)
-        : m_case_sensitive(case_sensitive.value_or(Rules::case_sensitive)) {
+    constexpr explicit basic_glob_pattern(std::string_view pattern, std::optional<bool> case_sensitive = std::nullopt,
+                                          glob_kind kind = glob_kind::any, std::vector<std::string> skip = {})
+        : m_skip(std::move(skip)), m_kind(kind), m_case_sensitive(case_sensitive.value_or(Rules::case_sensitive)) {
         if (pattern.empty()) throw std::invalid_argument("Unacceptable pattern: ''");
         // A leading separator is refused explicitly: under Windows' rules "/x" has no drive, so it
         // is not absolute, yet the pattern is clearly not relative in the caller's intent.
@@ -193,6 +205,12 @@ public:
     /// Whether the pattern ended in a separator: only directories match its last segment.
     [[nodiscard]] constexpr bool dirs_only() const noexcept { return m_dirs_only; }
     [[nodiscard]] constexpr bool case_sensitive() const noexcept { return m_case_sensitive; }
+    /// Which matches the walk keeps.
+    [[nodiscard]] constexpr glob_kind kind() const noexcept { return m_kind; }
+    /// Whether a folder of this name is passed over: one of the skip globs matches it.
+    [[nodiscard]] constexpr bool skips(std::string_view name) const noexcept {
+        return std::ranges::any_of(m_skip, [&](const std::string& g) { return glob_match(g, name, m_case_sensitive); });
+    }
     [[nodiscard]] constexpr const std::string& segment(std::size_t k) const noexcept { return m_segments[k]; }
     /// Whether a name matches segment k.
     [[nodiscard]] constexpr bool matches(std::size_t k, std::string_view name) const noexcept { return glob_match(m_segments[k], name, m_case_sensitive); }
@@ -208,9 +226,15 @@ public:
 
 private:
     std::vector<std::string> m_segments;
+    std::vector<std::string> m_skip;
+    glob_kind m_kind;
     bool m_dirs_only = false;
     bool m_case_sensitive;
 };
+static_assert(basic_glob_pattern<posix_strategy>("**/*.py", std::nullopt, glob_kind::file, {"build", ".*"}).skips(".git") &&
+              !basic_glob_pattern<posix_strategy>("**/*.py", std::nullopt, glob_kind::file, {"build", ".*"}).skips("src") &&
+              basic_glob_pattern<posix_strategy>("*", false, glob_kind::any, {"build"}).skips("Build") &&
+              !basic_glob_pattern<posix_strategy>("*").skips("build"));
 
 /// A glob pattern under the running system's rules.
 using glob_pattern = basic_glob_pattern<native_strategy>;
@@ -223,6 +247,12 @@ using platform::list_directory;
 [[nodiscard]] inline bool leads_to_directory(const fs::path& path) {
     std::error_code ec;
     return fs::is_directory(path, ec);
+}
+
+/// Whether a link at `path` leads to a regular file.
+[[nodiscard]] inline bool leads_to_file(const fs::path& path) {
+    std::error_code ec;
+    return fs::is_regular_file(path, ec);
 }
 
 /// One unit of a walk: a directory and the segment of the pattern its entries are matched against;
@@ -251,8 +281,26 @@ namespace detail {
 
 // Whether a matched entry is gone on with: a directory, or a link to one (followed, as pathlib's
 // segments other than `**` follow it).
-[[nodiscard]] inline bool is_directory_followed(const dir_entry& e, const fs::path& path) {
-    return e.kind() == entry_kind::directory || (e.kind() == entry_kind::link && leads_to_directory(path));
+[[nodiscard]] inline bool is_directory_followed(entry_kind kind, const fs::path& path) {
+    return kind == entry_kind::directory || (kind == entry_kind::link && leads_to_directory(path));
+}
+[[nodiscard]] inline bool is_directory_followed(const dir_entry& e, const fs::path& path) { return is_directory_followed(e.kind(), path); }
+
+// Whether a match of `kind` at `path` is one the pattern keeps: what is_file() or is_dir() says of
+// it, a link followed — a stat for a link only, the listing tells the rest.
+[[nodiscard]] inline bool kept(const glob_pattern& pattern, entry_kind kind, const fs::path& path) {
+    switch (pattern.kind()) {
+        case glob_kind::file: return kind == entry_kind::file || (kind == entry_kind::link && leads_to_file(path));
+        case glob_kind::directory: return is_directory_followed(kind, path);
+        case glob_kind::any: break;
+    }
+    return true;
+}
+
+// Whether a listed entry is a folder the pattern skips: its name is one of skip's, and it is a
+// directory or a link to one (the name asked first: a stat for a link so named only).
+[[nodiscard]] inline bool skipped(const glob_pattern& pattern, const dir_entry& e, const fs::path& path) {
+    return pattern.skips(e.name()) && is_directory_followed(e, path);
 }
 
 // The entries of `dir` against segment k (not `**`): a match on the last segment is emitted (a
@@ -264,8 +312,9 @@ void match_segment(const glob_pattern& pattern, const fs::path& dir, const std::
     for (const dir_entry& e : entries) {
         if (!pattern.matches(k, e.name())) continue;
         fs::path path = e.under(dir);
+        if (skipped(pattern, e, path)) continue;
         if (pattern.is_last(k)) {
-            if (!pattern.dirs_only() || is_directory_followed(e, path)) emit(std::move(path));
+            if ((!pattern.dirs_only() || is_directory_followed(e, path)) && kept(pattern, e.kind(), path)) emit(std::move(path));
         } else if (is_directory_followed(e, path)) {
             go_on(glob_task::entering(pattern, std::move(path), k + 1));
         }
@@ -276,8 +325,8 @@ void match_segment(const glob_pattern& pattern, const fs::path& dir, const std::
 template <class Emit, class GoOn>
 void step_up(const glob_pattern& pattern, const fs::path& dir, std::size_t k, Emit& emit, GoOn& go_on) {
     fs::path up = dir / "..";
-    if (pattern.is_last(k)) emit(std::move(up));
-    else go_on(glob_task::entering(pattern, std::move(up), k + 1));
+    if (!pattern.is_last(k)) go_on(glob_task::entering(pattern, std::move(up), k + 1));
+    else if (pattern.kind() != glob_kind::file) emit(std::move(up));   // the folder above: a directory
 }
 
 // Segment k names one entry: one stat of `dir/name`, where a listing read the whole directory to
@@ -289,9 +338,10 @@ void find_literal(const glob_pattern& pattern, const fs::path& dir, std::size_t 
     fs::path path = dir / pattern.segment(k);
     const std::optional<entry_kind> kind = platform::entry_at(path);
     if (!kind) return;
-    const bool directory = *kind == entry_kind::directory || (*kind == entry_kind::link && leads_to_directory(path));
+    const bool directory = is_directory_followed(*kind, path);
+    if (directory && pattern.skips(pattern.segment(k))) return;
     if (pattern.is_last(k)) {
-        if (!pattern.dirs_only() || directory) emit(std::move(path));
+        if ((!pattern.dirs_only() || directory) && kept(pattern, *kind, path)) emit(std::move(path));
     } else if (directory) {
         go_on(glob_task::entering(pattern, std::move(path), k + 1));
     }
@@ -317,13 +367,14 @@ void glob_step(const glob_pattern& pattern, const glob_task& task, Emit&& emit, 
         return;
     }
     if (pattern.is_last(k)) {   // a final `**`: where it starts, then every entry below (a final `**/`: every real directory)
-        if (task.starts_run()) emit(task.dir());
+        if (task.starts_run() && pattern.kind() != glob_kind::file) emit(task.dir());
         for (const dir_entry& e : entries) {
             fs::path path = e.under(task.dir());
+            if (detail::skipped(pattern, e, path)) continue;
             if (e.kind() == entry_kind::directory) {
                 go_on(glob_task(path, k));
-                emit(std::move(path));
-            } else if (!pattern.dirs_only()) {
+                if (pattern.kind() != glob_kind::file) emit(std::move(path));
+            } else if (!pattern.dirs_only() && detail::kept(pattern, e.kind(), path)) {
                 emit(std::move(path));
             }
         }
@@ -334,7 +385,7 @@ void glob_step(const glob_pattern& pattern, const glob_task& task, Emit&& emit, 
     if (pattern.steps_up(k + 1)) go_on(glob_task::entering(pattern, task.dir(), k + 1));
     else detail::match_segment(pattern, task.dir(), entries, k + 1, emit, go_on);
     for (const dir_entry& e : entries) {
-        if (e.kind() == entry_kind::directory) go_on(glob_task(e.under(task.dir()), k));
+        if (e.kind() == entry_kind::directory && !pattern.skips(e.name())) go_on(glob_task(e.under(task.dir()), k));
     }
 }
 

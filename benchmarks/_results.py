@@ -35,22 +35,15 @@ def _git(*args, cwd=HERE):
         return None
 
 
-def _checkout_of(where):
-    """The top folder of the git checkout holding *where* (a folder, or a file's), resolved as a
-    resolved *where* is; None outside any checkout."""
-    top = _git("rev-parse", "--show-toplevel", cwd=where if where.is_dir() else where.parent)
-    return path(top).resolve() if top else None
-
-
 def corpus(folder):
     """A corpus as a record names it: its checkout's folder name and the path below it
     (``cpython/Lib``, ``llvm-project``), never where on this machine it lies; a folder outside any
-    checkout by its own name."""
-    here = path(folder).expanduser().resolve()
-    checkout = _checkout_of(here)
-    if checkout is None:
-        return here.name
-    return "/".join([checkout.name, *here.relative_to(checkout).parts])
+    checkout by its own name. *folder* is resolved already: ``_bench.folder`` made it of --root."""
+    top = _git("rev-parse", "--show-toplevel", cwd=folder)
+    if top is None:
+        return folder.name
+    checkout = path(top).resolve()   # as *folder* is: git prints the top as the OS names it
+    return "/".join([checkout.name, *folder.relative_to(checkout).parts])
 
 
 def _local_paths(value, where):

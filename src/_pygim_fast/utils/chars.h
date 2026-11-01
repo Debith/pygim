@@ -16,6 +16,7 @@
 //
 // CORE layer: pybind-free.
 
+#include <algorithm>
 #include <cstdint>
 #include <string>
 #include <string_view>
@@ -85,6 +86,12 @@ static_assert(lower("Windows-1252") == "windows-1252");   // a codec name, a sch
 
 [[nodiscard]] constexpr std::string upper(std::string_view s) { return with_case(s, to_upper); }
 static_assert(upper(".py") == ".PY");   // engine_list's proof that an extension's case does not matter
+
+/// Whether `a` and `b` are one text but for the case of ASCII letters, compared without a copy.
+[[nodiscard]] constexpr bool same_folded(std::string_view a, std::string_view b) noexcept {
+    return std::ranges::equal(a, b, [](char x, char y) { return to_lower(x) == to_lower(y); });
+}
+static_assert(same_folded(".PY", ".py") && !same_folded(".py", ".pyi") && !same_folded(".\xc3", ".\xe3"));   // a byte past ASCII as it is
 
 /// How many bytes a code point's UTF-8 takes, a surrogate's too: what append_wtf8 appends.
 [[nodiscard]] constexpr std::size_t wtf8_length(std::uint32_t cp) noexcept { return cp < 0x80 ? 1 : cp < 0x800 ? 2 : cp < 0x10000 ? 3 : 4; }

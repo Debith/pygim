@@ -15,6 +15,7 @@ from pathlib import Path
 
 import pytest
 
+import pygim
 from pygim import code
 from stub_parity import Stub
 from pool_threads import POOL_THREADS
@@ -465,7 +466,7 @@ def test_a_file_named_past_utf8_is_named_as_os_fsdecode_names_it(temp_dir, write
     good = write_named_past_utf8(os.path.join(root, b"\xff.py"), b"x = 1\n")
     bad = write_named_past_utf8(os.path.join(root, b"\xfe.py"), b"x = (\n")
     corpus = code.parse(os.fsdecode(root))
-    assert sorted(corpus.files) == sorted([os.fsdecode(good), os.fsdecode(bad)])
+    assert sorted(corpus.files.to_list()) == sorted([os.fsdecode(good), os.fsdecode(bad)])
     assert [e[0] for e in corpus.errors] == [os.fsdecode(bad)]
     assert corpus[os.fsdecode(good)].path == os.fsdecode(good)
 
@@ -543,7 +544,17 @@ def project(temp_dir):
 
 def test_a_corpus_holds_every_match_sorted(project):
     corpus = code.parse(project)
-    assert [Path(os.path.relpath(p, project)).as_posix() for p in corpus.files] == ["a.py", "pkg/b.py", "pkg/c.py", "pkg/e.py/f.py", "pkg/sub/d.py"]
+    assert ["/".join(p.parts) for p in corpus.files.relative_to(project)] == ["a.py", "pkg/b.py", "pkg/c.py", "pkg/e.py/f.py", "pkg/sub/d.py"]
+
+
+def test_a_corpus_names_its_files_as_a_pathset_its_trees_are_found_by(project):
+    """Many files are a PathSet (pathlike's rule: one path is a path, many a set), in the corpus's own
+    order, and each member finds its tree."""
+    corpus = code.parse(project)
+    assert isinstance(corpus.files, pygim.PathSet)
+    assert corpus.files == pygim.path(project).pathset("**/*.py", kind="file")
+    assert [corpus[member].path for member in corpus.files if member.name != "c.py"] == \
+        [os.fspath(member) for member in corpus.files if member.name != "c.py"]   # c.py is not Python
 
 
 def test_a_file_that_is_not_python_is_listed_with_its_place(project):
@@ -659,6 +670,7 @@ def test_an_absolute_pattern_is_a_value_error(project):
 
 CHILD = POOL_THREADS + r"""
 import os, pathlib, signal, sys, threading, time
+import pygim
 from pygim import code
 
 root = pathlib.Path(sys.argv[1])

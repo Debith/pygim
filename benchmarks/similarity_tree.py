@@ -18,7 +18,10 @@ Each run appends its raw measurements + environment metadata to
 with add_file() in a loop, so the same script measures an older build.
 """
 
+import argparse
 import collections
+import functools
+import operator
 import subprocess
 import sys
 
@@ -26,8 +29,9 @@ import pyarrow.compute as pc
 from tabulate import tabulate
 
 from pygim import similarity
-from pygim.pathlike import path
+from pygim.pathlike import ext
 from pygim.utils import QuickTimer
+from _bench import folder
 from _results import corpus, save, wants_save
 
 THRESHOLD = 0.8
@@ -36,13 +40,11 @@ TOP = 1000
 
 
 def sources(root, dirs):
-    """{language: [files]} under root/dir for each dir, through pygim's own walker."""
-    found = collections.defaultdict(list)
-    for d in dirs:
-        for f in (root / d).rglob("*"):   # sorted already, in pathlib's order
-            if f.is_file() and (language := similarity.language_of(f)):
-                found[language].append(f)
-    return {language: sorted(files) for language, files in found.items()}   # pathlib's order, across folders
+    """{language: [files]} under root/dir for each dir: walked as one PathSet, each language's files
+    chosen by its extensions as similarity.language_of reads them."""
+    walked = functools.reduce(operator.or_, ((root / d).pathset("**/*", kind="file") for d in dirs))   # one table
+    found = {language: walked.filter(ext(*record["exts"], case_sensitive=False)) for language, record in similarity.LANGUAGES.items()}
+    return {language: sorted(files) for language, files in found.items() if files}   # pathlib's order, across folders
 
 
 def cause(message):
@@ -72,7 +74,10 @@ def main():
     args = [a for a in sys.argv[1:] if not a.startswith("--")]
     if len(args) < 2:
         sys.exit(__doc__)
-    root = path(args[0]).expanduser().resolve()
+    try:
+        root = folder(args[0])
+    except argparse.ArgumentTypeError as e:
+        sys.exit(str(e))
     corpora = {name: dirs.split(",") for name, dirs in (a.split("=", 1) for a in args[1:])}
     try:
         commit = subprocess.run(["git", "-C", str(root), "log", "-1", "--format=%h %cd", "--date=short"],

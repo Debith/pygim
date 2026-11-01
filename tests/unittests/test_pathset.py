@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """The set-like surface of pygim.PathSet — what the former pygim.pathset module
 offered, now over one table: construction from one path or many, bool/==/in,
-+ and - with paths or sets, clone, cwd, read_all_files, match_pattern, and the
++ and - with paths or sets, clone, cwd, read_all_files, sizes, match_pattern, and the
 Filter / Query algebra (ext, name, absolute; & | ~; ps & f)."""
 
 import fnmatch
@@ -101,6 +101,30 @@ def test_extension_filter_selects_matching_files(temp_files):
     assert PathSet(temp_files).filter(ext(".rst")) == filtered
 
 
+SUFFIXED = ["a.h", "b.CPP", "c.py", "d.Hpp", "e.tar.c", "f", ".h", "g.pyi", "h.PY", "i.c++", "j.ç"]
+
+
+def test_ext_takes_several_suffixes_and_any_case_on_request():
+    names = lambda f: [p.name for p in PathSet(SUFFIXED) & f]
+    assert names(ext(".h", ".cpp")) == ["a.h"]
+    assert names(ext(".h", ".cpp", ".hpp", case_sensitive=False)) == ["a.h", "b.CPP", "d.Hpp"]
+    assert names(ext(".C", case_sensitive=False)) == ["e.tar.c"]            # the final suffix only
+    assert names(ext(".Ç", case_sensitive=False)) == []                     # ASCII letters fold, no others
+    assert names(ext("")) == ["f", ".h"]                                     # pathlib: ".h" has no suffix
+    with pytest.raises(TypeError, match="one suffix or more"):
+        ext()
+    with pytest.raises(TypeError, match="as str, not bool"):
+        ext(".py", True)                                                    # case_sensitive is keyword-only
+
+
+def test_ext_of_a_languages_suffixes_finds_what_language_of_finds():
+    """The Filter similarity's files are chosen by: ext(*LANGUAGES[l]["exts"], case_sensitive=False)."""
+    similarity = pytest.importorskip("pygim.similarity")
+    for language, record in similarity.LANGUAGES.items():
+        chosen = [p.name for p in PathSet(SUFFIXED) & ext(*record["exts"], case_sensitive=False)]
+        assert chosen == [n for n in SUFFIXED if similarity.language_of(n) == language], language
+
+
 def test_query_is_lazy_and_keeps_its_source_alive(temp_files):
     query = PathSet(temp_files) & ext(".rst")                     # the source is a temporary
     gc.collect()
@@ -149,6 +173,22 @@ def test_read_all_files(temp_dir, temp_files):
     (temp_dir / "readme.rst").write_text("world")
     texts = PathSet([temp_dir / "readme.txt", temp_dir / "readme.rst", temp_dir]).read_all_files()
     assert texts == ["hello", "world"]                            # the directory is skipped
+
+
+def test_sizes_are_each_members_size_in_member_order(temp_dir, temp_files):
+    """What path.size() gives each member, in member order — and the OSError it raises, naming the member."""
+    for n, f in enumerate(temp_files):
+        f.write_bytes(b"x" * (10 * n + 1))
+    members = PathSet(list(reversed(temp_files)))
+    assert members.sizes() == [p.size() for p in members] == [21, 11, 1]
+    assert PathSet([]).sizes() == []
+    with pytest.raises(FileNotFoundError) as missing:
+        PathSet([temp_files[0], temp_dir / "gone.txt"]).sizes()
+    assert missing.value.filename == os.fspath(temp_dir / "gone.txt")
+    with pytest.raises(OSError) as folder:
+        PathSet([temp_dir]).sizes()
+    with pytest.raises(type(folder.value)):
+        pygim.path(temp_dir).size()                               # the same error path.size() raises
 
 
 FNMATCH_PATTERNS = ["*.py", "?.py", "[ab]", "[!a]*", "[a-c]?", "[]a]", "[!]a]", "[a-]", "[-a]", "[c-a]", "[ab", "x[!]", "[[]",

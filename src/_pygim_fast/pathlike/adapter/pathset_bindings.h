@@ -108,6 +108,28 @@ inline bool contains(const PathSet& ps, py::handle item) {
     return ps.contains_text(t.view());
 }
 
+/// pathset()'s kind: None, 'file' or 'dir'; anything else a ValueError naming what is taken.
+[[nodiscard]] inline glob_kind glob_kind_of(std::optional<std::string_view> kind) {
+    if (!kind) return glob_kind::any;
+    if (*kind == "file") return glob_kind::file;
+    if (*kind == "dir") return glob_kind::directory;
+    throw py::value_error("kind must be 'file', 'dir' or None, not '" + std::string(*kind) + "'");
+}
+
+/// pathset()'s skip: names from any iterable of str — a list, a tuple, a set. One str alone is a
+/// TypeError: iterated, it would skip every folder named by one of its letters.
+[[nodiscard]] inline std::vector<std::string> skip_names(const py::object& skip) {
+    if (PyUnicode_Check(skip.ptr()) || PyBytes_Check(skip.ptr())) {
+        throw py::type_error("skip takes folder names, not one string: skip=[" + py::repr(skip).cast<std::string>() + "]");
+    }
+    std::vector<std::string> out;
+    for (const py::handle name : py::iter(skip)) {
+        if (!PyUnicode_Check(name.ptr())) throw py::type_error("skip takes folder names as str, not " + std::string(Py_TYPE(name.ptr())->tp_name));
+        out.push_back(name.cast<std::string>());
+    }
+    return out;
+}
+
 /// The UTF-8 text of `bytes` as a str, or a ValueError naming the file they came from: name(),
 /// asked only then, decoded as os.fsdecode does, since a POSIX name need not be UTF-8 either.
 template <std::invocable Name>
@@ -296,13 +318,21 @@ void bind_pathset(engine_list<Es...> es, py::module_& m, py::class_<pathview>& p
     using Engines_ = engine_list<Es...>;
     (void)Engines_{};
 
-    // `p.pathset(pattern)`: the glob results as a set over p's own table.
-    path_cls.def("pathset", [](const pathview& v, std::string_view pattern, std::optional<bool> case_sensitive) {
+    // `p.pathset(pattern, kind=, skip=)`: the glob results as a set over p's own table.
+    path_cls.def("pathset", [](const pathview& v, std::string_view pattern, std::optional<bool> case_sensitive,
+                               std::optional<std::string_view> kind, const py::object& skip) {
+                 glob_pattern parsed(pattern, case_sensitive, glob_kind_of(kind), skip_names(skip));
                  PathSet ps(v.table());
-                 for (const file& m : glob_of(v.value(), pattern, case_sensitive)) ps.add_value(m.value());
+                 for (const file& m : glob_of(v.value(), std::move(parsed))) ps.add_value(m.value());
                  return ps;
-             }, py::arg("pattern") = "*", py::kw_only(), py::arg("case_sensitive") = py::none(),
-             "The glob results as a PathSet over this path's table, for set algebra and Filter queries.");
+             }, py::arg("pattern") = "*", py::kw_only(), py::arg("case_sensitive") = py::none(), py::arg("kind") = py::none(),
+             py::arg("skip") = py::tuple(),
+             "What glob(pattern) finds, as a PathSet over this path's table, for set algebra and Filter queries.\n"
+             "kind: 'file' keeps what is_file() says is a file, 'dir' what is_dir() says is a directory (a link\n"
+             "followed; the walk's listing tells, a link alone is stat'ed); None keeps every match.\n"
+             "skip: names of folders to pass over (globs, as the pattern's case_sensitive says): a folder so\n"
+             "named, or a link to one, is never entered or matched, nor is anything beneath it; a file so\n"
+             "named is kept. `path(root).pathset('**/*.py', kind='file', skip=['.git', 'build'])`.");
 
     py::class_<file_content>(m, "FileContent", py::buffer_protocol(),
         "One member's bytes, read by PathSet.read_each(): held in C++ and shown as a read-only buffer, so\n"
@@ -352,8 +382,17 @@ void bind_pathset(engine_list<Es...> es, py::module_& m, py::class_<pathview>& p
         .def("__len__", [](const path_query& q) { return q.eval().size(); })
         .def("__iter__", [](const path_query& q) { return py::cast(q.eval()).attr("__iter__")(); });
 
-    m.def("ext", [](std::string s) { return ext_filter(std::move(s)); }, py::arg("suffix"),
-          "Filter: pathlib's final suffix equals `suffix` ('.yaml'; case-sensitive).");
+    m.def("ext", [](const py::args& suffixes, bool case_sensitive) {
+              if (suffixes.empty()) throw py::type_error("ext() takes one suffix or more: ext('.h', '.cpp')");
+              std::vector<std::string> wanted;
+              for (const py::handle s : suffixes) {
+                  if (!PyUnicode_Check(s.ptr())) throw py::type_error("ext() takes suffixes as str, not " + std::string(Py_TYPE(s.ptr())->tp_name));
+                  wanted.push_back(s.cast<std::string>());
+              }
+              return ext_filter(std::move(wanted), case_sensitive);
+          }, py::arg("case_sensitive") = true,   // keyword-only: it follows *suffixes
+          "Filter: pathlib's final suffix is one of `suffixes` ('.yaml'; ext('.h', '.cpp')), compared\n"
+          "exactly, or but for the case of ASCII letters when case_sensitive is False.");
     m.def("name", [](std::string g) { return name_filter(std::move(g)); }, py::arg("glob"),
           "Filter: the final component matches the glob (`*` and `?`).");
     m.def("absolute", []() { return absolute_filter(); }, "Filter: pathlib's is_absolute().");
@@ -447,6 +486,14 @@ void bind_pathset(engine_list<Es...> es, py::module_& m, py::class_<pathview>& p
              "threads: as read_all_files. Folders, missing paths, link loops, FIFOs and devices are left out\n"
              "(a FIFO or device opened, non-blocking, to be told apart); a file the OS refuses raises in its\n"
              "place, and the reading ends there.")
+        .def("sizes", [](const PathSet& ps) {
+                 const std::vector<fs::path> paths = ps.fs_paths();   // copied with the GIL held
+                 const py::gil_scoped_release nogil;
+                 return sizes_of(paths);
+             },
+             "Each member's size in bytes, in member order, as path.size() gives it (a link followed); the\n"
+             "stats run with the GIL released. A member that is not there, or is not a file, raises the\n"
+             "OSError path.size() raises, naming it.")
         .def("count_union", &PathSet::count_union, py::arg("other"),
              "len(self | other) without building the set: a popcount over the bitmaps when the tables are shared.")
         .def("count_intersection", &PathSet::count_intersection, py::arg("other"),

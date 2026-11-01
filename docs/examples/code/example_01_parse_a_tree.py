@@ -47,7 +47,7 @@ with tempfile.TemporaryDirectory() as tmp:
     #                         │          ┌─ threads: None is one per core; n fixes it
     #                         ▼          ▼
     corpus = code.parse(root, "**/*.py", threads=None)
-    assert [Path(p).name for p in corpus.files] == ["broken.py", "shapes.py"]   # sorted by path
+    assert [p.name for p in corpus.files] == ["broken.py", "shapes.py"]   # a PathSet, by path
     stats = corpus.stats()
     assert stats["files"] == 2
     assert stats["failed"] == 1

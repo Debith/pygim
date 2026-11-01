@@ -198,7 +198,7 @@ def _listed_data_caches():
     """{level: bytes} of the largest cache of each level that holds data, as the kernel lists cpu0's."""
     read = lambda index, what: index.joinpath(what).read_bytes().decode().strip()
     found = {}
-    for index in SYS_CACHES.glob("index*"):
+    for index in SYS_CACHES.pathset("index*", kind="dir"):
         size = read(index, "size")
         bytes_ = int(size[:-1]) * {"K": 1024, "M": 1 << 20}[size[-1]] if size[-1] in "KM" else int(size)
         if read(index, "type") != "Instruction":

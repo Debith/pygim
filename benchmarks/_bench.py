@@ -1,12 +1,15 @@
 """Shared benchmark helpers: timing that is honest about what is alive, a
-synthetic path corpus, and RSS.
+synthetic path corpus, RSS, and the command line's folders.
 
 Import from a benchmark next to this file (``from _bench import best, corpus``).
 """
 
+import argparse
 import gc
 import random
+import sys
 
+from pygim import path
 from pygim.utils import QuickTimer
 from pygim.utils import rss_mb  # the benchmarks import it from here: one syscall, every platform
 
@@ -44,6 +47,27 @@ def best_fresh(fn, reps=REPS):
 
 def ns(seconds, n):
     return seconds / n * 1e9
+
+
+def folder(text):
+    """A folder named on the command line, as the whole run uses it: a pygim path, ``~`` expanded and
+    resolved here, where it is read, and refused here when it is no folder — before anything is
+    measured, and never resolved again below. An argparse ``type=``, or ``argument("--root", folder)``."""
+    named = path(text).expanduser().resolve()
+    if not named.is_dir():
+        raise argparse.ArgumentTypeError(f"{text} is not a folder")
+    return named
+
+
+def argument(name, convert=str):
+    """The value after *name* on the command line, converted at once (``argument("--root", folder)``);
+    None when it is not given. A value *convert* refuses ends the run before anything is measured."""
+    if name not in sys.argv[:-1]:
+        return None
+    try:
+        return convert(sys.argv[sys.argv.index(name) + 1])
+    except argparse.ArgumentTypeError as e:
+        sys.exit(f"{name}: {e}")
 
 
 

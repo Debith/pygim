@@ -34,7 +34,7 @@ def compilers():
 
 
 def main():
-    proofs = list(HERE.glob("*_proofs.cpp"))   # sorted
+    proofs = HERE.pathset("*_proofs.cpp", kind="file")   # sorted
     failed = []
     for cxx in compilers():
         for proof in proofs:

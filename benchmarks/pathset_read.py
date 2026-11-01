@@ -7,7 +7,8 @@ Sections:
    (a str per file), read_each (a view per file; and its text()), each warm (pages cached).
 2. **cold** — the same with each file's pages dropped first (posix_fadvise DONTNEED): Linux, on a
    disk-backed file system; tmpfs keeps its pages whatever is asked, so there it measures warm.
-3. **glob** — path(root).glob("**/*.py") against pathlib.Path(root).rglob("*.py").
+3. **glob** — path(root).glob("**/*.py") and path(root).pathset("**/*.py") against
+   pathlib.Path(root).rglob("*.py").
 
 The corpus is --root DIR (CPython's Lib reproduces the design's table: 1,756 files, 32 MB), or else
 20,000 generated files of about 260 bytes — the design's small-files row — in a temporary folder.
@@ -24,18 +25,13 @@ import tempfile
 
 from tabulate import tabulate
 
-from pygim import PathSet, path
+from pygim import path
 from _results import corpus, save, wants_save
 
-from _bench import REPS, best_fresh
+from _bench import REPS, argument, best_fresh, folder
 
 SMALL_FILES = 20_000
 SMALL_TEXT = "x = 1  # a line of a small module\n" * 7   # 259 bytes
-
-
-def argument(name):
-    """The value after `name` on the command line, or None."""
-    return sys.argv[sys.argv.index(name) + 1] if name in sys.argv[:-1] else None
 
 
 def generated(root):
@@ -47,17 +43,18 @@ def generated(root):
     return root
 
 
-def utf8(file):
-    """Whether the file's bytes are UTF-8: every contender here makes a str of each."""
+def is_utf8(content):
+    """Whether a member's bytes, as read_each() read them, are UTF-8: every contender here makes a str of each."""
     try:
-        path(file).read_text()
+        content.text()
         return True
-    except UnicodeDecodeError:
+    except ValueError:
         return False
 
 
 def drop_pages(files):
-    """Each file's cached pages dropped, so the next read goes to the disk (Linux; ext4 honours it)."""
+    """Each file's cached pages dropped, so the next read goes to the disk (Linux; ext4 honours it).
+    *files* are the members' names: fadvise is a call per open file, which no PathSet operation makes."""
     for f in files:
         fd = os.open(f, os.O_RDONLY)
         try:
@@ -66,9 +63,9 @@ def drop_pages(files):
             os.close(fd)
 
 
-def reads(files):
-    """What each contender does to the whole corpus: label -> call."""
-    members = PathSet(files)
+def reads(members, files):
+    """What each contender does to the whole corpus: label -> call. Python's loop is handed the members'
+    names (*files*), made before any timing, as a loop of its own would have them."""
 
     def python_bytes():
         out = []
@@ -103,9 +100,9 @@ def best_cold(call, files, reps=REPS):
     return best
 
 
-def bench_reads(files, cold):
+def bench_reads(members, files, cold):
     rows, raw = [], {}
-    for label, call in reads(files).items():
+    for label, call in reads(members, files).items():
         t = best_cold(call, files) if cold else best_fresh(call)[0]
         raw[label] = {"seconds": t}
         rows.append([label, f"{t * 1e3:,.1f}"])
@@ -115,7 +112,8 @@ def bench_reads(files, cold):
 def bench_glob(root):
     rows, raw = [], {}
     for label, call in {"pathlib rglob('*.py')": lambda: list(pathlib.Path(root).rglob("*.py")),
-                        "path.glob('**/*.py')": lambda: path(str(root)).glob("**/*.py")}.items():
+                        "path.glob('**/*.py')": lambda: root.glob("**/*.py"),
+                        "path.pathset('**/*.py')": lambda: root.pathset("**/*.py")}.items():
         t, found = best_fresh(call)
         raw[label] = {"seconds": t, "found": len(found)}
         rows.append([label, f"{t * 1e3:,.1f}", len(found)])
@@ -123,23 +121,23 @@ def bench_glob(root):
 
 
 def main():
-    given = argument("--root")
+    given = argument("--root", folder)
     with tempfile.TemporaryDirectory() as scratch:
-        root = path(given) if given else generated(path(scratch))
-        found = [str(p) for p in root.glob("**/*.py") if p.is_file()]   # sorted already
-        files = [f for f in found if utf8(f)]   # CPython's Lib holds a few that are not, on purpose
-        size = sum(path(f).size() for f in files)
-        print(f"{len(files):,} UTF-8 files ({len(found) - len(files)} others left out), {size / 2**20:,.1f} MB "
+        root = given or generated(path(scratch))
+        found = root.pathset("**/*.py", kind="file")   # sorted already
+        members = found - [c.path for c in found.read_each() if not is_utf8(c)]   # CPython's Lib holds a few that are not, on purpose
+        files, size = members.to_list(), sum(members.sizes())
+        print(f"{len(members):,} UTF-8 files ({len(found) - len(members)} others left out), {size / 2**20:,.1f} MB "
               f"under {root if given else 'a generated tree'}; best of {REPS}, ms\n")
-        sections = {"corpus": {"root": corpus(root) if given else "generated", "files": len(files), "bytes": size}}
+        sections = {"corpus": {"root": corpus(root) if given else "generated", "files": len(members), "bytes": size}}
 
-        rows, sections["read"] = bench_reads(files, cold=False)
+        rows, sections["read"] = bench_reads(members, files, cold=False)
         print("read, warm\n" + tabulate(rows, headers=["", "ms"], disable_numparse=True) + "\n")
         if "--cold" in sys.argv:
             if not hasattr(os, "posix_fadvise"):
                 print("cold: no posix_fadvise on this platform, skipped\n")
             else:
-                rows, sections["cold"] = bench_reads(files, cold=True)
+                rows, sections["cold"] = bench_reads(members, files, cold=True)
                 print("read, cold (pages dropped; tmpfs keeps them)\n" +
                       tabulate(rows, headers=["", "ms"], disable_numparse=True) + "\n")
         rows, sections["glob"] = bench_glob(root)

@@ -48,7 +48,9 @@
 // CORE layer: pybind-free.
 
 #include <cstddef>
+#include <algorithm>
 #include <cstdint>
+#include <filesystem>
 #include <functional>
 #include <memory>
 #include <stdexcept>
@@ -58,6 +60,7 @@
 #include <vector>
 
 #include "../mapping/id_set.h"
+#include "../utils/chars.h"
 #include "core.h"
 #include "file_reads.h"
 #include "path_store.h"
@@ -102,6 +105,14 @@ private:
 /// pathlib's final suffix equals `s` (case-sensitive).          ext_filter(".rst")
 [[nodiscard]] inline row_filter ext_filter(std::string s) {
     return {[s = std::move(s)](const path_table& t, std::uint32_t r) { return detail::suffix_of(t.name(r)) == s; }};
+}
+/// pathlib's final suffix is one of `suffixes`, compared exactly — or, case_sensitive false, but for
+/// the case of ASCII letters, as similarity.language_of compares one.    ext_filter({".h", ".cpp"}, false)
+[[nodiscard]] inline row_filter ext_filter(std::vector<std::string> suffixes, bool case_sensitive) {
+    return {[s = std::move(suffixes), case_sensitive](const path_table& t, std::uint32_t r) {
+        const std::string_view mine = detail::suffix_of(t.name(r));
+        return std::ranges::any_of(s, [&](const std::string& x) { return case_sensitive ? mine == x : chars::same_folded(mine, x); });
+    }};
 }
 /// The name matches a glob (`*`, `?` within the component).       name_filter("read*")
 [[nodiscard]] inline row_filter name_filter(std::string glob) {
@@ -354,6 +365,17 @@ public:
         return out;
     }
 
+    /// Every member as std::filesystem takes it, in member order (file::to_fs): what a call that only
+    /// stats the members owns, so it can run with the GIL released.
+    ///
+    ///     ps.fs_paths() -> ["a/b.yaml", "a/c.json", "/d"]
+    [[nodiscard]] std::vector<fs::path> fs_paths() const {
+        std::vector<fs::path> out;
+        out.reserve(size());
+        for (const std::uint32_t r : members()) out.push_back(file(m_table->value(r)).to_fs());
+        return out;
+    }
+
     /// The bytes the members and bitmap hold (PathSet.stats()["member_bytes"]).
     [[nodiscard]] std::size_t member_bytes() const noexcept { return m_ids.bytes(); }
 
@@ -364,5 +386,16 @@ private:
     table_ptr m_table;
     mapping::id_set m_ids;   // the members (insertion order) and their bitmap
 };
+
+/// Each file's size in bytes, in order: file::size of each (a link followed). One that is not there,
+/// or is not a file, is the OS's error naming it (std::filesystem_error), as path.size() raises it.
+///
+///     sizes_of(ps.fs_paths()) -> {259, 4096, 12}
+[[nodiscard]] inline std::vector<std::uintmax_t> sizes_of(const std::vector<fs::path>& paths) {
+    std::vector<std::uintmax_t> out;
+    out.reserve(paths.size());
+    for (const fs::path& p : paths) out.push_back(fs::file_size(p));
+    return out;
+}
 
 }  // namespace pygim::pathlike

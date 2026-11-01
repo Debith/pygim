@@ -23,22 +23,21 @@ import os
 import sys
 import tempfile
 import zlib
-from pathlib import Path
 
-from pygim import PathSet
+from pygim import PathSet, path
 
 tmp = tempfile.TemporaryDirectory()
-root = Path(tmp.name)
+root = path(tmp.name)
 for i in range(300):
     (root / f"part_{i:03d}.txt").write_text(f"part {i}\n" + "x" * (i * 13))
-members = sorted(root.glob("*.txt"))
+members = root.pathset("*.txt", kind="file")       # many files are one PathSet, sorted
 
 # ----------------------------------------------------------------------------
 # 1. Views in member order, while threads read ahead
 # ----------------------------------------------------------------------------
 checksum = 0
 first_lines = []
-for content in PathSet(members).read_each():       # threads read the next files meanwhile
+for content in members.read_each():                 # threads read the next files meanwhile
     checksum = zlib.crc32(content, checksum)         # a buffer: zlib reads it in place
     first_lines.append(content.text().splitlines()[0])   # written as text: \r\n on Windows
 assert first_lines == [f"part {i}" for i in range(300)]          # member order, every run
@@ -52,7 +51,7 @@ content = next(PathSet([members[1]]).read_each())
 #                          ▼
 assert memoryview(content).obj is content
 assert memoryview(content).readonly
-assert len(content) == members[1].stat().st_size
+assert len(content) == members[1].size() == members.sizes()[1]
 # bytes() copies, when you want one
 assert bytes(content) == members[1].read_bytes()
 assert content.path.name == "part_001.txt"                       # the member it came from
@@ -66,7 +65,7 @@ assert [c.path.name for c in mixed.read_each()] == ["part_000.txt", "part_002.tx
 if sys.platform != "win32" and os.geteuid() != 0:   # permission bits bind a non-root POSIX user
     secret = root / "secret.txt"
     secret.write_text("no")
-    secret.chmod(0)
+    os.chmod(secret, 0)
     reading = PathSet([members[0], secret, members[1]]).read_each()
     assert next(reading).path.name == "part_000.txt"
     try:
@@ -75,22 +74,22 @@ if sys.platform != "win32" and os.geteuid() != 0:   # permission bits bind a non
     except PermissionError:
         # as pathlib's read_bytes() raises; the reading ends
         pass
-    secret.chmod(0o600)
+    os.chmod(secret, 0o600)
 
 # ----------------------------------------------------------------------------
 # 4. Fixing the width, bounding the read-ahead
 # ----------------------------------------------------------------------------
-#                                    ┌─ threads: how many read at once (None: as the job rewards)
-#                                    │          ┌─ ahead_bytes: how much may wait for you, read
-#                                    ▼          ▼
-bounded = PathSet(members).read_each(threads=4, ahead_bytes=64 * 1024)
+#                           ┌─ threads: how many read at once (None: as the job rewards)
+#                           │          ┌─ ahead_bytes: how much may wait for you, read
+#                           ▼          ▼
+bounded = members.read_each(threads=4, ahead_bytes=64 * 1024)
 fixed = [c.text() for c in bounded]
 assert fixed == [m.read_bytes().decode() for m in members]       # same results, whatever the width
 
 # ----------------------------------------------------------------------------
 # 5. read_all_files(): the whole set as str, in one call
 # ----------------------------------------------------------------------------
-texts = PathSet(members).read_all_files()                        # the reads run without the GIL
+texts = members.read_all_files()                                 # the reads run without the GIL
 assert texts == [m.read_bytes().decode() for m in members]     # the bytes as str: \r\n stays
 
 tmp.cleanup()

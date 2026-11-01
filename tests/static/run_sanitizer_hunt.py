@@ -26,14 +26,16 @@ from __future__ import annotations
 
 import argparse
 import concurrent.futures as futures
+import functools
 import json
+import operator
 import os
 import re
 import subprocess
 import sys
 import time
 
-from pygim.pathlike import path
+from pygim.pathlike import ext, path
 
 HERE = path(os.path.dirname(os.path.abspath(__file__)))
 UNIT_SIZE = {"python": 2000, "cpp": 1000}
@@ -89,8 +91,8 @@ def seed_list(out, target, roots):
     copied into the run's own directory, so a run outlives its sources and can be made again."""
     listing = out / f"{target}-files.txt"
     if not listing.exists():
-        found = sorted((p for root in roots for p in path(root).rglob("*")
-                        if p.suffix in EXTENSIONS[target] and p.is_file() and 0 < p.size() <= MAX_SEED_BYTES), key=str)
+        sources = functools.reduce(operator.or_, (path(root).pathset("**/*", kind="file") for root in roots)).filter(ext(*EXTENSIONS[target]))
+        found = sorted((p for p, size in zip(sources, sources.sizes()) if 0 < size <= MAX_SEED_BYTES), key=str)
         seeds = out / "seeds" / target
         seeds.mkdir(parents=True, exist_ok=True)
         copies = []
@@ -190,8 +192,8 @@ def main():
                 if s["findings"] or done % 50 == 0:
                     print(f"{time.strftime('%H:%M:%S')} {s['target']} unit {s['unit']}: {s['inputs']} inputs, "
                           f"{s['findings']} finding(s); {done} units this run", flush=True)
-    units = [json.loads(p.read_bytes()) for p in (out / "units").glob("*.json")]
-    findings = (out / "findings").glob("*.json")
+    units = [json.loads(bytes(content)) for content in (out / "units").pathset("*.json", kind="file").read_each()]
+    findings = (out / "findings").pathset("*.json", kind="file")
     print(f"hunt done: {len(units)} units, {sum(u['inputs'] for u in units)} inputs, {len(findings)} findings")
     return 1 if findings else 0
 

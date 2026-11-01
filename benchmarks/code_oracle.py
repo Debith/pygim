@@ -27,6 +27,7 @@ import tempfile
 
 from pygim import code, path, pathlike
 from pygim.utils import QuickTimer
+from _bench import folder
 from _results import save, wants_save
 
 # What python3.14 runs: for each path on stdin, one JSON line {"ok": bool, "dump"|"error": ...};
@@ -52,7 +53,7 @@ print(json.dumps({"seconds": total}))
 
 
 def cpython(paths, mode):
-    """python3.14's answer for each path, and the seconds its ast.parse took in all."""
+    """python3.14's answer for each member of *paths* (a PathSet), and the seconds its ast.parse took in all."""
     done = subprocess.run(["python3.14", "-c", CPYTHON, mode], input="\n".join(map(str, paths)) + "\n",
                           capture_output=True, text=True, check=True)
     lines = pathlike.decode(done.stdout, engine="jsonl")
@@ -68,28 +69,28 @@ def section_files(root):
     with QuickTimer.silent("parse") as parsing:
         corpus = code.parse(root)
     took = parsing.total.seconds
-    paths = corpus.files
-    theirs, cpython_seconds = cpython(paths, "dump")
+    files = corpus.files   # a PathSet, in the corpus's order
+    theirs, cpython_seconds = cpython(files, "dump")
     counts = {"same": 0, "differ": 0, "only pygim refuses": 0, "only cpython refuses": 0, "both refuse": 0}
     shown = []
-    for i, (path, answer) in enumerate(zip(paths, theirs)):
+    for member, answer in zip(files, theirs):
         try:
-            ours = corpus[i].dump(include_attributes=True)
+            ours = corpus[member].dump(include_attributes=True)
         except SyntaxError as e:
             ours = None
             why = str(e)
         if ours is None:
             key = "both refuse" if not answer["ok"] else "only pygim refuses"
             if answer["ok"]:
-                shown.append((path, why, ""))
+                shown.append((member, why, ""))
         elif not answer["ok"]:
             key = "only cpython refuses"
-            shown.append((path, "", answer["error"]))
+            shown.append((member, "", answer["error"]))
         elif ours == answer["dump"]:
             key = "same"
         else:
             key = "differ"
-            shown.append((path, *first_difference(ours, answer["dump"])))
+            shown.append((member, *first_difference(ours, answer["dump"])))
         counts[key] += 1
     return {"counts": counts, "seconds": took, "cpython_seconds": cpython_seconds, "stats": corpus.stats()}, shown
 
@@ -121,22 +122,19 @@ def mutant_of(text, rng):
 
 def section_mutants(root, count, seed):
     rng = random.Random(seed)
-    small = [p for p in path(root).rglob("*.py") if 200 < p.size() < 6000]
+    py = root.pathset("**/*.py", kind="file")
+    small = py - [p for p, size in zip(py, py.sizes()) if not 200 < size < 6000]
+    texts = [bytes(c).decode("utf-8", "surrogateescape") for c in small.read_each()]   # bytes kept as they are
     with tempfile.TemporaryDirectory() as tmp:
-        paths = []
+        written = path(tmp)
         for n in range(count):
-            text = rng.choice(small).read_text(errors="surrogateescape", newline="")   # bytes kept as they are
-            p = path(tmp) / f"m{n:06d}.py"
-            p.write_text(mutant_of(text, rng), errors="surrogateescape", newline="")
-            paths.append(p)
-        theirs, _ = cpython(paths, "verdicts")
+            (written / f"m{n:06d}.py").write_text(mutant_of(rng.choice(texts), rng), errors="surrogateescape", newline="")
+        judged = code.parse(written)   # pygim.code's verdict on every mutant, in one run
+        mutants, refused = judged.files, {error[0] for error in judged.errors}
+        theirs, _ = cpython(mutants, "verdicts")
         agree, shown = 0, []
-        for p, answer in zip(paths, theirs):
-            try:
-                code.parse_source(p.read_bytes(), str(p))
-                ours = True
-            except SyntaxError:
-                ours = False
+        for p, answer in zip(mutants, theirs):
+            ours = str(p) not in refused
             if ours == answer["ok"]:
                 agree += 1
             elif len(shown) < 20:
@@ -146,7 +144,7 @@ def section_mutants(root, count, seed):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("root")
+    ap.add_argument("root", type=folder)
     ap.add_argument("--mutants", type=int, default=2000)
     ap.add_argument("--seed", type=int, default=1)
     ap.add_argument("--no-save", action="store_true")

@@ -11,6 +11,8 @@ import os
 from collections.abc import Iterator
 from typing import TypedDict
 
+from pygim.pathlike import PathSet
+
 StrPath = str | bytes | os.PathLike[str] | os.PathLike[bytes]   # what pygim's paths take
 
 
@@ -44,8 +46,8 @@ class Corpus:
     def __iter__(self) -> Iterator[Tree]:
         """The trees of the files that parsed, in path order."""
     @property
-    def files(self) -> list[str]:
-        """Every file's path, sorted."""
+    def files(self) -> PathSet:
+        """Every file, parsed or not, as a PathSet in path order (corpus[i] is files[i]'s tree)."""
     @property
     def errors(self) -> list[tuple[str, str, int | None, int | None]]:
         """(path, message, line, column) of each file that is not Python; column in bytes from 0."""

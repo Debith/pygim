@@ -30,7 +30,8 @@ import pyarrow as pa
 import pyarrow.compute as pc
 import pyarrow.parquet as pq
 
-from pygim import similarity
+from pygim import path, similarity
+from pygim.pathlike import ext
 
 # ----------------------------------------------------------------------------
 # 1. One index, every pair
@@ -191,11 +192,12 @@ with tempfile.TemporaryDirectory() as tmp:
     (src / "shapes.py").write_text("def doubled(w):\n    return w * 2\n")
     (src / "broken.py").write_text("def half(:\n")
 
-    # Files routed by extension; each language's files go to its index in one call, read,
+    # Files routed by extension: one PathSet of the folder, each language's files chosen by its
+    # extensions (as language_of reads them), each set added to its index in one call — read,
     # parsed and fingerprinted on worker threads with the GIL released.
-    by_language = {}
-    for f in sorted(src.iterdir()):
-        by_language.setdefault(similarity.language_of(f), []).append(f)
+    found = path(src).pathset("*", kind="file")
+    by_language = {language: found.filter(ext(*record["exts"], case_sensitive=False))
+                   for language, record in similarity.LANGUAGES.items()}
     indexes = {}
     for language, files in by_language.items():
         indexes[language] = similarity.Index(language)

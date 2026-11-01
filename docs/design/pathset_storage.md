@@ -152,6 +152,26 @@ Open: opening by `openat` relative to a directory saves 10-15% on deep paths
 io_uring is Linux-only and refused by Docker's default seccomp; a `Stage`
 that parses (the Python parser, D8) is the next consumer of the seam.
 
+## Walking into a set
+
+A path is one file or folder; many are a `PathSet` (Debith on PR #39, 2026-11-01: "pathset is
+for multiple files/folders and pathlike is a single file"). `path.pathset(pattern, kind=, skip=)`
+is glob's walk (`glob_walk.h`, D49) with two options pathlib's glob has not:
+
+- `kind="file"` or `"dir"` keeps what `is_file()` or `is_dir()` says of each match, a link
+  followed. The listing tells (`platform::entry_kind`: `file` from `DT_REG`); a link alone is
+  stat'ed. A walk keeps a FIFO or device out unopened, which is D64's case (1) below.
+- `skip` names folders — globs, matched as the pattern is — never entered or matched, nor
+  anything beneath them; a file of such a name is kept.
+
+Both are fields of `glob_pattern`, so the one-thread walk, the parallel walk and `code.parse`'s
+corpus run obey them alike. Before them, every caller walked with `rglob` and filtered with
+`is_file()` and `parts` in Python: a stat a path, and a walk through every `.git`, `build` and
+test folder it was about to drop. With them come `PathSet.sizes()` (a stat a member, the GIL
+released) and `ext(*suffixes, case_sensitive=)`, so a language's files are one filter.
+`test_layering.py`'s `test_many_paths_are_a_pathset` refuses a list of paths asked of one of
+pygim's paths where a set would do.
+
 ## Rules to keep
 
 - **Append-only, single writer.** Rows are never removed or renumbered.
@@ -209,6 +229,8 @@ that parses (the Python parser, D8) is the next consumer of the seam.
   each at creation is the measured 37%, moved, not saved; (3) either is a snapshot: a path can
   become a FIFO between the set's making and the read, so the read keeps its non-blocking open and
   its fstat whatever (1) or (2) say. Until a case asks for it, the read opens and says so.
+  Since 2026-11-01 a walk can do (1) itself: `pathset(pattern, kind="file")` keeps only what the
+  listing says is a regular file, so a device it finds is never a member to open.
 - Filters beyond suffix, name glob and absoluteness: depth, "under this
   directory" (a parent-row test), a regular expression on the name (names are
   dictionary-encoded — each distinct segment is stored once — so the

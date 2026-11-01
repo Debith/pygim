@@ -95,7 +95,7 @@ Each step a refactor under the tests as they are (#36), its own commit, the ratc
 | platform/errors.h | an errno's words; `open_error_for<F>`, `open()`'s error for a folder; `os_error::of<F>`, what a system's error code tells Python's `OSError` (an errno, or Windows' own error, which Python maps) | rules and calls |
 | platform/files.h | a path's text (`path_text_is_utf8`), exclusive create, write, force, close, unlink | rules and calls |
 | platform/home.h | `home_of(user)`: whose home `~` names; posixpath's and ntpath's rules | rules and calls |
-| platform/listing.h | a directory's listing, `entry_at`, `finds_a_name_by_stat` | calls |
+| platform/listing.h | a directory's listing with each entry's kind (`directory`, `file`, `link`, `other`), `entry_at`, `finds_a_name_by_stat` | calls |
 | platform/reads.h | `posix_reads`, `windows_reads` behind the `file_reads` concept | calls |
 | platform/process.h | a thread's name, the signal mask its threads inherit, `at_fork`, `process_id` | calls |
 | platform/signals.h | `interrupt_handlers` (Ctrl-C, SIGTERM), `wakeup` (a pipe; an event) | calls |

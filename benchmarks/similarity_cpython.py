@@ -27,6 +27,8 @@ call per corpus, on worker threads.
 
 import argparse
 import collections
+import functools
+import operator
 import subprocess
 import sys
 import threading
@@ -37,7 +39,9 @@ import pyarrow.parquet as pq
 from tabulate import tabulate
 
 from pygim import path as pygim_path, similarity   # `path` names a file below
+from pygim.pathlike import ext
 from pygim.utils import QuickTimer, rss_bytes
+from _bench import folder
 from _results import corpus, save, wants_save
 
 THRESHOLD = 0.8
@@ -47,13 +51,15 @@ C_DIRS = ("Objects", "Python", "Modules", "Parser", "Include")
 
 
 def corpora(root):
-    py = (root / "Lib").rglob("*.py")   # sorted already
-    is_test = lambda p: any(part in TESTDIRS for part in p.relative_to(root).parts)
+    """Each corpus as (language, PathSet): Lib's files with and without its test folders, and the C
+    core's files whose extension is C's or C++'s, as similarity.language_of reads one."""
+    lib = (root / "Lib").pathset("**/*.py", kind="file")   # sorted already
+    stdlib = (root / "Lib").pathset("**/*.py", kind="file", skip=TESTDIRS)
+    core = functools.reduce(operator.or_, ((root / d).pathset("**/*", kind="file") for d in C_DIRS))   # one table: a bitmap union
     return {
-        "stdlib": ("python", [p for p in py if not is_test(p)]),
-        "tests": ("python", [p for p in py if is_test(p)]),
-        "c": ("cpp", [p for d in C_DIRS for p in (root / d).rglob("*")
-                      if p.is_file() and similarity.language_of(p) == "cpp"]),
+        "stdlib": ("python", stdlib),
+        "tests": ("python", lib - stdlib),
+        "c": ("cpp", core.filter(ext(*similarity.LANGUAGES["cpp"]["exts"], case_sensitive=False))),
     }
 
 
@@ -117,12 +123,11 @@ class PeakRss:
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("checkout", help="a CPython checkout")
-    parser.add_argument("--out", default="similarity_cpython", help="where the ranked tables are written")
+    parser.add_argument("checkout", type=folder, help="a CPython checkout")
+    parser.add_argument("--out", type=pygim_path, default="similarity_cpython", help="where the ranked tables are written")
     parser.add_argument("--no-save", action="store_true", help="measure only: append no record (_results.wants_save)")
     args = parser.parse_args()
-    root = pygim_path(args.checkout).resolve()
-    out = pygim_path(args.out)
+    root, out = args.checkout, args.out
     out.mkdir(parents=True, exist_ok=True)
     try:
         commit = subprocess.run(["git", "-C", str(root), "log", "-1", "--format=%h %cd", "--date=short"],
@@ -187,13 +192,13 @@ def main():
 
     # 4. sample
     print("\n4. sample: first cross-file near-duplicate per band (clinic output left out)")
+    rel = lambda o: str(p.relative_to(root)) if (p := pygim_path(o)).is_relative_to(root) else o   # never a text cut (#129)
     for name, tb in ranked.items():
         rows = [r for r in tb.filter(pc.invert(tb["exact"])).to_pylist()
                 if r["a_origin"] != r["b_origin"] and "/clinic/" not in r["a_origin"]]
         for lo, hi in ((0.95, 1.0), (0.9, 0.95), (0.85, 0.9), (THRESHOLD, 0.85)):
             r = next((r for r in rows if lo <= r["score"] < hi), None)
             if r:
-                rel = lambda o: str(pygim_path(o).resolve().relative_to(root)) if o.startswith(str(root)) else o
                 print(f"   {name:6s} {r['score']:.2f}  {r['a_qualname']}  {rel(r['a_origin'])}:{r['a_line']}")
                 print(f"   {'':6s}       {r['b_qualname']}  {rel(r['b_origin'])}:{r['b_line']}")
 

@@ -9,6 +9,7 @@ import sys
 import shutil
 import subprocess
 import functools
+import operator
 from pathlib import Path
 from dataclasses import dataclass
 from importlib import import_module
@@ -16,7 +17,7 @@ import click
 
 from _pygim._config import Environment
 from _pygim._cli import _style
-from pygim.pathlike import path
+from pygim.pathlike import ext, name, path
 
 __all__ = ["GimmicksCliApp", "flag_opt"]
 
@@ -28,10 +29,8 @@ def _echo(msg, quiet):
 
 flag_opt = functools.partial(click.option, is_flag=True, default=False)
 
-def _hidden(parts) -> bool:
-    """Whether a walked path is under a directory a walk of sources passes over: a dot directory or
-    __pycache__ (`parts` below the walk's root)."""
-    return any(part.startswith(".") or part == "__pycache__" for part in parts[:-1])
+# The folders a walk of sources passes over: dot folders and __pycache__ (pathset's skip).
+HIDDEN = (".*", "__pycache__")
 
 
 def _excluded(parts, patterns) -> bool:
@@ -65,18 +64,14 @@ class GimmicksCliApp:
     def clean_up(self, yes, build_dirs, pycache_dirs, compiled_files, quiet, all):
         root = path(os.getcwd())
         _echo(f"Starting clean up in `{root}`", quiet)
-        targets = []
         pycache_dirs = pycache_dirs or not build_dirs and not compiled_files
-
-        if all or build_dirs:
-            targets.extend(p for p in root.rglob("build") if p.is_dir())
-
-        if all or pycache_dirs:
-            targets.extend(p for p in root.rglob("__pycache__") if p.is_dir())
-
+        folders = [n for n, wanted in (("build", all or build_dirs), ("__pycache__", all or pycache_dirs)) if wanted]
+        found = []   # one walk for the folders, one for the files: sets over root's table
+        if folders:
+            found.append(root.pathset("**/*", kind="dir").filter(functools.reduce(operator.or_, map(name, folders))))
         if all or compiled_files:
-            targets.extend(p for p in root.rglob("*.c") if p.is_file())
-            targets.extend(p for p in root.rglob("*.so") if p.is_file())
+            found.append(root.pathset("**/*", kind="file").filter(ext(".c", ".so")))
+        targets = functools.reduce(operator.or_, found)   # never empty: no flag at all asks for __pycache__
 
         if targets and not yes:
             print("\n".join([str(t) for t in targets]))
@@ -245,9 +240,9 @@ class GimmicksCliApp:
                     files.setdefault(os.path.realpath(root), str(root))
             elif root.is_dir():
                 top = path(str(root))   # pygim's own walker and its own paths: pathlib's relative_to took 0.4 s on CPython's Lib
-                for p in top.rglob("*"):
-                    parts = p.relative_to(top).parts
-                    if p.is_file() and not _hidden(parts) and not _excluded(parts, exclude):
+                walked = top.pathset("**/*", kind="file", skip=HIDDEN)
+                for p, member in zip(walked, walked.relative_to(top)):   # the same members, in order
+                    if not _excluded(member.parts, exclude):
                         files.setdefault(os.path.realpath(str(p)), str(p))
             else:
                 raise click.ClickException(f"{root}: is neither a file nor a directory")

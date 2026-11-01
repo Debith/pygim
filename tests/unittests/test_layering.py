@@ -24,7 +24,7 @@ pytestmark = pytest.mark.skipif(not ROOT.is_dir(), reason="source tree not prese
 def _headers(pattern):
     """The headers matching *pattern*, through pygim's own walker — see `sources` below on why the
     project's components are used by the project even where the milliseconds do not matter."""
-    return sorted(pathlib.Path(str(p)) for p in path(str(ROOT)).glob(pattern))
+    return sorted(pathlib.Path(str(p)) for p in path(str(ROOT)).pathset(pattern, kind="file"))
 
 
 def _declares_core(header):
@@ -124,9 +124,9 @@ def sources(root, pattern, least=1):
     walks a filesystem by hand while the package ships a walker is not eating what it cooks.
 
     `read_all_files` skips a member that is not a regular file, so its list can be shorter than the
-    membership; a glob for files cannot produce that, and the assertion says so rather than
-    trusting it."""
-    found = PathSet(path(str(root)).rglob(pattern))
+    membership; a walk that keeps files only (kind="file") cannot produce that, and the assertion
+    says so rather than trusting it."""
+    found = path(str(root)).pathset("**/" + pattern, kind="file")
     members, texts = found.to_list(), found.read_all_files()
     assert len(members) == len(texts), "a member was not a regular file; the two lists no longer align"
     assert len(members) >= least, (
@@ -206,15 +206,13 @@ WALKS_BY_HAND = 4
 OURS = {"path", "PathSet", "PathStore"}         # pygim's own, which is the point of the rule
 
 
-def _hand_walks(text):
-    """Where *text* walks a filesystem itself. `ast.walk` is not a filesystem walk, and neither is
-    `path(x).rglob(...)` — that is the walker this rule exists to promote, and a check that counted
-    obeying it as breaking it would be read once and then turned off.
+def _walk_calls(text):
+    """Each call in *text* that walks a filesystem, as (line, how, ours): ours when the receiver is
+    one of pygim's paths. `ast.walk` is not a filesystem walk.
 
     Receivers are followed through the idioms that keep a path ours: an assignment from `path(…)`
-    or from `ours / "part"`, and a loop over what one of ours yields (`for child in here.iterdir()`).
-    That is as far as a syntax tree can honestly go. Anything less direct is still counted, so the
-    number can only be too high, never too low."""
+    or from `ours / "part"`, and a loop over what one of ours yields (`for child in here.pathset()`).
+    That is as far as a syntax tree can honestly go. Anything less direct is taken for not ours."""
     if not any(word in text for word in BY_HAND | OS_WALKS):
         return []                                       # a walk is called by its name: none named, none made
     nodes = list(ast.walk(ast.parse(text)))             # walked once; read four times below
@@ -251,12 +249,25 @@ def _hand_walks(text):
         if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)):
             continue
         receiver = getattr(node.func.value, "id", None)
-        on_ours = is_ours(node.func.value, ours)
-        if node.func.attr in BY_HAND and receiver != "ast" and not on_ours:
-            out.append((node.lineno, node.func.attr))
+        if node.func.attr in BY_HAND and receiver != "ast":
+            out.append((node.lineno, node.func.attr, is_ours(node.func.value, ours)))
         elif node.func.attr in OS_WALKS and receiver == "os":
-            out.append((node.lineno, "os." + node.func.attr))
+            out.append((node.lineno, "os." + node.func.attr, False))
     return out
+
+
+def _hand_walks(text):
+    """Where *text* walks a filesystem itself: pathlib's walkers and os's. One of pygim's paths walking
+    is not counted here — that is the walker this rule exists to promote, and a check that counted
+    obeying it as breaking it would be read once and then turned off. Not knowing a receiver counts it,
+    so the number can only be too high, never too low."""
+    return [(line, how) for line, how, ours in _walk_calls(text) if not ours]
+
+
+def _lists_of_paths(text):
+    """Where *text* asks one of pygim's paths for many paths as a list — glob, rglob, iterdir — where
+    `pathset()` hands back the PathSet that pathlike keeps many paths as."""
+    return [(line, how) for line, how, ours in _walk_calls(text) if ours]
 
 
 def test_the_walk_checker_knows_our_walker_from_the_hand_written_one():
@@ -270,6 +281,10 @@ def test_the_walk_checker_knows_our_walker_from_the_hand_written_one():
     assert _hand_walks("here = path('.') / 'src'\nfor child in sorted(here.iterdir(), key=str):\n"
                        "    child.iterdir()\n") == []
     assert _hand_walks("from pathlib import Path\nhere = Path('.') / 'src'\nhere.iterdir()\n")
+    assert _lists_of_paths("from pygim.pathlike import path\npath('.').rglob('*.py')\n") == [(2, "rglob")]
+    assert _lists_of_paths("here = path('.')\nfor child in here.pathset('*', kind='dir'):\n    child.iterdir()\n") == [(3, "iterdir")]
+    assert _lists_of_paths("import pygim\npygim.path('.').pathset('**/*.py', kind='file')\n") == []
+    assert _lists_of_paths("from pathlib import Path\nPath('.').rglob('*.py')\n") == []   # a hand walk, counted above
 
 
 @pytest.mark.skipif(not PY_ROOT.is_dir(), reason="source tree not present (testing the installed package)")
@@ -295,6 +310,35 @@ def test_the_project_walks_with_its_own_walker():
     assert len(found) >= WALKS_BY_HAND - 2, (
         f"only {len(found)} hand-written walks are left, and WALKS_BY_HAND still says "
         f"{WALKS_BY_HAND} — lower it, or the budget stops meaning anything")
+
+
+# Where a list of paths is the subject itself: path's own traversal API, held to pathlib or shown.
+LISTS_OF_PATHS = {
+    "tests/unittests/test_glob_walk.py": "glob and rglob held to pathlib's",
+    "tests/unittests/test_pathlike.py": "the path API held to pathlib's",
+    "tests/unittests/test_path_store.py": "a store's rows, found by glob",
+    "docs/examples/pathlike/example_08_traversal.py": "path's traversal API, shown",
+    "docs/examples/pathlike/example_12_path_stores.py": "what a glob's results inherit from a store, shown",
+    "benchmarks/pathset_read.py": "path.glob timed against pathlib's rglob",
+}
+
+
+@pytest.mark.skipif(not PY_ROOT.is_dir(), reason="source tree not present (testing the installed package)")
+def test_many_paths_are_a_pathset():
+    """pathlike is one path and PathSet is many (Debith, 2026-11-01: "pathset is for multiple
+    files/folders and pathlike is a single file"). Asking a path for many paths as a list —
+    glob, rglob, iterdir — leaves each caller to filter, size and read them one by one; pathset()
+    hands back the set that does it all at once (kind=, skip=, filters, sizes(), read_each()).
+    Found on PR #39: the benchmarks walked with path.rglob and filtered with is_file() in Python."""
+    repo = PY_ROOT.parent
+    found = []
+    for area, least in (("src", 5), ("tests", 5), ("benchmarks", 5), ("docs/examples", 5)):
+        for file, text in sources(repo / area, "*.py", least=least):
+            relative = file.relative_to(repo).as_posix()
+            if relative not in LISTS_OF_PATHS:
+                found += [f"{relative}:{line}: {how}()" for line, how in _lists_of_paths(text)]
+    assert found == [], "many paths are a PathSet: path(x).pathset(pattern, kind=..., skip=...):\n" + "\n".join(found)
+    assert all((repo / listed).is_file() for listed in LISTS_OF_PATHS), "an exemption names a file that is gone"
 
 
 # ── a test reaches the code through its public names ─────────────────────────
@@ -376,7 +420,7 @@ def test_each_test_module_has_a_name_of_its_own():
     stop the whole run at collection — while each folder run alone passes. tests/examples' and
     tests/unittests' test_examples.py did, 2026-10-30."""
     repo = ROOT.parents[1]
-    names = [pathlib.Path(str(p)).name for top in ("tests", "src") for p in path(str(repo / top)).glob("**/test_*.py")]
+    names = [p.name for top in ("tests", "src") for p in path(str(repo / top)).pathset("**/test_*.py", kind="file")]
     assert sorted({n for n in names if names.count(n) > 1}) == []
 
 
@@ -418,11 +462,10 @@ def test_every_package_that_ships_holds_something():
     something: pygim.ai did from 2025-08-07 until Debith dropped it (D78, 2026-10-31)."""
     empty = []
     for package in ("pygim", "_pygim"):
-        for init in path(str(PY_ROOT)).glob(f"{package}/**/__init__.py"):
-            folder = path(str(init.parent))
-            others = [p for p in folder.iterdir() if p.name not in ("__init__.py", "__pycache__")]
+        for init in path(str(PY_ROOT)).pathset(f"{package}/**/__init__.py", kind="file"):
+            others = init.parent.pathset("*", skip=["__pycache__"]) - [init]
             if not _text(pathlib.Path(str(init))).strip() and not others:
-                empty.append(pathlib.Path(str(folder)).relative_to(PY_ROOT).as_posix())
+                empty.append(pathlib.Path(str(init.parent)).relative_to(PY_ROOT).as_posix())
     assert empty == [], "a package holding nothing: give it its code, or remove it"
 
 
@@ -454,6 +497,7 @@ IMPORTS = {
     "persistence/adapter/arrow_export.h": 2,     # pyarrow's reader import and polars.from_arrow, once at first use (D53)
     "wiring/ioc/adapter.h": 2,                   # inspect and typing, for a constructor its code object cannot say (D67)
     "wiring/factory/adapter.h": 1,               # Factory.use_module(name): importing is what it is asked
+    "code/adapter/corpus_bindings.h": 1,         # pygim.pathlike's PathSet, once at first use: Corpus.files is a set (D91)
 }
 
 

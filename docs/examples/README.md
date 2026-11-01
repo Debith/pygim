@@ -44,7 +44,7 @@ python -m pytest tests/unittests/test_examples.py
 | pathlike | [example_05_json_and_toml.py](pathlike/example_05_json_and_toml.py) | Strict JSON with filename in errors; TOML with real datetime objects |
 | pathlike | [example_06_engine_pinning.py](pathlike/example_06_engine_pinning.py) | Pinning an engine at construction, refusal to guess, pin inheritance, per-call override |
 | pathlike | [example_07_writing.py](pathlike/example_07_writing.py) | write() round-trips for all three formats, trap-string quoting, non-finite float policies, TOML mapping roots |
-| pathlike | [example_08_traversal.py](pathlike/example_08_traversal.py) | glob/rglob/iterdir, sorted+deduplicated results, pin inheritance, the PathSet bridge |
+| pathlike | [example_08_traversal.py](pathlike/example_08_traversal.py) | glob/rglob/iterdir, sorted+deduplicated results, pin inheritance, `pathset()` for many paths: `kind=` files or folders only, `skip=` folders never entered, `sizes()` |
 | pathlike | [example_09_parallel_and_key_cache.py](pathlike/example_09_parallel_and_key_cache.py) | GIL-released parallel reads, key_cache interning semantics and proof |
 | pathlike | [example_10_jsonl.py](pathlike/example_10_jsonl.py) | JSON Lines read as a list (one item per document), blank lines ignored, a parse error naming its line, a list written back one line per item |
 | pathlike | [example_12_path_stores.py](pathlike/example_12_path_stores.py) | `PathStore` and `store=`: the default table and a private one, derived paths inheriting their table, equality across stores without identity, a PathSet over a store, a lifetime chosen by argument |
