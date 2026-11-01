@@ -273,7 +273,7 @@ class jsonpath(path):
     def __init__(self, path: str | bytes | os.PathLike[str], *, store: PathStore | None = None) -> None: ...
 
 class jsonlpath(path):
-    """JSON Lines (ndjson) via simdjson's document stream: reads as a list, one item per document, and writes one compact document per line from a list root. Constructing one pins the engine (simdjson-ndjson)."""
+    """JSON Lines (ndjson) via simdjson's document stream: reads as a list, one item per document, and writes one compact document per line: a list's items, or one document. Constructing one pins the engine (simdjson-ndjson)."""
     def __init__(self, path: str | bytes | os.PathLike[str], *, store: PathStore | None = None) -> None: ...
 
 class tomlpath(path):

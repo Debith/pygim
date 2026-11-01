@@ -111,7 +111,7 @@ def save(bench, sections, *, reps, in_tree=True):
         "sections": sections,
     }
     out = path(RESULTS_DIR) / f"{bench}.jsonl"
-    out.write([record], append=True, parents=True)   # one line added: pygim's JSONL engine
+    out.write(record, append=True, parents=True)   # one line added: pygim's JSONL engine
     return out
 
 

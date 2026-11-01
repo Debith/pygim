@@ -1031,12 +1031,21 @@ def test_jsonl_write_read_roundtrip_one_document_per_line(temp_dir, rows):
     assert p.read() == rows
 
 
-def test_jsonl_write_requires_a_list_root(temp_dir):
+def test_jsonl_writes_a_lists_items_or_one_document(temp_dir):
+    """A list or tuple is the documents, one a line; anything else is one document, one line
+    (Debith on PR #39: "for jsonl, I would accept single record directly"). A list written as one
+    document goes inside a list."""
     p = pygim.path(temp_dir / "out.jsonl")
-    with pytest.raises(ValueError, match="list or tuple"):
-        p.write({"a": 1})
     p.write(({"a": 1},))                                    # tuples are sequences too
     assert p.read() == [{"a": 1}]
+    p.write({"a": 1})
+    text = (temp_dir / "out.jsonl").read_text(encoding="utf-8")
+    assert text.count("\n") == 1 and json.loads(text) == {"a": 1}   # one document, one line
+    p.write({"b": 2}, append=True)
+    p.write([[1, 2]], append=True)
+    p.write("text", append=True)
+    assert p.read() == [{"a": 1}, {"b": 2}, [1, 2], "text"]
+    assert pathlike.encode({"a": 1}, engine="jsonl") == pathlike.encode([{"a": 1}], engine="jsonl")
 
 
 def test_jsonl_engine_resolution_and_typed_class(temp_dir):

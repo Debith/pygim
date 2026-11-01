@@ -6,9 +6,9 @@
 //
 // A .jsonl file is a sequence of JSON documents, one per line; it reads as a
 // Python list (one item per document) and writes from a list (one line per
-// item). Reading uses simdjson's parse_many(), so the separator rule is
-// simdjson's: documents are delimited by whitespace, newlines included — every
-// well-formed JSONL/ndjson file qualifies. Writing emits each item through the
+// item) or from one document (one line). Reading uses simdjson's parse_many(),
+// so the separator rule is simdjson's: documents are delimited by whitespace,
+// newlines included — every well-formed JSONL/ndjson file qualifies. Writing emits each item through the
 // shared ryml JSON emitter (engine_yaml.h), which is single-line by
 // construction; that property is asserted, never patched up after the fact.
 
@@ -98,18 +98,16 @@ namespace pygim::pathlike::detail {
     throw std::invalid_argument("JSONL parse error (" + std::string(origin) + "): " + simdjson::error_message(simdjson::CAPACITY));
 }
 
-// One compact JSON document per line. The root must be a list/tuple — JSONL
-// *is* a sequence — and each item may be any JSON value.
-/// `obj` — a list or tuple — as JSON Lines text, one document a line, each ended by "\n".
+// One compact JSON document a line. A list or tuple is the documents, one a line — JSONL *is* a
+// sequence; any other value is one document, one line (Debith on PR #39, 2026-11-01: "for jsonl, I
+// would accept single record directly without putting it to a list"). So one list written as one
+// document goes inside a list: [[1, 2]].
+/// `obj` as JSON Lines text — a list's or tuple's items, or `obj` itself — each line ended by "\n".
 [[nodiscard]] inline std::string encode_jsonl(py::handle obj) {
-    if (!py::isinstance<py::list>(obj) && !py::isinstance<py::tuple>(obj)) {
-        throw std::invalid_argument("jsonl: the root must be a list or tuple (one document per line), got " +
-                                    py::str(py::type::of(obj)).cast<std::string>());
-    }
     std::string text;
-    for (auto item : obj.cast<py::sequence>()) {
+    const auto add_line = [&text](py::handle document) {
         ryml::Tree tree;
-        py_to_node(tree, tree.rootref(), item, /*json_mode=*/true);
+        py_to_node(tree, tree.rootref(), document, /*json_mode=*/true);
         std::string line;
         ryml::emitrs_json(tree, tree.root_id(), &line);
         if (line.find('\n') != std::string::npos) {
@@ -117,6 +115,11 @@ namespace pygim::pathlike::detail {
         }
         text += line;
         text += '\n';
+    };
+    if (py::isinstance<py::list>(obj) || py::isinstance<py::tuple>(obj)) {
+        for (auto item : obj.cast<py::sequence>()) add_line(item);
+    } else {
+        add_line(obj);
     }
     return text;
 }
@@ -133,7 +136,7 @@ struct jsonl {
         .name = "jsonl",
         .label = "simdjson-ndjson",
         .doc = "JSON Lines (ndjson) via simdjson's document stream: reads as a list, one item per document, "
-               "and writes one compact document per line from a list root.",
+               "and writes one compact document per line: a list's items, or one document.",
         .exts = exts,
         .aliases = aliases,
     };
