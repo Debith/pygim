@@ -23,7 +23,7 @@
 // (read/write/glob) release the GIL around the I/O only.
 //
 // Typed classes: `path("x.yaml")` is a `yamlpath`, `path("x.json")` a
-// `jsonpath` — one subclass per engine the build discovered (adapter.h's
+// `jsonpath` — one subclass per engine the build discovered (the registry's
 // engine list), chosen by the pin or the extension exactly as read() chooses
 // the decoder. A Python constructor cannot return a subclass instance, so the
 // classes share a metaclass whose __call__ builds the object through wrap();
@@ -40,6 +40,7 @@
 //     path("x", store=mine)         -> {mine's table, row}; its parent is in mine's table too
 //     yamlpath("notes.txt")         -> pinned: reads as YAML whatever the extension
 
+#include <concepts>
 #include <cstddef>
 #include <cstdint>
 #include <limits>
@@ -54,12 +55,26 @@
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 
+#include "../core.h"
+#include "../engine_list.h"
 #include "../path_table.h"
-#include "adapter.h"
+#include "materialize.h"
 #include "path_store.h"
 #include "path_text.h"
 
 namespace pygim::pathlike {
+
+/// The full engine contract: metadata (engine_list.h) plus the two I/O entry
+/// points. Adding a format is adding adapter/engines/<name>.h, a struct with
+/// exts, aliases, info (engine_list.h), and these two:
+///
+///     static py::object load(const file&, detail::KeyCache&);
+///     static void write(const file&, py::handle);
+template <class E>
+concept Engine = EngineMeta<E> && requires(const file& f, detail::KeyCache& keys, py::handle obj) {
+    { E::load(f, keys) } -> std::same_as<py::object>;
+    { E::write(f, obj) } -> std::same_as<void>;
+};
 
 struct pathview;
 
@@ -80,9 +95,9 @@ struct pathview {
     std::uint32_t row = 0;
     const engine_entry* pin = nullptr;   // the engine pinned at construction (inherited by derived paths)
 
-    /// The core value of the row, with the pin: what the engines' load/write
-    /// and the value-route operations take.
-    [[nodiscard]] file value() const { return file(table->value(row), pin ? pin->info : nullptr); }
+    /// The core value of the row: what the engines' load/write and the
+    /// value-route operations take.
+    [[nodiscard]] file value() const { return file(table->value(row)); }
     /// pathlib's str() of the row (path_table::render).      p.fspath() -> "a/b/c.yaml"
     [[nodiscard]] std::string fspath() const { return table->render<native_strategy>(row); }
     /// The final component (a view into the arena).          p.name() -> "c.yaml"
@@ -177,8 +192,7 @@ template <Engine... Es>
     if (!s) throw py::error_already_set();
     const std::string_view sv(s, static_cast<std::size_t>(n));
     if (sv.empty()) return nullptr;
-    if (const engine_entry* e = L::template from_name_at_runtime<entry_row>(sv)) return e;
-    throw std::invalid_argument("unknown engine: '" + std::string(sv) + "' (known: " + L::known_text() + ")");
+    return L::template resolve<entry_row>(sv, nullptr, {});
 }
 
 /// The handle for a constructor call: text into the chosen table.
@@ -287,7 +301,7 @@ py::class_<pathview> bind_path(engine_list<Es...> es, py::module_& m, const path
         .def("__fspath__", [](const pathview& v) { return str_from_text(v.fspath()); },
              "os.PathLike protocol: the plain path string.")
         .def("__str__", [](const pathview& v) { return str_from_text(v.fspath()); })
-        .def("__repr__", [](const pathview& v) { return v.value().repr(); })
+        .def("__repr__", [](const pathview& v) { return v.value().repr(v.pin ? v.pin->info->label : std::string_view{}); })
         .def("__eq__", [](const pathview& a, const pathview& b) { return a.equals(b); }, py::is_operator())
         .def("__hash__", [](const pathview& v) {
                 const auto h = static_cast<py::ssize_t>(v.table->hash(v.row));   // == the value's hash

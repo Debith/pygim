@@ -408,9 +408,9 @@ using native_strategy = std::conditional_t<platform::native == platform::family:
 
 // A path that reads and decodes itself. Models os.PathLike (it exposes
 // __fspath__ through the binding), so it drops straight into open(), Path(),
-// etc. An engine may be pinned at construction (nullptr = auto by extension);
-// derived paths (parent(), with_suffix(), ...) inherit the pin. Resolution
-// itself lives in the registry (registry.h: engine_list::resolve).
+// etc. Which engine reads it is the registry's to say (engine_list.h) and an
+// engine pinned to a path is the handle's (adapter/pathview.h): the value
+// carries neither.
 template <class Strategy>
 class basic_file {
 public:
@@ -419,13 +419,11 @@ public:
     constexpr basic_file() = default;   // "."
 
     // From a value already in the model (a path_table row, a parsed uri).
-    constexpr explicit basic_file(uri value, const engine_info* pin = nullptr) : m_uri(std::move(value)), m_pin(pin) {}
+    constexpr explicit basic_file(uri value) : m_uri(std::move(value)) {}
 
     // From native path text — or a file:// URI (RFC 8089, decoded as
     // pathlib.Path.from_uri does). Any other "scheme://" text is rejected.
-    constexpr explicit basic_file(std::string_view text, const engine_info* pin = nullptr) : m_pin(pin) {
-        assign_text(m_uri, text);
-    }
+    constexpr explicit basic_file(std::string_view text) { assign_text(m_uri, text); }
 
     // ── construction rules (constexpr, so provable) ────────────────────────
     [[nodiscard]] static constexpr bool is_file_scheme(std::string_view sch) noexcept {
@@ -478,7 +476,6 @@ public:
 
     // ── value ──────────────────────────────────────────────────────────────
     [[nodiscard]] constexpr const uri& value() const noexcept { return m_uri; }
-    [[nodiscard]] constexpr const engine_info* pinned() const noexcept { return m_pin; }
 
     // os.PathLike: the native path text, in pathlib's normalised spelling.
     [[nodiscard]] constexpr std::string fspath() const { return Strategy::render(m_uri); }
@@ -563,9 +560,10 @@ public:
         return out;
     }
 
-    [[nodiscard]] constexpr std::string repr() const {
+    // `engine`: the label of the engine pinned to the path, if one is.
+    [[nodiscard]] constexpr std::string repr(std::string_view engine = {}) const {
         std::string out = "path(\"" + as_uri() + "\"";
-        if (m_pin) out += ", engine=" + std::string(m_pin->label);
+        if (!engine.empty()) out += ", engine=" + std::string(engine);
         return out + ")";
     }
 
@@ -577,7 +575,7 @@ public:
         return out;
     }
     [[nodiscard]] constexpr basic_file rjoined(std::string_view other) const {   // other / self
-        basic_file out(other, m_pin);
+        basic_file out(other);
         Strategy::join_into(out.m_uri, m_uri);
         return out;
     }
@@ -716,7 +714,6 @@ private:
 
     [[nodiscard]] basic_file from_fs(const fs::path& p) const {
         basic_file out;
-        out.m_pin = m_pin;
         Strategy::parse_into(out.m_uri, detail::text_from_fs(p));
         return out;
     }
@@ -756,7 +753,6 @@ private:
     }
 
     uri m_uri;
-    const engine_info* m_pin{nullptr};   // pinned at construction; nullptr = auto by extension
 };
 
 using file = basic_file<native_strategy>;

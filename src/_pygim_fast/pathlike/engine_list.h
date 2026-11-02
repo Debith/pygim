@@ -17,7 +17,7 @@
 // flat_storage, the same RegistryCore the run-time Registry uses),
 // the error-message inventories, the Python typed classes and their
 // docstrings, the module's ENGINES record, and the proofs. Adding a format is
-// adding a file; nothing in this header, adapter.h or bindings.cpp changes,
+// adding a file; nothing in this header, pathview.h or bindings.cpp changes,
 // and the new engine is swept by every proof on its first build.
 //
 // Why a generated header AND reflection: the build's glob is the portable
@@ -37,7 +37,7 @@
 // This header is pybind-free: it knows engines only through engine_info, so
 // the proof TU (tests/static/pathlike_core_proofs.cpp) exercises the registry
 // on synthetic packs — positively AND negatively — without any parser or
-// Python header. adapter/adapter.h adds the load/write half of the contract.
+// Python header. adapter/pathview.h adds the load/write half of the contract.
 
 #include <array>
 #include <concepts>
@@ -74,7 +74,7 @@ namespace pygim::pathlike {
 namespace engines {}   // the engine headers populate this; pre-declared so reflection can name it
 
 // The pybind-free half of the engine contract: a descriptor exposes its
-// engine_info. (adapter.h's `Engine` concept adds load()/write().)
+// engine_info. (pathview.h's `Engine` concept adds load()/write().)
 template <class E>
 concept EngineMeta = requires {
     { E::info } -> std::convertible_to<const engine_info&>;
@@ -304,38 +304,7 @@ struct engine_list {
         return std::move(t.out);
     }
 
-    // Position in the pack (== size when unknown).
-    [[nodiscard]] static constexpr std::size_t index_of(const engine_info* e) noexcept {
-        for (std::size_t i = 0; i < size; ++i) {
-            if (infos[i] == e) return i;
-        }
-        return size;
-    }
-
-    template <EngineMeta E>
-    [[nodiscard]] static constexpr std::size_t id_of() noexcept { return index_of(&E::info); }
-
-    // ── pack iteration ────────────────────────────────────────────────────
-    // f.template operator()<E>() for every engine, in pack order.
-    template <class F>
-    static constexpr void for_each(F&& f) {
-        (f.template operator()<Es>(), ...);
-    }
-
-    // f.template operator()<E>() for the engine at position i (i < size).
-    template <class F>
-    static constexpr decltype(auto) visit(std::size_t i, F&& f) {
-        return visit_impl(i, f, std::index_sequence_for<Es...>{});
-    }
-
     // ── resolution ────────────────────────────────────────────────────────
-    // The engine a read or write of f uses, in constant evaluation (transient
-    // table) — for the proofs: the constructor pin, else the extension. `file`
-    // is a literal type, so a path can be resolved at compile time.
-    [[nodiscard]] static constexpr const engine_info* resolved_ct(const file& f) {
-        return f.pinned() ? f.pinned() : for_ext(f.ext_key());
-    }
-
     // At run time, as the caller's row. Precedence: an explicit engine= wins,
     // then the pin, then the extension. Throws std::invalid_argument (Python
     // ValueError) with the derived inventory rather than guessing.
@@ -518,19 +487,6 @@ struct engine_list {
             r.put("pathlike engine registry: all invariants hold");
         }
         return r;
-    }
-
-private:
-    template <class F, std::size_t... Is>
-    static constexpr auto visit_impl(std::size_t i, F& f, std::index_sequence<Is...>) {
-        using R = std::common_type_t<decltype(f.template operator()<Es>())...>;
-        if constexpr (std::is_void_v<R>) {
-            ((i == Is ? (f.template operator()<Es>(), true) : false) || ...);
-        } else {
-            R out{};
-            ((i == Is ? (out = f.template operator()<Es>(), true) : false) || ...);
-            return out;
-        }
     }
 };
 

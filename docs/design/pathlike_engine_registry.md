@@ -93,25 +93,24 @@ same proofs pass on GCC 13.4, GCC 14.3 and GCC 16 (verified).
 
 | Layer | File | Role |
 |---|---|---|
-| vocabulary | `pathlike/uri.h`, `pathlike/core.h` | pybind-free: the RFC 3986 `uri` value; `engine_info` (name, label, doc, extensions, aliases), `sv_list`; the strategies and `basic_file<Strategy>` (pins `const engine_info*`) |
-| registry | `pathlike/engine_list.h` | pybind-free: `EngineMeta` concept, `engine_list<Es...>` (the extension and selector tables as `StaticRegistryCore` over `flat_storage`, over the row a caller names — `info_row`, the engine's info, by default; inventories, `visit`/`for_each`, `resolve`, the proofs, `conflict_report`) |
+| vocabulary | `pathlike/uri.h`, `pathlike/core.h` | pybind-free: the RFC 3986 `uri` value; `engine_info` (name, label, doc, extensions, aliases), `sv_list`; the strategies and `basic_file<Strategy>`, a value that names no engine |
+| registry | `pathlike/engine_list.h` | pybind-free: `EngineMeta` concept, `engine_list<Es...>` (the extension and selector tables as `StaticRegistryCore` over `flat_storage`, over the row a caller names — `info_row`, the engine's info, by default; inventories, `resolve`, the proofs, `conflict_report`) |
 | discovery | `setup.py::_apply_typelist` + `[extension.typelist]` in `ext.pathlike.toml` | globs `adapter/engines/*.h` (sorted by stem) into `build/gen/pathlike/pathlike_engines.gen.h`: the includes and `using Engines = engine_list<engines::json, ...>` |
-| contract | `adapter/adapter.h` | `Engine` concept (adds `load`/`write`); `engines_record()`, a loop over `engine_list::infos` |
-| dispatch | `adapter/pathview.h` | `engine_entry`, an engine's row (`info`, `load`, `write`, `wrap`), built at compile time as `entry_of<E>`; `entry_row`, the tables over rows; `wrap()`, `bind_typed_one()` |
+| dispatch | `adapter/pathview.h` | `Engine` concept (adds `load`/`write`); `engine_entry`, an engine's row (`info`, `load`, `write`, `wrap`), built at compile time as `entry_of<E>`; `entry_row`, the tables over rows; `wrap()`, `bind_typed_one()` |
 | bindings | `adapter/bindings.cpp` | includes the generated header; docstrings, error inventories, typed classes and `ENGINES` are derived; asserts the proofs on the real pack |
 | proofs | `tests/static/pathlike_core_proofs.cpp` | the same predicates on synthetic packs, positive and negative |
 | Python | `pygim/_stubs.py`, `pygim stubs` | renders the stub's generated block from `pathlike.ENGINES`; a test keeps it current |
 
-In the core, an engine is the address of its `static constexpr engine_info
-info` (a C++17 inline variable: exactly one per program): `file` pins that
-pointer, and the proofs resolve to it. In the adapter, an engine is the address
-of its row, `entry_of<E>` (`pathview.h`): the info beside pointers to its
-`load`, `write` and typed class, built at compile time. The extension and
-selector tables are built by the same code over whichever row the caller names
-(`info_row` or `entry_row`), so a lookup in the adapter hands back the row, and
-dispatch is that lookup and one call — for reading, writing and wrapping alike,
-with no search over the pack. A path's pin is a row too; its core value carries
-the row's info.
+In the registry, an engine is the address of its `static constexpr
+engine_info info` (a C++17 inline variable: exactly one per program), which the
+proofs resolve to. In the adapter, an engine is the address of its row,
+`entry_of<E>` (`pathview.h`): the info beside pointers to its `load`, `write`
+and typed class, built at compile time. The extension and selector tables are
+built by the same code over whichever row the caller names (`info_row` or
+`entry_row`), so a lookup in the adapter hands back the row, and dispatch is
+that lookup and one call — for reading, writing and wrapping alike, with no
+search over the pack. An engine pinned to a path is a row held by the path's
+handle; the core's `file` names no engine.
 
 ## What every build proves
 

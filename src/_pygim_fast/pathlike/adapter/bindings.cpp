@@ -26,7 +26,6 @@
 
 #include "../core.h"
 #include "../engine_list.h"
-#include "adapter.h"
 #include "path_store.h"
 #include "path_text.h"
 #include "pathset.h"
@@ -73,16 +72,34 @@ consteval bool dispatches_to() {
     for (std::string_view x : E::info.exts) {
         const file native("dir/name" + std::string(x));
         const file via_uri("file:///C:/dir/name" + std::string(x));   // absolute under both strategies (a drive on Windows)
-        if (Engines::for_ext(native.ext_key()) != &E::info || Engines::resolved_ct(via_uri) != &E::info) return false;
+        if (Engines::for_ext(native.ext_key()) != &E::info || Engines::for_ext(via_uri.ext_key()) != &E::info) return false;
         if (Engines::for_ext<entry_row>(native.ext_key()) != &entry_of<E>) return false;
     }
-    return Engines::from_name<entry_row>(E::info.name) == &entry_of<E>;
+    return true;
 }
 template <class... Es>
 consteval bool paths_dispatch_to_their_engines(engine_list<Es...>) { return (dispatches_to<Es>() && ... && true); }
 static_assert(paths_dispatch_to_their_engines(Engines{}));
 
 namespace {
+
+// The module-level ENGINES record: an immutable, introspectable view of the
+// registry for Python tooling (the .pyi generator, the tests, users).
+py::tuple engines_record() {
+    py::object record = py::module_::import("collections")
+                            .attr("namedtuple")("EngineInfo", "name label extensions aliases doc");
+    const auto texts = [](const sv_list& views) {
+        py::list out;
+        for (std::string_view v : views) out.append(std::string(v));
+        return py::tuple(out);
+    };
+    py::list out;
+    for (const engine_info* e : Engines::infos) {
+        out.append(record(std::string(e->name), std::string(e->label), texts(e->exts), texts(e->aliases),
+                          std::string(e->doc)));
+    }
+    return py::tuple(out);
+}
 
 // ── Docstrings derived from the registry (static storage: pybind11 keeps pointers).
 // Passed as py::doc(...) rather than a bare const char*: a dynamic docstring as
@@ -99,7 +116,7 @@ std::string join_exts(const engine_info& e, std::string_view sep) {
 }
 
 // The docstring fragments are folds over the pack through plain function
-// templates (the same portable construct set as adapter.h: no capturing
+// templates (the portable construct set: no capturing
 // generic lambdas at run time), writing into engine_list.h's text sink.
 template <class E>
 void append_dispatch(detail::text& t) {
@@ -210,7 +227,7 @@ PYBIND11_MODULE(pathlike, m) {
     bind_pathset(Engines{}, m, path_cls);                            // PathSet, Filter, Query (pathset.h)
 
     // The registry, introspectable: a tuple of EngineInfo(name, label, extensions, aliases, doc).
-    m.attr("ENGINES") = engines_record(Engines::infos);
+    m.attr("ENGINES") = engines_record();
 
 #ifndef VERSION_INFO
 #error "VERSION_INFO must be defined by the build system (setup.py base_macros)"
