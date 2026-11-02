@@ -197,6 +197,16 @@ inline constexpr auto class_name_buf = [] {
 template <EngineMeta E>
 inline constexpr std::string_view class_name{detail::class_name_buf<E>.data(), E::info.name.size() + 4};
 
+// What the registry's tables map a key to: `Row::of<E>()` for engine E. This one
+// is the engine's info, the default, which the proofs and the core resolve to;
+// the adapter's row carries the engine's entry points (pathview.h), so a lookup
+// there hands back code to call.
+struct info_row {
+    using value = const engine_info*;
+    template <EngineMeta E>
+    [[nodiscard]] static constexpr value of() noexcept { return &E::info; }
+};
+
 // The registry, generic over the pack the build discovered.
 template <EngineMeta... Es>
 struct engine_list {
@@ -214,29 +224,33 @@ struct engine_list {
     // which, when the table is built in constant evaluation, is a build error
     // (holds() below reports the conflict by name first, and short-circuits).
     // The same table object serves the proofs (built transiently in constant
-    // evaluation) and the process (built once, on first use).
-    using table = core::StaticRegistryCore<std::string_view, const engine_info*>;
+    // evaluation) and the process (built once, on first use), over whichever
+    // row the caller names (info_row above).
+    template <class Row = info_row>
+    using table = core::StaticRegistryCore<std::string_view, typename Row::value>;
 
-    template <EngineMeta E>
-    static constexpr void add_exts(table& t) {
-        for (std::string_view x : E::info.exts) t.register_or_override(x, &E::info, false);
+    template <class Row, EngineMeta E>
+    static constexpr void add_exts(table<Row>& t) {
+        for (std::string_view x : E::info.exts) t.register_or_override(x, Row::template of<E>(), false);
     }
-    template <EngineMeta E>
-    static constexpr void add_selectors(table& t) {
-        t.register_or_override(E::info.name, &E::info, false);
-        t.register_or_override(E::info.label, &E::info, false);
-        for (std::string_view a : E::info.aliases) t.register_or_override(a, &E::info, false);
+    template <class Row, EngineMeta E>
+    static constexpr void add_selectors(table<Row>& t) {
+        t.register_or_override(E::info.name, Row::template of<E>(), false);
+        t.register_or_override(E::info.label, Row::template of<E>(), false);
+        for (std::string_view a : E::info.aliases) t.register_or_override(a, Row::template of<E>(), false);
     }
 
-    [[nodiscard]] static constexpr table ext_table() {
-        table t;
-        (add_exts<Es>(t), ...);
+    template <class Row = info_row>
+    [[nodiscard]] static constexpr table<Row> ext_table() {
+        table<Row> t;
+        (add_exts<Row, Es>(t), ...);
         return t;
     }
 
-    [[nodiscard]] static constexpr table selector_table() {
-        table t;
-        (add_selectors<Es>(t), ...);
+    template <class Row = info_row>
+    [[nodiscard]] static constexpr table<Row> selector_table() {
+        table<Row> t;
+        (add_selectors<Row, Es>(t), ...);
         return t;
     }
 
@@ -246,29 +260,34 @@ struct engine_list {
     // constexpr std::vector cannot outlive its evaluation — and the run-time
     // ones build it once per process in a plain function. Both build it with
     // the same code, so the proven table IS the served table.
-    [[nodiscard]] static constexpr const engine_info* lookup(const table& t, std::string_view key) noexcept {
-        const engine_info* const* hit = t.try_get_const(key);
+    template <class Row>
+    [[nodiscard]] static constexpr typename Row::value lookup(const table<Row>& t, std::string_view key) noexcept {
+        const typename Row::value* hit = t.try_get_const(key);
         return hit ? *hit : nullptr;
     }
 
     // The engine that auto-dispatches an extension (lower-case, leading dot), or nullptr.
-    [[nodiscard]] static constexpr const engine_info* for_ext(std::string_view ext) {
-        const table t = ext_table();
-        return lookup(t, ext);
+    template <class Row = info_row>
+    [[nodiscard]] static constexpr typename Row::value for_ext(std::string_view ext) {
+        const table<Row> t = ext_table<Row>();
+        return lookup<Row>(t, ext);
     }
-    [[nodiscard]] static const engine_info* for_ext_at_runtime(std::string_view ext) {
-        static const table t = ext_table();
-        return lookup(t, ext);
+    template <class Row = info_row>
+    [[nodiscard]] static typename Row::value for_ext_at_runtime(std::string_view ext) {
+        static const table<Row> t = ext_table<Row>();
+        return lookup<Row>(t, ext);
     }
 
     // The engine an engine= selector names (format name, library label or alias), or nullptr.
-    [[nodiscard]] static constexpr const engine_info* from_name(std::string_view n) {
-        const table t = selector_table();
-        return lookup(t, n);
+    template <class Row = info_row>
+    [[nodiscard]] static constexpr typename Row::value from_name(std::string_view n) {
+        const table<Row> t = selector_table<Row>();
+        return lookup<Row>(t, n);
     }
-    [[nodiscard]] static const engine_info* from_name_at_runtime(std::string_view n) {
-        static const table t = selector_table();
-        return lookup(t, n);
+    template <class Row = info_row>
+    [[nodiscard]] static typename Row::value from_name_at_runtime(std::string_view n) {
+        static const table<Row> t = selector_table<Row>();
+        return lookup<Row>(t, n);
     }
 
     // The inventories as run-time strings, from the same folds through a text
@@ -309,27 +328,28 @@ struct engine_list {
         return visit_impl(i, f, std::index_sequence_for<Es...>{});
     }
 
-    // ── resolution (runtime; throws with derived inventories) ─────────────
-    // The engine read()/write() would use for f: the constructor pin, else the extension.
-    [[nodiscard]] static const engine_info* resolved(const file& f) {
-        return f.pinned() ? f.pinned() : for_ext_at_runtime(f.ext_key());
-    }
-    // The same, in constant evaluation (transient table) — for the proofs:
-    // `file` is a literal type, so a path can be resolved at compile time.
+    // ── resolution ────────────────────────────────────────────────────────
+    // The engine a read or write of f uses, in constant evaluation (transient
+    // table) — for the proofs: the constructor pin, else the extension. `file`
+    // is a literal type, so a path can be resolved at compile time.
     [[nodiscard]] static constexpr const engine_info* resolved_ct(const file& f) {
         return f.pinned() ? f.pinned() : for_ext(f.ext_key());
     }
 
-    // Precedence: an explicit engine= wins, then the pin, then the extension.
-    // Throws std::invalid_argument (Python ValueError) rather than guessing.
-    [[nodiscard]] static const engine_info* resolve(const file& f, std::string_view requested) {
+    // At run time, as the caller's row. Precedence: an explicit engine= wins,
+    // then the pin, then the extension. Throws std::invalid_argument (Python
+    // ValueError) with the derived inventory rather than guessing.
+    template <class Row = info_row>
+    [[nodiscard]] static typename Row::value resolve(std::string_view requested, typename Row::value pin,
+                                                     std::string_view ext) {
         if (!requested.empty()) {
-            if (const engine_info* e = from_name_at_runtime(requested)) return e;
+            if (const auto e = from_name_at_runtime<Row>(requested)) return e;
             throw std::invalid_argument("unknown engine: '" + std::string(requested) + "' (known: " +
                                         known_text() + ")");
         }
-        if (const engine_info* e = resolved(f)) return e;
-        throw std::invalid_argument("no engine for extension '" + f.ext_key() + "' (known: " +
+        if (pin) return pin;
+        if (const auto e = for_ext_at_runtime<Row>(ext)) return e;
+        throw std::invalid_argument("no engine for extension '" + std::string(ext) + "' (known: " +
                                     ext_inventory_text() +
                                     ") — pass engine= at construction or read(engine=...)");
     }

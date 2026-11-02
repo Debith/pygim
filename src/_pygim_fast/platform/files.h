@@ -1,7 +1,7 @@
 #pragma once
 // platform/files.h — a path's text as the system takes it. Infrastructure behind the platform
 // boundary (docs/design/platform_boundary.md, D77): pathlike's files (pathlike/core.h) and the
-// Python boundary (pathlike/adapter/adapter.h) call these and never ask which system they run on.
+// Python boundary (pathlike/adapter/path_text.h) call these and never ask which system they run on.
 //
 //     text_from_fs(p)    -> the internal text: the system's own bytes on POSIX, UTF-8 on Windows
 //     fs_from_text(t)    -> the std::filesystem path that text names
@@ -20,7 +20,7 @@ namespace fs = std::filesystem;
 
 /// What a path's internal text is: the system's own bytes on POSIX (so a name that is not UTF-8
 /// round-trips), UTF-8 on Windows (lossless from the wide native form, and what Python's str
-/// carries). The Python boundary encodes a str by it (pathlike/adapter/adapter.h).
+/// carries). The Python boundary encodes a str by it (pathlike/adapter/path_text.h).
 inline constexpr bool path_text_is_utf8 = native == family::windows;
 
 // The OS boundary: the internal text form, as path_text_is_utf8 says. fs::path::string() would

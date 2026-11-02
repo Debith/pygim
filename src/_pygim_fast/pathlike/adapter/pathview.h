@@ -57,18 +57,32 @@
 #include "../path_table.h"
 #include "adapter.h"
 #include "path_store.h"
+#include "path_text.h"
 
 namespace pygim::pathlike {
+
+struct pathview;
+
+/// An engine's row: everything a caller does with an engine, built at compile
+/// time from its descriptor (entry_of below). The registry's tables map an
+/// extension or a selector straight to one, so picking an engine is one lookup
+/// and using it is one call.
+struct engine_entry {
+    const engine_info* info;                                    // name card: messages, repr, ENGINES
+    py::object (*load)(const file&, detail::KeyCache&);         // read()
+    void (*write)(const file&, py::handle);                     // write()
+    py::object (*wrap)(pathview);                               // the typed class: yamlpath(...)
+};
 
 /// The handle. Copies nothing; keeps the table alive.
 struct pathview {
     table_ptr table;
     std::uint32_t row = 0;
-    const engine_info* pin = nullptr;   // the engine pinned at construction (inherited by derived paths)
+    const engine_entry* pin = nullptr;   // the engine pinned at construction (inherited by derived paths)
 
     /// The core value of the row, with the pin: what the engines' load/write
     /// and the value-route operations take.
-    [[nodiscard]] file value() const { return file(table->value(row), pin); }
+    [[nodiscard]] file value() const { return file(table->value(row), pin ? pin->info : nullptr); }
     /// pathlib's str() of the row (path_table::render).      p.fspath() -> "a/b/c.yaml"
     [[nodiscard]] std::string fspath() const { return table->render<native_strategy>(row); }
     /// The final component (a view into the arena).          p.name() -> "c.yaml"
@@ -114,19 +128,27 @@ struct typed_view : pathview {
     explicit typed_view(pathview v) : pathview(std::move(v)) {}
 };
 
+template <Engine E>
+[[nodiscard]] py::object wrap_as(pathview v) { return py::cast(typed_view<E>(std::move(v))); }
+
+/// E's row. An engine without load() or write() fails here, named.
+template <Engine E>
+inline constexpr engine_entry entry_of{&E::info, &E::load, &E::write, &wrap_as<E>};
+
+/// The registry's tables over rows (engine_list.h's info_row is the other).
+struct entry_row {
+    using value = const engine_entry*;
+    template <Engine E>
+    [[nodiscard]] static constexpr value of() noexcept { return &entry_of<E>; }
+};
+
 /// The Python type of each typed class -> its engine: what the metaclass
 /// consults to pin `yamlpath("x")`.
-inline std::unordered_map<PyTypeObject*, const engine_info*>& typed_types() {
-    static auto* m = new std::unordered_map<PyTypeObject*, const engine_info*>();
+inline std::unordered_map<PyTypeObject*, const engine_entry*>& typed_types() {
+    static auto* m = new std::unordered_map<PyTypeObject*, const engine_entry*>();
     return *m;
 }
 
-template <Engine E>
-bool wrap_if(const engine_info* e, pathview& v, py::object& out) {
-    if (e != &E::info) return false;
-    out = py::cast(typed_view<E>(std::move(v)));
-    return true;
-}
 /// The Python object for a handle: the typed subclass of its resolved engine
 /// (the pin, else the extension), or a plain `path` when none resolves.
 ///
@@ -134,10 +156,8 @@ bool wrap_if(const engine_info* e, pathview& v, py::object& out) {
 template <Engine... Es>
 [[nodiscard]] py::object wrap(engine_list<Es...>, pathview v) {
     char buf[32];
-    const engine_info* e = v.pin ? v.pin : engine_list<Es...>::for_ext_at_runtime(v.ext_key_into(buf));
-    py::object out;
-    const bool hit = (wrap_if<Es>(e, v, out) || ...);
-    return hit ? out : py::cast(std::move(v));
+    const engine_entry* e = v.pin ? v.pin : engine_list<Es...>::template for_ext_at_runtime<entry_row>(v.ext_key_into(buf));
+    return e ? e->wrap(std::move(v)) : py::cast(std::move(v));
 }
 template <Engine... Es>
 [[nodiscard]] py::list wrap_all(engine_list<Es...> es, const pathview& like, std::vector<file> values) {
@@ -148,7 +168,7 @@ template <Engine... Es>
 
 // None or "" -> auto (nullptr); a known selector -> its engine; else ValueError.
 template <Engine... Es>
-[[nodiscard]] const engine_info* engine_from_arg(engine_list<Es...>, py::handle name) {
+[[nodiscard]] const engine_entry* engine_from_arg(engine_list<Es...>, py::handle name) {
     using L = engine_list<Es...>;
     if (name.is_none()) return nullptr;
     if (!PyUnicode_Check(name.ptr())) throw py::type_error("engine must be a str or None");
@@ -157,12 +177,12 @@ template <Engine... Es>
     if (!s) throw py::error_already_set();
     const std::string_view sv(s, static_cast<std::size_t>(n));
     if (sv.empty()) return nullptr;
-    if (const engine_info* e = L::from_name_at_runtime(sv)) return e;
+    if (const engine_entry* e = L::template from_name_at_runtime<entry_row>(sv)) return e;
     throw std::invalid_argument("unknown engine: '" + std::string(sv) + "' (known: " + L::known_text() + ")");
 }
 
 /// The handle for a constructor call: text into the chosen table.
-[[nodiscard]] inline pathview make_view(py::handle text, const engine_info* pin, py::handle store) {
+[[nodiscard]] inline pathview make_view(py::handle text, const engine_entry* pin, py::handle store) {
     table_ptr table = store.is_none() ? default_table() : as_store(store).table();
     const text_arg t = text_view_of_arg(text);
     const std::uint32_t r = intern_text(*table, t.view);
@@ -197,9 +217,9 @@ void bind_typed_one(py::module_& m, py::handle meta) {
     static const std::string doc = std::string(E::info.doc) + " Constructing one pins the engine (" +
                                    std::string(E::info.label) + ").";
     py::class_<typed_view<E>, pathview> cls(m, name.c_str(), py::metaclass(meta), doc.c_str());
-    cls.def(py::init([](py::handle p, py::object store) { return typed_view<E>(make_view(p, &E::info, store)); }),
+    cls.def(py::init([](py::handle p, py::object store) { return typed_view<E>(make_view(p, &entry_of<E>, store)); }),
             py::arg("path"), py::kw_only(), py::arg("store") = py::none());
-    typed_types()[reinterpret_cast<PyTypeObject*>(cls.ptr())] = &E::info;
+    typed_types()[reinterpret_cast<PyTypeObject*>(cls.ptr())] = &entry_of<E>;
 }
 
 /// Binds `path` (the handle) and its typed subclasses. Returns the class so
@@ -237,7 +257,7 @@ py::class_<pathview> bind_path(engine_list<Es...> es, py::module_& m, const path
         const std::size_t n = args.size();
         if (n >= 1) text = args[0];
         if (!text) throw py::type_error("path() missing the 'path' argument");
-        const engine_info* pin = nullptr;
+        const engine_entry* pin = nullptr;
         if (is_base) {
             if (n >= 2) engine = args[1];
             if (n > 2) throw py::type_error("path() takes at most 2 positional arguments");
@@ -257,9 +277,9 @@ py::class_<pathview> bind_path(engine_list<Es...> es, py::module_& m, const path
                 return make_view(p, engine_from_arg(es, engine), store);
             }), py::arg("path"), py::arg("engine") = py::none(), py::kw_only(), py::arg("store") = py::none())
         .def_property_readonly("engine", [](const pathview& v) -> py::object {
-                const engine_info* e = v.pin ? v.pin : L::for_ext_at_runtime(v.ext_key());
+                const engine_entry* e = v.pin ? v.pin : L::template for_ext_at_runtime<entry_row>(v.ext_key());
                 if (!e) return py::none();
-                return py::str(std::string(e->label));
+                return py::str(std::string(e->info->label));
             }, py::doc(docs.engine.c_str()))
         .def_property_readonly("store", [](const pathview& v) { return path_store(v.table); },
                                "A PathStore over this path's table (the one derived paths share).")
@@ -351,11 +371,12 @@ py::class_<pathview> bind_path(engine_list<Es...> es, py::module_& m, const path
         .def("read", [](const pathview& v, const std::optional<std::string>& engine, py::ssize_t key_cache) {
                 const file f = v.value();
                 const std::size_t cap = key_cache < 0 ? std::numeric_limits<std::size_t>::max() : static_cast<std::size_t>(key_cache);
-                return load(L{}, L::resolve(f, requested_of(engine)), f, cap);
+                detail::KeyCache keys(cap);
+                return L::template resolve<entry_row>(requested_of(engine), v.pin, v.ext_key())->load(f, keys);
             }, py::arg("engine") = py::none(), py::arg("key_cache") = 256, py::doc(docs.read.c_str()))
         .def("write", [](const pathview& v, py::handle obj, const std::optional<std::string>& engine) {
                 const file f = v.value();
-                write(L{}, L::resolve(f, requested_of(engine)), f, obj);
+                L::template resolve<entry_row>(requested_of(engine), v.pin, v.ext_key())->write(f, obj);
             }, py::arg("obj"), py::arg("engine") = py::none(), py::doc(docs.write.c_str()))
         // -- traversal: results are rows of the same table and inherit the pin --
         .def("iterdir", [es](const pathview& v) { return wrap_all(es, v, v.value().iterdir()); },
