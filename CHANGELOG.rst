@@ -53,6 +53,7 @@ Changed
 
 Fixed
 ~~~~~
+- CLI: ``oo docs serve`` reads a POST's body before answering it. A refused request (an upload to a path outside ``images/``, an unknown route) was answered with its body unread, and on Windows closing the connection over unread data resets it: the client saw ``ConnectionAbortedError`` (WinError 10053) instead of the 400 or 404. A body over the 25 MB upload limit is still left unread.
 - PathSet: Fix interpreter crash when filtering: ``ext()`` captured a dangling ``string_view`` and ``Query`` held a non-owning pointer to a source ``PathSet`` that Python could garbage-collect before evaluation. The filter now owns its extension string and the ``&``/``|`` bindings keep the source alive (``py::keep_alive``).
 - PathSet: Fix ``__add__`` discarding the left operand; ``a + b`` now returns the union of both path sets.
 - Each: Accessing an attribute missing from any element now raises ``AttributeError`` immediately, per the Proxy's documented contract; previously the exception *instances* were silently collected into the result list.
