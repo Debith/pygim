@@ -17,7 +17,9 @@ What differs between systems sits behind one boundary, in two kinds:
 The calls live in `src/_pygim_fast/platform/`; a rule lives there too, or with the domain it is the
 rules of (pathlike's path strategies, the BCP driver's file names). The running system's are chosen
 once, by `platform::native`. Nothing else asks which system it runs on: no `#if _WIN32`, `__APPLE__`
-or `__linux__` outside that folder.
+or `__linux__` outside that folder. Inside it, a call written against one system's own headers and
+types (`dlopen` against `LoadLibraryW`, statm against the Mach task) is the only code that still asks
+the compiler.
 
 What is built so far: the headers the code on `main` asks of the system — `native.h` (the family,
 decided once), `windows_headers.h`, `files.h` (a path's text), `memory.h` (the resident-memory
@@ -36,8 +38,11 @@ both were fixed with another `#ifdef` in the same class. The glob's own rules, i
 separators, are `#ifdef`s in glob_walk.h, so the glob under Windows' rules is tested nowhere: its tests
 cannot run on Windows (they build symbolic links) and never ask for Windows' rules elsewhere.
 
-On 2026-10-31, 59 conditionals on the system sat in 14 headers outside any boundary (counted by
-`test_the_operating_system_is_asked_only_behind_the_platform_boundary`):
+On 2026-10-31, on PR #39's branch, 59 conditionals on the system sat in 14 headers outside any
+boundary (counted by `test_the_operating_system_is_asked_only_behind_the_platform_boundary`).
+`main`, which has less of that code, had 14 in five files: pathlike's path text and native rules, the
+ODBC headers and driver loading, the memory probes. The first step moves those, and the test then
+allows none outside the folder. PR #39's branch had:
 
 | Header | Conditionals | What they decide | Kind |
 | --- | --- | --- | --- |
@@ -79,7 +84,9 @@ behind the `file_reads` concept. The boundary extends that pattern to the rest.
 
 Each step a refactor under the tests as they are (#36), its own commit, the ratchet lowered with it:
 
-1. This document and the ratchet (`test_the_operating_system_is_asked_only_behind_the_platform_boundary`, 59).
+1. This document, the ratchet (`test_the_operating_system_is_asked_only_behind_the_platform_boundary`), and the
+   conditionals `main` has, behind the boundary: `native.h`, `files.h` (a path's text), `memory.h`,
+   `libraries.h` and `windows_headers.h`.
 2. The path rules: the glob's case default and separators from the path strategy; the glob's
    matching tested under Windows' rules on Linux — the coverage Windows lacks.
 3. The listing: one engine per system behind a concept, the glob reading through it.
@@ -96,21 +103,29 @@ Each step a refactor under the tests as they are (#36), its own commit, the ratc
 
 | Header | What it holds | Kind |
 | --- | --- | --- |
-| platform/native.h | `native`: the running system's family, the one place that asks the compiler | the choice |
-| pathlike/path_rules.h | `posix_strategy`, `windows_strategy`: separators, case, parsing; `native_strategy` | rules |
+| platform/native.h | `native`: the running system's family, decided once | the choice |
+| platform/files.h | a path's text: `path_text_is_utf8`, `text_from_fs`, `fs_from_text` | rules and calls |
+| platform/memory.h | `resident_bytes`, `peak_resident_bytes` | calls |
+| platform/libraries.h | `library`: `first_of`, `last_match`, `function<F>` | calls |
+| platform/windows_headers.h | `<windows.h>` lean and without `min` and `max`, for every header that calls it | — |
+| pathlike/core.h | `posix_strategy`, `windows_strategy`: separators, case, parsing; `native_strategy` | rules |
+| persistence/.../bcp_api.h | `driver_files<F>`: the ODBC driver's library as each system names it | rules |
+
+Arriving with the code that calls them, from PR #39's branch, each behind the same boundary:
+
+| Header | What it will hold | Kind |
+| --- | --- | --- |
+| pathlike/path_rules.h | the path strategies, out of core.h | rules |
 | platform/errors.h | an errno's words; `open_error_for<F>`, `open()`'s error for a folder; `os_error::of<F>`, what a system's error code tells Python's `OSError` (an errno, or Windows' own error, which Python maps) | rules and calls |
-| platform/files.h | a path's text (`path_text_is_utf8`), exclusive create, write, force, close, unlink, `file_size<F>` (a folder has none, on every system) | rules and calls |
+| platform/files.h | exclusive create, write, force, close, unlink, `file_size<F>` (a folder has none, on every system) | rules and calls |
 | platform/home.h | `home_of(user)`: whose home `~` names; posixpath's and ntpath's rules | rules and calls |
 | platform/listing.h | a directory's listing with each entry's kind (`directory`, `file`, `link`, `other`), `entry_at`, `finds_a_name_by_stat` | calls |
 | platform/reads.h | `posix_reads`, `windows_reads` behind the `file_reads` concept | calls |
 | platform/process.h | a thread's name, the signal mask its threads inherit, `at_fork`, `process_id` | calls |
 | platform/signals.h | `interrupt_handlers` (Ctrl-C, SIGTERM), `wakeup` (a pipe; an event) | calls |
 | platform/caches.h | `system_caches`; the kernel's /sys list read by rules compiled everywhere | calls and rules |
-| platform/memory.h | `resident_bytes`, `peak_resident_bytes`, `advise_huge_pages` | calls |
+| platform/memory.h | `advise_huge_pages` | calls |
 | platform/clocks.h | `thread_cpu_ns`, `counts_thread_cpu_time` | calls |
-| platform/libraries.h | `library`: `first_of`, `last_match`, `function<F>` | calls |
-| platform/windows_headers.h | `<windows.h>` lean and without `min` and `max`, for every header that calls it | — |
-| persistence/.../bcp_api.h | `driver_files<F>`: the ODBC driver's library as each system names it | rules |
 
 ## Open
 

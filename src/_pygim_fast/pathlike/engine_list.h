@@ -15,8 +15,9 @@
 // Everything downstream is a fold over that pack: the extension and selector
 // tables (static registries — wiring/registry/core.h over the mapping toolkit's
 // flat_storage, the same RegistryCore the run-time Registry uses),
-// the error-message inventories, the Python typed classes and their
-// docstrings, the module's ENGINES record, and the proofs. Adding a format is
+// the error-message inventories, the Python typed classes, their docstrings
+// and their rows (entry_of, pathview.h), the module's ENGINES record (through
+// `infos`), and the proofs. Adding a format is
 // adding a file; nothing in this header, pathview.h or bindings.cpp changes,
 // and the new engine is swept by every proof on its first build.
 //
@@ -48,7 +49,7 @@
 #include <type_traits>
 #include <utility>
 
-#include "core.h"
+#include "uri.h"
 #include "../wiring/registry/core.h"   // StaticRegistryCore: the tables below are registries, not hand-rolled scans
 
 // P2996 detection: the standard feature-test macro is __cpp_reflection, but
@@ -72,6 +73,49 @@
 namespace pygim::pathlike {
 
 namespace engines {}   // the engine headers populate this; pre-declared so reflection can name it
+
+// A borrowed view over an engine's constexpr string list — a deliberately
+// minimal stand-in for std::span that is usable in constant expressions on
+// every compiler in the build matrix.
+struct sv_list {
+    const std::string_view* first = nullptr;
+    std::size_t count = 0;
+
+    constexpr sv_list() = default;
+    template <std::size_t N>
+    constexpr sv_list(const std::array<std::string_view, N>& items) noexcept  // implicit by design
+        : first(items.data()), count(N) {}
+
+    [[nodiscard]] constexpr const std::string_view* begin() const noexcept { return first; }
+    [[nodiscard]] constexpr const std::string_view* end() const noexcept { return first + count; }
+    [[nodiscard]] constexpr std::size_t size() const noexcept { return count; }
+    [[nodiscard]] constexpr bool empty() const noexcept { return count == 0; }
+    [[nodiscard]] constexpr bool contains(std::string_view s) const noexcept {
+        for (std::string_view x : *this) {
+            if (x == s) return true;
+        }
+        return false;
+    }
+};
+
+// The pybind-free face of one engine: everything the registry and its proofs
+// need to know. Every engine header declares one as `static constexpr
+// engine_info info`; its address is the engine's identity in the registry
+// (static constexpr members are inline variables, so there is exactly one per
+// program).
+struct engine_info {
+    std::string_view name;     // format name: engine="json"; the Python class is "<name>path"
+    std::string_view label;    // LIBRARY label reported by .engine: "simdjson"
+    std::string_view doc;      // one sentence, used by every derived docstring
+    sv_list exts;              // auto-dispatch extensions: lower-case, leading dot
+    sv_list aliases;           // extra engine= spellings: "yml", "ndjson", "tomlplusplus"
+
+    // engine= selectors: the format name, the library label and the aliases.
+    [[nodiscard]] constexpr bool selects(std::string_view n) const noexcept {
+        return n == name || n == label || aliases.contains(n);
+    }
+    [[nodiscard]] constexpr bool owns(std::string_view ext) const noexcept { return exts.contains(ext); }
+};
 
 // The pybind-free half of the engine contract: a descriptor exposes its
 // engine_info. (pathview.h's `Engine` concept adds load()/write().)
@@ -198,9 +242,9 @@ template <EngineMeta E>
 inline constexpr std::string_view class_name{detail::class_name_buf<E>.data(), E::info.name.size() + 4};
 
 // What the registry's tables map a key to: `Row::of<E>()` for engine E. This one
-// is the engine's info, the default, which the proofs and the core resolve to;
-// the adapter's row carries the engine's entry points (pathview.h), so a lookup
-// there hands back code to call.
+// is the engine's info, which the proofs resolve to; the adapter's row carries
+// the engine's entry points (pathview.h), so a lookup there hands back code to
+// call.
 struct info_row {
     using value = const engine_info*;
     template <EngineMeta E>
@@ -272,7 +316,7 @@ struct engine_list {
         const table<Row> t = ext_table<Row>();
         return lookup<Row>(t, ext);
     }
-    template <class Row = info_row>
+    template <class Row>
     [[nodiscard]] static typename Row::value for_ext_at_runtime(std::string_view ext) {
         static const table<Row> t = ext_table<Row>();
         return lookup<Row>(t, ext);
@@ -284,7 +328,7 @@ struct engine_list {
         const table<Row> t = selector_table<Row>();
         return lookup<Row>(t, n);
     }
-    template <class Row = info_row>
+    template <class Row>
     [[nodiscard]] static typename Row::value from_name_at_runtime(std::string_view n) {
         static const table<Row> t = selector_table<Row>();
         return lookup<Row>(t, n);
@@ -304,18 +348,21 @@ struct engine_list {
         return std::move(t.out);
     }
 
-    // ── resolution ────────────────────────────────────────────────────────
-    // At run time, as the caller's row. Precedence: an explicit engine= wins,
-    // then the pin, then the extension. Throws std::invalid_argument (Python
-    // ValueError) with the derived inventory rather than guessing.
-    template <class Row = info_row>
+    // ── resolution (run time, as the caller's row) ────────────────────────
+    // The engine an engine= selector names. Throws std::invalid_argument
+    // (Python ValueError) with the derived inventory rather than guessing.
+    template <class Row>
+    [[nodiscard]] static typename Row::value named(std::string_view name) {
+        if (const auto e = from_name_at_runtime<Row>(name)) return e;
+        throw std::invalid_argument("unknown engine: '" + std::string(name) + "' (known: " + known_text() + ")");
+    }
+
+    // The engine a read or write uses: an explicit engine= wins, then the pin,
+    // then the extension. Throws as named() does.
+    template <class Row>
     [[nodiscard]] static typename Row::value resolve(std::string_view requested, typename Row::value pin,
                                                      std::string_view ext) {
-        if (!requested.empty()) {
-            if (const auto e = from_name_at_runtime<Row>(requested)) return e;
-            throw std::invalid_argument("unknown engine: '" + std::string(requested) + "' (known: " +
-                                        known_text() + ")");
-        }
+        if (!requested.empty()) return named<Row>(requested);
         if (pin) return pin;
         if (const auto e = for_ext_at_runtime<Row>(ext)) return e;
         throw std::invalid_argument("no engine for extension '" + std::string(ext) + "' (known: " +

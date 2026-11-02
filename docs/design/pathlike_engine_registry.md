@@ -93,8 +93,8 @@ same proofs pass on GCC 13.4, GCC 14.3 and GCC 16 (verified).
 
 | Layer | File | Role |
 |---|---|---|
-| vocabulary | `pathlike/uri.h`, `pathlike/core.h` | pybind-free: the RFC 3986 `uri` value; `engine_info` (name, label, doc, extensions, aliases), `sv_list`; the strategies and `basic_file<Strategy>`, a value that names no engine |
-| registry | `pathlike/engine_list.h` | pybind-free: `EngineMeta` concept, `engine_list<Es...>` (the extension and selector tables as `StaticRegistryCore` over `flat_storage`, over the row a caller names — `info_row`, the engine's info, by default; inventories, `resolve`, the proofs, `conflict_report`) |
+| vocabulary | `pathlike/uri.h`, `pathlike/core.h` | pybind-free: the RFC 3986 `uri` value; the strategies and `basic_file<Strategy>`, a value that names no engine |
+| registry | `pathlike/engine_list.h` | pybind-free: `engine_info` (name, label, doc, extensions, aliases) and `sv_list`, `EngineMeta` concept, `engine_list<Es...>` (the extension and selector tables as `StaticRegistryCore` over `flat_storage`, over the row a caller names — `info_row`, the engine's info, by default; inventories, `named`, `resolve`, the proofs, `conflict_report`) |
 | discovery | `setup.py::_apply_typelist` + `[extension.typelist]` in `ext.pathlike.toml` | globs `adapter/engines/*.h` (sorted by stem) into `build/gen/pathlike/pathlike_engines.gen.h`: the includes and `using Engines = engine_list<engines::json, ...>` |
 | dispatch | `adapter/pathview.h` | `Engine` concept (adds `load`/`write`); `engine_entry`, an engine's row (`info`, `load`, `write`, `wrap`), built at compile time as `entry_of<E>`; `entry_row`, the tables over rows; `wrap()`, `bind_typed_one()` |
 | bindings | `adapter/bindings.cpp` | includes the generated header; docstrings, error inventories, typed classes and `ENGINES` are derived; asserts the proofs on the real pack |

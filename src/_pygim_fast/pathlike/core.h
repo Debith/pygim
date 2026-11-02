@@ -20,7 +20,6 @@
 // in adapter/.
 
 #include <algorithm>
-#include <array>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
@@ -40,48 +39,6 @@
 namespace pygim::pathlike {
 
 namespace fs = std::filesystem;
-
-// A borrowed view over an engine's constexpr string list — a deliberately
-// minimal stand-in for std::span that is usable in constant expressions on
-// every compiler in the build matrix.
-struct sv_list {
-    const std::string_view* first = nullptr;
-    std::size_t count = 0;
-
-    constexpr sv_list() = default;
-    template <std::size_t N>
-    constexpr sv_list(const std::array<std::string_view, N>& items) noexcept  // implicit by design
-        : first(items.data()), count(N) {}
-
-    [[nodiscard]] constexpr const std::string_view* begin() const noexcept { return first; }
-    [[nodiscard]] constexpr const std::string_view* end() const noexcept { return first + count; }
-    [[nodiscard]] constexpr std::size_t size() const noexcept { return count; }
-    [[nodiscard]] constexpr bool empty() const noexcept { return count == 0; }
-    [[nodiscard]] constexpr bool contains(std::string_view s) const noexcept {
-        for (std::string_view x : *this) {
-            if (x == s) return true;
-        }
-        return false;
-    }
-};
-
-// The pybind-free face of one engine: everything the registry, the proofs and
-// `file` need to know. Every engine header declares one as `static constexpr
-// engine_info info`; its address is the engine's identity at run time (static
-// constexpr members are inline variables, so there is exactly one per program).
-struct engine_info {
-    std::string_view name;     // format name: engine="json"; the Python class is "<name>path"
-    std::string_view label;    // LIBRARY label reported by .engine: "simdjson"
-    std::string_view doc;      // one sentence, used by every derived docstring
-    sv_list exts;              // auto-dispatch extensions: lower-case, leading dot
-    sv_list aliases;           // extra engine= spellings: "yml", "ndjson", "tomlplusplus"
-
-    // engine= selectors: the format name, the library label and the aliases.
-    [[nodiscard]] constexpr bool selects(std::string_view n) const noexcept {
-        return n == name || n == label || aliases.contains(n);
-    }
-    [[nodiscard]] constexpr bool owns(std::string_view ext) const noexcept { return exts.contains(ext); }
-};
 
 namespace detail {
 // The value hash of basic_file and path_table: one definition, in utils/hash.h.

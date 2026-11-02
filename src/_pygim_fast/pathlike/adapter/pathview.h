@@ -83,7 +83,7 @@ struct pathview;
 /// extension or a selector straight to one, so picking an engine is one lookup
 /// and using it is one call.
 struct engine_entry {
-    const engine_info* info;                                    // name card: messages, repr, ENGINES
+    const engine_info* info;                                    // name card: .engine, repr
     py::object (*load)(const file&, detail::KeyCache&);         // read()
     void (*write)(const file&, py::handle);                     // write()
     py::object (*wrap)(pathview);                               // the typed class: yamlpath(...)
@@ -192,7 +192,7 @@ template <Engine... Es>
     if (!s) throw py::error_already_set();
     const std::string_view sv(s, static_cast<std::size_t>(n));
     if (sv.empty()) return nullptr;
-    return L::template resolve<entry_row>(sv, nullptr, {});
+    return L::template named<entry_row>(sv);
 }
 
 /// The handle for a constructor call: text into the chosen table.

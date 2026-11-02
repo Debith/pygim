@@ -88,15 +88,15 @@ namespace {
 py::tuple engines_record() {
     py::object record = py::module_::import("collections")
                             .attr("namedtuple")("EngineInfo", "name label extensions aliases doc");
-    const auto texts = [](const sv_list& views) {
+    const auto text = [](std::string_view v) { return py::str(v.data(), v.size()); };
+    const auto texts = [&](const sv_list& views) {
         py::list out;
-        for (std::string_view v : views) out.append(std::string(v));
+        for (std::string_view v : views) out.append(text(v));
         return py::tuple(out);
     };
     py::list out;
     for (const engine_info* e : Engines::infos) {
-        out.append(record(std::string(e->name), std::string(e->label), texts(e->exts), texts(e->aliases),
-                          std::string(e->doc)));
+        out.append(record(text(e->name), text(e->label), texts(e->exts), texts(e->aliases), text(e->doc)));
     }
     return py::tuple(out);
 }

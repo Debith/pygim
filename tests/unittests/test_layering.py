@@ -14,7 +14,7 @@ ROOT = pathlib.Path(__file__).resolve().parents[2] / "src" / "_pygim_fast"
 # CI removes src/ before running the suite against the installed package: this
 # is a source-tree check, so it skips there rather than fail.
 pytestmark = pytest.mark.skipif(not ROOT.is_dir(), reason="source tree not present (testing the installed package)")
-CORE = sorted(ROOT.glob("mapping/*.h")) + [
+CORE = sorted(ROOT.glob("mapping/*.h")) + sorted(ROOT.glob("platform/*.h")) + [
     ROOT / "utils" / "hash.h",
     ROOT / "utils" / "memory.h",
     ROOT / "pathlike" / "core.h",

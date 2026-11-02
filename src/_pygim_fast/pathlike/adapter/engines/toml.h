@@ -20,6 +20,7 @@
 #define TOML_EXCEPTIONS 0   // error-code API (toml::parse_result), no throw across nogil
 #include "../third_party/tomlplusplus/toml.hpp"
 #include "../../core.h"
+#include "../../engine_list.h"
 #include "../common.h"
 #include "../materialize.h"
 
