@@ -76,3 +76,16 @@ def test_the_os_check_finds_what_it_is_for(tmp_path):
 def test_the_operating_system_is_asked_only_behind_the_platform_boundary():
     found = os_conditionals(ROOT)
     assert found == [], "a conditional on the operating system outside platform/: put the system's rules and calls behind the boundary:\n" + "\n".join(found)
+
+
+def test_every_package_that_ships_holds_something():
+    """A package of one empty __init__.py ships in every wheel and imports as if it offered
+    something: pygim.ai did from 2025-08-07 until Debith dropped it (D78, 2026-10-31)."""
+    src = ROOT.parent
+    empty = []
+    for package in ("pygim", "_pygim"):
+        for init in sorted((src / package).rglob("__init__.py")):
+            others = [p for p in init.parent.iterdir() if p.name not in ("__init__.py", "__pycache__")]
+            if not init.read_text(encoding="utf-8").strip() and not others:
+                empty.append(init.parent.relative_to(src).as_posix())
+    assert empty == [], "a package holding nothing: give it its code, or remove it"
