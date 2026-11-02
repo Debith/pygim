@@ -4,7 +4,6 @@ tests and what a release builds wheels for are one list. Each is written in a fi
 one could drift from the others — a classifier claiming a Python no job tests, a wheel built for
 one pip would refuse."""
 
-import os
 import re
 
 import pytest
@@ -14,14 +13,14 @@ from pygim import path
 # Debith, 2026-10-31: "We can drop 3.9 support" (end of life since October 2025).
 SUPPORTED = ["3.10", "3.11", "3.12", "3.13", "3.14"]
 
-REPO = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..")
+REPO = path(__file__).resolve().parent.parent.parent
 
 
 def read(relative):
-    file = os.path.normpath(os.path.join(REPO, relative))
-    if not os.path.isfile(file):
+    file = REPO / relative
+    if not file.is_file():
         pytest.skip(f"{relative} is not here: the repository's files are not")
-    return path(file).read()
+    return file.read()
 
 
 def test_pip_is_told_the_oldest_python():
