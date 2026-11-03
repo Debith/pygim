@@ -83,22 +83,37 @@ static_assert(paths_dispatch_to_their_engines(Engines{}));
 
 namespace {
 
-// The module-level ENGINES record: an immutable, introspectable view of the
-// registry for Python tooling (the .pyi generator, the tests, users).
-py::tuple engines_record() {
-    py::object record = py::module_::import("collections")
-                            .attr("namedtuple")("EngineInfo", "name label extensions aliases doc");
-    const auto text = [](std::string_view v) { return py::str(v.data(), v.size()); };
-    const auto texts = [&](const sv_list& views) {
-        py::list out;
-        for (std::string_view v : views) out.append(text(v));
-        return py::tuple(out);
-    };
-    py::list out;
-    for (const engine_info* e : Engines::infos) {
-        out.append(record(text(e->name), text(e->label), texts(e->exts), texts(e->aliases), text(e->doc)));
+// The module-level ENGINES record, for Python tooling (the .pyi generator, the
+// tests, users): each engine's own engine_info, bound read-only and by
+// reference (static storage, never copied).
+py::str str_of(std::string_view v) { return py::str(v.data(), v.size()); }
+py::tuple strs_of(const sv_list& views) {
+    py::tuple out(views.size());
+    for (std::size_t i = 0; i < views.size(); ++i) out[i] = str_of(views.begin()[i]);
+    return out;
+}
+
+void bind_engines(py::module_& m) {
+    py::class_<engine_info>(m, "EngineInfo", "One entry of ENGINES: an engine's descriptor, read-only.")
+        .def_property_readonly("name", [](const engine_info& e) { return str_of(e.name); },
+                               "The format name: engine=\"json\"; the typed class is <name>path.")
+        .def_property_readonly("label", [](const engine_info& e) { return str_of(e.label); },
+                               "The library label reported by .engine.")
+        .def_property_readonly("extensions", [](const engine_info& e) { return strs_of(e.exts); },
+                               "The extensions that dispatch to it: lower-case, leading dot.")
+        .def_property_readonly("aliases", [](const engine_info& e) { return strs_of(e.aliases); },
+                               "Extra engine= spellings.")
+        .def_property_readonly("doc", [](const engine_info& e) { return str_of(e.doc); },
+                               "One sentence, used by every derived docstring.")
+        .def("__repr__", [](const engine_info& e) {
+            return py::str("EngineInfo(name={!r}, label={!r}, extensions={!r}, aliases={!r})")
+                .format(str_of(e.name), str_of(e.label), strs_of(e.exts), strs_of(e.aliases));
+        });
+    py::tuple record(Engines::infos.size());
+    for (std::size_t i = 0; i < Engines::infos.size(); ++i) {
+        record[i] = py::cast(Engines::infos[i], py::return_value_policy::reference);
     }
-    return py::tuple(out);
+    m.attr("ENGINES") = record;
 }
 
 // ── Docstrings derived from the registry (static storage: pybind11 keeps pointers).
@@ -226,8 +241,7 @@ PYBIND11_MODULE(pathlike, m) {
     py::class_<pathview> path_cls = bind_path(Engines{}, m, docs);   // path + <engine>path classes (pathview.h)
     bind_pathset(Engines{}, m, path_cls);                            // PathSet, Filter, Query (pathset.h)
 
-    // The registry, introspectable: a tuple of EngineInfo(name, label, extensions, aliases, doc).
-    m.attr("ENGINES") = engines_record();
+    bind_engines(m);   // EngineInfo, and ENGINES: the registry, introspectable
 
 #ifndef VERSION_INFO
 #error "VERSION_INFO must be defined by the build system (setup.py base_macros)"
