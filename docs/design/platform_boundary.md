@@ -1,6 +1,6 @@
 # The operating system behind a boundary
 
-Status: decided and built 2026-10-31 (D77) · Owner: Debith
+Status: decided and built 2026-10-31 (D77); a component's shape decided and built 2026-11-03 (D106) · Owner: Debith
 
 The operating system is a model foreign to pygim's domain, as Python's object model is. The domain —
 pathlib's rules, the glob, the parser, similarity — states its rules once, the same on every system.
@@ -11,21 +11,25 @@ What differs between systems sits behind one boundary, in two kinds:
   compile-time tables, one per system, every one compiled everywhere — so the domain is tested under
   Windows' rules on Linux.
 - **The calls** a system makes: listing a directory, opening and reading a file, forcing it to the
-  disk, blocking signals, naming a thread, asking the caches' sizes. Infrastructure: one engine per
-  system behind a concept; only the running system's is compiled.
+  disk, blocking signals, naming a thread, asking the caches' sizes. Infrastructure: one class per
+  system for each component, in a file of its own, behind the component's concept; only the running
+  system's is compiled ([the shape of a component](#the-shape-of-a-component-d106)).
 
 The calls live in `src/_pygim_fast/platform/`; a rule lives there too, or with the domain it is the
 rules of (pathlike's path strategies, the BCP driver's file names). The running system's are chosen
 once, by `platform::native`. Nothing else asks which system it runs on: no `#if _WIN32`, `__APPLE__`
-or `__linux__` outside that folder. Inside it, a call written against one system's own headers and
-types (`dlopen` against `LoadLibraryW`, statm against the Mach task) is the only code that still asks
-the compiler.
+or `__linux__` outside that folder. Inside it, each component's header asks once, in the `#if` chain
+that picks the running system's class, and a system's own file (`platform/linux/memory.h`,
+`platform/windows/libraries.h`) never asks
+(`test_inside_the_boundary_a_header_asks_once_and_a_systems_own_file_never`).
 
 What is built so far: the headers the code on `main` asks of the system — `native.h` (the family,
 decided once), `windows_headers.h`, `files.h` (a path's text), `memory.h` (the resident-memory
-probes) and `libraries.h` (loading the ODBC driver) — and that code moved behind them. The other
-headers this document names (the listing, the reads, the process's and the signals' calls, the
-caches, the clocks) arrive with the code that calls them, each behind the same boundary.
+probes, a class per system under `linux/`, `macos/` and `windows/`) and `libraries.h` (loading the
+ODBC driver, a class each under `posix/` and `windows/`) — and that code moved behind them. The
+other headers this document names (the listing, the reads, the process's and the signals' calls,
+the caches, the clocks) arrive with the code that calls them, each behind the same boundary and in
+the same shape.
 
 ## Scenario
 
@@ -71,6 +75,64 @@ behind the `file_reads` concept. The boundary extends that pattern to the rest.
 | **B. the system's rules as data, its calls as engines** | `platform/` holds a rules table per system and an engine per system behind each concept; the domain is a template on the rules; a test_layering ratchet counts the conditionals left outside | **chosen** (Debith, 2026-10-31: "I like B") |
 | C. a runtime interface | one abstract system, real or fake, called through virtual functions | rejected: a virtual call on the hot paths (a listing, a read), against making a component a template on its policy |
 
+## The shape of a component (D106)
+
+A component is one subject of the system's calls: the process's memory, loading a library, and with
+PR #39's code the listing, the reads, the writes, the process. Each system gets one class for it,
+holding all of that component's calls (Q51: the huge-page advice joins the memory probes, not a
+contract of its own), in a file of its own under the folder of the most general system it serves.
+The component's header in `platform/` states what every class answers, as a concept, and picks the
+running system's, once:
+
+```
+platform/
+    native.h              the family, decided once
+    windows_headers.h     <windows.h>, lean; nothing on other systems
+    files.h               a path's text: the rule path_text_is_utf8 picks the form, no class per system
+    libraries.h           library_loader; the choice of native_loader; library, written over it
+    memory.h              process_memory; the choice of native_memory
+    posix/libraries.h     posix_loader: dlopen, dlsym, glob
+    windows/libraries.h   windows_loader: LoadLibraryW, GetProcAddress
+    linux/memory.h        linux_memory: /proc/self/statm, getrusage in kilobytes
+    macos/memory.h        macos_memory: the Mach task, getrusage in bytes
+    windows/memory.h      windows_memory: GetProcessMemoryInfo
+```
+
+The memory component, in pseudocode:
+
+```python
+# platform/memory.h
+class ProcessMemory(Protocol):               # a concept
+    def resident_bytes() -> int: ...         # 0 when the call fails, never raises
+    def peak_resident_bytes() -> int: ...    # never below resident_bytes()
+
+if WINDOWS: NativeMemory = WindowsMemory     # windows/memory.h, included only here
+elif MACOS: NativeMemory = MacosMemory       # macos/memory.h
+else:       NativeMemory = LinuxMemory       # linux/memory.h
+
+assert NativeMemory satisfies ProcessMemory  # checked by the compiler when it builds
+
+# utils/memory.h, a caller: never asks which system
+def resident_bytes(): return platform.NativeMemory.resident_bytes()
+```
+
+Memory splits three ways where loading a library splits two: POSIX has no call for the current
+reading, and `getrusage`'s peak is kilobytes on Linux and bytes on macOS. A component whose forms all
+compile on every system needs no class at all: `files.h`'s two conversions are both standard C++,
+so `if constexpr (path_text_is_utf8)` picks one, as the Python boundary's `path_text.h` already did.
+
+| Option | What it is | Verdict |
+| --- | --- | --- |
+| A. `#if` inside the functions | one header per component, each system's code interleaved in every function (as first built, 2026-11-01) | rejected: a flag in every function, and no shape the systems are held to |
+| **B. a class per system, a file each** | the component's header holds the concept and the one choice; a system's files ask nothing | **chosen** (Debith, 2026-11-03: "let's do with B") |
+| C. B, and every system's class checked on every build | each class's declaration compiled everywhere, its system calls only on its own system | not now: it splits classes of two or three functions in two, and CI's matrix catches the same drift in the same run; worth it when a component grows large (the listing, the reads) |
+
+CPython has the same shape where a subsystem is large (`thread_pthread.h` or `thread_nt.h`;
+`posixpath` or `ntpath`, chosen once in `os.py`) and not in `Modules/posixmodule.c` (18,482 lines,
+1,146 preprocessor conditionals, 3.14). Its two loaders, `dynload_shlib.c` and `dynload_win.c`, take
+a file's name in different forms, so `importdl.c` asks the system again at the call: what a shared
+concept rules out.
+
 ## What it does not cover
 
 - **Compiler portability** — MSVC's constexpr step limit, Apple clang's late-parsed nested templates,
@@ -104,14 +166,17 @@ Each step a refactor under the tests as they are (#36), its own commit, the ratc
 | Header | What it holds | Kind |
 | --- | --- | --- |
 | platform/native.h | `native`: the running system's family, decided once | the choice |
-| platform/files.h | a path's text: `path_text_is_utf8`, `text_from_fs`, `fs_from_text` | rules and calls |
-| platform/memory.h | `resident_bytes`, `peak_resident_bytes` | calls |
-| platform/libraries.h | `library`: `first_of`, `last_match`, `function<F>` | calls |
+| platform/files.h | a path's text: `path_text_is_utf8`, and the `text_from_fs` and `fs_from_text` it picks the form of | rules |
+| platform/memory.h | `process_memory`, what every system's class answers; `native_memory`, the running system's | the choice |
+| platform/linux/, macos/, windows/memory.h | `linux_memory`, `macos_memory`, `windows_memory`: `resident_bytes`, `peak_resident_bytes` | calls |
+| platform/libraries.h | `library_loader`; `native_loader`; `library` over it: `first_of`, `last_match`, `function<F>` | the choice |
+| platform/posix/, windows/libraries.h | `posix_loader`, `windows_loader`: `open`, `symbol`, `newest` | calls |
 | platform/windows_headers.h | `<windows.h>` lean and without `min` and `max`, for every header that calls it | — |
 | pathlike/core.h | `posix_strategy`, `windows_strategy`: separators, case, parsing; `native_strategy` | rules |
 | persistence/.../bcp_api.h | `driver_files<F>`: the ODBC driver's library as each system names it | rules |
 
-Arriving with the code that calls them, from PR #39's branch, each behind the same boundary:
+Arriving with the code that calls them, from PR #39's branch, each behind the same boundary; each
+component's calls in the shape above, a class per system in a file of its own (D106):
 
 | Header | What it will hold | Kind |
 | --- | --- | --- |
@@ -120,11 +185,11 @@ Arriving with the code that calls them, from PR #39's branch, each behind the sa
 | platform/files.h | exclusive create, write, force, close, unlink, `file_size<F>` (a folder has none, on every system) | rules and calls |
 | platform/home.h | `home_of(user)`: whose home `~` names; posixpath's and ntpath's rules | rules and calls |
 | platform/listing.h | a directory's listing with each entry's kind (`directory`, `file`, `link`, `other`), `entry_at`, `finds_a_name_by_stat` | calls |
-| platform/reads.h | `posix_reads`, `windows_reads` behind the `file_reads` concept | calls |
+| platform/reads.h | `posix_reads`, `windows_reads` (posix/reads.h, windows/reads.h) behind the `file_reads` concept | calls |
 | platform/process.h | a thread's name, the signal mask its threads inherit, `at_fork`, `process_id` | calls |
 | platform/signals.h | `interrupt_handlers` (Ctrl-C, SIGTERM), `wakeup` (a pipe; an event) | calls |
 | platform/caches.h | `system_caches`; the kernel's /sys list read by rules compiled everywhere | calls and rules |
-| platform/memory.h | `advise_huge_pages` | calls |
+| platform/memory.h | `advise_huge_pages`, on each system's memory class beside the probes (Q51) | calls |
 | platform/clocks.h | `thread_cpu_ns`, `counts_thread_cpu_time` | calls |
 
 ## Open

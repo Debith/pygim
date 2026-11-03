@@ -14,7 +14,7 @@ ROOT = pathlib.Path(__file__).resolve().parents[2] / "src" / "_pygim_fast"
 # CI removes src/ before running the suite against the installed package: this
 # is a source-tree check, so it skips there rather than fail.
 pytestmark = pytest.mark.skipif(not ROOT.is_dir(), reason="source tree not present (testing the installed package)")
-CORE = sorted(ROOT.glob("mapping/*.h")) + sorted(ROOT.glob("platform/*.h")) + [
+CORE = sorted(ROOT.glob("mapping/*.h")) + sorted(ROOT.glob("platform/**/*.h")) + [
     ROOT / "utils" / "hash.h",
     ROOT / "utils" / "memory.h",
     ROOT / "pathlike" / "core.h",
@@ -76,6 +76,35 @@ def test_the_os_check_finds_what_it_is_for(tmp_path):
 def test_the_operating_system_is_asked_only_behind_the_platform_boundary():
     found = os_conditionals(ROOT)
     assert found == [], "a conditional on the operating system outside platform/: put the system's rules and calls behind the boundary:\n" + "\n".join(found)
+
+
+# Inside the boundary (D106): each system's calls are a class in a folder of its own — platform/posix/,
+# linux/, macos/, windows/ — and never ask which system they run on; a header directly in platform/
+# asks once, in the one #if chain that picks the running system's class (an #elif continues it).
+SYSTEM_FOLDERS = ("posix", "linux", "macos", "windows")
+OS_ASK = re.compile(r"^[ \t]*#[ \t]*(?:if|ifdef|ifndef)\b.*\b(?:_WIN32|_WIN64|__APPLE__|__linux__|__unix__|__FreeBSD__)\b", re.M)
+
+
+def platform_asks(platform):
+    """How often each header under `platform` opens a conditional on the system, as {"file": n}."""
+    return {f.relative_to(platform).as_posix(): len(OS_ASK.findall(f.read_text(encoding="utf-8")))
+            for f in sorted(platform.rglob("*.h"))}
+
+
+def test_the_platform_check_finds_what_it_is_for(tmp_path):
+    (tmp_path / "linux").mkdir()
+    (tmp_path / "linux" / "memory.h").write_text("#ifdef __linux__\n#endif\n")
+    (tmp_path / "memory.h").write_text("#if defined(_WIN32)\n#elif defined(__APPLE__)\n#else\n#endif\n#ifdef _MSC_VER\n#endif\n")
+    assert platform_asks(tmp_path) == {"linux/memory.h": 1, "memory.h": 1}
+
+
+def test_inside_the_boundary_a_header_asks_once_and_a_systems_own_file_never():
+    asks = platform_asks(ROOT / "platform")
+    in_a_system = {f: n for f, n in asks.items() if f.split("/")[0] in SYSTEM_FOLDERS and n}
+    more_than_once = {f: n for f, n in asks.items() if "/" not in f and n > 1}
+    assert any(f.split("/")[0] in SYSTEM_FOLDERS for f in asks), "no system's folder under platform/"
+    assert not in_a_system, f"a system's own file asks which system it is: {in_a_system}"
+    assert not more_than_once, f"a platform header asks more than once (one #if chain picks the class): {more_than_once}"
 
 
 def test_every_package_that_ships_holds_something():

@@ -10,12 +10,12 @@
 // Bound to Python as utils.rss_bytes / peak_rss_bytes / rss_mb / peak_rss_mb
 // (utils/bindings.cpp).
 //
-// Cost: one system call (platform/memory.h: /proc/self/statm on Linux, the
-// Mach task on macOS, the working set on Windows) — about a microsecond on
-// Linux. Cheap enough to sit inside a measured loop without moving the number.
-// A probe whose call fails reads 0, and the peak is never below the present
-// reading (Linux samples its peak at scheduling events, so platform/memory.h
-// returns the larger).
+// Cost: one system call (platform/memory.h picks the system's class:
+// /proc/self/statm on Linux, the Mach task on macOS, the working set on
+// Windows) — about a microsecond on Linux. Cheap enough to sit inside a
+// measured loop without moving the number. A probe whose call fails reads 0,
+// and the peak is never below the present reading (Linux samples its peak at
+// scheduling events, so platform/linux/memory.h returns the larger).
 //
 // A worked example, used in the comments below — what
 // tests/unittests/test_utils.py::test_rss_grows_with_a_large_allocation does:
@@ -34,12 +34,16 @@
 // measurement of the same allocation in the same process can show no growth
 // at all — a benchmark takes its delta on a fresh heap, once.
 
+#include <cstdint>
+
 #include "../platform/memory.h"
 
 namespace pygim::memory {
 
-using platform::peak_resident_bytes;   // the process's high-water mark, in bytes; >= resident_bytes()
-using platform::resident_bytes;        // what the system holds in physical memory for it now, in bytes
+/// What the system holds in physical memory for the process now, in bytes.
+[[nodiscard]] inline std::uint64_t resident_bytes() noexcept { return platform::native_memory::resident_bytes(); }
+/// The process's high-water mark, in bytes; >= resident_bytes().
+[[nodiscard]] inline std::uint64_t peak_resident_bytes() noexcept { return platform::native_memory::peak_resident_bytes(); }
 
 // ── in mebibytes ──────────────────────────────────────────────────────────
 
