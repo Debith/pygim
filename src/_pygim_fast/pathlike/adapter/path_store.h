@@ -31,6 +31,8 @@
 
 namespace pygim::pathlike {
 
+namespace py = pybind11;
+
 using table_ptr = std::shared_ptr<path_table>;
 
 /// A table holder. `PathStore()` makes a fresh table; the module's default
