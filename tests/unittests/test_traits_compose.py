@@ -120,6 +120,18 @@ def test_the_trait_itself_is_untouched():
     assert "_Greeter__name" in greet.__code__.co_names
 
 
+def test_a_composed_classmethod_and_staticmethod_keep_their_wrappers():
+    """The function inside is rebuilt and its wrapper made again around it: the target holds a
+    classmethod and a staticmethod, as the trait did. Reached through an instance, a bare function
+    would answer as the classmethod does, so calling it alone does not show this."""
+    trait = type("Trait", (), {"named": classmethod(lambda cls: cls.__name__),
+                               "constant": staticmethod(lambda: 1)})
+    target = type("Target", (), {})
+    compose(target, trait)
+    assert (type(vars(target)["named"]), type(vars(target)["constant"])) == (classmethod, staticmethod)
+    assert (target.named(), target().constant()) == ("Target", 1)
+
+
 def test_a_composed_function_keeps_what_it_carries():
     """Everything a function carries besides its code comes along unchanged: its name (even one that
     differs from its code's), defaults, keyword defaults, annotations, docstring, module, attributes,
