@@ -8,15 +8,15 @@ The decoder resolves in precedence order:
 3. the file extension              -- the compile-time table
 
 Each is one lookup in a table built at compile time, and what it finds is
-the engine's own entry: the same entry reads, writes and picks the path's
-type. ``pathlike.ENGINES`` is that registry as data.
+the engine's own entry: the same entry reads and writes.
+``pathlike.ENGINES`` is that registry as data.
 
 This example demonstrates:
 - Pinning an engine for files whose extension says nothing (".dat")
 - The refusal to guess when nothing resolves
 - The pin travelling with derived paths
 - A per-call engine= winning over the pin
-- One engine reading, writing and typing the path
+- One engine reading and writing the path
 - ``pathlike.ENGINES``: every name an engine answers to, read-only
 """
 
@@ -25,7 +25,6 @@ from pathlib import Path
 
 import pygim
 from pygim import pathlike
-from pygim.pathlike import yamlpath
 
 tmp = tempfile.TemporaryDirectory()
 root = Path(tmp.name)
@@ -69,11 +68,10 @@ doc.write_text('{"a": 1}')
 assert pygim.path(doc, engine="yaml").read(engine="json") == {"a": 1}
 
 # ----------------------------------------------------------------------------
-# 5. One engine reads, writes and types the path
+# 5. One engine reads and writes the path
 # ----------------------------------------------------------------------------
 # The pin is the engine's entry, held by the path: writing goes through it as
-# reading does, and the path's type comes from it too.
-assert isinstance(p, yamlpath)
+# reading does.
 p.write({"name": "exported", "version": 4})
 assert legacy.read_text() == "name: exported\nversion: 4\n"
 assert p.read() == {"name": "exported", "version": 4}
