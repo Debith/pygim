@@ -59,35 +59,41 @@ private:
     py::object m_property;
 };
 
-/// A classmethod: the function inside rebuilt, so `cls` is the class it is called on.
-class ClassMethodMember {
+/// A function in a wrapper whose type `Wrapper` names — a classmethod or a staticmethod: the function
+/// inside rebuilt, and a wrapper of the same type made again around it. Each wrapper is a class of
+/// its own (the aliases below); one that needs behaviour of its own gets a specialization.
+template <class Wrapper>
+class WrappedFunctionMember {
 public:
-    static bool is(const py::handle& value) { return PyObject_TypeCheck(value.ptr(), &PyClassMethod_Type); }
-    explicit ClassMethodMember(py::object method) : m_method(std::move(method)) {}
+    static bool is(const py::handle& value) { return PyObject_TypeCheck(value.ptr(), Wrapper::type()); }
+    explicit WrappedFunctionMember(py::object method) : m_method(std::move(method)) {}
 
     [[nodiscard]] py::object rewritten(const TraitMove& trait) const {
-        return py::type::of(m_method)(trait.function_or_same(m_method.attr("__func__")));
+        return py::type::of(m_method)(trait.function_or_same(function()));
     }
-    [[nodiscard]] py::object code() const { return code_or_none(m_method.attr("__func__")); }
+    [[nodiscard]] py::object code() const { return code_or_none(function()); }
 
 private:
+    [[nodiscard]] py::object function() const { return m_method.attr("__func__"); }
     py::object m_method;
 };
 
-/// A staticmethod: the function inside rebuilt.
-class StaticMethodMember {
+// The wrapper's type is returned by a function, not taken as a template argument: on Windows the
+// type objects are imported from the Python DLL, and such an address is no constant.
+
+/// classmethod: the function inside rebuilt, so `cls` is the class it is called on.
+class ClassMethodWrapper {
 public:
-    static bool is(const py::handle& value) { return PyObject_TypeCheck(value.ptr(), &PyStaticMethod_Type); }
-    explicit StaticMethodMember(py::object method) : m_method(std::move(method)) {}
-
-    [[nodiscard]] py::object rewritten(const TraitMove& trait) const {
-        return py::type::of(m_method)(trait.function_or_same(m_method.attr("__func__")));
-    }
-    [[nodiscard]] py::object code() const { return code_or_none(m_method.attr("__func__")); }
-
-private:
-    py::object m_method;
+    static PyTypeObject* type() { return &PyClassMethod_Type; }
 };
+using ClassMethodMember = WrappedFunctionMember<ClassMethodWrapper>;
+
+/// staticmethod: the function inside rebuilt.
+class StaticMethodWrapper {
+public:
+    static PyTypeObject* type() { return &PyStaticMethod_Type; }
+};
+using StaticMethodMember = WrappedFunctionMember<StaticMethodWrapper>;
 
 /// A member of a trait as its kind — each kind a class with its own behaviour, chosen once, here.
 /// Example: Member::of(Greeter.__dict__["greet"])->rewritten(trait) is greet rebuilt for the target.
