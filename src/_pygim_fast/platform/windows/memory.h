@@ -1,13 +1,16 @@
 #pragma once
-// platform/windows/memory.h — the process's memory as Windows keeps it, behind platform/memory.h's
-// process_memory. Only that header includes it, and only on Windows: nothing here asks which system
-// it runs on (D106).
+// platform/windows/memory.h — the call Windows' memory probes make, one thin wrapper, behind
+// platform/memory.h's windows_memory_calls: GetProcessMemoryInfo. No logic lives here — that is
+// basic_windows_memory's, proven over fake calls on every system (D138). Only platform/memory.h
+// includes this, and only on Windows: nothing here asks which system it runs on (D106).
 //
-// Cost: one kernel call each (GetProcessMemoryInfo).
+// Cost: one kernel call.
 //
 // CORE layer: pybind-free.
 
 #include <cstdint>
+#include <optional>
+#include <utility>
 
 #include "../windows_headers.h"
 
@@ -15,27 +18,17 @@
 
 namespace pygim::platform {
 
-class windows_memory {
-public:
-    /// WorkingSetSize — the pages of this process currently in physical memory.
-    [[nodiscard]] static std::uint64_t resident_bytes() noexcept {
-        return static_cast<std::uint64_t>(counters().WorkingSetSize);
-    }
-
-    /// PeakWorkingSetSize — the largest working set the process has had. Maintained by the kernel as
-    /// it goes, so it never trails the current value the way Linux's does.
-    [[nodiscard]] static std::uint64_t peak_resident_bytes() noexcept {
-        return static_cast<std::uint64_t>(counters().PeakWorkingSetSize);
-    }
-
-private:
-    /// The process's memory counters, all zero when the call fails.
-    static PROCESS_MEMORY_COUNTERS counters() noexcept {
+struct win32_memory_calls {
+    /// WorkingSetSize and PeakWorkingSetSize, the pages of this process in physical memory now and
+    /// at most; nothing when the call fails.
+    [[nodiscard]] static std::optional<std::pair<std::uint64_t, std::uint64_t>> working_set() noexcept {
         PROCESS_MEMORY_COUNTERS pmc{};
         pmc.cb = sizeof(pmc);
-        if (!GetProcessMemoryInfo(GetCurrentProcess(), &pmc, sizeof(pmc))) return PROCESS_MEMORY_COUNTERS{};
-        return pmc;
+        if (!GetProcessMemoryInfo(GetCurrentProcess(), &pmc, sizeof(pmc))) return std::nullopt;
+        return std::pair<std::uint64_t, std::uint64_t>{static_cast<std::uint64_t>(pmc.WorkingSetSize), static_cast<std::uint64_t>(pmc.PeakWorkingSetSize)};
     }
 };
+
+using windows_memory = basic_windows_memory<win32_memory_calls>;
 
 }  // namespace pygim::platform
