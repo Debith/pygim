@@ -1,13 +1,17 @@
 
 #include <pybind11/pybind11.h>
 #include <pybind11/functional.h>
+#include <pybind11/operators.h>
 #include <pybind11/stl.h>
+#include <cstdint>
 #include <optional>
 #include <string>
 #include <unordered_map>
 #include "core_utils.h"
 #include "adapter_utils.h"
 #include "memory.h"
+#include "duration.h"
+#include "timestamp.h"
 #include "../mapping/dynamic_merge_map.h"
 
 namespace py = pybind11;
@@ -226,6 +230,54 @@ private:
       std::optional<MergeStrategy> m_explicit_default{};
 };
 
+// One keyword amount of one unit, as Python writes it: an integer exactly — an int, or anything
+// with __index__ (numpy's integers); any other real number (float, Fraction, Decimal) through its
+// float, rounded exactly by the core. A bool is no amount of time.
+pygim::duration amount_of(const pygim::time_unit& unit, py::handle amount) {
+    if (PyBool_Check(amount.ptr())) throw py::type_error(std::string(unit.name()) + " must be a real number, not bool");
+    if (PyLong_Check(amount.ptr()) || PyIndex_Check(amount.ptr())) {
+        const py::object integer = py::reinterpret_steal<py::object>(PyNumber_Index(amount.ptr()));
+        if (!integer) throw py::error_already_set();
+        int overflow = 0;
+        const long long whole = PyLong_AsLongLongAndOverflow(integer.ptr(), &overflow);
+        if (overflow != 0) throw std::overflow_error("a duration past 64 bits of nanoseconds (about 292 years)");
+        if (whole == -1 && PyErr_Occurred()) throw py::error_already_set();
+        return unit.of(static_cast<std::int64_t>(whole));
+    }
+    if (!PyNumber_Check(amount.ptr())) {
+        throw py::type_error(std::string(unit.name()) + " must be a real number, not " + Py_TYPE(amount.ptr())->tp_name);
+    }
+    const double real = PyFloat_AsDouble(amount.ptr());
+    if (real == -1.0 && PyErr_Occurred()) throw py::error_already_set();
+    return unit.of(real);
+}
+
+// The duration that **units name: each amount converted, then added exactly.
+pygim::duration duration_of_units(const py::kwargs& units) {
+    pygim::duration total(0);
+    for (const auto& [name, amount] : units) {
+        const std::string unit_name = py::str(name);
+        const auto unit = pygim::time_unit::named(unit_name);
+        if (!unit) {
+            throw py::type_error("unknown unit '" + unit_name +
+                                 "'; the units are years, weeks, days, hours, mins, secs, msecs, usecs and nsecs");
+        }
+        total = pygim::sum_exactly(total, amount_of(*unit, amount));
+    }
+    return total;
+}
+
+// Duration(mins=2, secs=30): the units it is spelt in, longest first, which eval() reads back.
+std::string duration_repr(pygim::duration d) {
+    std::string out = "Duration(";
+    std::string_view separator;
+    for (const pygim::unit_amount& part : pygim::spelt_in_units(d)) {
+        out += std::string(separator) + std::string(part.unit_name()) + "=" + std::to_string(part.amount());
+        separator = ", ";
+    }
+    return out + ")";
+}
+
 } // namespace
 
 PYBIND11_MODULE(utils, m) {
@@ -255,6 +307,57 @@ PYBIND11_MODULE(utils, m) {
     m.def("peak_rss_bytes", &pygim::memory::peak_resident_bytes,
           "The process's peak resident set size in bytes (its high-water mark).");
     m.def("peak_rss_mb", &pygim::memory::peak_resident_mb, "peak_rss_bytes() in mebibytes.");
+
+    // A length of time (utils/duration.h): one signed 64-bit count of nanoseconds; units are conversions.
+    py::class_<pygim::duration>(m, "Duration",
+                                "A length of time: one signed 64-bit count of nanoseconds. Duration(mins=1, secs=30).\n"
+                                "Units: years (365.2425 days, as C++ counts them), weeks, days, hours, mins, secs, msecs,\n"
+                                "usecs, nsecs. They add up; an amount may be negative or a fraction, rounded exactly to\n"
+                                "the nearest nanosecond (ties to even). Past 64 bits (about 292 years) is an OverflowError.")
+        .def(py::init([](const py::kwargs& units) { return duration_of_units(units); }))
+        .def_property_readonly("nanoseconds", [](pygim::duration d) { return d.count(); }, "The number itself.")
+        .def_property_readonly("seconds", [](pygim::duration d) { return static_cast<double>(d.count()) / 1e9; },
+                               "The same in seconds, as a float: a view, not a second store.")
+        .def("__int__", [](pygim::duration d) { return d.count(); })
+        .def(py::self == py::self)
+        .def(py::self != py::self)
+        .def(py::self < py::self)
+        .def(py::self <= py::self)
+        .def(py::self > py::self)
+        .def(py::self >= py::self)
+        .def("__hash__", [](pygim::duration d) { return d.count(); })
+        .def("__repr__", &duration_repr);
+
+    // Time that moves only when told (utils/timestamp.h): the clock for testing timing code exactly.
+    py::class_<pygim::manual_time>(m, "ManualTime",
+                                   "Time that moves only when told: a clock for testing timing code exactly.")
+        .def(py::init<>())
+        .def("now", &pygim::manual_time::now_ns, "Nanoseconds since this time started at 0.")
+        .def("advance",
+             [](pygim::manual_time& time, std::optional<pygim::duration> by, const py::kwargs& units) {
+                 if (by && units.size() != 0) throw py::type_error("advance() takes a Duration or units, not both");
+                 time.advance(by ? *by : duration_of_units(units));
+             },
+             py::arg("by") = py::none(),
+             "Moves time by a Duration or by units: advance(mins=1, secs=30). Past 64 bits it raises\n"
+             "OverflowError and time does not move.");
+
+    // A calendar moment (utils/timestamp.h): nanoseconds since the Unix epoch, from the wall clock.
+    py::class_<pygim::timestamp>(m, "Timestamp", "A moment: nanoseconds since the Unix epoch (1970-01-01T00:00:00Z).")
+        .def(py::init<std::int64_t>(), py::arg("nanoseconds"), "The moment `nanoseconds` after the epoch: Timestamp(12333).")
+        .def_static("now", [] { return pygim::timestamp::now(); }, "The wall clock's current moment.")
+        .def_property_readonly("nanoseconds", &pygim::timestamp::nanoseconds, "Nanoseconds since the epoch.")
+        .def("__int__", &pygim::timestamp::nanoseconds)
+        .def("__sub__", [](const pygim::timestamp& later, const pygim::timestamp& earlier) { return later - earlier; },
+             py::is_operator(), "The Duration from the other moment to this one.")
+        .def(py::self == py::self)
+        .def(py::self != py::self)
+        .def(py::self < py::self)
+        .def(py::self <= py::self)
+        .def(py::self > py::self)
+        .def(py::self >= py::self)
+        .def("__hash__", &pygim::timestamp::nanoseconds)
+        .def("__repr__", [](const pygim::timestamp& t) { return "Timestamp(" + std::to_string(t.nanoseconds()) + ")"; });
 
     m.def("calculate_rate",
           &calculate_rate,
