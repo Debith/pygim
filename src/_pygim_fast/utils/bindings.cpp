@@ -12,6 +12,7 @@
 #include "memory.h"
 #include "duration.h"
 #include "timestamp.h"
+#include "quick_timer_adapter.h"
 #include "../mapping/dynamic_merge_map.h"
 
 namespace py = pybind11;
@@ -358,6 +359,9 @@ PYBIND11_MODULE(utils, m) {
         .def(py::self >= py::self)
         .def("__hash__", &pygim::timestamp::nanoseconds)
         .def("__repr__", [](const pygim::timestamp& t) { return "Timestamp(" + std::to_string(t.nanoseconds()) + ")"; });
+
+    // One timer for a block and its laps (utils/quick_timer.h), its clock and its report given.
+    pygim::adapter::bind_quick_timer(m);
 
     m.def("calculate_rate",
           &calculate_rate,

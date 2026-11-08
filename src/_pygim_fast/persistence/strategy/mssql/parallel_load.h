@@ -142,13 +142,13 @@ inline void run_worker(OdbcConnection& conn,
                        SchemaInfo const& schema_info,
                        int64_t block_size,
                        WorkerResult& out) {
-    QuickTimerT<WorkerPhase> timer("worker", nullptr, false, false);
+    SilentTimer<WorkerPhase> timer("worker");
     auto& metrics = out.metrics;
     try {
         StmtHandle stmt(conn.dbc());
 
         // Prepare + Execute
-        timer.start_sub_timer(WorkerPhase::prepare, false);
+        timer.start_lap(WorkerPhase::prepare);
         {
             SQLRETURN ret = SQLPrepare(
                 stmt, const_cast<SQLCHAR*>(
@@ -159,7 +159,7 @@ inline void run_worker(OdbcConnection& conn,
             ret = SQLExecute(stmt);
             odbc::raise_if_error(ret, SQL_HANDLE_STMT, stmt, "worker: SQLExecute");
         }
-        metrics.prepare_seconds = timer.stop_sub_timer(WorkerPhase::prepare, false);
+        metrics.prepare_seconds = pygim::seconds_of(timer.stop_lap(WorkerPhase::prepare));
 
         // Setup builder + buffers + dispatch using shared schema
         core::ArrowBuilder builder(schema_info.schema);
@@ -189,16 +189,16 @@ inline void run_worker(OdbcConnection& conn,
         std::vector<uint8_t> valid;
 
         while (true) {
-            timer.start_sub_timer(WorkerPhase::fetch, false);
+            timer.start_lap(WorkerPhase::fetch);
             SQLRETURN ret = SQLFetch(stmt);
-            timer.stop_sub_timer(WorkerPhase::fetch, false);
+            timer.stop_lap(WorkerPhase::fetch);
 
             if (ret == SQL_NO_DATA) break;
             odbc::raise_if_error(ret, SQL_HANDLE_STMT, stmt, "worker: SQLFetch");
 
             const int64_t nrows = static_cast<int64_t>(buffers.rows_fetched);
 
-            timer.start_sub_timer(WorkerPhase::build, false);
+            timer.start_lap(WorkerPhase::build);
             for (std::size_t c = 0; c < ncols; ++c) {
                 auto& col = buffers.columns[c];
                 const auto& cd = dispatch[c];
@@ -212,14 +212,14 @@ inline void run_worker(OdbcConnection& conn,
 
                 cd.fn(builder, c, col, nrows, valid_ptr);
             }
-            timer.stop_sub_timer(WorkerPhase::build, false);
+            timer.stop_lap(WorkerPhase::build);
 
             metrics.fetched_rows += nrows;
             metrics.fetched_blocks++;
         }
 
-        metrics.fetch_seconds = timer.sub_timer_seconds(WorkerPhase::fetch);
-        metrics.build_seconds = timer.sub_timer_seconds(WorkerPhase::build);
+        metrics.fetch_seconds = timer.lap_seconds(WorkerPhase::fetch);
+        metrics.build_seconds = timer.lap_seconds(WorkerPhase::build);
         out.table = builder.finish();
         metrics.columns = static_cast<int64_t>(ncols);
 
@@ -255,7 +255,7 @@ inline core::LoadResult execute_parallel(
     int64_t block_size,
     MssqlLoadCache& load_cache,
     int packet_size = 16384) {
-    QuickTimerT<LoadPhase> timer("parallel_load", nullptr, false, false);
+    SilentTimer<LoadPhase> timer("parallel_load");
     core::LoadMetrics metrics;
 
     PYGIM_LOG_FMT("[parallel_load] starting: table=%.*s, partition=%.*s, workers=%d\n",
@@ -302,7 +302,7 @@ inline core::LoadResult execute_parallel(
     //    MSSQL ODBC supports SQLDescribeCol after SQLPrepare — no execute needed.
     SchemaInfo schema_info;
     {
-        timer.start_sub_timer(LoadPhase::describe, false);
+        timer.start_lap(LoadPhase::describe);
         StmtHandle stmt(conn.dbc());
         SQLRETURN ret = SQLPrepare(
             stmt, const_cast<SQLCHAR*>(
@@ -310,15 +310,15 @@ inline core::LoadResult execute_parallel(
             static_cast<SQLINTEGER>(queries[0].size()));
         odbc::raise_if_error(ret, SQL_HANDLE_STMT, stmt, "parallel_load: SQLPrepare schema");
         schema_info = describe_columns(stmt);
-        metrics.describe_seconds = timer.stop_sub_timer(LoadPhase::describe, false);
+        metrics.describe_seconds = pygim::seconds_of(timer.stop_lap(LoadPhase::describe));
         metrics.columns = static_cast<int64_t>(schema_info.col_info.size());
     }
 
     // 4. Establish N-1 worker connections (cached)
     auto run_workers = [&](MssqlLoadCache& cache) -> std::vector<detail::WorkerResult> {
-        timer.start_sub_timer(LoadPhase::connect, false);
+        timer.start_lap(LoadPhase::connect);
         auto* extra_pool = cache.ensure_pool(conn.conn_str(), load_workers - 1, packet_size);
-        metrics.connect_seconds = timer.stop_sub_timer(LoadPhase::connect, false);
+        metrics.connect_seconds = pygim::seconds_of(timer.stop_lap(LoadPhase::connect));
         PYGIM_LOG_FMT("[parallel_load] %d extra connections in %.3fs\n",
                       load_workers - 1, metrics.connect_seconds);
 
@@ -383,7 +383,7 @@ inline core::LoadResult execute_parallel(
     }
 
     // 6. Concatenate tables
-    timer.start_sub_timer(LoadPhase::concat, false);
+    timer.start_lap(LoadPhase::concat);
     std::vector<std::shared_ptr<arrow::Table>> tables;
     tables.reserve(static_cast<std::size_t>(load_workers));
     for (auto& r : results) {
@@ -407,7 +407,7 @@ inline core::LoadResult execute_parallel(
         }
         combined = std::move(*concat_result);
     }
-    metrics.concat_seconds = timer.stop_sub_timer(LoadPhase::concat, false);
+    metrics.concat_seconds = pygim::seconds_of(timer.stop_lap(LoadPhase::concat));
 
     // 7. Aggregate metrics
     for (auto const& r : results) {

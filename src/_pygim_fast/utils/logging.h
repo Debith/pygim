@@ -144,18 +144,17 @@ inline void log_fmt(const char* fmt, ...) {
 
 #define PYGIM_LOG_FMT(fmt, ...) ::pygim::logging::log_fmt(fmt, ##__VA_ARGS__)
 
-// RAII QuickTimer — prints summary with sub-timer breakdown at scope exit.
+// RAII QuickTimer — prints a summary with its laps at scope exit.
 // Output goes to stderr (same stream as PYGIM_LOG_FMT and ScopeLog).
-// Use PYGIM_TIMED_SUB("phase") within the same scope to add sub-timers.
+// Use PYGIM_TIMED_SUB("phase") within the same scope to time a lap.
 // Variable name is always pygim_timer_ so PYGIM_TIMED_SUB can reference it.
 #define PYGIM_TIMED_SCOPE(name)                                                 \
-    ::pygim::QuickTimer pygim_timer_((name), stderr,                            \
-                                     /*print_on_end=*/true,                     \
-                                     /*print_on_start=*/false)
+    ::pygim::QuickTimer pygim_timer_((name), ::pygim::monotonic_clock{},        \
+                                     ::pygim::stderr_report(::pygim::report_lines::summary))
 
-// Start a sub-timer phase on the enclosing PYGIM_TIMED_SCOPE timer.
-// Starting a new sub-timer automatically stops the previous one.
-#define PYGIM_TIMED_SUB(phase) pygim_timer_.start_sub_timer((phase), false)
+// Start a lap on the enclosing PYGIM_TIMED_SCOPE timer.
+// Starting a lap stops the one running.
+#define PYGIM_TIMED_SUB(phase) pygim_timer_.start_lap((phase))
 
 #else
 
