@@ -1,6 +1,7 @@
 #pragma once
 
 #include "quick_timer.h"
+#include "timestamp.h"
 
 #include <chrono>
 #include <cstdarg>
@@ -24,7 +25,7 @@ namespace pygim::logging {
 
 // ── ScopeLog ─────────────────────────────────────────────────────
 // Lightweight RAII enter/exit trace with file:line info.
-// Zero heap allocations — raw steady_clock + fprintf to stderr.
+// Zero heap allocations — the monotonic clock (utils/timestamp.h) + fprintf to stderr.
 class ScopeLog {
 public:
     explicit ScopeLog(std::string_view tag = {},
@@ -35,7 +36,7 @@ public:
           m_line(static_cast<int>(loc.line())),
           m_tag(tag),
           m_note(note),
-          m_start(std::chrono::steady_clock::now())
+          m_start(monotonic_timestamp::now())
     {
         write_enter();
     }
@@ -43,7 +44,7 @@ public:
     ~ScopeLog() {
         const auto micros = std::chrono::duration_cast<
             std::chrono::microseconds>(
-            std::chrono::steady_clock::now() - m_start).count();
+            monotonic_timestamp::now() - m_start).count();
         write_exit(micros);
     }
 
@@ -101,7 +102,7 @@ private:
     int m_line;
     std::string_view m_tag;
     std::string_view m_note;
-    std::chrono::steady_clock::time_point m_start;
+    monotonic_timestamp m_start;
 };
 
 } // namespace pygim::logging

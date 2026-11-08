@@ -12,9 +12,10 @@
 // prof.dump() for stderr output or read fields directly.
 
 #include <algorithm>
-#include <chrono>
 #include <cstdint>
 #include <cstdio>
+
+#include "../../../../utils/timestamp.h"
 
 namespace pygim::strategy::mssql::bcp {
 
@@ -43,9 +44,6 @@ namespace pygim::strategy::mssql::bcp {
 
 /// Per-worker profiling accumulator.  All durations in seconds.
 struct BcpProfiler {
-    using clock = std::chrono::steady_clock;
-    using tp    = clock::time_point;
-
     // Durations (seconds): bind, rebind, classify, fixed/string copy,
     // sendrow, flushes, session init, and reader-next.
     // Counters: sendrow, mid_flush, string/fixed cell handling, rebind, bind.
@@ -103,15 +101,14 @@ struct BcpProfiler {
 
 /// RAII scope timer: accumulates elapsed time into a target double on destruction.
 struct ProfileScope {
-    using clock = std::chrono::steady_clock;
     double& target;
-    clock::time_point start;
+    monotonic_timestamp start;   // utils/timestamp.h: the monotonic clock, read in one place
 
     explicit ProfileScope(double& t) noexcept
-        : target(t), start(clock::now()) {}
+        : target(t), start(monotonic_timestamp::now()) {}
 
     ~ProfileScope() noexcept {
-        target += std::chrono::duration<double>(clock::now() - start).count();
+        target += monotonic_timestamp::now().seconds_since(start);
     }
 
     ProfileScope(const ProfileScope&) = delete;

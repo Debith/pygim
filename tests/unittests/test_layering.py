@@ -15,8 +15,10 @@ ROOT = pathlib.Path(__file__).resolve().parents[2] / "src" / "_pygim_fast"
 # is a source-tree check, so it skips there rather than fail.
 pytestmark = pytest.mark.skipif(not ROOT.is_dir(), reason="source tree not present (testing the installed package)")
 CORE = sorted(ROOT.glob("mapping/*.h")) + sorted(ROOT.glob("platform/**/*.h")) + [
+    ROOT / "utils" / "duration.h",
     ROOT / "utils" / "hash.h",
     ROOT / "utils" / "memory.h",
+    ROOT / "utils" / "timestamp.h",
     ROOT / "pathlike" / "core.h",
     ROOT / "pathlike" / "uri.h",
     ROOT / "pathlike" / "path_table.h",
@@ -108,6 +110,43 @@ def test_the_platform_branch_check_finds_what_it_is_for(tmp_path):
 def test_no_behaviour_branches_on_the_platform_outside_the_boundary():
     found = platform_branches(ROOT)
     assert found == [], "a branch on a platform value outside platform/: give each system its class and let the family choose it once:\n" + "\n".join(found)
+
+
+# Timing code takes its clock (#264): only utils/timestamp.h reads std::chrono's clocks, in
+# wall_clock and monotonic_clock. Everything else that times takes one of those as its clock, so a
+# test can hand it a manual one. Found 2026-10-30:
+# ScopeLog, the BCP profiler and the fetch benchmark each read steady_clock themselves.
+CLOCK_READ = re.compile(r"std::chrono::(?:steady_clock|system_clock|high_resolution_clock)\b")
+# The one reader left: the QuickTimer of before, which takes its clock once it times laps.
+CLOCK_READERS_LEFT = ["utils/quick_timer.h"]
+
+
+def clock_readers(root):
+    """Each header or source under `root` that reads a std::chrono clock itself, outside
+    utils/timestamp.h, platform/ and third_party/, as its path under `root`."""
+    found = []
+    for file in sorted([*root.rglob("*.h"), *root.rglob("*.cpp")]):
+        relative = file.relative_to(root).as_posix()
+        if "third_party" in file.parts or relative.startswith("platform/") or relative == "utils/timestamp.h":
+            continue
+        if CLOCK_READ.search(_code(file)):
+            found.append(relative)
+    return found
+
+
+def test_the_clock_check_finds_what_it_is_for(tmp_path):
+    for folder in ("platform", "utils"):
+        (tmp_path / folder).mkdir()
+    (tmp_path / "platform" / "clocks.h").write_text("auto t = std::chrono::steady_clock::now();\n")
+    (tmp_path / "utils" / "timestamp.h").write_text("auto t = std::chrono::system_clock::now();\n")
+    (tmp_path / "a.h").write_text("auto t = std::chrono::steady_clock::now();\n")
+    (tmp_path / "b.h").write_text("// std::chrono::steady_clock, named in a comment only\nusing d = std::chrono::nanoseconds;\n")
+    assert clock_readers(tmp_path) == ["a.h"]
+
+
+def test_time_is_read_in_one_header():
+    found = clock_readers(ROOT) + [f"tests/static/{f}" for f in clock_readers(ROOT.parents[1] / "tests" / "static")]
+    assert found == CLOCK_READERS_LEFT, "a clock read outside utils/timestamp.h: take a clock (wall_clock, monotonic_clock) instead"
 
 
 # Inside the boundary (D106): each system's calls are a class in a folder of its own — platform/posix/,
