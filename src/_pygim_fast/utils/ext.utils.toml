@@ -1,7 +1,7 @@
 [extension]
 module = "utils"
-# tests/static/platform_proofs.cpp proves the platform boundary's logic — the loaders and the memory
-# probes — over fake system calls on every system (D138); wired into the sources so every build
+# tests/static/platform_proofs.cpp proves the logic the platform boundary puts above the system's calls —
+# the loaders and Linux's memory probes — over fake calls on every system (D138); wired into the sources so every build
 # proves it (it contributes no runtime code). utils carries it because utils/memory.h is the
 # platform's first caller and utils builds everywhere with no dependency.
 sources = [

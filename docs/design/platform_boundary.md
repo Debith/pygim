@@ -91,15 +91,14 @@ platform/
     files.h               a path's text: path_text_rules; the choice of native_files; text_from_fs and fs_from_text over it
     posix/files.h         posix_files: the system's own bytes, string() both ways
     windows/files.h       windows_files: UTF-8 from the wide native form, u8string() both ways
-    libraries.h           library_loader and the calls concepts; basic_posix_loader and basic_windows_loader, the logic over
-                          the calls (D138); the choice of native_loader; basic_library, and library over it
-    memory.h              process_memory and the calls concepts; basic_linux_memory, basic_macos_memory,
-                          basic_windows_memory, the logic over the calls (D138); the choice of native_memory
+    libraries.h           library_loader; basic_posix_loader and basic_windows_loader, the logic over each system's
+                          calls (D138); the choice of native_loader; basic_library, and library over it
+    memory.h              process_memory; basic_linux_memory, the logic over Linux's calls (D138); the choice of native_memory
     posix/libraries.h     posix_dl_calls: dlopen, dlsym, glob; posix_loader over them
     windows/libraries.h   win32_library_calls: LoadLibraryW, GetProcAddress; windows_loader over them
     linux/memory.h        linux_proc_calls: a pread of /proc/self/statm, the page size, getrusage; linux_memory over them
-    macos/memory.h        macos_mach_calls: the Mach task, getrusage; macos_memory over them
-    windows/memory.h      win32_memory_calls: GetProcessMemoryInfo; windows_memory over them
+    macos/memory.h        macos_memory: the Mach task, getrusage in bytes (no logic above the calls, no policy)
+    windows/memory.h      windows_memory: GetProcessMemoryInfo (no logic above the call, no policy)
     (tests/static/platform_proofs.cpp proves every logic class over fake calls, in every build, on every system)
 ```
 
@@ -141,11 +140,12 @@ pick the system's rule itself; the layering test now refuses a branch on a platf
 
 Where to draw the line between what a test can prove anywhere and what only the system can prove:
 at the system call. A per-system class is two things. Its **logic** — which name to open first, that
-the newest file is the last of glob's sorted matches, that `ru_maxrss` is kilobytes on Linux and bytes
-on macOS, that a peak never reads below the present, that a failed call reads 0 — depends on the
-family, not on the system being present. Its **calls** — `dlopen`, `LoadLibraryW`, `task_info`,
-`GetProcessMemoryInfo` — are the behaviour, and exist only on their own system. So each class takes
-its calls as a type parameter, the system's real wrappers by default, a fake in the proofs
+the newest file is the last of glob's sorted matches, that Windows widens a name and has no glob, that
+statm's second field is the resident count, that `ru_maxrss` is kilobytes on Linux, that a peak never
+reads below the present — depends on the family, not on the system being present. Its **calls** —
+`dlopen`, `glob`, `LoadLibraryW`, `pread`, `getrusage` — are the behaviour, and exist only on their own
+system. So a class with logic above its calls takes them as a type parameter, the system's real
+wrappers by default, a fake in the proofs
 (Debith, 2026-11-08: "if we build a small wrapper for each system call, we could replace them in the
 test time ... that could be compile time thing so execution would not see the wrapper at all"):
 
@@ -156,7 +156,7 @@ class Win32LibraryCalls:                     # windows/libraries.h: one wrapper 
 
 class BasicWindowsLoader[Calls]:             # libraries.h: the logic, compiled everywhere
     def open(name): return Calls.load_library(widen(name))
-    def newest(pattern): return Calls.none   # Windows has no glob
+    def newest(pattern): return None         # Windows has no glob
 
 windows_loader = BasicWindowsLoader[Win32LibraryCalls]   # what ships: the wrappers inlined, nothing seen at run time
 BasicWindowsLoader[FakeWin32Calls]                       # tests/static/platform_proofs.cpp, on Linux too: the logic over recorded answers
@@ -178,6 +178,25 @@ symbol that is missing, a peak the kernel has not caught up with, procfs absent.
 The line it draws: wrap what only an operating system can answer, never the standard library
 (`files.h`'s text classes have no calls and take no policy). The wrappers stay thin, one call each,
 so a fake has nothing to imitate but return values; the real call's behaviour stays CI's to prove.
+
+The smallest form that keeps the intention, as built:
+
+- **A policy only where logic sits above the calls.** The loaders have it (the first name that
+  opens, the newest match, Windows' widening and missing glob) and so has Linux's memory (statm's
+  second field, the kilobyte peak, the larger of peak and present). macOS's and Windows' memory
+  classes hand the system's reading on as it is, 0 when the call fails, so a fake of them would prove
+  only itself: they stay their calls, and CI on their own systems proves them.
+- **The system's own types.** A handle stays `void*`, as the system gives it; a fake's handles are the
+  addresses of its own objects. A failed reading is 0, as the contract already says, so no wrapper
+  needs an optional: Linux's peak of 0 makes the present reading win by the same comparison.
+- **No concept for the calls.** The template's body is their contract, and the component's own
+  concept, `library_loader` or `process_memory`, checks every instantiation, the real one in the
+  header and each fake in the proofs.
+- **Each proof can fail.** Seven defects planted one at a time in the logic — the first match taken
+  for the newest, a name not widened, a later name kept over the first, a glob on Windows, statm's
+  first field read, the peak taken as bytes, a peak allowed to trail — each fails a proof
+  (2026-11-08; the glob on Windows survived a first version of the proofs, which asked for a pattern
+  that matched nothing, and the proof now asks for an installed name).
 
 CPython has the same shape where a subsystem is large (`thread_pthread.h` or `thread_nt.h`;
 `posixpath` or `ntpath`, chosen once in `os.py`) and not in `Modules/posixmodule.c` (18,482 lines,
@@ -219,11 +238,12 @@ Each step a refactor under the tests as they are (#36), its own commit, the ratc
 | --- | --- | --- |
 | platform/native.h | `native`: the running system's family, decided once | the choice |
 | platform/files.h | a path's text: `posix_files` and `windows_files`, the `native_files` the family chooses, and `text_from_fs` and `fs_from_text` over it | rules |
-| platform/memory.h | `process_memory` and the calls concepts; `basic_linux_memory`, `basic_macos_memory`, `basic_windows_memory`, the logic over the calls, proven over fakes everywhere (D138); `native_memory`, the running system's | logic, and the choice |
-| platform/linux/, macos/, windows/memory.h | `linux_proc_calls`, `macos_mach_calls`, `win32_memory_calls`: one wrapper a call; `linux_memory`, `macos_memory`, `windows_memory` over them | calls |
-| platform/libraries.h | `library_loader` and the calls concepts; `basic_posix_loader`, `basic_windows_loader`, the logic over the calls (D138); `native_loader`; `basic_library` and `library` over it: `first_of`, `last_match`, `function<F>`, `address_of` | logic, and the choice |
+| platform/memory.h | `process_memory`; `basic_linux_memory`, Linux's logic over its calls, proven over fakes everywhere (D138); `native_memory`, the running system's | logic, and the choice |
+| platform/linux/memory.h | `linux_proc_calls`: one wrapper a call (the statm line, the page size, the peak in kilobytes); `linux_memory` over them | calls |
+| platform/macos/, windows/memory.h | `macos_memory`, `windows_memory`: `resident_bytes`, `peak_resident_bytes`, the system's reading as it is | calls |
+| platform/libraries.h | `library_loader`; `basic_posix_loader`, `basic_windows_loader`, the logic over each system's calls (D138); `native_loader`; `basic_library` and `library` over it: `first_of`, `last_match`, `function<F>`, `address_of` | logic, and the choice |
 | platform/posix/, windows/libraries.h | `posix_dl_calls`, `win32_library_calls`: one wrapper a call; `posix_loader`, `windows_loader` over them | calls |
-| tests/static/platform_proofs.cpp | every logic class over constexpr fake calls, compiled by every build of `pygim.utils`: the first installed name, the newest match, no match, a missing symbol, the kilobyte and byte peaks, a peak below the present, procfs absent, a failed call | the proofs |
+| tests/static/platform_proofs.cpp | every logic class over constexpr fake calls, compiled by every build of `pygim.utils`: the first name that opens, a missing library and symbol, the newest match and no match, Windows' widened name and missing glob, statm's resident count, the kilobyte peak, a peak below the present, a failed getrusage, procfs absent | the proofs |
 | platform/windows_headers.h | `<windows.h>` lean and without `min` and `max`, for every header that calls it | — |
 | pathlike/core.h | `posix_strategy`, `windows_strategy`: separators, case, parsing; `native_strategy` | rules |
 | persistence/.../bcp_api.h | `driver_files<F>`: the ODBC driver's library as each system names it | rules |
