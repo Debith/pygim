@@ -78,6 +78,38 @@ def test_the_operating_system_is_asked_only_behind_the_platform_boundary():
     assert found == [], "a conditional on the operating system outside platform/: put the system's rules and calls behind the boundary:\n" + "\n".join(found)
 
 
+# A branch on a platform value is the same conditional in another spelling: `if constexpr
+# (platform::some_flag)` lets a component pick the system's rule itself, where the one sanctioned form
+# is a class per system chosen once by the family (platform/native.h, D106). Five of them sat in
+# pathlike's path text and the platform's own files header until 2026-11-08.
+PLATFORM_BRANCH = re.compile(r"\bif\s*(?:constexpr\s*)?\(\s*!?\s*platform::")
+
+
+def platform_branches(root):
+    """Each branch on a platform value in a header or source under `root` outside platform/ and
+    third_party/, as "file:line"."""
+    found = []
+    for file in sorted([*root.rglob("*.h"), *root.rglob("*.cpp")]):
+        relative = file.relative_to(root).as_posix()
+        if "third_party" in file.parts or relative.startswith("platform/"):
+            continue
+        text = file.read_text(encoding="utf-8", errors="replace")
+        found += [f"{relative}:{text.count(chr(10), 0, m.start()) + 1}" for m in PLATFORM_BRANCH.finditer(text)]
+    return found
+
+
+def test_the_platform_branch_check_finds_what_it_is_for(tmp_path):
+    (tmp_path / "platform").mkdir()
+    (tmp_path / "platform" / "files.h").write_text("if constexpr (platform::x) {}\n")
+    (tmp_path / "a.h").write_text("using t = std::conditional_t<platform::native == platform::family::windows, W, P>;\nif constexpr (!platform::x) {}\nif (platform::y) {}\n")
+    assert platform_branches(tmp_path) == ["a.h:2", "a.h:3"]
+
+
+def test_no_behaviour_branches_on_the_platform_outside_the_boundary():
+    found = platform_branches(ROOT)
+    assert found == [], "a branch on a platform value outside platform/: give each system its class and let the family choose it once:\n" + "\n".join(found)
+
+
 # Inside the boundary (D106): each system's calls are a class in a folder of its own — platform/posix/,
 # linux/, macos/, windows/ — and never ask which system they run on; a header directly in platform/
 # asks once, in the one #if chain that picks the running system's class (an #elif continues it).

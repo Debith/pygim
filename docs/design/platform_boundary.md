@@ -88,7 +88,9 @@ running system's, once:
 platform/
     native.h              the family, decided once
     windows_headers.h     <windows.h>, lean; nothing on other systems
-    files.h               a path's text: the rule path_text_is_utf8 picks the form, no class per system
+    files.h               a path's text: path_text_rules; the choice of native_files; text_from_fs and fs_from_text over it
+    posix/files.h         posix_files: the system's own bytes, string() both ways
+    windows/files.h       windows_files: UTF-8 from the wide native form, u8string() both ways
     libraries.h           library_loader; the choice of native_loader; library, written over it
     memory.h              process_memory; the choice of native_memory
     posix/libraries.h     posix_loader: dlopen, dlsym, glob
@@ -118,8 +120,13 @@ def resident_bytes(): return platform.NativeMemory.resident_bytes()
 
 Memory splits three ways where loading a library splits two: POSIX has no call for the current
 reading, and `getrusage`'s peak is kilobytes on Linux and bytes on macOS. A component whose forms all
-compile on every system needs no class at all: `files.h`'s two conversions are both standard C++,
-so `if constexpr (path_text_is_utf8)` picks one, as the Python boundary's `path_text.h` already did.
+compile on every system still gets a class per system: `files.h`'s two conversions are standard C++
+on both, so `posix_files` and `windows_files` are both compiled and proven everywhere, and the family
+chooses `native_files` once. The Python boundary follows the same shape outside the platform:
+`path_text.h`'s `posix_path_text` and `windows_path_text`, chosen by `platform::native`. Until
+2026-11-08 both headers branched on a flag, `if constexpr (path_text_is_utf8)`, which let a component
+pick the system's rule itself; the layering test now refuses a branch on a platform value outside
+`platform/`.
 
 | Option | What it is | Verdict |
 | --- | --- | --- |
@@ -166,7 +173,7 @@ Each step a refactor under the tests as they are (#36), its own commit, the ratc
 | Header | What it holds | Kind |
 | --- | --- | --- |
 | platform/native.h | `native`: the running system's family, decided once | the choice |
-| platform/files.h | a path's text: `path_text_is_utf8`, and the `text_from_fs` and `fs_from_text` it picks the form of | rules |
+| platform/files.h | a path's text: `posix_files` and `windows_files`, the `native_files` the family chooses, and `text_from_fs` and `fs_from_text` over it | rules |
 | platform/memory.h | `process_memory`, what every system's class answers; `native_memory`, the running system's | the choice |
 | platform/linux/, macos/, windows/memory.h | `linux_memory`, `macos_memory`, `windows_memory`: `resident_bytes`, `peak_resident_bytes` | calls |
 | platform/libraries.h | `library_loader`; `native_loader`; `library` over it: `first_of`, `last_match`, `function<F>` | the choice |
