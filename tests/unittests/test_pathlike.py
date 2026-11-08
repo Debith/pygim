@@ -983,9 +983,21 @@ def test_engines_record_shape():
     names = [e.name for e in pathlike.ENGINES]
     assert names == sorted(names) and len(set(names)) == len(names)   # pack order = sorted stems
     for e in pathlike.ENGINES:
+        assert type(e) is pathlike.EngineInfo
         assert e.name and e.label and e.doc and e.extensions
         assert all(x.startswith(".") and x == x.lower() for x in e.extensions)
         assert all(a == a.lower() for a in e.aliases)
+        assert repr(e).startswith(f"EngineInfo(name={e.name!r}, label={e.label!r}, extensions=")
+
+
+def test_engines_record_is_the_registry_read_only():
+    from pygim import pathlike
+
+    e = pathlike.ENGINES[0]
+    with pytest.raises(AttributeError):
+        e.name = "x"
+    with pytest.raises(TypeError):
+        pathlike.EngineInfo()   # only the registry makes one
 
 
 @pytest.mark.parametrize("engine", _engines(), ids=lambda e: e.name)

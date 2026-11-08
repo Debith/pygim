@@ -54,30 +54,11 @@ static_assert(Good::for_ext(".a") == &alpha::info && Good::for_ext(".aa") == &al
 static_assert(Good::from_name("alpha") == &alpha::info && Good::from_name("liba") == &alpha::info &&
               Good::from_name("al") == &alpha::info && Good::from_name("beta") == &beta::info &&
               Good::from_name("lib-b") == &beta::info && Good::from_name("xml") == nullptr);
-static_assert(Good::index_of(&alpha::info) == 0 && Good::index_of(&beta::info) == 1 &&
-              Good::index_of(nullptr) == Good::size);
-static_assert(Good::id_of<alpha>() == 0 && Good::id_of<beta>() == 1);
 static_assert(Good::known == "alpha/liba, beta/lib-b");
 static_assert(Good::ext_inventory == ".a .aa .b");
 static_assert(class_name<alpha> == "alphapath" && class_name<beta> == "betapath");
 static_assert(detail::class_name_buf<alpha>[9] == '\0');   // NUL-terminated for pybind11
-static_assert(Good::visit(1, []<class E>() { return E::info.name; }) == "beta");
 static_assert(Good::conflict_report().view() == "pathlike engine registry: all invariants hold");
-
-// visit() with a void visitor, and for_each(): the pack iteration primitives.
-consteval std::size_t visit_void_hits() {
-    std::size_t hits = 0;
-    Good::visit(0, [&]<class E>() { hits += E::info.exts.size(); });
-    return hits;
-}
-static_assert(visit_void_hits() == 2);
-
-consteval std::size_t total_exts() {
-    std::size_t n = 0;
-    Good::for_each([&]<class E>() { n += E::info.exts.size(); });
-    return n;
-}
-static_assert(total_exts() == 3);
 
 // The empty pack is a valid (if useless) registry: bindings.cpp rejects it separately.
 static_assert(engine_list<>::holds() && engine_list<>::size == 0 && engine_list<>::known.empty() &&

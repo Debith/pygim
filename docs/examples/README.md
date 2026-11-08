@@ -37,7 +37,7 @@ for f in docs/examples/*/example_*.py; do python "$f" || break; done
 | pathlike | [example_03_pathlib_parity.py](pathlike/example_03_pathlib_parity.py) | os.PathLike integration, name components, `/` composition |
 | pathlike | [example_04_yaml_12_scalars.py](pathlike/example_04_yaml_12_scalars.py) | YAML 1.2 scalar typing: hex/octal/big ints, 1.1-isms staying strings, dot-form floats, quoting |
 | pathlike | [example_05_json_and_toml.py](pathlike/example_05_json_and_toml.py) | Strict JSON with filename in errors; TOML with real datetime objects |
-| pathlike | [example_06_engine_pinning.py](pathlike/example_06_engine_pinning.py) | Pinning an engine at construction, refusal to guess, pin inheritance, per-call override |
+| pathlike | [example_06_engine_pinning.py](pathlike/example_06_engine_pinning.py) | Pinning an engine at construction, refusal to guess, pin inheritance, per-call override, one engine reading and writing a path, `pathlike.ENGINES` and every name `engine=` takes |
 | pathlike | [example_07_writing.py](pathlike/example_07_writing.py) | write() round-trips for all three formats, trap-string quoting, non-finite float policies, TOML mapping roots |
 | pathlike | [example_08_traversal.py](pathlike/example_08_traversal.py) | glob/rglob/iterdir, sorted+deduplicated results, pin inheritance, the PathSet bridge |
 | pathlike | [example_09_parallel_and_key_cache.py](pathlike/example_09_parallel_and_key_cache.py) | GIL-released parallel reads, key_cache interning semantics and proof |
