@@ -7,7 +7,7 @@ from contextlib import contextmanager
 import cProfile
 import pstats
 
-from pygim import utils
+from pygim import QuickTimer, Report
 
 __all__ = ("quick_timer", "quick_profile")
 
@@ -45,12 +45,12 @@ def quick_timer(title="Code block", *, printer=print, print_on_start=True):
         with quick_timer(title="Slow code"):
             slow_code()
     """
-    # pygim.utils.QuickTimer measures, on the monotonic clock; these hooks say it as this always has.
-    report = utils.Report.hooks()
+    # pygim.QuickTimer measures, on the monotonic clock; these hooks say it as this always has.
+    report = Report.hooks()
     if print_on_start:
         report.on_timer_started(lambda name: printer(f"{name} started..."))
     report.on_finished(lambda snapshot: printer(f"{snapshot.name} executed in {snapshot.total.seconds:.2f} seconds!"))
-    with utils.QuickTimer(str(title), report=report):   # any object's text, as before it was a native timer
+    with QuickTimer(str(title), report=report):   # any object's text, as before it was a native timer
         yield
 
 

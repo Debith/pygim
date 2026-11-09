@@ -14,11 +14,9 @@ ROOT = pathlib.Path(__file__).resolve().parents[2] / "src" / "_pygim_fast"
 # CI removes src/ before running the suite against the installed package: this
 # is a source-tree check, so it skips there rather than fail.
 pytestmark = pytest.mark.skipif(not ROOT.is_dir(), reason="source tree not present (testing the installed package)")
-CORE = sorted(ROOT.glob("mapping/*.h")) + sorted(ROOT.glob("platform/**/*.h")) + [
-    ROOT / "utils" / "duration.h",
+CORE = sorted(ROOT.glob("mapping/*.h")) + sorted(ROOT.glob("platform/**/*.h")) + sorted(ROOT.glob("core/primitives/*.h")) + [
     ROOT / "utils" / "hash.h",
     ROOT / "utils" / "memory.h",
-    ROOT / "utils" / "timestamp.h",
     ROOT / "pathlike" / "core.h",
     ROOT / "pathlike" / "uri.h",
     ROOT / "pathlike" / "path_table.h",
@@ -112,7 +110,7 @@ def test_no_behaviour_branches_on_the_platform_outside_the_boundary():
     assert found == [], "a branch on a platform value outside platform/: give each system its class and let the family choose it once:\n" + "\n".join(found)
 
 
-# Timing code takes its clock (#264): only utils/timestamp.h reads std::chrono's clocks, in
+# Timing code takes its clock (#264): only core/primitives/timestamp.h reads std::chrono's clocks, in
 # wall_clock and monotonic_clock. Everything else that times takes one of those as its clock, so a
 # test can hand it a manual one. Found 2026-10-30:
 # ScopeLog, the BCP profiler and the fetch benchmark each read steady_clock themselves.
@@ -121,11 +119,11 @@ CLOCK_READ = re.compile(r"std::chrono::(?:steady_clock|system_clock|high_resolut
 
 def clock_readers(root):
     """Each header or source under `root` that reads a std::chrono clock itself, outside
-    utils/timestamp.h, platform/ and third_party/, as its path under `root`."""
+    core/primitives/timestamp.h, platform/ and third_party/, as its path under `root`."""
     found = []
     for file in sorted([*root.rglob("*.h"), *root.rglob("*.cpp")]):
         relative = file.relative_to(root).as_posix()
-        if "third_party" in file.parts or relative.startswith("platform/") or relative == "utils/timestamp.h":
+        if "third_party" in file.parts or relative.startswith("platform/") or relative == "core/primitives/timestamp.h":
             continue
         if CLOCK_READ.search(_code(file)):
             found.append(relative)
@@ -133,18 +131,62 @@ def clock_readers(root):
 
 
 def test_the_clock_check_finds_what_it_is_for(tmp_path):
-    for folder in ("platform", "utils"):
-        (tmp_path / folder).mkdir()
+    for folder in ("platform", "core/primitives"):
+        (tmp_path / folder).mkdir(parents=True)
     (tmp_path / "platform" / "clocks.h").write_text("auto t = std::chrono::steady_clock::now();\n")
-    (tmp_path / "utils" / "timestamp.h").write_text("auto t = std::chrono::system_clock::now();\n")
+    (tmp_path / "core" / "primitives" / "timestamp.h").write_text("auto t = std::chrono::system_clock::now();\n")
     (tmp_path / "a.h").write_text("auto t = std::chrono::steady_clock::now();\n")
     (tmp_path / "b.h").write_text("// std::chrono::steady_clock, named in a comment only\nusing d = std::chrono::nanoseconds;\n")
     assert clock_readers(tmp_path) == ["a.h"]
 
 
+def test_the_primitives_are_core():
+    """Time, timing and the thread pools are primitives (core/primitives/), pybind-free like every
+    core header: their Python faces are adapters in the extension that binds them."""
+    names = {p.name for p in ROOT.glob("core/primitives/*.h")}
+    assert {"duration.h", "timestamp.h", "quick_timer.h", "hooks.h", "parallel.h"} <= names
+
+
 def test_time_is_read_in_one_header():
     found = clock_readers(ROOT) + [f"tests/static/{f}" for f in clock_readers(ROOT.parents[1] / "tests" / "static")]
-    assert found == [], "a clock read outside utils/timestamp.h: take a clock (wall_clock, monotonic_clock) instead"
+    assert found == [], "a clock read outside core/primitives/timestamp.h: take a clock (wall_clock, monotonic_clock) instead"
+
+
+# A length of time is the duration primitive's (D142, D143): pygim's own class over one count of
+# nanoseconds, spelt in its units' literals (20_us, 1_min), with std::chrono behind it. Outside the
+# time primitives (core/primitives/duration.h, timestamp.h) no code names std::chrono's lengths or
+# clocks. A calendar conversion is not a length: bcp_types.h's dates take std::chrono's calendar
+# under a using-directive, which this check does not count. Found 2026-11-09 (PR 49's review): the
+# pools, the logging macros, the fetch benchmark and the persistence pool spelt lengths in std::chrono.
+CHRONO_LENGTH = re.compile(r"std::chrono::(?:duration\b|duration_cast|nanoseconds|microseconds|milliseconds|seconds|minutes|hours|days|weeks|months|years|steady_clock|system_clock|high_resolution_clock)|chrono_literals")
+TIME_PRIMITIVES = ("core/primitives/duration.h", "core/primitives/timestamp.h")
+
+
+def chrono_lengths(root):
+    """Each header or source under `root` that names a std::chrono length or clock outside the time
+    primitives, platform/ and third_party/, as "file:line"."""
+    found = []
+    for file in sorted([*root.rglob("*.h"), *root.rglob("*.cpp")]):
+        relative = file.relative_to(root).as_posix()
+        if "third_party" in file.parts or relative.startswith("platform/") or relative in TIME_PRIMITIVES:
+            continue
+        text = _code(file)
+        found += [f"{relative}:{text.count(chr(10), 0, m.start()) + 1}" for m in CHRONO_LENGTH.finditer(text)]
+    return found
+
+
+def test_the_length_check_finds_what_it_is_for(tmp_path):
+    (tmp_path / "core" / "primitives").mkdir(parents=True)
+    (tmp_path / "core" / "primitives" / "duration.h").write_text("using rep = std::chrono::nanoseconds;\n")
+    (tmp_path / "a.h").write_text("auto t = std::chrono::milliseconds(50);\n")
+    (tmp_path / "b.h").write_text("using namespace std::chrono;\nyear_month_day ymd{sys_days{days{3}}};\n")
+    (tmp_path / "c.h").write_text("// std::chrono::seconds, named in a comment only\nauto t = 50_ms;\n")
+    assert chrono_lengths(tmp_path) == ["a.h:1"]
+
+
+def test_a_length_of_time_is_spelt_by_the_duration_primitive():
+    found = chrono_lengths(ROOT)
+    assert found == [], "a std::chrono length outside the time primitives: use pygim::primitives::duration and its literals (20_us, 1_min):\n" + "\n".join(found)
 
 
 # Inside the boundary (D106): each system's calls are a class in a folder of its own — platform/posix/,

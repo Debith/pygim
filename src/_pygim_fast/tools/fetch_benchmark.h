@@ -9,7 +9,7 @@
 #include "../persistence/strategy/mssql/odbc_error.h"
 #include "../persistence/strategy/mssql/sql_type_map.h"
 #include "../persistence/strategy/mssql/stmt_handle.h"
-#include "../utils/timestamp.h"
+#include "../core/primitives/timestamp.h"
 
 #include <chrono>
 #include <cstdint>
@@ -38,7 +38,7 @@ struct FetchBenchResult {
 inline FetchBenchResult bench_fetch(OdbcConnection& conn,
                                     std::string_view sql,
                                     int64_t block_size) {
-    using clock = monotonic_timestamp;   // utils/timestamp.h: the monotonic clock, read in one place
+    using clock = primitives::monotonic_timestamp;   // the monotonic clock (core/primitives/timestamp.h)
     FetchBenchResult r;
     r.block_size = block_size;
     const auto t_total = clock::now();
@@ -56,7 +56,7 @@ inline FetchBenchResult bench_fetch(OdbcConnection& conn,
 
         ret = SQLExecute(stmt);
         odbc::raise_if_error(ret, SQL_HANDLE_STMT, stmt, "bench: SQLExecute");
-        r.prepare_s = std::chrono::duration<double>(clock::now() - t0).count();
+        r.prepare_s = primitives::seconds_of(clock::now() - t0);
     }
 
     // 2. Describe columns + allocate buffers + bind
@@ -98,7 +98,7 @@ inline FetchBenchResult bench_fetch(OdbcConnection& conn,
 
         buffers.bind(stmt);
 
-        r.describe_bind_s = std::chrono::duration<double>(clock::now() - t0).count();
+        r.describe_bind_s = primitives::seconds_of(clock::now() - t0);
 
         // 3. Pure fetch loop — discard data
         {
@@ -110,11 +110,11 @@ inline FetchBenchResult bench_fetch(OdbcConnection& conn,
                 r.total_rows += static_cast<int64_t>(buffers.rows_fetched);
                 r.total_blocks++;
             }
-            r.fetch_s = std::chrono::duration<double>(clock::now() - t_fetch).count();
+            r.fetch_s = primitives::seconds_of(clock::now() - t_fetch);
         }
     }
 
-    r.total_s = std::chrono::duration<double>(clock::now() - t_total).count();
+    r.total_s = primitives::seconds_of(clock::now() - t_total);
     return r;
 }
 
@@ -138,7 +138,7 @@ inline ParallelFetchResult bench_fetch_parallel(
     int num_workers,
     int64_t block_size = 512)
 {
-    using clock = monotonic_timestamp;   // utils/timestamp.h: the monotonic clock, read in one place
+    using clock = primitives::monotonic_timestamp;   // the monotonic clock (core/primitives/timestamp.h)
     ParallelFetchResult result;
     result.num_workers = num_workers;
     result.block_size = block_size;
@@ -182,7 +182,7 @@ inline ParallelFetchResult bench_fetch_parallel(
 
     for (auto& t : threads) t.join();
 
-    result.total_s = std::chrono::duration<double>(clock::now() - t_total).count();
+    result.total_s = primitives::seconds_of(clock::now() - t_total);
 
     // Aggregate
     double max_fetch = 0;

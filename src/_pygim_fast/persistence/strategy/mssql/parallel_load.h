@@ -142,7 +142,7 @@ inline void run_worker(OdbcConnection& conn,
                        SchemaInfo const& schema_info,
                        int64_t block_size,
                        WorkerResult& out) {
-    SilentTimer<WorkerPhase> timer("worker");
+    pygim::primitives::SilentTimer<WorkerPhase> timer("worker");
     auto& metrics = out.metrics;
     try {
         StmtHandle stmt(conn.dbc());
@@ -159,7 +159,7 @@ inline void run_worker(OdbcConnection& conn,
             ret = SQLExecute(stmt);
             odbc::raise_if_error(ret, SQL_HANDLE_STMT, stmt, "worker: SQLExecute");
         }
-        metrics.prepare_seconds = pygim::seconds_of(timer.stop_lap(WorkerPhase::prepare));
+        metrics.prepare_seconds = pygim::primitives::seconds_of(timer.stop_lap(WorkerPhase::prepare));
 
         // Setup builder + buffers + dispatch using shared schema
         core::ArrowBuilder builder(schema_info.schema);
@@ -255,7 +255,7 @@ inline core::LoadResult execute_parallel(
     int64_t block_size,
     MssqlLoadCache& load_cache,
     int packet_size = 16384) {
-    SilentTimer<LoadPhase> timer("parallel_load");
+    pygim::primitives::SilentTimer<LoadPhase> timer("parallel_load");
     core::LoadMetrics metrics;
 
     PYGIM_LOG_FMT("[parallel_load] starting: table=%.*s, partition=%.*s, workers=%d\n",
@@ -310,7 +310,7 @@ inline core::LoadResult execute_parallel(
             static_cast<SQLINTEGER>(queries[0].size()));
         odbc::raise_if_error(ret, SQL_HANDLE_STMT, stmt, "parallel_load: SQLPrepare schema");
         schema_info = describe_columns(stmt);
-        metrics.describe_seconds = pygim::seconds_of(timer.stop_lap(LoadPhase::describe));
+        metrics.describe_seconds = pygim::primitives::seconds_of(timer.stop_lap(LoadPhase::describe));
         metrics.columns = static_cast<int64_t>(schema_info.col_info.size());
     }
 
@@ -318,7 +318,7 @@ inline core::LoadResult execute_parallel(
     auto run_workers = [&](MssqlLoadCache& cache) -> std::vector<detail::WorkerResult> {
         timer.start_lap(LoadPhase::connect);
         auto* extra_pool = cache.ensure_pool(conn.conn_str(), load_workers - 1, packet_size);
-        metrics.connect_seconds = pygim::seconds_of(timer.stop_lap(LoadPhase::connect));
+        metrics.connect_seconds = pygim::primitives::seconds_of(timer.stop_lap(LoadPhase::connect));
         PYGIM_LOG_FMT("[parallel_load] %d extra connections in %.3fs\n",
                       load_workers - 1, metrics.connect_seconds);
 
@@ -407,7 +407,7 @@ inline core::LoadResult execute_parallel(
         }
         combined = std::move(*concat_result);
     }
-    metrics.concat_seconds = pygim::seconds_of(timer.stop_lap(LoadPhase::concat));
+    metrics.concat_seconds = pygim::primitives::seconds_of(timer.stop_lap(LoadPhase::concat));
 
     // 7. Aggregate metrics
     for (auto const& r : results) {

@@ -13,7 +13,6 @@
 #include "../../utils/logging.h"
 
 #include <cassert>
-#include <chrono>
 #include <condition_variable>
 #include <expected>
 #include <memory>
@@ -24,6 +23,8 @@
 #include <vector>
 
 namespace pygim::core {
+
+using namespace ::pygim::primitives::time_literals;   // 5_s: a length in the duration primitive's units
 
 // ────────────────────────────────────────────────────────────────
 // Error type for pool operations
@@ -185,7 +186,7 @@ public:
     /// Returns PoolError::Timeout or PoolError::PoolClosed on failure.
     [[nodiscard]]
     std::expected<ConnectionHandle<Backend>, PoolError>
-    checkout(std::chrono::milliseconds timeout = std::chrono::milliseconds{5000}) {
+    checkout(primitives::duration timeout = 5_s) {
         std::unique_lock lock(m_mutex);
 
         PYGIM_LOG_FMT("[ConnectionPool] checkout (available=%zu, total=%zu/%zu)\n",
@@ -212,9 +213,9 @@ public:
 
         // Must wait for a return
         PYGIM_LOG_FMT("[ConnectionPool] checkout → waiting (timeout=%lldms)\n",
-                      static_cast<long long>(timeout.count()));
+                      static_cast<long long>(timeout / 1_ms));
 
-        bool got_one = m_cv.wait_for(lock, timeout, [this] {
+        bool got_one = m_cv.wait_for(lock, timeout.as_chrono(), [this] {
             return !m_available.empty() || m_closed;
         });
 

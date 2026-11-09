@@ -1,5 +1,5 @@
 # type: ignore
-"""Time as one number: ``pygim.utils.Duration``, ``Timestamp`` and ``ManualTime``.
+"""Time as one number: ``pygim.Duration``, ``Timestamp`` and ``ManualTime``.
 
 A length of time is one signed 64-bit count of nanoseconds, and every unit is
 a conversion into it. A moment is one too: nanoseconds since its clock's
@@ -15,42 +15,42 @@ This example demonstrates:
 
 import time
 
-from pygim import utils
+from pygim import Duration, ManualTime, Timestamp
 
 # ----------------------------------------------------------------------------
 # 1. A duration is spelt in units and held as nanoseconds
 # ----------------------------------------------------------------------------
-#                     ┌─ **units: y, w, d, h, m, s, ms, us, ns; they add up
-#                     ▼
-wait = utils.Duration(m=1, s=30)
+#               ┌─ **units: yr, wk, day, hr, min, s, ms, us, ns; they add up
+#               ▼
+wait = Duration(min=1, s=30)
 assert wait.nanoseconds == 90_000_000_000
 assert wait.seconds == 90.0                      # a view as a float, not a store
-assert repr(wait) == "Duration(m=1, s=30)"
+assert repr(wait) == "Duration(min=1, s=30)"
 
 # The repr spells it in the longest units that fit, so another spelling of the
 # same length reads back the same.
-assert utils.Duration(s=150) == utils.Duration(m=2, s=30)
-assert repr(utils.Duration(s=150)) == "Duration(m=2, s=30)"
+assert Duration(s=150) == Duration(min=2, s=30)
+assert repr(Duration(s=150)) == "Duration(min=2, s=30)"
 
 # ----------------------------------------------------------------------------
 # 2. A fraction rounds exactly, to the nearest nanosecond, ties to even
 # ----------------------------------------------------------------------------
-assert utils.Duration(ns=2.5).nanoseconds == 2
-assert utils.Duration(ns=3.5).nanoseconds == 4
+assert Duration(ns=2.5).nanoseconds == 2
+assert Duration(ns=3.5).nanoseconds == 4
 # A year is 365.2425 days, as C++ counts it: 55 bits of nanoseconds, where a
 # float product would be one nanosecond off.
-assert utils.Duration(y=0.286).nanoseconds == 9_025_288_271_999_999
+assert Duration(yr=0.286).nanoseconds == 9_025_288_271_999_999
 
 # Past 64 bits (about 292 years) is an error, never a wrapped value.
 try:
-    utils.Duration(y=300)
+    Duration(yr=300)
 except OverflowError as e:
     assert "64 bits" in str(e)
 else:
     raise AssertionError("Expected 300 years to be past 64 bits")
 
 try:
-    utils.Duration(months=1)
+    Duration(months=1)
 except TypeError as e:
     assert "unknown unit 'months'" in str(e)
 else:
@@ -59,14 +59,14 @@ else:
 # ----------------------------------------------------------------------------
 # 3. A moment is nanoseconds since the Unix epoch
 # ----------------------------------------------------------------------------
-#                       ┌─ nanoseconds: after 1970-01-01T00:00:00Z
-#                       ▼
-start = utils.Timestamp(1_000)
-end = utils.Timestamp(3_500)
-assert end - start == utils.Duration(ns=2_500)      # two moments: the time between
+#                 ┌─ nanoseconds: after 1970-01-01T00:00:00Z
+#                 ▼
+start = Timestamp(1_000)
+end = Timestamp(3_500)
+assert end - start == Duration(ns=2_500)            # two moments: the time between
 assert start < end
 
-now = utils.Timestamp.now()                         # the wall clock
+now = Timestamp.now()                               # the wall clock
 assert abs(now.nanoseconds - time.time_ns()) < 1_000_000_000
 
 # ----------------------------------------------------------------------------
@@ -74,15 +74,15 @@ assert abs(now.nanoseconds - time.time_ns()) < 1_000_000_000
 # ----------------------------------------------------------------------------
 # Code that keeps time takes its clock, so a test can give it this one and
 # know every reading exactly.
-clock = utils.ManualTime()
+clock = ManualTime()
 assert clock.now() == 0
 #             ┌─ units, as Duration takes them
 #             ▼
-clock.advance(m=1, s=30)
+clock.advance(min=1, s=30)
 assert clock.now() == 90_000_000_000
 #             ┌─ by: a Duration instead of units
 #             ▼
-clock.advance(utils.Duration(s=-30))
+clock.advance(Duration(s=-30))
 assert clock.now() == 60_000_000_000
 
 print("durations and timestamps example OK:", wait)
