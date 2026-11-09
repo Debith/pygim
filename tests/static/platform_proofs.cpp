@@ -8,8 +8,12 @@
 //
 // Every proof is a constexpr function that returns the number of the first step that failed, or 0,
 // so a failing assertion names the step in the compiler's "comparison reduces to" note.
+//
+// A component with no logic above its calls, the file lock (platform/locks.h), is included only so
+// that every build compiles the running system's calls against their concept.
 
 #include "../../src/_pygim_fast/platform/libraries.h"
+#include "../../src/_pygim_fast/platform/locks.h"
 #include "../../src/_pygim_fast/platform/memory.h"
 
 #include <cstddef>
@@ -129,5 +133,8 @@ constexpr int linux_memory_holds() {
     return 0;
 }
 static_assert(linux_memory_holds() == 0);
+
+// ── The file lock: the running system's calls, open, lock, unlock and close over an int descriptor ──
+static_assert(file_lock_calls<native_lock_calls>);
 
 }  // namespace
