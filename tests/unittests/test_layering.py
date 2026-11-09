@@ -117,8 +117,6 @@ def test_no_behaviour_branches_on_the_platform_outside_the_boundary():
 # test can hand it a manual one. Found 2026-10-30:
 # ScopeLog, the BCP profiler and the fetch benchmark each read steady_clock themselves.
 CLOCK_READ = re.compile(r"std::chrono::(?:steady_clock|system_clock|high_resolution_clock)\b")
-# The one reader left: the QuickTimer of before, which takes its clock once it times laps.
-CLOCK_READERS_LEFT = ["utils/quick_timer.h"]
 
 
 def clock_readers(root):
@@ -146,7 +144,7 @@ def test_the_clock_check_finds_what_it_is_for(tmp_path):
 
 def test_time_is_read_in_one_header():
     found = clock_readers(ROOT) + [f"tests/static/{f}" for f in clock_readers(ROOT.parents[1] / "tests" / "static")]
-    assert found == CLOCK_READERS_LEFT, "a clock read outside utils/timestamp.h: take a clock (wall_clock, monotonic_clock) instead"
+    assert found == [], "a clock read outside utils/timestamp.h: take a clock (wall_clock, monotonic_clock) instead"
 
 
 # Inside the boundary (D106): each system's calls are a class in a folder of its own — platform/posix/,

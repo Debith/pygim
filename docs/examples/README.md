@@ -44,6 +44,7 @@ for f in docs/examples/*/example_*.py; do python "$f" || break; done
 | pathlike | [example_12_path_stores.py](pathlike/example_12_path_stores.py) | `PathStore` and `store=`: the default table and a private one, derived paths inheriting their table, equality across stores without identity, a PathSet over a store, a lifetime chosen by argument |
 | utils | [example_01_process_memory.py](utils/example_01_process_memory.py) | `rss_bytes` / `peak_rss_bytes` and the MiB forms: a before/after delta around an allocation, and why only the delta means anything |
 | utils | [example_02_durations_and_timestamps.py](utils/example_02_durations_and_timestamps.py) | `Duration` spelt in units and held as nanoseconds, exact rounding and the refusals past 64 bits; `Timestamp` and the duration between two moments; `ManualTime` for testing code that keeps time |
+| utils | [example_03_quick_timer.py](utils/example_03_quick_timer.py) | `QuickTimer` with its clock and report given: laps measured exactly on a `ManualTime`, laps as with blocks on `QuickTimer.silent()`, `Report.hooks()` callbacks, the default stderr text |
 | pathlike | [example_11_path_collections.py](pathlike/example_11_path_collections.py) | `PathSet` as one table: set semantics, `+`/`-` with paths or sets, `clone`, Filters (`ext`/`name`/`absolute`, `& | ~`) and lazy Queries, `read_all_files`, `match_pattern`, counting without building |
 | persistence | [arrow_bcp_quickstart.md](arrow_bcp_quickstart.md) | Quickstart for the Arrow/BCP persistence layer (prose walkthrough, requires a database) |
 

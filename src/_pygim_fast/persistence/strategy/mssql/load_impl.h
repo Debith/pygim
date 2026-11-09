@@ -72,7 +72,7 @@ struct MssqlLoadImpl {
                                     MssqlLoadCache& load_cache,
                                     int64_t block_size = kDefaultBlockSize,
                                     int packet_size = kDefaultPacketSize) {
-        QuickTimerT<SingleLoadPhase> timer("load", nullptr, false, false);
+        SilentTimer<SingleLoadPhase> timer("load");
         core::LoadMetrics metrics;
 
         PYGIM_LOG_FMT("[MssqlLoadImpl] execute(sql=\"%.*s\", workers=%d)\n",
@@ -103,7 +103,7 @@ struct MssqlLoadImpl {
 
         // ── 2. Prepare + execute ────────────────────────────────
         {
-            timer.start_sub_timer(SingleLoadPhase::prepare, false);
+            timer.start_lap(SingleLoadPhase::prepare);
 
             SQLRETURN ret = SQLPrepare(
                 stmt, const_cast<SQLCHAR*>(
@@ -115,17 +115,17 @@ struct MssqlLoadImpl {
             odbc::raise_if_error(ret, SQL_HANDLE_STMT, stmt, "SQLExecute");
 
             metrics.prepare_seconds =
-                timer.stop_sub_timer(SingleLoadPhase::prepare, false);
+                pygim::seconds_of(timer.stop_lap(SingleLoadPhase::prepare));
         }
 
         // ── 3. Describe result columns → schema ────────────────
         SchemaInfo schema_info;
         {
-            timer.start_sub_timer(SingleLoadPhase::describe, false);
+            timer.start_lap(SingleLoadPhase::describe);
             schema_info = describe_columns(stmt);
             metrics.columns = static_cast<int64_t>(schema_info.col_info.size());
             metrics.describe_seconds =
-                timer.stop_sub_timer(SingleLoadPhase::describe, false);
+                pygim::seconds_of(timer.stop_lap(SingleLoadPhase::describe));
         }
 
         // ── 4. Set up builder + fetch buffers + dispatch ──────
@@ -159,9 +159,9 @@ struct MssqlLoadImpl {
             // -- fetch block --
             SQLRETURN ret;
             {
-                timer.start_sub_timer(SingleLoadPhase::fetch, false);
+                timer.start_lap(SingleLoadPhase::fetch);
                 ret = SQLFetch(stmt);
-                timer.stop_sub_timer(SingleLoadPhase::fetch, false);
+                timer.stop_lap(SingleLoadPhase::fetch);
             }
 
             if (ret == SQL_NO_DATA) break;
@@ -171,7 +171,7 @@ struct MssqlLoadImpl {
                 static_cast<int64_t>(buffers.rows_fetched);
 
             // -- append to Arrow builder --
-            timer.start_sub_timer(SingleLoadPhase::build, false);
+            timer.start_lap(SingleLoadPhase::build);
 
             for (std::size_t c = 0; c < ncols; ++c) {
                 auto& col = buffers.columns[c];
@@ -190,7 +190,7 @@ struct MssqlLoadImpl {
                 cd.fn(builder, c, col, nrows, valid_ptr);
             }
 
-            timer.stop_sub_timer(SingleLoadPhase::build, false);
+            timer.stop_lap(SingleLoadPhase::build);
             metrics.fetched_rows += nrows;
             metrics.fetched_blocks++;
         }
@@ -198,8 +198,8 @@ struct MssqlLoadImpl {
         // ── 8. Finalize ────────────────────────────────────────
         auto table = builder.finish();
         metrics.workers_used = 1;
-        metrics.fetch_seconds = timer.sub_timer_seconds(SingleLoadPhase::fetch);
-        metrics.build_seconds = timer.sub_timer_seconds(SingleLoadPhase::build);
+        metrics.fetch_seconds = timer.lap_seconds(SingleLoadPhase::fetch);
+        metrics.build_seconds = timer.lap_seconds(SingleLoadPhase::build);
         metrics.total_seconds = timer.total_seconds();
 
         PYGIM_LOG_FMT("[MssqlLoadImpl] done: %lld rows, %lld blocks, "

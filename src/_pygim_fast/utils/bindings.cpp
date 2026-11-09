@@ -12,6 +12,7 @@
 #include "memory.h"
 #include "duration.h"
 #include "timestamp.h"
+#include "quick_timer_adapter.h"
 #include "../mapping/dynamic_merge_map.h"
 
 namespace py = pybind11;
@@ -259,15 +260,19 @@ pygim::duration duration_of_units(const py::kwargs& units) {
         const std::string unit_name = py::str(name);
         const auto unit = pygim::time_unit::named(unit_name);
         if (!unit) {
-            throw py::type_error("unknown unit '" + unit_name +
-                                 "'; the units are years, weeks, days, hours, mins, secs, msecs, usecs and nsecs");
+            std::string known;
+            for (std::size_t i = 0; i < pygim::time_units.size(); ++i) {
+                known += i == 0 ? "" : i + 1 == pygim::time_units.size() ? " and " : ", ";
+                known += pygim::time_units[i].name();
+            }
+            throw py::type_error("unknown unit '" + unit_name + "'; the units are " + known);
         }
         total = pygim::sum_exactly(total, amount_of(*unit, amount));
     }
     return total;
 }
 
-// Duration(mins=2, secs=30): the units it is spelt in, longest first, which eval() reads back.
+// Duration(m=2, s=30): the units it is spelt in, longest first, which eval() reads back.
 std::string duration_repr(pygim::duration d) {
     std::string out = "Duration(";
     std::string_view separator;
@@ -310,9 +315,9 @@ PYBIND11_MODULE(utils, m) {
 
     // A length of time (utils/duration.h): one signed 64-bit count of nanoseconds; units are conversions.
     py::class_<pygim::duration>(m, "Duration",
-                                "A length of time: one signed 64-bit count of nanoseconds. Duration(mins=1, secs=30).\n"
-                                "Units: years (365.2425 days, as C++ counts them), weeks, days, hours, mins, secs, msecs,\n"
-                                "usecs, nsecs. They add up; an amount may be negative or a fraction, rounded exactly to\n"
+                                "A length of time: one signed 64-bit count of nanoseconds. Duration(m=1, s=30).\n"
+                                "Units: y (a year: 365.2425 days, as C++ counts them), w, d, h, m, s, ms, us, ns.\n"
+                                "They add up; an amount may be negative or a fraction, rounded exactly to\n"
                                 "the nearest nanosecond (ties to even). Past 64 bits (about 292 years) is an OverflowError.")
         .def(py::init([](const py::kwargs& units) { return duration_of_units(units); }))
         .def_property_readonly("nanoseconds", [](pygim::duration d) { return d.count(); }, "The number itself.")
@@ -339,7 +344,7 @@ PYBIND11_MODULE(utils, m) {
                  time.advance(by ? *by : duration_of_units(units));
              },
              py::arg("by") = py::none(),
-             "Moves time by a Duration or by units: advance(mins=1, secs=30). Past 64 bits it raises\n"
+             "Moves time by a Duration or by units: advance(m=1, s=30). Past 64 bits it raises\n"
              "OverflowError and time does not move.");
 
     // A calendar moment (utils/timestamp.h): nanoseconds since the Unix epoch, from the wall clock.
@@ -358,6 +363,9 @@ PYBIND11_MODULE(utils, m) {
         .def(py::self >= py::self)
         .def("__hash__", &pygim::timestamp::nanoseconds)
         .def("__repr__", [](const pygim::timestamp& t) { return "Timestamp(" + std::to_string(t.nanoseconds()) + ")"; });
+
+    // One timer for a block and its laps (utils/quick_timer.h), its clock and its report given.
+    pygim::adapter::bind_quick_timer(m);
 
     m.def("calculate_rate",
           &calculate_rate,

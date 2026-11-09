@@ -2,14 +2,17 @@
 // utils/duration.h — a length of time is one signed 64-bit count of nanoseconds
 // (std::chrono::nanoseconds); every unit is a conversion into it.
 //
-//     time_unit::named("mins")->of(1) + time_unit::named("secs")->of(90)   -> 150'000'000'000ns
-//     time_unit::named("years")->of(0.286)                                 -> 9'025'288'271'999'999ns
-//     spelt_in_units(150s)                                                 -> {mins 2, secs 30}
+//     time_unit::named("m")->of(1) + time_unit::named("s")->of(90)   -> 150'000'000'000ns
+//     time_unit::named("y")->of(0.286)                               -> 9'025'288'271'999'999ns
+//     spelt_in_units(150s)                                           -> {m 2, s 30}
+//
+// The units are the common short forms, as Go's durations, Prometheus and systemd spell them:
+// y, w, d, h, m, s, ms, us, ns.
 //
 // The units are std::chrono's, a year its 365.2425 days, so C++ and Python agree. An amount may be
 // a fraction: the float's exact value times the unit, rounded to the nearest nanosecond, ties to
 // even. That is computed from the float's bits with integer arithmetic, because a year is 55 bits
-// of nanoseconds and a float product would miss by one (years=0.286 rounds to ...272000000 instead
+// of nanoseconds and a float product would miss by one (y=0.286 rounds to ...272000000 instead
 // of ...271999999). Past 64 bits is std::overflow_error and a non-finite amount std::domain_error:
 // never a wrapped or invented value.
 //
@@ -133,7 +136,7 @@ public:
         return of_real(static_cast<double>(amount));
     }
 
-    /// The unit spelt `name` ("years" ... "nsecs"), or nothing.
+    /// The unit spelt `name` ("y" ... "ns"), or nothing.
     [[nodiscard]] static constexpr std::optional<time_unit> named(std::string_view name) noexcept;
 
 private:
@@ -174,19 +177,19 @@ private:
         return of_count(static_cast<std::int64_t>(amount));
     }
 };
-static_assert(time_unit("secs", std::chrono::seconds(1)).of(2) == std::chrono::seconds(2) && time_unit("secs", std::chrono::seconds(1)).name() == "secs");
+static_assert(time_unit("s", std::chrono::seconds(1)).of(2) == std::chrono::seconds(2) && time_unit("s", std::chrono::seconds(1)).name() == "s");
 
 /// Every unit, longest first: the names Duration(**units) takes, the order repr spells them in.
 inline constexpr std::array<time_unit, 9> time_units{{
-    {"years", std::chrono::years(1)},
-    {"weeks", std::chrono::weeks(1)},
-    {"days", std::chrono::days(1)},
-    {"hours", std::chrono::hours(1)},
-    {"mins", std::chrono::minutes(1)},
-    {"secs", std::chrono::seconds(1)},
-    {"msecs", std::chrono::milliseconds(1)},
-    {"usecs", std::chrono::microseconds(1)},
-    {"nsecs", std::chrono::nanoseconds(1)},
+    {"y", std::chrono::years(1)},
+    {"w", std::chrono::weeks(1)},
+    {"d", std::chrono::days(1)},
+    {"h", std::chrono::hours(1)},
+    {"m", std::chrono::minutes(1)},
+    {"s", std::chrono::seconds(1)},
+    {"ms", std::chrono::milliseconds(1)},
+    {"us", std::chrono::microseconds(1)},
+    {"ns", std::chrono::nanoseconds(1)},
 }};
 
 constexpr std::optional<time_unit> time_unit::named(std::string_view name) noexcept {
@@ -196,11 +199,11 @@ constexpr std::optional<time_unit> time_unit::named(std::string_view name) noexc
     return std::nullopt;
 }
 
-static_assert(time_unit::named("years")->length() == std::chrono::seconds(31'556'952));
+static_assert(time_unit::named("y")->length() == std::chrono::seconds(31'556'952));
 static_assert(!time_unit::named("months"));
-static_assert(time_unit::named("mins")->of(1) + time_unit::named("secs")->of(90) == std::chrono::seconds(150));
-static_assert(time_unit::named("nsecs")->of(2.5) == duration(2) && time_unit::named("nsecs")->of(-1.5) == duration(-2));
-static_assert(time_unit::named("years")->of(0.286) == duration(9'025'288'271'999'999));
+static_assert(time_unit::named("m")->of(1) + time_unit::named("s")->of(90) == std::chrono::seconds(150));
+static_assert(time_unit::named("ns")->of(2.5) == duration(2) && time_unit::named("ns")->of(-1.5) == duration(-2));
+static_assert(time_unit::named("y")->of(0.286) == duration(9'025'288'271'999'999));
 
 /// One amount of one unit: a part of how a duration is spelt.
 class unit_amount {
@@ -214,10 +217,10 @@ private:
     time_unit m_unit{"", duration(0)};
     std::int64_t m_amount = 0;
 };
-static_assert(unit_amount(time_unit("mins", std::chrono::minutes(1)), 3).unit_name() == "mins" && unit_amount().amount() == 0);
+static_assert(unit_amount(time_unit("m", std::chrono::minutes(1)), 3).unit_name() == "m" && unit_amount().amount() == 0);
 
 /// How a duration is spelt in whole units, longest first, each amount the most that fits: 150 s is
-/// {mins 2, secs 30}; a negative duration's amounts are all negative; zero is spelt with none.
+/// {m 2, s 30}; a negative duration's amounts are all negative; zero is spelt with none.
 class spelt_in_units {
 public:
     constexpr explicit spelt_in_units(duration d) noexcept {
@@ -240,8 +243,8 @@ private:
 
 static_assert([] {
     const spelt_in_units s(std::chrono::seconds(150));
-    return s.size() == 2 && s.begin()[0].unit_name() == "mins" && s.begin()[0].amount() == 2 &&
-           s.begin()[1].unit_name() == "secs" && s.begin()[1].amount() == 30;
+    return s.size() == 2 && s.begin()[0].unit_name() == "m" && s.begin()[0].amount() == 2 &&
+           s.begin()[1].unit_name() == "s" && s.begin()[1].amount() == 30;
 }());
 static_assert(spelt_in_units(duration(0)).size() == 0);
 
