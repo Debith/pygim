@@ -1,5 +1,6 @@
-// tests/static/threads_stress.cpp — the pool every thread of a process shares (utils/parallel.h),
-// driven hard under ThreadSanitizer, or AddressSanitizer with UndefinedBehaviorSanitizer.
+// tests/static/threads_stress.cpp — the pool every thread of a process shares
+// (core/primitives/parallel.h), driven hard under ThreadSanitizer, or AddressSanitizer with
+// UndefinedBehaviorSanitizer.
 //
 // Built and run by run_threads_stress.py, once per sanitizer; CI's threads-stress job runs it on
 // every pull request. Each part prints one line and the process exits 0 when every part held; a
@@ -42,12 +43,12 @@
 #include <thread>
 #include <vector>
 
-#include "../../src/_pygim_fast/utils/parallel.h"
+#include "../../src/_pygim_fast/core/primitives/parallel.h"
 
 namespace {
 
-using pygim::parallel::for_each;
-namespace parallel = pygim::parallel;
+using pygim::primitives::parallel::for_each;
+namespace parallel = pygim::primitives::parallel;
 
 const char* g_part = "";   // the part running, for the alarm to name
 

@@ -9,7 +9,7 @@
 #include "../persistence/strategy/mssql/odbc_error.h"
 #include "../persistence/strategy/mssql/sql_type_map.h"
 #include "../persistence/strategy/mssql/stmt_handle.h"
-#include "../utils/timestamp.h"
+#include "../core/primitives/timestamp.h"
 
 #include <chrono>
 #include <cstdint>
@@ -38,7 +38,7 @@ struct FetchBenchResult {
 inline FetchBenchResult bench_fetch(OdbcConnection& conn,
                                     std::string_view sql,
                                     int64_t block_size) {
-    using clock = monotonic_timestamp;   // utils/timestamp.h: the monotonic clock, read in one place
+    using clock = primitives::monotonic_timestamp;   // the monotonic clock (core/primitives/timestamp.h)
     FetchBenchResult r;
     r.block_size = block_size;
     const auto t_total = clock::now();
@@ -138,7 +138,7 @@ inline ParallelFetchResult bench_fetch_parallel(
     int num_workers,
     int64_t block_size = 512)
 {
-    using clock = monotonic_timestamp;   // utils/timestamp.h: the monotonic clock, read in one place
+    using clock = primitives::monotonic_timestamp;   // the monotonic clock (core/primitives/timestamp.h)
     ParallelFetchResult result;
     result.num_workers = num_workers;
     result.block_size = block_size;

@@ -99,10 +99,11 @@ jobs:
         pytest
 
   threads-stress:
-    # The pool every thread of a process shares (utils/parallel.h), built under ThreadSanitizer and
-    # under AddressSanitizer with UndefinedBehaviorSanitizer and driven hard: a race, a helper left
-    # inside a finished job or a lock a fork left held shows only there. The program is the headers
-    # it includes, so the job needs a compiler and not pygim's build (tests/static/run_threads_stress.py).
+    # The pool every thread of a process shares (core/primitives/parallel.h), built under
+    # ThreadSanitizer and under AddressSanitizer with UndefinedBehaviorSanitizer and driven hard: a
+    # race, a helper left inside a finished job or a lock a fork left held shows only there. The
+    # program is the headers it includes, so the job needs a compiler and not pygim's build
+    # (tests/static/run_threads_stress.py).
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v4

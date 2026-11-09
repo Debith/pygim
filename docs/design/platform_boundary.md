@@ -32,7 +32,7 @@ of their callers, so that CI, which runs for pull requests into `main`, compiles
 caller is a file store's commit lock on a branch not yet in `main`, which has no pull request; and
 `process.h` (the pools' thread names, signal mask and fork hooks, POSIX's calls under `posix/` with
 Linux's and macOS's thread names over them, and Windows') and `clocks.h` (a thread's CPU time, a class
-each under `posix/` and `windows/`), whose caller, utils/parallel.h's pools, came with them ahead of
+each under `posix/` and `windows/`), whose caller, core/primitives/parallel.h's pools, came with them ahead of
 the parallel reads, the parser and similarity that call it, and is driven under the sanitizers by CI's
 threads-stress job meanwhile. The other headers this document names (the listing, the reads, the
 signals' calls, the caches) arrive with the code that calls them, each behind the same boundary and in
@@ -60,14 +60,14 @@ allows none outside the folder. PR #39's branch had:
 | pathlike/glob_walk.h | 11 | the case and separator rules; the listing (`opendir` against `directory_iterator`); a name's native spelling; Linux's one-`lstat` shortcut | rules and calls |
 | pathlike/core.h | 7 | exclusive create, `fsync` (`F_FULLFSYNC` on macOS), unlink, a path's UTF-8, the native path strategy | calls, and the choice of rules |
 | utils/interrupt.h | 7 | signal handlers and the wake-up pipe | calls |
-| utils/parallel.h | 7 | the signal mask a pool's threads inherit; thread names | calls |
+| core/primitives/parallel.h | 7 | the signal mask a pool's threads inherit; thread names | calls |
 | pathlike/file_reads.h | 4 | the reads; an errno's words; `open()`'s error for a folder | calls and rules |
 | utils/cpu.h, utils/memory.h | 8 | the caches; resident memory | calls |
 | pathlike/adapter/path_text.h | 3 | a path's text at the Python boundary: the file system's encoding | rules |
 | persistence/strategy/mssql/bcp/bcp_api.h, persistence/odbc_headers.h | 4 | loading the ODBC driver (`dlopen` against `LoadLibraryW`); the SDK's headers | calls |
 | similarity/adapter/stream.h | 3 | whether the process forked since a stream opened | calls |
 | utils/huge_pages.h, utils/kept_blocks.h | 4 | `madvise` for huge pages; `pthread_atfork` | calls |
-| utils/timestamp.h | 1 | the clock | calls |
+| core/primitives/timestamp.h | 1 | the clock | calls |
 
 pathlike already has the shape in two places: `posix_strategy` and `windows_strategy` (core.h) are the
 path rules as compile-time classes, both compiled everywhere and proven against pathlib's
@@ -264,9 +264,9 @@ Each step a refactor under the tests as they are (#36), its own commit, the ratc
 | tests/static/platform_proofs.cpp | every logic class over constexpr fake calls, compiled by every build of `pygim.utils`: the first name that opens, a missing library and symbol, the newest match and no match, Windows' widened name and missing glob, statm's resident count, the kilobyte peak, a peak below the present, a failed getrusage, procfs absent; and the running system's file-lock calls, compiled against their concept | the proofs |
 | platform/locks.h | `file_lock_calls`: open, lock, unlock and close a file locked across processes, over an `int` descriptor on every system; `native_lock_calls`, the running system's. No caller on `main` yet | the choice |
 | platform/posix/, windows/locks.h | `posix_lock_calls` (open, flock retried on EINTR, close), `win32_lock_calls` (_wsopen_s, LockFileEx and UnlockFileEx through the descriptor's handle, _close) | calls |
-| platform/process.h | `process_calls`; `native_process`, the running system's; `name_this_thread`, `signals_blocked` and `at_fork` over it, what utils/parallel.h's pools call | the choice |
+| platform/process.h | `process_calls`; `native_process`, the running system's; `name_this_thread`, `signals_blocked` and `at_fork` over it, what core/primitives/parallel.h's pools call | the choice |
 | platform/posix/, linux/, macos/, windows/process.h | `posix_process` (the signal mask, `pthread_atfork`); `linux_process` and `macos_process` over it, each naming a thread its system's way; `windows_process`, which does nothing | calls |
-| platform/clocks.h | `thread_clocks`; `native_clocks`, the running system's, which utils/timestamp.h's `thread_cpu_clock` reads | the choice |
+| platform/clocks.h | `thread_clocks`; `native_clocks`, the running system's, which core/primitives/timestamp.h's `thread_cpu_clock` reads | the choice |
 | platform/posix/, windows/clocks.h | `posix_clocks` (`CLOCK_THREAD_CPUTIME_ID`); `windows_clocks` (the measuring clock, standing in) | calls |
 | platform/windows_headers.h | `<windows.h>` lean and without `min` and `max`, for every header that calls it | — |
 | pathlike/core.h | `posix_strategy`, `windows_strategy`: separators, case, parsing; `native_strategy` | rules |

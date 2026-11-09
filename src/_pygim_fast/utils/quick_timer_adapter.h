@@ -7,7 +7,7 @@
 // timer one clock_source and one timer_report. Lap names the timer keeps as views are Python
 // strings this adapter keeps alive; a snapshot handed to Python copies them.
 //
-//     with utils.QuickTimer.silent("load csv", clock=time) as timer:
+//     with pygim.QuickTimer.silent("load csv", clock=time) as timer:
 //         with timer.lap("read"):
 //             ...
 //     timer.laps                  -> {"read": Duration(...)}
@@ -23,13 +23,34 @@
 
 #include <pybind11/pybind11.h>
 
-#include "duration.h"
-#include "quick_timer.h"
-#include "timestamp.h"
+#include "../core/primitives/duration.h"
+#include "../core/primitives/quick_timer.h"
+#include "../core/primitives/timestamp.h"
 
 namespace pygim::adapter {
 
 namespace py = pybind11;
+
+// The primitives this adapter gives a Python face (core/primitives/): the time and the timer.
+using primitives::clock_source;
+using primitives::duration;
+using primitives::lap_started;
+using primitives::lap_stopped;
+using primitives::lap_time;
+using primitives::manual_clock;
+using primitives::manual_time;
+using primitives::monotonic_clock;
+using primitives::one_of;
+using primitives::QuickTimerT;
+using primitives::report_lines;
+using primitives::silent;
+using primitives::text_report;
+using primitives::text_sink;
+using primitives::timer_finished;
+using primitives::timer_hooks;
+using primitives::timer_report;
+using primitives::timer_snapshot;
+using primitives::timer_started;
 
 /// The clock a Python QuickTimer reads: the monotonic clock, or a ManualTime it was given.
 class python_clock {

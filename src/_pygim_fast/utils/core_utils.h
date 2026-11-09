@@ -11,7 +11,7 @@
 #include <array>
 #include <stdexcept>
 #include <cctype>
-#include "quick_timer.h"
+#include "../core/primitives/quick_timer.h"
 
 [[nodiscard]] inline std::string to_csv(std::vector<std::string> strings, bool sorted = false) {
     if (sorted) {

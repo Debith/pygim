@@ -1,9 +1,9 @@
 #pragma once
 // platform/process.h — the process's calls the pools make: naming a thread, the signal mask the
 // threads a thread starts inherit, hooks around a fork. Infrastructure behind the platform boundary
-// (docs/design/platform_boundary.md, D77): utils/parallel.h calls these and never asks which system it
-// runs on. Where a system has no such thing (Windows has no fork and no POSIX signals), the call does
-// nothing.
+// (docs/design/platform_boundary.md, D77): core/primitives/parallel.h calls these and never asks
+// which system it runs on. Where a system has no such thing (Windows has no fork and no POSIX
+// signals), the call does nothing.
 //
 // One class per system, each in a file of its own that asks nothing (D106): POSIX's signal mask and
 // fork hooks in posix/process.h, and naming a thread, which Linux and macOS spell differently, in

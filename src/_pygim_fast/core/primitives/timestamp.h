@@ -1,6 +1,7 @@
 #pragma once
-// utils/timestamp.h — a moment as nanoseconds since its clock's epoch, read from a clock that is
-// GIVEN, never fetched: code that keeps time takes its clock, so a test can hand it a manual one.
+// core/primitives/timestamp.h — a moment as nanoseconds since its clock's epoch, read from a clock
+// that is GIVEN, never fetched: code that keeps time takes its clock, so a test can hand it a
+// manual one.
 //
 //     timestamp t = timestamp::now();                       // the wall clock: ns since the Unix epoch
 //     timestamp(12'333).nanoseconds()           -> 12333
@@ -9,7 +10,7 @@
 //
 //     manual_time time;                                     // a clock that moves only when told
 //     const auto t0 = basic_timestamp<manual_clock>::now(time.clock());
-//     time.advance(1min + 30s);                             // std::chrono's units (utils/duration.h)
+//     time.advance(1min + 30s);                             // std::chrono's units (duration.h)
 //     basic_timestamp<manual_clock>::now(time.clock()) - t0 -> 90s
 //
 // Every moment and every length of time is ONE signed 64-bit count of nanoseconds: a timestamp is
@@ -17,21 +18,22 @@
 // seconds as a float and calendar forms are conversions of that number, never a second store.
 //
 // CORE layer: pybind-free, and constexpr except for the operating-system clocks. The OS is read in
-// exactly three places, wall_clock::now_ns(), monotonic_clock::now_ns() and thread_cpu_clock::now_ns()
-// (the last through platform/clocks.h); timing code elsewhere in pygim takes one of these as its
-// clock and never reads a clock itself (#264; utils/logging.h's ScopeLog, the BCP profiler and the
-// fetch benchmark too, which test_layering's test_time_is_read_in_one_header holds). A timestamp's
-// clock is part of its type, so a wall-clock moment cannot be subtracted from a monotonic one.
+// exactly three places, wall_clock::now_ns(), monotonic_clock::now_ns() and
+// thread_cpu_clock::now_ns() (the last through platform/clocks.h); timing code elsewhere in pygim
+// takes one of these as its clock and never reads a clock itself (#264; utils/logging.h's ScopeLog,
+// the BCP profiler and the fetch benchmark too, which test_layering's
+// test_time_is_read_in_one_header holds). A timestamp's clock is part of its type, so a wall-clock
+// moment cannot be subtracted from a monotonic one.
 
 #include <chrono>
 #include <concepts>
 #include <cstdint>
 #include <limits>
 
-#include "../platform/clocks.h"
+#include "../../platform/clocks.h"
 #include "duration.h"
 
-namespace pygim {
+namespace pygim::primitives {
 
 /// Where `now` comes from: a copyable value whose now_ns() is the count of nanoseconds since its
 /// epoch.
@@ -64,7 +66,9 @@ public:
 /// not read it per item.
 class thread_cpu_clock {
 public:
-    [[nodiscard]] std::int64_t now_ns() const noexcept { return platform::native_clocks::thread_cpu_ns(); }
+    [[nodiscard]] std::int64_t now_ns() const noexcept {
+        return platform::native_clocks::thread_cpu_ns();
+    }
 };
 
 class manual_clock;
@@ -96,7 +100,8 @@ private:
 
 constexpr manual_clock manual_time::clock() const noexcept { return manual_clock(*this); }
 
-static_assert(clock_source<wall_clock> && clock_source<monotonic_clock> && clock_source<thread_cpu_clock> && clock_source<manual_clock>);
+static_assert(clock_source<wall_clock> && clock_source<monotonic_clock> && clock_source<thread_cpu_clock> &&
+              clock_source<manual_clock>);
 static_assert([] {
     manual_time time(5);
     const manual_clock clock = time.clock();
@@ -134,7 +139,7 @@ private:
     std::int64_t m_ns;
 };
 
-/// A calendar moment: nanoseconds since the Unix epoch. Python's pygim.utils.Timestamp.
+/// A calendar moment: nanoseconds since the Unix epoch. Python's pygim.Timestamp.
 using timestamp = basic_timestamp<wall_clock>;
 /// A moment to measure from: what a timer, a profiler or a scope log starts at.
 using monotonic_timestamp = basic_timestamp<monotonic_clock>;
@@ -144,4 +149,4 @@ static_assert(timestamp(3'500) - timestamp(1'000) == duration(2'500) && timestam
 static_assert(timestamp(1'000) < timestamp(3'500) && timestamp(7) == timestamp(7));
 static_assert(timestamp::never() < timestamp(std::numeric_limits<std::int64_t>::min() + 1));
 
-}  // namespace pygim
+}  // namespace pygim::primitives

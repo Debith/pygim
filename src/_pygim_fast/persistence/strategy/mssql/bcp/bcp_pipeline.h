@@ -1,7 +1,7 @@
 #pragma once
 // BCP Pipeline: single-connection and parallel bulk insert orchestrator.
 // Combines archive's bcp_strategy.cpp, bcp_row_loop.h, bcp_entry.h into a
-// single header-only file; its stages are timed by a SilentTimer (utils/quick_timer.h).
+// single header-only file; its stages are timed by a SilentTimer (core/primitives/quick_timer.h).
 
 #include "bcp_helpers.h"
 #include "bcp_pool.h"
@@ -19,7 +19,7 @@
 
 #include <arrow/table.h>
 #include <arrow/table_builder.h>
-#include "../../../../utils/quick_timer.h"
+#include "../../../../core/primitives/quick_timer.h"
 
 namespace pygim::strategy::mssql::bcp {
 
@@ -116,7 +116,7 @@ struct ParallelWorkerResult {
 };
 
 /// Build metrics for single-connection insert path.
-inline BcpMetrics make_single_metrics(const pygim::SilentTimer<BcpPhase>& timer,
+inline BcpMetrics make_single_metrics(const pygim::primitives::SilentTimer<BcpPhase>& timer,
                                       const BcpContext& ctx,
                                       const BcpProfiler& profiler) {
     const auto timing = timer.snapshot();
@@ -132,7 +132,7 @@ inline BcpMetrics make_single_metrics(const pygim::SilentTimer<BcpPhase>& timer,
 }
 
 /// Build metrics for a parallel worker path.
-inline BcpMetrics make_worker_metrics(const pygim::SilentTimer<BcpWorkerPhase>& timer,
+inline BcpMetrics make_worker_metrics(const pygim::primitives::SilentTimer<BcpWorkerPhase>& timer,
                                       const BcpContext& ctx,
                                       const BcpProfiler& profiler) {
     const auto timing = timer.snapshot();
@@ -148,7 +148,7 @@ inline BcpMetrics make_worker_metrics(const pygim::SilentTimer<BcpWorkerPhase>& 
 }
 
 /// Build final metrics for parallel orchestrator path.
-inline BcpMetrics make_parallel_metrics(const pygim::SilentTimer<BcpParallelPhase>& timer,
+inline BcpMetrics make_parallel_metrics(const pygim::primitives::SilentTimer<BcpParallelPhase>& timer,
                                         const std::vector<ParallelWorkerResult>& results) {
     const auto timing = timer.snapshot();
     BcpMetrics merged{};
@@ -382,7 +382,7 @@ inline void finalize_bcp(BcpContext& ctx) {
     int64_t batch_size,
     const std::string& table_hint)
 {
-    pygim::SilentTimer<BcpPhase> timer("bcp_insert");
+    pygim::primitives::SilentTimer<BcpPhase> timer("bcp_insert");
 
     if (!table_data || table_data->num_rows() == 0)
         throw std::runtime_error("Arrow BCP received zero rows from payload");
@@ -456,7 +456,7 @@ inline void finalize_bcp(BcpContext& ctx) {
     const std::string& table_hint,
     int num_workers)
 {
-    pygim::SilentTimer<BcpParallelPhase> timer("bcp_parallel");
+    pygim::primitives::SilentTimer<BcpParallelPhase> timer("bcp_parallel");
 
     if (!table_data || table_data->num_rows() == 0)
         throw std::runtime_error("Arrow BCP received zero rows from payload");
@@ -511,7 +511,7 @@ inline void finalize_bcp(BcpContext& ctx) {
             auto& my_slice = slices[static_cast<size_t>(w)];
 
             try {
-                pygim::SilentTimer<BcpWorkerPhase> wtimer("bcp_worker");
+                pygim::primitives::SilentTimer<BcpWorkerPhase> wtimer("bcp_worker");
                 BCP_PROF_DECL(prof);
 
                 {

@@ -15,7 +15,7 @@
 #include <cstdint>
 #include <cstdio>
 
-#include "../../../../utils/timestamp.h"
+#include "../../../../core/primitives/timestamp.h"
 
 namespace pygim::strategy::mssql::bcp {
 
@@ -102,13 +102,13 @@ struct BcpProfiler {
 /// RAII scope timer: accumulates elapsed time into a target double on destruction.
 struct ProfileScope {
     double& target;
-    monotonic_timestamp start;   // utils/timestamp.h: the monotonic clock, read in one place
+    primitives::monotonic_timestamp start;   // the monotonic clock (core/primitives/timestamp.h)
 
     explicit ProfileScope(double& t) noexcept
-        : target(t), start(monotonic_timestamp::now()) {}
+        : target(t), start(primitives::monotonic_timestamp::now()) {}
 
     ~ProfileScope() noexcept {
-        target += monotonic_timestamp::now().seconds_since(start);
+        target += primitives::monotonic_timestamp::now().seconds_since(start);
     }
 
     ProfileScope(const ProfileScope&) = delete;

@@ -72,7 +72,7 @@ struct MssqlLoadImpl {
                                     MssqlLoadCache& load_cache,
                                     int64_t block_size = kDefaultBlockSize,
                                     int packet_size = kDefaultPacketSize) {
-        SilentTimer<SingleLoadPhase> timer("load");
+        pygim::primitives::SilentTimer<SingleLoadPhase> timer("load");
         core::LoadMetrics metrics;
 
         PYGIM_LOG_FMT("[MssqlLoadImpl] execute(sql=\"%.*s\", workers=%d)\n",
@@ -115,7 +115,7 @@ struct MssqlLoadImpl {
             odbc::raise_if_error(ret, SQL_HANDLE_STMT, stmt, "SQLExecute");
 
             metrics.prepare_seconds =
-                pygim::seconds_of(timer.stop_lap(SingleLoadPhase::prepare));
+                pygim::primitives::seconds_of(timer.stop_lap(SingleLoadPhase::prepare));
         }
 
         // ── 3. Describe result columns → schema ────────────────
@@ -125,7 +125,7 @@ struct MssqlLoadImpl {
             schema_info = describe_columns(stmt);
             metrics.columns = static_cast<int64_t>(schema_info.col_info.size());
             metrics.describe_seconds =
-                pygim::seconds_of(timer.stop_lap(SingleLoadPhase::describe));
+                pygim::primitives::seconds_of(timer.stop_lap(SingleLoadPhase::describe));
         }
 
         // ── 4. Set up builder + fetch buffers + dispatch ──────

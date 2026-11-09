@@ -1,8 +1,9 @@
 #pragma once
-// platform/clocks.h — the calling thread's CPU time, as each system counts it. Infrastructure behind
-// the platform boundary (docs/design/platform_boundary.md, D77): utils/timestamp.h's thread_cpu_clock
-// reads it, and never asks which system it runs on. The wall and measuring clocks are std::chrono's,
-// the same everywhere, and read in timestamp.h itself.
+// platform/clocks.h — the calling thread's CPU time, as each system counts it. Infrastructure
+// behind the platform boundary (docs/design/platform_boundary.md, D77):
+// core/primitives/timestamp.h's thread_cpu_clock reads it, and never asks which system it runs on.
+// The wall and measuring clocks are std::chrono's, the same everywhere, and read in timestamp.h
+// itself.
 //
 // One class per system, each in a file of its own that asks nothing (D106): posix/clocks.h and
 // windows/clocks.h. This header states what every one of them answers and picks the running

@@ -1,6 +1,6 @@
 #pragma once
-// utils/parallel.h — run n indexed tasks on as many threads as they reward, handing the results to
-// one consumer in index order, with at most a window of them waiting.
+// core/primitives/parallel.h — run n indexed tasks on as many threads as they reward, handing the
+// results to one consumer in index order, with at most a window of them waiting.
 //
 //     ordered_pool pool(n, [&](std::size_t i) { return work(in[i]); }, elastic_width(cores, elastic_cap(cores)),
 //                       window_limits(1'024, 64 << 20));
@@ -55,11 +55,11 @@
 #include <variant>
 #include <vector>
 
-#include "../platform/process.h"
+#include "../../platform/process.h"
 #include "duration.h"
 #include "timestamp.h"
 
-namespace pygim::parallel {
+namespace pygim::primitives::parallel {
 
 // ── how wide ─────────────────────────────────────────────────────────────
 
@@ -1041,4 +1041,4 @@ private:
     std::vector<std::jthread> m_workers;
 };
 
-}  // namespace pygim::parallel
+}  // namespace pygim::primitives::parallel

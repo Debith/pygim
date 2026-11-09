@@ -1,6 +1,6 @@
 #pragma once
-// utils/quick_timer.h — one timer measures a block and the laps inside it. Its CLOCK and its
-// REPORT are given to it, never built in.
+// core/primitives/quick_timer.h — one timer measures a block and the laps inside it. Its CLOCK and
+// its REPORT are given to it, never built in.
 //
 //     QuickTimer timer("load csv");                     // the monotonic clock, the stderr report
 //     timer.start_lap("read");   ...              // a lap: starting one stops the one running
@@ -14,18 +14,18 @@
 //     hooks.add<lap_stopped>([](std::string_view timer, std::string_view lap, duration took) { ... });
 //     QuickTimerT<void, 8, manual_clock, timer_hooks> timer("job", time.clock(), hooks);
 //
-// The clock is a clock_source (utils/timestamp.h). The report hears four moments, each as plain values:
+// The clock is a clock_source (timestamp.h). The report hears four moments, each as plain values:
 //
 //     timer_started(timer)  lap_started(timer, lap)  lap_stopped(timer, lap, took)  timer_finished(snapshot)
 //
 // Reports that ship: silent (no_hooks: compiles away, keeping the timer a literal type), timer_hooks
-// (your callbacks, utils/hooks.h), stderr_report (text: started lines, stopped lines and the summary,
+// (your callbacks, core/primitives/hooks.h), stderr_report (text: started lines, stopped lines and the summary,
 // each on or off) and both<A, B>. A lap's `took` is all the time that lap has run.
 //
 // Two modes, by PhaseEnum. String mode (void): laps are named at run time — string_views the caller
 // keeps alive. Enum mode: laps are an enum's values, named by phase_name(PhaseEnum) found by ADL,
 // capacity PhaseEnum::COUNT. The timer allocates nothing; a snapshot allocates its list of laps.
-// Every time is one 64-bit count of nanoseconds (utils/duration.h); seconds are views of it.
+// Every time is one 64-bit count of nanoseconds (duration.h); seconds are views of it.
 //
 // CORE layer: pybind-free.
 
@@ -46,7 +46,7 @@
 #include "hooks.h"
 #include "timestamp.h"
 
-namespace pygim {
+namespace pygim::primitives {
 
 namespace detail {
 template <typename E> struct timer_capacity {
@@ -482,4 +482,4 @@ using QuickTimer = QuickTimerT<>;
 template <typename PhaseEnum = void, clock_source Clock = monotonic_clock>
 using SilentTimer = QuickTimerT<PhaseEnum, detail::timer_capacity<PhaseEnum>::value, Clock, silent>;
 
-} // namespace pygim
+}  // namespace pygim::primitives

@@ -1,5 +1,5 @@
 #pragma once
-// utils/duration.h — a length of time is one signed 64-bit count of nanoseconds
+// core/primitives/duration.h — a length of time is one signed 64-bit count of nanoseconds
 // (std::chrono::nanoseconds); every unit is a conversion into it.
 //
 //     time_unit::named("m")->of(1) + time_unit::named("s")->of(90)   -> 150'000'000'000ns
@@ -31,7 +31,7 @@
 #include <type_traits>
 #include <utility>
 
-namespace pygim {
+namespace pygim::primitives {
 
 /// A length of time: one signed 64-bit count of nanoseconds, std::chrono's own.
 using duration = std::chrono::nanoseconds;
@@ -248,4 +248,4 @@ static_assert([] {
 }());
 static_assert(spelt_in_units(duration(0)).size() == 0);
 
-}  // namespace pygim
+}  // namespace pygim::primitives

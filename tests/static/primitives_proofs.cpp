@@ -1,5 +1,6 @@
-// Compile-time proofs for utils/duration.h, utils/timestamp.h and utils/quick_timer.h, and the pools
-// of utils/parallel.h compiled on every system.
+// Compile-time proofs for core/primitives/duration.h, core/primitives/timestamp.h and
+// core/primitives/quick_timer.h, and the pools of core/primitives/parallel.h compiled on every
+// system.
 //
 // This TU is part of the utils extension's SOURCES (ext.utils.toml): it is compiled by every
 // build, so a violated law fails the build instead of a test run. A manual_clock makes time
@@ -11,27 +12,27 @@
 #include <cstdint>
 #include <string_view>
 
-#include "../../src/_pygim_fast/utils/duration.h"
-#include "../../src/_pygim_fast/utils/parallel.h"
-#include "../../src/_pygim_fast/utils/quick_timer.h"
-#include "../../src/_pygim_fast/utils/timestamp.h"
+#include "../../src/_pygim_fast/core/primitives/duration.h"
+#include "../../src/_pygim_fast/core/primitives/parallel.h"
+#include "../../src/_pygim_fast/core/primitives/quick_timer.h"
+#include "../../src/_pygim_fast/core/primitives/timestamp.h"
 
 namespace {
 
-using pygim::basic_timestamp;
-using pygim::manual_clock;
-using pygim::manual_time;
-using pygim::duration;
-using manual_timer = pygim::QuickTimerT<void, 8, manual_clock, pygim::silent>;
+using pygim::primitives::basic_timestamp;
+using pygim::primitives::manual_clock;
+using pygim::primitives::manual_time;
+using pygim::primitives::duration;
+using manual_timer = pygim::primitives::QuickTimerT<void, 8, manual_clock, pygim::primitives::silent>;
 using manual_moment = basic_timestamp<manual_clock>;
 
 // A moment read from a clock is that clock's count; the difference of two is the time between.
 consteval bool timestamps_read_their_clock() {
     manual_time time(1'000);
     const manual_moment a = manual_moment::now(time.clock());
-    time.advance(pygim::duration(2'500));
+    time.advance(pygim::primitives::duration(2'500));
     const manual_moment b = manual_moment::now(time.clock());
-    return a.nanoseconds() == 1'000 && b.nanoseconds() == 3'500 && b - a == pygim::duration(2'500) && a < b &&
+    return a.nanoseconds() == 1'000 && b.nanoseconds() == 3'500 && b - a == pygim::primitives::duration(2'500) && a < b &&
            b.seconds_since(a) == 2.5e-6;
 }
 static_assert(timestamps_read_their_clock());
@@ -53,13 +54,13 @@ static_assert(a_clock_sees_every_advance());
 consteval bool quick_timer_measures_with_its_clock() {
     manual_time time;
     manual_timer timer("job", time.clock());
-    time.advance(pygim::duration(1'000));
+    time.advance(pygim::primitives::duration(1'000));
     timer.start_lap("read");
-    time.advance(pygim::duration(2'000));
+    time.advance(pygim::primitives::duration(2'000));
     timer.start_lap("parse");   // stops "read"
-    time.advance(pygim::duration(4'000));
+    time.advance(pygim::primitives::duration(4'000));
     timer.stop_lap("parse");
-    time.advance(pygim::duration(8'000));
+    time.advance(pygim::primitives::duration(8'000));
     return timer.total() == duration(15'000) && timer.lap("read") == duration(2'000) &&
            timer.lap("parse") == duration(4'000) && timer.total_seconds() == 15e-6;
 }
@@ -70,10 +71,10 @@ consteval bool a_running_lap_reports_up_to_now() {
     manual_time time;
     manual_timer timer("job", time.clock());
     timer.start_lap("wait");
-    time.advance(pygim::duration(3'000));
+    time.advance(pygim::primitives::duration(3'000));
     const bool running = timer.lap("wait") == duration(3'000);
     timer.stop_lap("wait");
-    time.advance(pygim::duration(5'000));
+    time.advance(pygim::primitives::duration(5'000));
     return running && timer.stop_lap("wait") == duration(3'000);
 }
 static_assert(a_running_lap_reports_up_to_now());
@@ -83,7 +84,7 @@ consteval bool a_lap_started_at_zero_runs() {
     manual_time time(0);
     manual_timer timer("job", time.clock());
     timer.start_lap("first");
-    time.advance(pygim::duration(1'000));
+    time.advance(pygim::primitives::duration(1'000));
     return timer.stop_lap("first") == duration(1'000);
 }
 static_assert(a_lap_started_at_zero_runs());
@@ -91,8 +92,8 @@ static_assert(a_lap_started_at_zero_runs());
 // Units are std::chrono's; whole amounts add exactly; fractions round to the nearest nanosecond,
 // ties to even, from the float's exact value (the cases a float product gets wrong included).
 consteval bool units_convert_exactly() {
-    using pygim::duration;
-    using pygim::time_unit;
+    using pygim::primitives::duration;
+    using pygim::primitives::time_unit;
     const auto unit = [](std::string_view name) { return *time_unit::named(name); };
     return unit("y").length() == std::chrono::years(1) && unit("w").length() == std::chrono::weeks(1) &&
            unit("d").length() == std::chrono::days(1) && unit("us").length() == std::chrono::microseconds(1) &&
@@ -107,12 +108,12 @@ static_assert(units_convert_exactly());
 
 // A duration is spelt in whole units, longest first; the parts add back to it.
 consteval bool spelling_adds_back() {
-    using pygim::duration;
+    using pygim::primitives::duration;
     const duration year_and_7ns = std::chrono::years(1) + duration(7);
-    const pygim::spelt_in_units s(year_and_7ns);
-    const pygim::spelt_in_units negative(-std::chrono::seconds(150));
+    const pygim::primitives::spelt_in_units s(year_and_7ns);
+    const pygim::primitives::spelt_in_units negative(-std::chrono::seconds(150));
     duration sum(0);
-    for (const auto& part : s) sum += pygim::time_unit::named(part.unit_name())->of(part.amount());
+    for (const auto& part : s) sum += pygim::primitives::time_unit::named(part.unit_name())->of(part.amount());
     return s.size() == 2 && s.begin()[0].unit_name() == "y" && s.begin()[1].unit_name() == "ns" &&
            sum == year_and_7ns && negative.size() == 2 && negative.begin()[0].amount() == -2 &&
            negative.begin()[1].amount() == -30;
@@ -158,14 +159,14 @@ public:
 private:
     using kind = moment_log::kind;
     moment_log* m_log;
-    constexpr void note(pygim::timer_started, std::string_view) const { m_log->note(kind::timer_started, {}, duration(0)); }
-    constexpr void note(pygim::lap_started, std::string_view, std::string_view lap) const { m_log->note(kind::lap_started, lap, duration(0)); }
-    constexpr void note(pygim::lap_stopped, std::string_view, std::string_view lap, duration took) const { m_log->note(kind::lap_stopped, lap, took); }
-    constexpr void note(pygim::timer_finished, const pygim::timer_snapshot& s) const { m_log->note(kind::timer_finished, {}, s.total()); }
+    constexpr void note(pygim::primitives::timer_started, std::string_view) const { m_log->note(kind::timer_started, {}, duration(0)); }
+    constexpr void note(pygim::primitives::lap_started, std::string_view, std::string_view lap) const { m_log->note(kind::lap_started, lap, duration(0)); }
+    constexpr void note(pygim::primitives::lap_stopped, std::string_view, std::string_view lap, duration took) const { m_log->note(kind::lap_stopped, lap, took); }
+    constexpr void note(pygim::primitives::timer_finished, const pygim::primitives::timer_snapshot& s) const { m_log->note(kind::timer_finished, {}, s.total()); }
 };
-static_assert(pygim::timer_report<logging_report>);
+static_assert(pygim::primitives::timer_report<logging_report>);
 
-using logged_timer = pygim::QuickTimerT<void, 8, manual_clock, logging_report>;
+using logged_timer = pygim::primitives::QuickTimerT<void, 8, manual_clock, logging_report>;
 
 // The report hears the timer start, each lap start and stop (the next lap's start stops the one
 // running; the finish stops the last), and the finish with the total — the destructor finishing it.
@@ -225,11 +226,11 @@ consteval bool a_moved_timer_reports_once() {
 static_assert(a_moved_timer_reports_once());
 
 // The OS clocks and the silent report are empty: neither adds a byte to the timer.
-static_assert(sizeof(pygim::QuickTimerT<>) == sizeof(pygim::QuickTimerT<void, 8, pygim::wall_clock>));
-static_assert(sizeof(pygim::SilentTimer<>) < sizeof(pygim::QuickTimer));
+static_assert(sizeof(pygim::primitives::QuickTimerT<>) == sizeof(pygim::primitives::QuickTimerT<void, 8, pygim::primitives::wall_clock>));
+static_assert(sizeof(pygim::primitives::SilentTimer<>) < sizeof(pygim::primitives::QuickTimer));
 
 // The thread's CPU clock is a clock like the others: the pools take it as their CpuClock.
-static_assert(pygim::clock_source<pygim::thread_cpu_clock>);
+static_assert(pygim::primitives::clock_source<pygim::primitives::thread_cpu_clock>);
 
 // What the pools are instantiated with below: a task, a task that adds tasks, and for_each's body.
 struct square {
@@ -250,6 +251,6 @@ struct touch_each {
 // Every member of the pools and for_each, compiled on each system a build runs on: a call that system
 // does not have fails its build here, before anything calls the pools. What they do under load is
 // tests/static/threads_stress.cpp's, run under the sanitizers by CI's threads-stress job.
-template class pygim::parallel::ordered_pool<square>;
-template class pygim::parallel::task_pool<int, count_down>;
-template void pygim::parallel::for_each<const touch_each&>(std::size_t, std::size_t, const touch_each&);
+template class pygim::primitives::parallel::ordered_pool<square>;
+template class pygim::primitives::parallel::task_pool<int, count_down>;
+template void pygim::primitives::parallel::for_each<const touch_each&>(std::size_t, std::size_t, const touch_each&);

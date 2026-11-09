@@ -1,11 +1,11 @@
 #!/usr/bin/env python
 """Build tests/static/threads_stress.cpp under each sanitizer and run it: the pool every thread of a
-process shares (utils/parallel.h), under ThreadSanitizer, and under AddressSanitizer with
+process shares (core/primitives/parallel.h), under ThreadSanitizer, and under AddressSanitizer with
 UndefinedBehaviorSanitizer.
 
 pytest cannot see these defects: a race, a helper left inside a finished job or a lock a fork left
 held shows only under load, in a build instrumented for it. CI's threads-stress job runs this on
-every pull request; run it yourself after changing utils/parallel.h or what it includes.
+every pull request; run it yourself after changing core/primitives/parallel.h or what it includes.
 
 It needs a C++ compiler and nothing of pygim's build: the program is the headers it includes, so the
 job runs without installing pygim.

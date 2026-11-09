@@ -1,13 +1,14 @@
 [extension]
 module = "utils"
-# tests/static/platform_proofs.cpp proves the logic the platform boundary puts above the system's calls —
-# the loaders and Linux's memory probes — over fake calls on every system (D138); wired into the sources so every build
-# proves it (it contributes no runtime code). utils carries it because utils/memory.h is the
-# platform's first caller and utils builds everywhere with no dependency. tests/static/utils_proofs.cpp
-# proves utils/duration.h, utils/timestamp.h and utils/quick_timer.h the same way, and instantiates
-# utils/parallel.h's pools so every system's build compiles them (code the module never calls).
+# tests/static/platform_proofs.cpp proves the logic the platform boundary puts above the system's
+# calls — the loaders and Linux's memory probes — over fake calls on every system (D138); wired into
+# the sources so every build proves it (it contributes no runtime code). utils carries it because
+# utils/memory.h is the platform's first caller and utils builds everywhere with no dependency.
+# tests/static/primitives_proofs.cpp proves core/primitives/duration.h, core/primitives/timestamp.h
+# and core/primitives/quick_timer.h the same way, and instantiates core/primitives/parallel.h's
+# pools so every system's build compiles them (code the module never calls).
 sources = [
   "bindings.cpp",
   "../../../tests/static/platform_proofs.cpp",
-  "../../../tests/static/utils_proofs.cpp",
+  "../../../tests/static/primitives_proofs.cpp",
 ]

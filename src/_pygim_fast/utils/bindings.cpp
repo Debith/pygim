@@ -10,8 +10,8 @@
 #include "core_utils.h"
 #include "adapter_utils.h"
 #include "memory.h"
-#include "duration.h"
-#include "timestamp.h"
+#include "../core/primitives/duration.h"
+#include "../core/primitives/timestamp.h"
 #include "quick_timer_adapter.h"
 #include "../mapping/dynamic_merge_map.h"
 
@@ -231,10 +231,12 @@ private:
       std::optional<MergeStrategy> m_explicit_default{};
 };
 
+namespace primitives = pygim::primitives;   // time and timing (core/primitives/), given a Python face here
+
 // One keyword amount of one unit, as Python writes it: an integer exactly — an int, or anything
 // with __index__ (numpy's integers); any other real number (float, Fraction, Decimal) through its
 // float, rounded exactly by the core. A bool is no amount of time.
-pygim::duration amount_of(const pygim::time_unit& unit, py::handle amount) {
+primitives::duration amount_of(const primitives::time_unit& unit, py::handle amount) {
     if (PyBool_Check(amount.ptr())) throw py::type_error(std::string(unit.name()) + " must be a real number, not bool");
     if (PyLong_Check(amount.ptr()) || PyIndex_Check(amount.ptr())) {
         const py::object integer = py::reinterpret_steal<py::object>(PyNumber_Index(amount.ptr()));
@@ -254,29 +256,29 @@ pygim::duration amount_of(const pygim::time_unit& unit, py::handle amount) {
 }
 
 // The duration that **units name: each amount converted, then added exactly.
-pygim::duration duration_of_units(const py::kwargs& units) {
-    pygim::duration total(0);
+primitives::duration duration_of_units(const py::kwargs& units) {
+    primitives::duration total(0);
     for (const auto& [name, amount] : units) {
         const std::string unit_name = py::str(name);
-        const auto unit = pygim::time_unit::named(unit_name);
+        const auto unit = primitives::time_unit::named(unit_name);
         if (!unit) {
             std::string known;
-            for (std::size_t i = 0; i < pygim::time_units.size(); ++i) {
-                known += i == 0 ? "" : i + 1 == pygim::time_units.size() ? " and " : ", ";
-                known += pygim::time_units[i].name();
+            for (std::size_t i = 0; i < primitives::time_units.size(); ++i) {
+                known += i == 0 ? "" : i + 1 == primitives::time_units.size() ? " and " : ", ";
+                known += primitives::time_units[i].name();
             }
             throw py::type_error("unknown unit '" + unit_name + "'; the units are " + known);
         }
-        total = pygim::sum_exactly(total, amount_of(*unit, amount));
+        total = primitives::sum_exactly(total, amount_of(*unit, amount));
     }
     return total;
 }
 
 // Duration(m=2, s=30): the units it is spelt in, longest first, which eval() reads back.
-std::string duration_repr(pygim::duration d) {
+std::string duration_repr(primitives::duration d) {
     std::string out = "Duration(";
     std::string_view separator;
-    for (const pygim::unit_amount& part : pygim::spelt_in_units(d)) {
+    for (const primitives::unit_amount& part : primitives::spelt_in_units(d)) {
         out += std::string(separator) + std::string(part.unit_name()) + "=" + std::to_string(part.amount());
         separator = ", ";
     }
@@ -313,33 +315,35 @@ PYBIND11_MODULE(utils, m) {
           "The process's peak resident set size in bytes (its high-water mark).");
     m.def("peak_rss_mb", &pygim::memory::peak_resident_mb, "peak_rss_bytes() in mebibytes.");
 
-    // A length of time (utils/duration.h): one signed 64-bit count of nanoseconds; units are conversions.
-    py::class_<pygim::duration>(m, "Duration",
+    // A length of time (core/primitives/duration.h): one signed 64-bit count of nanoseconds; units
+    // are conversions.
+    py::class_<primitives::duration>(m, "Duration",
                                 "A length of time: one signed 64-bit count of nanoseconds. Duration(m=1, s=30).\n"
                                 "Units: y (a year: 365.2425 days, as C++ counts them), w, d, h, m, s, ms, us, ns.\n"
                                 "They add up; an amount may be negative or a fraction, rounded exactly to\n"
                                 "the nearest nanosecond (ties to even). Past 64 bits (about 292 years) is an OverflowError.")
         .def(py::init([](const py::kwargs& units) { return duration_of_units(units); }))
-        .def_property_readonly("nanoseconds", [](pygim::duration d) { return d.count(); }, "The number itself.")
-        .def_property_readonly("seconds", [](pygim::duration d) { return static_cast<double>(d.count()) / 1e9; },
+        .def_property_readonly("nanoseconds", [](primitives::duration d) { return d.count(); }, "The number itself.")
+        .def_property_readonly("seconds", [](primitives::duration d) { return static_cast<double>(d.count()) / 1e9; },
                                "The same in seconds, as a float: a view, not a second store.")
-        .def("__int__", [](pygim::duration d) { return d.count(); })
+        .def("__int__", [](primitives::duration d) { return d.count(); })
         .def(py::self == py::self)
         .def(py::self != py::self)
         .def(py::self < py::self)
         .def(py::self <= py::self)
         .def(py::self > py::self)
         .def(py::self >= py::self)
-        .def("__hash__", [](pygim::duration d) { return d.count(); })
+        .def("__hash__", [](primitives::duration d) { return d.count(); })
         .def("__repr__", &duration_repr);
 
-    // Time that moves only when told (utils/timestamp.h): the clock for testing timing code exactly.
-    py::class_<pygim::manual_time>(m, "ManualTime",
+    // Time that moves only when told (core/primitives/timestamp.h): the clock for testing timing
+    // code exactly.
+    py::class_<primitives::manual_time>(m, "ManualTime",
                                    "Time that moves only when told: a clock for testing timing code exactly.")
         .def(py::init<>())
-        .def("now", &pygim::manual_time::now_ns, "Nanoseconds since this time started at 0.")
+        .def("now", &primitives::manual_time::now_ns, "Nanoseconds since this time started at 0.")
         .def("advance",
-             [](pygim::manual_time& time, std::optional<pygim::duration> by, const py::kwargs& units) {
+             [](primitives::manual_time& time, std::optional<primitives::duration> by, const py::kwargs& units) {
                  if (by && units.size() != 0) throw py::type_error("advance() takes a Duration or units, not both");
                  time.advance(by ? *by : duration_of_units(units));
              },
@@ -347,13 +351,14 @@ PYBIND11_MODULE(utils, m) {
              "Moves time by a Duration or by units: advance(m=1, s=30). Past 64 bits it raises\n"
              "OverflowError and time does not move.");
 
-    // A calendar moment (utils/timestamp.h): nanoseconds since the Unix epoch, from the wall clock.
-    py::class_<pygim::timestamp>(m, "Timestamp", "A moment: nanoseconds since the Unix epoch (1970-01-01T00:00:00Z).")
+    // A calendar moment (core/primitives/timestamp.h): nanoseconds since the Unix epoch, from the
+    // wall clock.
+    py::class_<primitives::timestamp>(m, "Timestamp", "A moment: nanoseconds since the Unix epoch (1970-01-01T00:00:00Z).")
         .def(py::init<std::int64_t>(), py::arg("nanoseconds"), "The moment `nanoseconds` after the epoch: Timestamp(12333).")
-        .def_static("now", [] { return pygim::timestamp::now(); }, "The wall clock's current moment.")
-        .def_property_readonly("nanoseconds", &pygim::timestamp::nanoseconds, "Nanoseconds since the epoch.")
-        .def("__int__", &pygim::timestamp::nanoseconds)
-        .def("__sub__", [](const pygim::timestamp& later, const pygim::timestamp& earlier) { return later - earlier; },
+        .def_static("now", [] { return primitives::timestamp::now(); }, "The wall clock's current moment.")
+        .def_property_readonly("nanoseconds", &primitives::timestamp::nanoseconds, "Nanoseconds since the epoch.")
+        .def("__int__", &primitives::timestamp::nanoseconds)
+        .def("__sub__", [](const primitives::timestamp& later, const primitives::timestamp& earlier) { return later - earlier; },
              py::is_operator(), "The Duration from the other moment to this one.")
         .def(py::self == py::self)
         .def(py::self != py::self)
@@ -361,11 +366,19 @@ PYBIND11_MODULE(utils, m) {
         .def(py::self <= py::self)
         .def(py::self > py::self)
         .def(py::self >= py::self)
-        .def("__hash__", &pygim::timestamp::nanoseconds)
-        .def("__repr__", [](const pygim::timestamp& t) { return "Timestamp(" + std::to_string(t.nanoseconds()) + ")"; });
+        .def("__hash__", &primitives::timestamp::nanoseconds)
+        .def("__repr__", [](const primitives::timestamp& t) { return "Timestamp(" + std::to_string(t.nanoseconds()) + ")"; });
 
-    // One timer for a block and its laps (utils/quick_timer.h), its clock and its report given.
+    // One timer for a block and its laps (core/primitives/quick_timer.h), its clock and its report
+    // given.
     pygim::adapter::bind_quick_timer(m);
+
+    // Time and timing are primitives (core/primitives/), not utilities: this module makes their
+    // Python types, and pygim exports them, `from pygim import Duration`. Each names pygim as its
+    // home, so repr(type), help() and a traceback show pygim.Duration.
+    for (const char* name : {"Duration", "ManualTime", "Timestamp", "QuickTimer", "Report", "TimerLap", "TimerSnapshot"}) {
+        m.attr(name).attr("__module__") = "pygim";
+    }
 
     m.def("calculate_rate",
           &calculate_rate,
