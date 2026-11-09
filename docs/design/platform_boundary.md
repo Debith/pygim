@@ -24,14 +24,19 @@ that picks the running system's class, and a system's own file (`platform/linux/
 (`test_inside_the_boundary_a_header_asks_once_and_a_systems_own_file_never`).
 
 What is built so far: the headers the code on `main` asks of the system — `native.h` (the family,
-decided once), `windows_headers.h`, `files.h` (a path's text), `memory.h` (the resident-memory
-probes, a class per system under `linux/`, `macos/` and `windows/`), `libraries.h` (loading the
-ODBC driver, a class each under `posix/` and `windows/`), `process.h` (the pools' thread names,
-signal mask and fork hooks, POSIX's calls under `posix/` with Linux's and macOS's thread names over
-them, and Windows') and `clocks.h` (a thread's CPU time, a class each under `posix/` and
-`windows/`) — and that code moved behind them. The other headers this document names (the listing,
-the reads, the signals' calls, the caches) arrive with the code that calls them, each behind the
-same boundary and in the same shape.
+decided once), `windows_headers.h`, `files.h` (a path's text), `memory.h` (the resident-memory probes,
+a class per system under `linux/`, `macos/` and `windows/`) and `libraries.h` (loading the ODBC driver,
+a class each under `posix/` and `windows/`) — and that code moved behind them. Three headers came ahead
+of their callers, so that CI, which runs for pull requests into `main`, compiles each system's calls:
+`locks.h` (a file locked across processes, the calls each under `posix/` and `windows/`), whose first
+caller is a file store's commit lock on a branch not yet in `main`, which has no pull request; and
+`process.h` (the pools' thread names, signal mask and fork hooks, POSIX's calls under `posix/` with
+Linux's and macOS's thread names over them, and Windows') and `clocks.h` (a thread's CPU time, a class
+each under `posix/` and `windows/`), whose caller, utils/parallel.h's pools, came with them ahead of
+the parallel reads, the parser and similarity that call it, and is driven under the sanitizers by CI's
+threads-stress job meanwhile. The other headers this document names (the listing, the reads, the
+signals' calls, the caches) arrive with the code that calls them, each behind the same boundary and in
+the same shape.
 
 ## Scenario
 
@@ -103,6 +108,9 @@ platform/
     linux/memory.h        linux_proc_calls: a pread of /proc/self/statm, the page size, getrusage; linux_memory over them
     macos/memory.h        macos_memory: the Mach task, getrusage in bytes (no logic above the calls, no policy)
     windows/memory.h      windows_memory: GetProcessMemoryInfo (no logic above the call, no policy)
+    locks.h               file_lock_calls; the choice of native_lock_calls (no logic above the calls, no policy)
+    posix/locks.h         posix_lock_calls: open, flock, close
+    windows/locks.h       win32_lock_calls: _wsopen_s, LockFileEx and UnlockFileEx through the descriptor's handle, _close
     posix/process.h       posix_process: pthread_sigmask (posix_signals_blocked), pthread_atfork
     linux/process.h       linux_process: posix_process, and pthread_setname_np(pthread_self(), name)
     macos/process.h       macos_process: posix_process, and pthread_setname_np(name)
@@ -253,11 +261,13 @@ Each step a refactor under the tests as they are (#36), its own commit, the ratc
 | platform/macos/, windows/memory.h | `macos_memory`, `windows_memory`: `resident_bytes`, `peak_resident_bytes`, the system's reading as it is | calls |
 | platform/libraries.h | `library_loader`; `basic_posix_loader`, `basic_windows_loader`, the logic over each system's calls (D138); `native_loader`; `basic_library` and `library` over it: `first_of`, `last_match`, `function<F>`, `address_of` | logic, and the choice |
 | platform/posix/, windows/libraries.h | `posix_dl_calls`, `win32_library_calls`: one wrapper a call; `posix_loader`, `windows_loader` over them | calls |
+| tests/static/platform_proofs.cpp | every logic class over constexpr fake calls, compiled by every build of `pygim.utils`: the first name that opens, a missing library and symbol, the newest match and no match, Windows' widened name and missing glob, statm's resident count, the kilobyte peak, a peak below the present, a failed getrusage, procfs absent; and the running system's file-lock calls, compiled against their concept | the proofs |
+| platform/locks.h | `file_lock_calls`: open, lock, unlock and close a file locked across processes, over an `int` descriptor on every system; `native_lock_calls`, the running system's. No caller on `main` yet | the choice |
+| platform/posix/, windows/locks.h | `posix_lock_calls` (open, flock retried on EINTR, close), `win32_lock_calls` (_wsopen_s, LockFileEx and UnlockFileEx through the descriptor's handle, _close) | calls |
 | platform/process.h | `process_calls`; `native_process`, the running system's; `name_this_thread`, `signals_blocked` and `at_fork` over it, what utils/parallel.h's pools call | the choice |
 | platform/posix/, linux/, macos/, windows/process.h | `posix_process` (the signal mask, `pthread_atfork`); `linux_process` and `macos_process` over it, each naming a thread its system's way; `windows_process`, which does nothing | calls |
 | platform/clocks.h | `thread_clocks`; `native_clocks`, the running system's, which utils/timestamp.h's `thread_cpu_clock` reads | the choice |
 | platform/posix/, windows/clocks.h | `posix_clocks` (`CLOCK_THREAD_CPUTIME_ID`); `windows_clocks` (the measuring clock, standing in) | calls |
-| tests/static/platform_proofs.cpp | every logic class over constexpr fake calls, compiled by every build of `pygim.utils`: the first name that opens, a missing library and symbol, the newest match and no match, Windows' widened name and missing glob, statm's resident count, the kilobyte peak, a peak below the present, a failed getrusage, procfs absent | the proofs |
 | platform/windows_headers.h | `<windows.h>` lean and without `min` and `max`, for every header that calls it | — |
 | pathlike/core.h | `posix_strategy`, `windows_strategy`: separators, case, parsing; `native_strategy` | rules |
 | persistence/.../bcp_api.h | `driver_files<F>`: the ODBC driver's library as each system names it | rules |
