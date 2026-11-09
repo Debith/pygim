@@ -20,31 +20,30 @@ from pygim import utils
 # ----------------------------------------------------------------------------
 # 1. A duration is spelt in units and held as nanoseconds
 # ----------------------------------------------------------------------------
-#                     ┌─ **units: years, weeks, days, hours, mins, secs, msecs,
-#                     │  usecs, nsecs; they add up
+#                     ┌─ **units: y, w, d, h, m, s, ms, us, ns; they add up
 #                     ▼
-wait = utils.Duration(mins=1, secs=30)
+wait = utils.Duration(m=1, s=30)
 assert wait.nanoseconds == 90_000_000_000
 assert wait.seconds == 90.0                      # a view as a float, not a store
-assert repr(wait) == "Duration(mins=1, secs=30)"
+assert repr(wait) == "Duration(m=1, s=30)"
 
 # The repr spells it in the longest units that fit, so another spelling of the
 # same length reads back the same.
-assert utils.Duration(secs=150) == utils.Duration(mins=2, secs=30)
-assert repr(utils.Duration(secs=150)) == "Duration(mins=2, secs=30)"
+assert utils.Duration(s=150) == utils.Duration(m=2, s=30)
+assert repr(utils.Duration(s=150)) == "Duration(m=2, s=30)"
 
 # ----------------------------------------------------------------------------
 # 2. A fraction rounds exactly, to the nearest nanosecond, ties to even
 # ----------------------------------------------------------------------------
-assert utils.Duration(nsecs=2.5).nanoseconds == 2
-assert utils.Duration(nsecs=3.5).nanoseconds == 4
+assert utils.Duration(ns=2.5).nanoseconds == 2
+assert utils.Duration(ns=3.5).nanoseconds == 4
 # A year is 365.2425 days, as C++ counts it: 55 bits of nanoseconds, where a
 # float product would be one nanosecond off.
-assert utils.Duration(years=0.286).nanoseconds == 9_025_288_271_999_999
+assert utils.Duration(y=0.286).nanoseconds == 9_025_288_271_999_999
 
 # Past 64 bits (about 292 years) is an error, never a wrapped value.
 try:
-    utils.Duration(years=300)
+    utils.Duration(y=300)
 except OverflowError as e:
     assert "64 bits" in str(e)
 else:
@@ -64,7 +63,7 @@ else:
 #                       ▼
 start = utils.Timestamp(1_000)
 end = utils.Timestamp(3_500)
-assert end - start == utils.Duration(nsecs=2_500)   # two moments: the time between
+assert end - start == utils.Duration(ns=2_500)      # two moments: the time between
 assert start < end
 
 now = utils.Timestamp.now()                         # the wall clock
@@ -79,11 +78,11 @@ clock = utils.ManualTime()
 assert clock.now() == 0
 #             ┌─ units, as Duration takes them
 #             ▼
-clock.advance(mins=1, secs=30)
+clock.advance(m=1, s=30)
 assert clock.now() == 90_000_000_000
 #             ┌─ by: a Duration instead of units
 #             ▼
-clock.advance(utils.Duration(secs=-30))
+clock.advance(utils.Duration(s=-30))
 assert clock.now() == 60_000_000_000
 
 print("durations and timestamps example OK:", wait)

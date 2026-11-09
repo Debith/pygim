@@ -21,7 +21,7 @@ def test_now_reads_the_wall_clock():
 
 
 def test_later_minus_earlier_is_a_duration():
-    assert utils.Timestamp(3_500) - utils.Timestamp(1_000) == utils.Duration(nsecs=2_500)
+    assert utils.Timestamp(3_500) - utils.Timestamp(1_000) == utils.Duration(ns=2_500)
 
 
 def test_timestamps_order_by_their_moment():

@@ -92,14 +92,14 @@ consteval bool units_convert_exactly() {
     using pygim::duration;
     using pygim::time_unit;
     const auto unit = [](std::string_view name) { return *time_unit::named(name); };
-    return unit("years").length() == std::chrono::years(1) && unit("weeks").length() == std::chrono::weeks(1) &&
-           unit("days").length() == std::chrono::days(1) && unit("usecs").length() == std::chrono::microseconds(1) &&
-           unit("mins").of(1) + unit("secs").of(90) == unit("mins").of(2) + unit("secs").of(30) &&
-           unit("secs").of(1.5) == duration(1'500'000'000) && unit("secs").of(-5) == duration(-5'000'000'000) &&
-           unit("nsecs").of(0.5) == duration(0) && unit("nsecs").of(1.5) == duration(2) &&
-           unit("nsecs").of(2.5) == duration(2) && unit("nsecs").of(-0.5) == duration(0) &&
-           unit("years").of(0.286) == duration(9'025'288'271'999'999) &&   // a float product gives ...272000000
-           unit("secs").of(5e-324) == duration(0);                           // the smallest subnormal
+    return unit("y").length() == std::chrono::years(1) && unit("w").length() == std::chrono::weeks(1) &&
+           unit("d").length() == std::chrono::days(1) && unit("us").length() == std::chrono::microseconds(1) &&
+           unit("m").of(1) + unit("s").of(90) == unit("m").of(2) + unit("s").of(30) &&
+           unit("s").of(1.5) == duration(1'500'000'000) && unit("s").of(-5) == duration(-5'000'000'000) &&
+           unit("ns").of(0.5) == duration(0) && unit("ns").of(1.5) == duration(2) &&
+           unit("ns").of(2.5) == duration(2) && unit("ns").of(-0.5) == duration(0) &&
+           unit("y").of(0.286) == duration(9'025'288'271'999'999) &&   // a float product gives ...272000000
+           unit("s").of(5e-324) == duration(0);                           // the smallest subnormal
 }
 static_assert(units_convert_exactly());
 
@@ -111,7 +111,7 @@ consteval bool spelling_adds_back() {
     const pygim::spelt_in_units negative(-std::chrono::seconds(150));
     duration sum(0);
     for (const auto& part : s) sum += pygim::time_unit::named(part.unit_name())->of(part.amount());
-    return s.size() == 2 && s.begin()[0].unit_name() == "years" && s.begin()[1].unit_name() == "nsecs" &&
+    return s.size() == 2 && s.begin()[0].unit_name() == "y" && s.begin()[1].unit_name() == "ns" &&
            sum == year_and_7ns && negative.size() == 2 && negative.begin()[0].amount() == -2 &&
            negative.begin()[1].amount() == -30;
 }

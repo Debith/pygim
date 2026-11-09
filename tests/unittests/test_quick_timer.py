@@ -11,7 +11,7 @@ from pygim import utils
 
 
 def ms(n):
-    return utils.Duration(msecs=n)
+    return utils.Duration(ms=n)
 
 
 @pytest.fixture
@@ -33,25 +33,25 @@ def recorded():
 def test_laps_and_total_are_the_clocks_steps(time):
     with utils.QuickTimer("job", clock=time, report=utils.Report.silent()) as timer:
         timer.start_lap("read")
-        time.advance(msecs=2)
+        time.advance(ms=2)
         timer.start_lap("parse")
-        time.advance(msecs=4)
+        time.advance(ms=4)
     assert timer.snapshot().laps == {"read": ms(2), "parse": ms(4)}
 
 
 def test_the_total_runs_from_the_timers_start(time):
     timer = utils.QuickTimer("job", clock=time, report=utils.Report.silent())
-    time.advance(msecs=1)
+    time.advance(ms=1)
     with timer:
         timer.start_lap("read")
-        time.advance(msecs=2)
+        time.advance(ms=2)
     assert timer.snapshot().total == ms(3)
 
 
 def test_a_finished_timer_no_longer_moves(time):
     with utils.QuickTimer("job", clock=time, report=utils.Report.silent()) as timer:
-        time.advance(msecs=2)
-    time.advance(secs=5)
+        time.advance(ms=2)
+    time.advance(s=5)
     assert timer.snapshot().total == ms(2)
 
 
@@ -59,9 +59,9 @@ def test_the_report_hears_every_moment_in_order(time):
     report, events = recorded()
     with utils.QuickTimer("job", clock=time, report=report) as timer:
         timer.start_lap("read")
-        time.advance(msecs=2)
+        time.advance(ms=2)
         timer.start_lap("parse")      # stops "read"
-        time.advance(msecs=4)
+        time.advance(ms=4)
     assert events == [
         ("timer_started", "job"),
         ("started", "job", "read"),
@@ -135,7 +135,7 @@ def test_a_lap_name_made_on_the_fly_stays_valid(time):
     with utils.QuickTimer("job", clock=time, report=utils.Report.silent()) as timer:
         for i in range(3):
             timer.start_lap(f"step {i}")
-            time.advance(msecs=1)
+            time.advance(ms=1)
     assert list(timer.snapshot().laps) == ["step 0", "step 1", "step 2"]
 
 
@@ -156,10 +156,10 @@ def test_a_lap_past_the_capacity_leaves_the_timer_as_it_was(time):
         with pytest.raises(IndexError):
             timer.start_lap("lap 8")
     timer.start_lap("lap 0")
-    time.advance(msecs=1)
+    time.advance(ms=1)
     timer.finish()
     assert list(timer.snapshot().laps) == [f"lap {i}" for i in range(8)]
-    assert timer.snapshot().laps["lap 0"] == utils.Duration(msecs=1)
+    assert timer.snapshot().laps["lap 0"] == utils.Duration(ms=1)
 
 
 def test_the_text_report_writes_through_sys_stderr(time):
@@ -168,7 +168,7 @@ def test_the_text_report_writes_through_sys_stderr(time):
     with contextlib.redirect_stderr(io.StringIO()) as err:
         with utils.QuickTimer("job", clock=time) as timer:
             timer.start_lap("read")
-            time.advance(msecs=2)
+            time.advance(ms=2)
     assert err.getvalue().splitlines() == ["job: started", "job [read]: started", "job [read]: 0.002000s",
                                            "job total: 0.002000s", "  - read: 0.002000s"]
 
@@ -182,7 +182,7 @@ def test_silent_prints_nothing(time, capfd):
 def test_the_default_report_prints_as_the_timer_always_has(time, capfd):
     with utils.QuickTimer("job", clock=time) as timer:
         timer.start_lap("read")
-        time.advance(msecs=2)
+        time.advance(ms=2)
     assert capfd.readouterr().err.splitlines() == [
         "job: started",
         "job [read]: started",
@@ -195,7 +195,7 @@ def test_the_default_report_prints_as_the_timer_always_has(time, capfd):
 def test_the_stderr_report_can_leave_out_the_started_and_stopped_lines(time, capfd):
     with utils.QuickTimer("job", clock=time, report=utils.Report.stderr(started=False, stopped=False)) as timer:
         timer.start_lap("read")
-        time.advance(msecs=2)
+        time.advance(ms=2)
     assert capfd.readouterr().err.splitlines() == ["job total: 0.002000s", "  - read: 0.002000s"]
 
 
@@ -217,7 +217,7 @@ def test_the_monotonic_clock_is_the_default():
         start = time_module.perf_counter()
         while time_module.perf_counter() - start < 0.002:   # not sleep: Windows may wake a 2 ms sleep early
             pass
-    assert timer.snapshot().total >= utils.Duration(msecs=2)
+    assert timer.snapshot().total >= utils.Duration(ms=2)
 
 
 def test_stopping_no_lap_or_an_unknown_one_is_refused(time):
@@ -270,7 +270,7 @@ def test_the_lap_calls_have_one_name_each():
 
 def test_silent_is_a_timer_that_tells_nobody(time, capfd):
     with utils.QuickTimer.silent("job", clock=time) as timer:
-        time.advance(msecs=3)
+        time.advance(ms=3)
     assert capfd.readouterr().err == "" and timer.snapshot().name == "job"
     assert utils.QuickTimer.silent().snapshot().name == "QuickTimer"
 
@@ -278,22 +278,22 @@ def test_silent_is_a_timer_that_tells_nobody(time, capfd):
 def test_total_and_laps_are_read_off_the_timer(time):
     with utils.QuickTimer.silent("job", clock=time) as timer:
         timer.start_lap("read")
-        time.advance(msecs=2)
+        time.advance(ms=2)
         assert timer.total == ms(2)   # running: up to now
-        time.advance(msecs=1)
-    time.advance(secs=5)
+        time.advance(ms=1)
+    time.advance(s=5)
     assert (timer.total, timer.laps) == (ms(3), {"read": ms(3)}) == (timer.snapshot().total, timer.snapshot().laps)
 
 
 def test_a_lap_block_starts_its_lap_and_stops_it_as_it_ends(time):
     with utils.QuickTimer.silent("job", clock=time) as timer:
         with timer.lap("read") as read:
-            time.advance(msecs=2)
-        time.advance(msecs=7)          # between the blocks: no lap runs
+            time.advance(ms=2)
+        time.advance(ms=7)          # between the blocks: no lap runs
         with timer.lap("parse"):
-            time.advance(msecs=4)
+            time.advance(ms=4)
         with timer.lap("read"):        # again: the lap's time adds up
-            time.advance(msecs=1)
+            time.advance(ms=1)
     assert timer.laps == {"read": ms(3), "parse": ms(4)} and read.took == ms(3) and read.name == "read"
     assert timer.total == ms(14)
 
@@ -302,9 +302,9 @@ def test_a_lap_block_that_raises_still_stops_its_lap(time):
     timer = utils.QuickTimer.silent("job", clock=time)
     with pytest.raises(KeyError):
         with timer.lap("read"):
-            time.advance(msecs=2)
+            time.advance(ms=2)
             raise KeyError("x")
-    time.advance(msecs=5)
+    time.advance(ms=5)
     assert timer.laps == {"read": ms(2)}
 
 
