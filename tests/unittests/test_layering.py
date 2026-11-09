@@ -18,6 +18,7 @@ CORE = sorted(ROOT.glob("mapping/*.h")) + sorted(ROOT.glob("platform/**/*.h")) +
     ROOT / "utils" / "duration.h",
     ROOT / "utils" / "hash.h",
     ROOT / "utils" / "memory.h",
+    ROOT / "utils" / "parallel.h",
     ROOT / "utils" / "timestamp.h",
     ROOT / "pathlike" / "core.h",
     ROOT / "pathlike" / "uri.h",

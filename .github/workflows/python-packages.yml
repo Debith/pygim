@@ -97,3 +97,24 @@ jobs:
     - name: Test with pytest
       run: |
         pytest
+
+  threads-stress:
+    # The pool every thread of a process shares (utils/parallel.h), built under ThreadSanitizer and
+    # under AddressSanitizer with UndefinedBehaviorSanitizer and driven hard: a race, a helper left
+    # inside a finished job or a lock a fork left held shows only there. The program is the headers
+    # it includes, so the job needs a compiler and not pygim's build (tests/static/run_threads_stress.py).
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: "3.12"
+
+    - name: Let the sanitizers map their shadow memory
+      # The runner randomises mmap addresses with 32 bits, where the sanitizers' fixed layout can fail
+      # to start; 28 bits is the kernel's usual default.
+      run: sudo sysctl vm.mmap_rnd_bits=28
+
+    - name: Stress the pool under each sanitizer
+      run: python tests/static/run_threads_stress.py

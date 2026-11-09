@@ -1,4 +1,5 @@
-// Compile-time proofs for utils/duration.h, utils/timestamp.h and utils/quick_timer.h.
+// Compile-time proofs for utils/duration.h, utils/timestamp.h and utils/quick_timer.h, and the pools
+// of utils/parallel.h compiled on every system.
 //
 // This TU is part of the utils extension's SOURCES (ext.utils.toml): it is compiled by every
 // build, so a violated law fails the build instead of a test run. A manual_clock makes time
@@ -11,6 +12,7 @@
 #include <string_view>
 
 #include "../../src/_pygim_fast/utils/duration.h"
+#include "../../src/_pygim_fast/utils/parallel.h"
 #include "../../src/_pygim_fast/utils/quick_timer.h"
 #include "../../src/_pygim_fast/utils/timestamp.h"
 
@@ -226,4 +228,28 @@ static_assert(a_moved_timer_reports_once());
 static_assert(sizeof(pygim::QuickTimerT<>) == sizeof(pygim::QuickTimerT<void, 8, pygim::wall_clock>));
 static_assert(sizeof(pygim::SilentTimer<>) < sizeof(pygim::QuickTimer));
 
+// The thread's CPU clock is a clock like the others: the pools take it as their CpuClock.
+static_assert(pygim::clock_source<pygim::thread_cpu_clock>);
+
+// What the pools are instantiated with below: a task, a task that adds tasks, and for_each's body.
+struct square {
+    [[nodiscard]] std::size_t operator()(std::size_t j) const noexcept { return j * j; }
+};
+struct count_down {
+    template <class Add>
+    void operator()(int n, const Add& add) const {
+        if (n > 0) add(n - 1);
+    }
+};
+struct touch_each {
+    void operator()(std::size_t, std::size_t) const noexcept {}
+};
+
 }  // namespace
+
+// Every member of the pools and for_each, compiled on each system a build runs on: a call that system
+// does not have fails its build here, before anything calls the pools. What they do under load is
+// tests/static/threads_stress.cpp's, run under the sanitizers by CI's threads-stress job.
+template class pygim::parallel::ordered_pool<square>;
+template class pygim::parallel::task_pool<int, count_down>;
+template void pygim::parallel::for_each<const touch_each&>(std::size_t, std::size_t, const touch_each&);

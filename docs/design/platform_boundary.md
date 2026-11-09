@@ -25,11 +25,13 @@ that picks the running system's class, and a system's own file (`platform/linux/
 
 What is built so far: the headers the code on `main` asks of the system — `native.h` (the family,
 decided once), `windows_headers.h`, `files.h` (a path's text), `memory.h` (the resident-memory
-probes, a class per system under `linux/`, `macos/` and `windows/`) and `libraries.h` (loading the
-ODBC driver, a class each under `posix/` and `windows/`) — and that code moved behind them. The
-other headers this document names (the listing, the reads, the process's and the signals' calls,
-the caches, the clocks) arrive with the code that calls them, each behind the same boundary and in
-the same shape.
+probes, a class per system under `linux/`, `macos/` and `windows/`), `libraries.h` (loading the
+ODBC driver, a class each under `posix/` and `windows/`), `process.h` (the pools' thread names,
+signal mask and fork hooks, POSIX's calls under `posix/` with Linux's and macOS's thread names over
+them, and Windows') and `clocks.h` (a thread's CPU time, a class each under `posix/` and
+`windows/`) — and that code moved behind them. The other headers this document names (the listing,
+the reads, the signals' calls, the caches) arrive with the code that calls them, each behind the
+same boundary and in the same shape.
 
 ## Scenario
 
@@ -94,11 +96,19 @@ platform/
     libraries.h           library_loader; basic_posix_loader and basic_windows_loader, the logic over each system's
                           calls (D138); the choice of native_loader; basic_library, and library over it
     memory.h              process_memory; basic_linux_memory, the logic over Linux's calls (D138); the choice of native_memory
+    process.h             process_calls; the choice of native_process; name_this_thread, signals_blocked, at_fork over it
+    clocks.h              thread_clocks; the choice of native_clocks
     posix/libraries.h     posix_dl_calls: dlopen, dlsym, glob; posix_loader over them
     windows/libraries.h   win32_library_calls: LoadLibraryW, GetProcAddress; windows_loader over them
     linux/memory.h        linux_proc_calls: a pread of /proc/self/statm, the page size, getrusage; linux_memory over them
     macos/memory.h        macos_memory: the Mach task, getrusage in bytes (no logic above the calls, no policy)
     windows/memory.h      windows_memory: GetProcessMemoryInfo (no logic above the call, no policy)
+    posix/process.h       posix_process: pthread_sigmask (posix_signals_blocked), pthread_atfork
+    linux/process.h       linux_process: posix_process, and pthread_setname_np(pthread_self(), name)
+    macos/process.h       macos_process: posix_process, and pthread_setname_np(name)
+    windows/process.h     windows_process: nothing to block, no fork, threads unnamed
+    posix/clocks.h        posix_clocks: clock_gettime(CLOCK_THREAD_CPUTIME_ID)
+    windows/clocks.h      windows_clocks: the measuring clock (GetThreadTimes counts in ~15 ms ticks)
     (tests/static/platform_proofs.cpp proves every logic class over fake calls, in every build, on every system)
 ```
 
@@ -243,6 +253,10 @@ Each step a refactor under the tests as they are (#36), its own commit, the ratc
 | platform/macos/, windows/memory.h | `macos_memory`, `windows_memory`: `resident_bytes`, `peak_resident_bytes`, the system's reading as it is | calls |
 | platform/libraries.h | `library_loader`; `basic_posix_loader`, `basic_windows_loader`, the logic over each system's calls (D138); `native_loader`; `basic_library` and `library` over it: `first_of`, `last_match`, `function<F>`, `address_of` | logic, and the choice |
 | platform/posix/, windows/libraries.h | `posix_dl_calls`, `win32_library_calls`: one wrapper a call; `posix_loader`, `windows_loader` over them | calls |
+| platform/process.h | `process_calls`; `native_process`, the running system's; `name_this_thread`, `signals_blocked` and `at_fork` over it, what utils/parallel.h's pools call | the choice |
+| platform/posix/, linux/, macos/, windows/process.h | `posix_process` (the signal mask, `pthread_atfork`); `linux_process` and `macos_process` over it, each naming a thread its system's way; `windows_process`, which does nothing | calls |
+| platform/clocks.h | `thread_clocks`; `native_clocks`, the running system's, which utils/timestamp.h's `thread_cpu_clock` reads | the choice |
+| platform/posix/, windows/clocks.h | `posix_clocks` (`CLOCK_THREAD_CPUTIME_ID`); `windows_clocks` (the measuring clock, standing in) | calls |
 | tests/static/platform_proofs.cpp | every logic class over constexpr fake calls, compiled by every build of `pygim.utils`: the first name that opens, a missing library and symbol, the newest match and no match, Windows' widened name and missing glob, statm's resident count, the kilobyte peak, a peak below the present, a failed getrusage, procfs absent | the proofs |
 | platform/windows_headers.h | `<windows.h>` lean and without `min` and `max`, for every header that calls it | — |
 | pathlike/core.h | `posix_strategy`, `windows_strategy`: separators, case, parsing; `native_strategy` | rules |
@@ -259,11 +273,10 @@ component's calls in the shape above, a class per system in a file of its own (D
 | platform/home.h | `home_of(user)`: whose home `~` names; posixpath's and ntpath's rules | rules and calls |
 | platform/listing.h | a directory's listing with each entry's kind (`directory`, `file`, `link`, `other`), `entry_at`, `finds_a_name_by_stat` | calls |
 | platform/reads.h | `posix_reads`, `windows_reads` (posix/reads.h, windows/reads.h) behind the `file_reads` concept | calls |
-| platform/process.h | a thread's name, the signal mask its threads inherit, `at_fork`, `process_id` | calls |
+| platform/process.h | `process_id`, beside the calls the pools make | calls |
 | platform/signals.h | `interrupt_handlers` (Ctrl-C, SIGTERM), `wakeup` (a pipe; an event) | calls |
 | platform/caches.h | `system_caches`; the kernel's /sys list read by rules compiled everywhere | calls and rules |
 | platform/memory.h | `advise_huge_pages`, on each system's memory class beside the probes (Q51) | calls |
-| platform/clocks.h | `thread_cpu_ns`, `counts_thread_cpu_time` | calls |
 
 ## Open
 

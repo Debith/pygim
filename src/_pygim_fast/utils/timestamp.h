@@ -17,17 +17,18 @@
 // seconds as a float and calendar forms are conversions of that number, never a second store.
 //
 // CORE layer: pybind-free, and constexpr except for the operating-system clocks. The OS is read in
-// exactly two places, wall_clock::now_ns() and monotonic_clock::now_ns(); timing code elsewhere in
-// pygim takes one of these as its clock and never reads a clock itself (#264; utils/logging.h's
-// ScopeLog, the BCP profiler and the fetch benchmark too, which test_layering's
-// test_time_is_read_in_one_header holds). A timestamp's clock is part of its type, so a wall-clock
-// moment cannot be subtracted from a monotonic one.
+// exactly three places, wall_clock::now_ns(), monotonic_clock::now_ns() and thread_cpu_clock::now_ns()
+// (the last through platform/clocks.h); timing code elsewhere in pygim takes one of these as its
+// clock and never reads a clock itself (#264; utils/logging.h's ScopeLog, the BCP profiler and the
+// fetch benchmark too, which test_layering's test_time_is_read_in_one_header holds). A timestamp's
+// clock is part of its type, so a wall-clock moment cannot be subtracted from a monotonic one.
 
 #include <chrono>
 #include <concepts>
 #include <cstdint>
 #include <limits>
 
+#include "../platform/clocks.h"
 #include "duration.h"
 
 namespace pygim {
@@ -54,6 +55,16 @@ public:
     [[nodiscard]] std::int64_t now_ns() const noexcept {
         return std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now().time_since_epoch()).count();
     }
+};
+
+/// The calling thread's CPU time: nanoseconds it has run, its waiting left out — what tells work
+/// that waits on a disk from work that computes. Its epoch is the thread's start, so only a
+/// difference read on one thread means anything. Windows reads the measuring clock instead (no
+/// waiting is seen there; platform/windows/clocks.h). About 500 ns a read on Linux: sample it, do
+/// not read it per item.
+class thread_cpu_clock {
+public:
+    [[nodiscard]] std::int64_t now_ns() const noexcept { return platform::native_clocks::thread_cpu_ns(); }
 };
 
 class manual_clock;
@@ -85,7 +96,7 @@ private:
 
 constexpr manual_clock manual_time::clock() const noexcept { return manual_clock(*this); }
 
-static_assert(clock_source<wall_clock> && clock_source<monotonic_clock> && clock_source<manual_clock>);
+static_assert(clock_source<wall_clock> && clock_source<monotonic_clock> && clock_source<thread_cpu_clock> && clock_source<manual_clock>);
 static_assert([] {
     manual_time time(5);
     const manual_clock clock = time.clock();
