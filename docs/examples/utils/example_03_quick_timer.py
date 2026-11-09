@@ -28,6 +28,15 @@ time = utils.ManualTime()                    # starts at 0 ns
 time.advance(usecs=1)                        # units add up into one 64-bit count of nanoseconds
 assert time.now() == 1_000
 
+
+def tick_tock(msecs):
+    """The work being timed: the manual clock moves on by `msecs` milliseconds."""
+    time.advance(msecs=msecs)
+
+
+tick_tock(2)
+assert time.now() == 2_001_000
+
 # ----------------------------------------------------------------------------
 # 2. Timing a block and its laps, silently
 # ----------------------------------------------------------------------------
@@ -35,11 +44,11 @@ assert time.now() == 1_000
 #                                 │           ┌─ report: how it tells you (default: sys.stderr)
 #                                 ▼           ▼
 with utils.QuickTimer("load csv", clock=time, report=utils.Report.silent()) as timer:
-    time.advance(msecs=8)                    # before any lap: in the total, in no lap
+    tick_tock(8)                             # before any lap: in the total, in no lap
     timer.start_lap("read")
-    time.advance(msecs=120)
-    timer.start_lap("parse")           # starting a lap stops the one running
-    time.advance(msecs=292)
+    tick_tock(120)
+    timer.start_lap("parse")                 # starting a lap stops the one running
+    tick_tock(292)
 # leaving the block finishes the timer: a running lap stops, the report hears "finished"
 
 snapshot = timer.snapshot()                  # the measured values, frozen at the finish
@@ -49,7 +58,7 @@ assert snapshot.laps == {"read": utils.Duration(msecs=120), "parse": utils.Durat
 assert snapshot.total == utils.Duration(msecs=420)
 assert snapshot.total.seconds == 0.42        # a view, for printing
 
-time.advance(secs=5)                         # later readings of a finished timer do not move
+tick_tock(5_000)                             # later readings of a finished timer do not move
 assert timer.snapshot().total == utils.Duration(msecs=420)
 
 # ----------------------------------------------------------------------------
@@ -57,10 +66,10 @@ assert timer.snapshot().total == utils.Duration(msecs=420)
 # ----------------------------------------------------------------------------
 with utils.QuickTimer.silent("load csv", clock=time) as timer:
     with timer.lap("read") as read:          # started here, stopped as the block ends
-        time.advance(msecs=120)
-    time.advance(msecs=8)                    # between the blocks: in the total, in no lap
+        tick_tock(120)
+    tick_tock(8)                             # between the blocks: in the total, in no lap
     with timer.lap("parse"):
-        time.advance(msecs=292)
+        tick_tock(292)
 assert read.took == utils.Duration(msecs=120)
 assert timer.laps == {"read": utils.Duration(msecs=120), "parse": utils.Duration(msecs=292)}
 assert timer.total.seconds == 0.42           # read off the timer: no snapshot needed
@@ -77,7 +86,7 @@ report.on_finished(lambda snap: lines.append(f"{snap.name} total {snap.total.sec
 
 with utils.QuickTimer("index", clock=time, report=report) as timer:
     timer.start_lap("scan")
-    time.advance(msecs=5)
+    tick_tock(5)
     timer.stop_lap("scan")
 
 assert lines == ["index [scan] started", "index [scan] 0.005s", "index total 0.005s"]
