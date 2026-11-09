@@ -4,11 +4,12 @@ module = "utils"
 # calls — the loaders and Linux's memory probes — over fake calls on every system (D138); wired into
 # the sources so every build proves it (it contributes no runtime code). utils carries it because
 # utils/memory.h is the platform's first caller and utils builds everywhere with no dependency.
-# tests/static/primitives_proofs.cpp proves core/primitives/duration.h, core/primitives/timestamp.h
-# and core/primitives/quick_timer.h the same way, and instantiates core/primitives/parallel.h's
-# pools so every system's build compiles them (code the module never calls).
+# tests/static/time_and_threads_proofs.cpp proves core/primitives/duration.h,
+# core/primitives/timestamp.h and core/primitives/quick_timer.h the same way, and instantiates
+# core/primitives/parallel.h's pools so every system's build compiles them (code the module never
+# calls).
 sources = [
   "bindings.cpp",
   "../../../tests/static/platform_proofs.cpp",
-  "../../../tests/static/primitives_proofs.cpp",
+  "../../../tests/static/time_and_threads_proofs.cpp",
 ]

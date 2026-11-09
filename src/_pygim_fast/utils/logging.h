@@ -42,9 +42,8 @@ public:
     }
 
     ~ScopeLog() {
-        const auto micros = std::chrono::duration_cast<
-            std::chrono::microseconds>(
-            primitives::monotonic_timestamp::now() - m_start).count();
+        using namespace primitives::time_literals;
+        const auto micros = (primitives::monotonic_timestamp::now() - m_start) / 1_us;
         write_exit(micros);
     }
 

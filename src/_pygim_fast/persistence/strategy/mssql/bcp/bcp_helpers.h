@@ -4,10 +4,11 @@
 
 #include "bcp_bind.h"
 
-#include <thread>
-#include <chrono>
+#include "../../../../core/primitives/timestamp.h"
 
 namespace pygim::strategy::mssql::bcp {
+
+using namespace ::pygim::primitives::time_literals;   // 50_ms: a length in the duration primitive's units
 
 // ── String column handling ──────────────────────────────────────────────────
 
@@ -89,7 +90,7 @@ inline void flush_batch(const BcpApi& bcp, SQLHDBC dbc, BcpContext& ctx) {
     if (ret == -1) [[unlikely]] {
         // One retry — bcp_batch -1 under heavy parallel load is often
         // transient server back-pressure, not a fatal protocol error.
-        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        primitives::sleep_for(50_ms);
         ret = bcp.batch(dbc);
     }
 

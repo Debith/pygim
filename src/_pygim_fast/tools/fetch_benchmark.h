@@ -56,7 +56,7 @@ inline FetchBenchResult bench_fetch(OdbcConnection& conn,
 
         ret = SQLExecute(stmt);
         odbc::raise_if_error(ret, SQL_HANDLE_STMT, stmt, "bench: SQLExecute");
-        r.prepare_s = std::chrono::duration<double>(clock::now() - t0).count();
+        r.prepare_s = primitives::seconds_of(clock::now() - t0);
     }
 
     // 2. Describe columns + allocate buffers + bind
@@ -98,7 +98,7 @@ inline FetchBenchResult bench_fetch(OdbcConnection& conn,
 
         buffers.bind(stmt);
 
-        r.describe_bind_s = std::chrono::duration<double>(clock::now() - t0).count();
+        r.describe_bind_s = primitives::seconds_of(clock::now() - t0);
 
         // 3. Pure fetch loop — discard data
         {
@@ -110,11 +110,11 @@ inline FetchBenchResult bench_fetch(OdbcConnection& conn,
                 r.total_rows += static_cast<int64_t>(buffers.rows_fetched);
                 r.total_blocks++;
             }
-            r.fetch_s = std::chrono::duration<double>(clock::now() - t_fetch).count();
+            r.fetch_s = primitives::seconds_of(clock::now() - t_fetch);
         }
     }
 
-    r.total_s = std::chrono::duration<double>(clock::now() - t_total).count();
+    r.total_s = primitives::seconds_of(clock::now() - t_total);
     return r;
 }
 
@@ -182,7 +182,7 @@ inline ParallelFetchResult bench_fetch_parallel(
 
     for (auto& t : threads) t.join();
 
-    result.total_s = std::chrono::duration<double>(clock::now() - t_total).count();
+    result.total_s = primitives::seconds_of(clock::now() - t_total);
 
     // Aggregate
     double max_fetch = 0;

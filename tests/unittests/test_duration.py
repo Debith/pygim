@@ -14,11 +14,11 @@ NS_PER = {
     "us": 1_000,
     "ms": 1_000_000,
     "s": 1_000_000_000,
-    "m": 60_000_000_000,
-    "h": 3_600_000_000_000,
-    "d": 86_400_000_000_000,
-    "w": 604_800_000_000_000,
-    "y": 31_556_952_000_000_000,   # C++'s year: 365.2425 days
+    "min": 60_000_000_000,
+    "hr": 3_600_000_000_000,
+    "day": 86_400_000_000_000,
+    "wk": 604_800_000_000_000,
+    "yr": 31_556_952_000_000_000,   # C++'s year: 365.2425 days
 }
 
 
@@ -28,11 +28,11 @@ def test_one_of_each_unit_is_its_nanoseconds(unit, ns):
 
 
 def test_units_add_up():
-    assert int(pygim.Duration(m=1, s=30)) == 90_000_000_000
+    assert int(pygim.Duration(min=1, s=30)) == 90_000_000_000
 
 
 def test_units_past_their_range_carry_over():
-    assert pygim.Duration(m=1, s=90) == pygim.Duration(m=2, s=30)
+    assert pygim.Duration(min=1, s=90) == pygim.Duration(min=2, s=30)
 
 
 def test_no_unit_is_zero():
@@ -46,11 +46,11 @@ def test_a_fraction_converts():
 AMOUNTS = [k / 1000 for k in range(1, 300)] + [k / 7 for k in range(1, 2000)]
 
 
-@pytest.mark.parametrize("unit", ["y", "d", "s"])
+@pytest.mark.parametrize("unit", ["yr", "day", "s"])
 def test_a_fraction_is_rounded_exactly(unit):
     """The float's exact value times the unit, rounded half to even, as Python's own exact arithmetic
     rounds it. A float product cannot: a year is 55 bits of nanoseconds, and for 1,722 of these 2,298
-    amounts of a year round(amount * unit) misses by a nanosecond (y=0.286: ...272000000 against
+    amounts of a year round(amount * unit) misses by a nanosecond (yr=0.286: ...272000000 against
     the exact ...271999999)."""
     wrong = [x for x in AMOUNTS if int(pygim.Duration(**{unit: x})) != round(Fraction(x) * NS_PER[unit])]
     assert wrong == []
@@ -71,7 +71,7 @@ def test_a_negative_amount_is_a_negative_duration():
 
 def test_past_64_bits_is_refused():
     with pytest.raises(OverflowError):
-        pygim.Duration(y=300)
+        pygim.Duration(yr=300)
 
 
 def test_an_integer_past_64_bits_is_refused():
@@ -81,7 +81,7 @@ def test_an_integer_past_64_bits_is_refused():
 
 def test_a_sum_past_64_bits_is_refused():
     with pytest.raises(OverflowError):
-        pygim.Duration(y=200, w=5_000)
+        pygim.Duration(yr=200, wk=5_000)
 
 
 @pytest.mark.parametrize("amount", [math.nan, math.inf, -math.inf])
@@ -95,11 +95,12 @@ def test_an_unknown_unit_is_refused():
         pygim.Duration(months=1)
 
 
-@pytest.mark.parametrize("name", ["years", "mins", "secs", "msecs"])
-def test_units_are_the_common_short_forms_and_only_those(name):
-    """The short forms Go's durations, Prometheus and systemd share; a long name is not a second
-    spelling, and the refusal names the units to use."""
-    with pytest.raises(TypeError, match=r"the units are y, w, d, h, m, s, ms, us and ns$"):
+@pytest.mark.parametrize("name", ["years", "mins", "secs", "msecs", "y", "m", "h", "d", "w", "sec"])
+def test_units_are_the_named_ones_and_only_those(name):
+    """yr, wk, day, hr, min, s, ms, us, ns, as Debith chose them to read (C++'s literals say the
+    same: 1_min, 20_us). Any other spelling is refused, never a second name, and the refusal names
+    the units to use."""
+    with pytest.raises(TypeError, match=r"the units are yr, wk, day, hr, min, s, ms, us and ns$"):
         pygim.Duration(**{name: 1})
 
 
@@ -129,19 +130,19 @@ def test_a_non_number_is_refused():
 
 
 def test_seconds_is_a_view():
-    assert pygim.Duration(m=2, s=30).seconds == 150.0
+    assert pygim.Duration(min=2, s=30).seconds == 150.0
 
 
 def test_durations_order_and_hash_by_their_number():
-    assert pygim.Duration(s=1) < pygim.Duration(s=2) and hash(pygim.Duration(s=150)) == hash(pygim.Duration(m=2, s=30))
+    assert pygim.Duration(s=1) < pygim.Duration(s=2) and hash(pygim.Duration(s=150)) == hash(pygim.Duration(min=2, s=30))
 
 
 def test_repr_spells_the_exact_units():
-    assert repr(pygim.Duration(m=1, s=90)) == "Duration(m=2, s=30)"
+    assert repr(pygim.Duration(min=1, s=90)) == "Duration(min=2, s=30)"
 
 
 def test_repr_round_trips():
-    d = pygim.Duration(y=1, ns=7)
+    d = pygim.Duration(yr=1, ns=7)
     assert eval(repr(d), {"Duration": pygim.Duration}) == d
 
 
@@ -151,24 +152,24 @@ def test_manual_time_starts_at_zero():
 
 def test_manual_time_advances_by_units():
     time = pygim.ManualTime()
-    time.advance(m=1, s=30)
-    time.advance(m=1, s=90)
+    time.advance(min=1, s=30)
+    time.advance(min=1, s=90)
     time.advance(ns=50)
     assert time.now() == 240_000_000_050
 
 
 def test_manual_time_advances_by_a_duration():
     time = pygim.ManualTime()
-    time.advance(pygim.Duration(y=1))
+    time.advance(pygim.Duration(yr=1))
     assert time.now() == 31_556_952_000_000_000
 
 
 def test_manual_time_refuses_to_pass_64_bits_and_does_not_move():
     time = pygim.ManualTime()
-    time.advance(y=200)
+    time.advance(yr=200)
     with pytest.raises(OverflowError):
-        time.advance(y=100)
-    assert time.now() == 200 * NS_PER["y"]
+        time.advance(yr=100)
+    assert time.now() == 200 * NS_PER["yr"]
 
 
 def test_advance_takes_a_duration_or_units_not_both():

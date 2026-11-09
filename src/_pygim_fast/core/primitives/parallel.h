@@ -68,7 +68,7 @@ class item_cost {
 public:
     /// What one more thread costs to start and join: 8 threads over 8 files took 179 µs where one
     /// took 33 (Linux, 2026-10-25).
-    static constexpr duration thread_start = std::chrono::microseconds(20);
+    static constexpr duration thread_start = 20_us;
 
     constexpr item_cost(duration spent, std::size_t items) noexcept : m_spent(spent), m_items(items) {}
 
@@ -91,9 +91,9 @@ private:
     duration m_spent;
     std::size_t m_items;
 };
-static_assert(item_cost(std::chrono::microseconds(32), 32).width_for(30, 16) == 1);     // 30 µs of work: not worth a thread
-static_assert(item_cost(std::chrono::microseconds(320), 32).width_for(32, 16) == 4);    // 320 µs: four
-static_assert(item_cost(std::chrono::microseconds(320), 32).width_for(1'000, 16) == 16); // 10 ms: the cap
+static_assert(item_cost(32_us, 32).width_for(30, 16) == 1);     // 30 µs of work: not worth a thread
+static_assert(item_cost(320_us, 32).width_for(32, 16) == 4);    // 320 µs: four
+static_assert(item_cost(320_us, 32).width_for(1'000, 16) == 16); // 10 ms: the cap
 static_assert(item_cost(duration(0), 0).width_for(1'000, 16) == 1);
 
 /// How much of a task's time its thread spent on a CPU rather than waiting — on a disk, a network.
@@ -109,7 +109,7 @@ public:
     [[nodiscard]] constexpr std::size_t threads_worth(std::size_t cores, std::size_t cap) const noexcept {
         const std::size_t floor = std::min(cores, cap);
         if (m_on_cpu <= duration(0)) return floor;   // unmeasured
-        const auto scaled = static_cast<std::size_t>(m_wall.count() / std::max<duration::rep>(m_on_cpu.count() / static_cast<duration::rep>(cores), 1));
+        const auto scaled = static_cast<std::size_t>(m_wall.nanoseconds() / std::max<duration::rep>(m_on_cpu.nanoseconds() / static_cast<duration::rep>(cores), 1));
         return std::clamp(scaled, floor, cap);
     }
 
@@ -117,9 +117,9 @@ private:
     duration m_on_cpu;
     duration m_wall;
 };
-static_assert(compute_share(std::chrono::milliseconds(10), std::chrono::milliseconds(10)).threads_worth(16, 32) == 16);   // computes: the cores
-static_assert(compute_share(std::chrono::milliseconds(1), std::chrono::milliseconds(10)).threads_worth(16, 32) == 32);    // waits 90%: the cap
-static_assert(compute_share(std::chrono::milliseconds(8), std::chrono::milliseconds(10)).threads_worth(16, 32) == 20);    // waits 20%: 16 / 0.8
+static_assert(compute_share(10_ms, 10_ms).threads_worth(16, 32) == 16);   // computes: the cores
+static_assert(compute_share(1_ms, 10_ms).threads_worth(16, 32) == 32);    // waits 90%: the cap
+static_assert(compute_share(8_ms, 10_ms).threads_worth(16, 32) == 20);    // waits 20%: 16 / 0.8
 static_assert(compute_share(duration(0), duration(0)).threads_worth(16, 32) == 16);
 
 /// How many threads a pool runs, the consumer counted: before any task is measured, and after.
@@ -160,9 +160,9 @@ private:
     std::size_t m_cap;
 };
 static_assert([] {
-    const item_cost ten_us_each(std::chrono::microseconds(320), 32);
-    const compute_share computes(std::chrono::milliseconds(1), std::chrono::milliseconds(1));
-    const compute_share waits(std::chrono::milliseconds(1), std::chrono::milliseconds(10));
+    const item_cost ten_us_each(320_us, 32);
+    const compute_share computes(1_ms, 1_ms);
+    const compute_share waits(1_ms, 10_ms);
     const elastic_width width(16, 32);
     return width_policy<elastic_width> && width.at_start() == 1 && width.for_the_rest(ten_us_each, computes, 1'000) == 16 &&
            width.for_the_rest(ten_us_each, waits, 1'000) == 22 && width.for_the_rest(ten_us_each, waits, 10) == 2;

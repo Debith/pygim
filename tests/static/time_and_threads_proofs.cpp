@@ -11,6 +11,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <string_view>
+#include <type_traits>
 
 #include "../../src/_pygim_fast/core/primitives/duration.h"
 #include "../../src/_pygim_fast/core/primitives/parallel.h"
@@ -18,6 +19,8 @@
 #include "../../src/_pygim_fast/core/primitives/timestamp.h"
 
 namespace {
+
+using namespace pygim::primitives::time_literals;
 
 using pygim::primitives::basic_timestamp;
 using pygim::primitives::manual_clock;
@@ -43,10 +46,10 @@ consteval bool a_clock_sees_every_advance() {
     manual_time time;
     const manual_clock clock = time.clock();
     const manual_moment start = manual_moment::now(clock);
-    time.advance(std::chrono::minutes(1));
-    time.advance(std::chrono::seconds(30));
+    time.advance(1_min);
+    time.advance(30_s);
     time.advance(duration(-500));
-    return manual_moment::now(clock) - start == std::chrono::seconds(90) - duration(500);
+    return manual_moment::now(clock) - start == 90_s - duration(500);
 }
 static_assert(a_clock_sees_every_advance());
 
@@ -95,13 +98,13 @@ consteval bool units_convert_exactly() {
     using pygim::primitives::duration;
     using pygim::primitives::time_unit;
     const auto unit = [](std::string_view name) { return *time_unit::named(name); };
-    return unit("y").length() == std::chrono::years(1) && unit("w").length() == std::chrono::weeks(1) &&
-           unit("d").length() == std::chrono::days(1) && unit("us").length() == std::chrono::microseconds(1) &&
-           unit("m").of(1) + unit("s").of(90) == unit("m").of(2) + unit("s").of(30) &&
+    return unit("yr").length() == duration::from_chrono(std::chrono::years(1)) && unit("wk").length() == duration::from_chrono(std::chrono::weeks(1)) &&
+           unit("day").length() == duration::from_chrono(std::chrono::days(1)) && unit("us").length() == duration::from_chrono(std::chrono::microseconds(1)) &&
+           unit("min").of(1) + unit("s").of(90) == unit("min").of(2) + unit("s").of(30) &&
            unit("s").of(1.5) == duration(1'500'000'000) && unit("s").of(-5) == duration(-5'000'000'000) &&
            unit("ns").of(0.5) == duration(0) && unit("ns").of(1.5) == duration(2) &&
            unit("ns").of(2.5) == duration(2) && unit("ns").of(-0.5) == duration(0) &&
-           unit("y").of(0.286) == duration(9'025'288'271'999'999) &&   // a float product gives ...272000000
+           unit("yr").of(0.286) == duration(9'025'288'271'999'999) &&   // a float product gives ...272000000
            unit("s").of(5e-324) == duration(0);                           // the smallest subnormal
 }
 static_assert(units_convert_exactly());
@@ -109,16 +112,32 @@ static_assert(units_convert_exactly());
 // A duration is spelt in whole units, longest first; the parts add back to it.
 consteval bool spelling_adds_back() {
     using pygim::primitives::duration;
-    const duration year_and_7ns = std::chrono::years(1) + duration(7);
+    const duration year_and_7ns = 1_yr + duration(7);
     const pygim::primitives::spelt_in_units s(year_and_7ns);
-    const pygim::primitives::spelt_in_units negative(-std::chrono::seconds(150));
+    const pygim::primitives::spelt_in_units negative(-(150_s));
     duration sum(0);
     for (const auto& part : s) sum += pygim::primitives::time_unit::named(part.unit_name())->of(part.amount());
-    return s.size() == 2 && s.begin()[0].unit_name() == "y" && s.begin()[1].unit_name() == "ns" &&
+    return s.size() == 2 && s.begin()[0].unit_name() == "yr" && s.begin()[1].unit_name() == "ns" &&
            sum == year_and_7ns && negative.size() == 2 && negative.begin()[0].amount() == -2 &&
            negative.begin()[1].amount() == -30;
 }
 static_assert(spelling_adds_back());
+
+// A duration is pygim's own type, not std::chrono's: the standard library is behind the class, and
+// a length is spelt in the units' own literals, the names Python's Duration takes.
+static_assert(!std::is_same_v<duration, std::chrono::nanoseconds>);
+consteval bool lengths_are_spelt_in_the_units_names() {
+    using namespace pygim::primitives::time_literals;
+    return 20_us == duration(20'000) && 1_min + 90_s == 2_min + 30_s && 1_hr == 60_min && 1_day == 24_hr &&
+           1_wk == 7_day && 1_yr == duration(31'556'952'000'000'000) && 1.5_s == 1'500_ms && 2.5_ns == 2_ns &&
+           -(5_s) == duration(-5'000'000'000) && 1_ms / 1_us == 1'000 && seconds_of(250_ms) == 0.25;
+}
+static_assert(lengths_are_spelt_in_the_units_names());
+
+// The class's units are std::chrono's exactly, a year its 365.2425 days, so C++ and Python agree.
+static_assert(duration::from_chrono(std::chrono::years(1)) == pygim::primitives::time_unit::named("yr")->length() &&
+              duration::from_chrono(std::chrono::minutes(1)) == pygim::primitives::time_unit::named("min")->length() &&
+              duration::from_chrono(std::chrono::nanoseconds(7)) == duration(7));
 
 // What a report hears, kept outside it: a report is copied into its timer, so it writes through a pointer.
 class moment_log {

@@ -49,6 +49,7 @@ namespace {
 
 using pygim::primitives::parallel::for_each;
 namespace parallel = pygim::primitives::parallel;
+using namespace pygim::primitives::time_literals;
 
 const char* g_part = "";   // the part running, for the alarm to name
 
@@ -121,7 +122,7 @@ bool fork_while_busy() {
             while (!stop.load()) for_each(32, 4, [](std::size_t, std::size_t) {});
         });
     }
-    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    pygim::primitives::sleep_for(50_ms);
     int hung = 0, failed = 0;
     for (int k = 0; k < 20; ++k) {
         const pid_t pid = ::fork();
@@ -234,7 +235,7 @@ bool caller_throws() {
         }
         inside.fetch_add(1);
         entered.fetch_add(1);
-        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        pygim::primitives::sleep_for(50_ms);
         inside.fetch_sub(1);
     };
     bool thrown = false;

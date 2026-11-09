@@ -274,7 +274,7 @@ primitives::duration duration_of_units(const py::kwargs& units) {
     return total;
 }
 
-// Duration(m=2, s=30): the units it is spelt in, longest first, which eval() reads back.
+// Duration(min=2, s=30): the units it is spelt in, longest first, which eval() reads back.
 std::string duration_repr(primitives::duration d) {
     std::string out = "Duration(";
     std::string_view separator;
@@ -318,22 +318,22 @@ PYBIND11_MODULE(utils, m) {
     // A length of time (core/primitives/duration.h): one signed 64-bit count of nanoseconds; units
     // are conversions.
     py::class_<primitives::duration>(m, "Duration",
-                                "A length of time: one signed 64-bit count of nanoseconds. Duration(m=1, s=30).\n"
-                                "Units: y (a year: 365.2425 days, as C++ counts them), w, d, h, m, s, ms, us, ns.\n"
+                                "A length of time: one signed 64-bit count of nanoseconds. Duration(min=1, s=30).\n"
+                                "Units: yr (365.2425 days, as C++ counts a year), wk, day, hr, min, s, ms, us, ns.\n"
                                 "They add up; an amount may be negative or a fraction, rounded exactly to\n"
                                 "the nearest nanosecond (ties to even). Past 64 bits (about 292 years) is an OverflowError.")
         .def(py::init([](const py::kwargs& units) { return duration_of_units(units); }))
-        .def_property_readonly("nanoseconds", [](primitives::duration d) { return d.count(); }, "The number itself.")
-        .def_property_readonly("seconds", [](primitives::duration d) { return static_cast<double>(d.count()) / 1e9; },
+        .def_property_readonly("nanoseconds", [](primitives::duration d) { return d.nanoseconds(); }, "The number itself.")
+        .def_property_readonly("seconds", [](primitives::duration d) { return primitives::seconds_of(d); },
                                "The same in seconds, as a float: a view, not a second store.")
-        .def("__int__", [](primitives::duration d) { return d.count(); })
+        .def("__int__", [](primitives::duration d) { return d.nanoseconds(); })
         .def(py::self == py::self)
         .def(py::self != py::self)
         .def(py::self < py::self)
         .def(py::self <= py::self)
         .def(py::self > py::self)
         .def(py::self >= py::self)
-        .def("__hash__", [](primitives::duration d) { return d.count(); })
+        .def("__hash__", [](primitives::duration d) { return d.nanoseconds(); })
         .def("__repr__", &duration_repr);
 
     // Time that moves only when told (core/primitives/timestamp.h): the clock for testing timing
@@ -348,7 +348,7 @@ PYBIND11_MODULE(utils, m) {
                  time.advance(by ? *by : duration_of_units(units));
              },
              py::arg("by") = py::none(),
-             "Moves time by a Duration or by units: advance(m=1, s=30). Past 64 bits it raises\n"
+             "Moves time by a Duration or by units: advance(min=1, s=30). Past 64 bits it raises\n"
              "OverflowError and time does not move.");
 
     // A calendar moment (core/primitives/timestamp.h): nanoseconds since the Unix epoch, from the

@@ -350,7 +350,7 @@ inline void finalize_bcp(BcpContext& ctx) {
     if (ctx.sent_rows > 0 && ctx.rows_until_flush < ctx.batch_size) {
         auto ret = ctx.bcp.batch(ctx.dbc);
         if (ret == -1) [[unlikely]] {
-            std::this_thread::sleep_for(std::chrono::milliseconds(50));
+            primitives::sleep_for(50_ms);
             ret = ctx.bcp.batch(ctx.dbc);
         }
         if (ret == -1) [[unlikely]]

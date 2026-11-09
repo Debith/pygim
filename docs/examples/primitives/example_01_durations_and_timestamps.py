@@ -20,17 +20,17 @@ from pygim import Duration, ManualTime, Timestamp
 # ----------------------------------------------------------------------------
 # 1. A duration is spelt in units and held as nanoseconds
 # ----------------------------------------------------------------------------
-#               ┌─ **units: y, w, d, h, m, s, ms, us, ns; they add up
+#               ┌─ **units: yr, wk, day, hr, min, s, ms, us, ns; they add up
 #               ▼
-wait = Duration(m=1, s=30)
+wait = Duration(min=1, s=30)
 assert wait.nanoseconds == 90_000_000_000
 assert wait.seconds == 90.0                      # a view as a float, not a store
-assert repr(wait) == "Duration(m=1, s=30)"
+assert repr(wait) == "Duration(min=1, s=30)"
 
 # The repr spells it in the longest units that fit, so another spelling of the
 # same length reads back the same.
-assert Duration(s=150) == Duration(m=2, s=30)
-assert repr(Duration(s=150)) == "Duration(m=2, s=30)"
+assert Duration(s=150) == Duration(min=2, s=30)
+assert repr(Duration(s=150)) == "Duration(min=2, s=30)"
 
 # ----------------------------------------------------------------------------
 # 2. A fraction rounds exactly, to the nearest nanosecond, ties to even
@@ -39,11 +39,11 @@ assert Duration(ns=2.5).nanoseconds == 2
 assert Duration(ns=3.5).nanoseconds == 4
 # A year is 365.2425 days, as C++ counts it: 55 bits of nanoseconds, where a
 # float product would be one nanosecond off.
-assert Duration(y=0.286).nanoseconds == 9_025_288_271_999_999
+assert Duration(yr=0.286).nanoseconds == 9_025_288_271_999_999
 
 # Past 64 bits (about 292 years) is an error, never a wrapped value.
 try:
-    Duration(y=300)
+    Duration(yr=300)
 except OverflowError as e:
     assert "64 bits" in str(e)
 else:
@@ -78,7 +78,7 @@ clock = ManualTime()
 assert clock.now() == 0
 #             ┌─ units, as Duration takes them
 #             ▼
-clock.advance(m=1, s=30)
+clock.advance(min=1, s=30)
 assert clock.now() == 90_000_000_000
 #             ┌─ by: a Duration instead of units
 #             ▼

@@ -10,11 +10,11 @@
 //
 //     manual_time time;                                     // a clock that moves only when told
 //     const auto t0 = basic_timestamp<manual_clock>::now(time.clock());
-//     time.advance(1min + 30s);                             // std::chrono's units (duration.h)
+//     time.advance(1_min + 30_s);                           // the units' literals (duration.h)
 //     basic_timestamp<manual_clock>::now(time.clock()) - t0 -> 90s
 //
 // Every moment and every length of time is ONE signed 64-bit count of nanoseconds: a timestamp is
-// one since its clock's epoch, a difference of two is a duration (std::chrono::nanoseconds). Units,
+// one since its clock's epoch, a difference of two is a duration (duration.h). Units,
 // seconds as a float and calendar forms are conversions of that number, never a second store.
 //
 // CORE layer: pybind-free, and constexpr except for the operating-system clocks. The OS is read in
@@ -29,6 +29,7 @@
 #include <concepts>
 #include <cstdint>
 #include <limits>
+#include <thread>
 
 #include "../../platform/clocks.h"
 #include "duration.h"
@@ -71,6 +72,11 @@ public:
     }
 };
 
+/// The calling thread waits `d` on the OS's clock: the one sleep pygim's code makes, here beside the
+/// clocks so no other file names std::chrono. Code that a test must time exactly takes a clock
+/// instead; a sleep is for waiting on something outside the process (a server, a retry).
+inline void sleep_for(duration d) { std::this_thread::sleep_for(d.as_chrono()); }
+
 class manual_clock;
 
 /// Time that moves only when told: what makes timing code testable, and provable at compile time.
@@ -80,7 +86,7 @@ public:
     constexpr explicit manual_time(std::int64_t start_ns = 0) noexcept : m_ns(start_ns) {}
     /// Moves time by `by` (negative moves it back); std::overflow_error past 64 bits, and then
     /// time has not moved.
-    constexpr void advance(duration by) { m_ns = sum_exactly(duration(m_ns), by).count(); }
+    constexpr void advance(duration by) { m_ns = sum_exactly(duration(m_ns), by).nanoseconds(); }
     [[nodiscard]] constexpr std::int64_t now_ns() const noexcept { return m_ns; }
     [[nodiscard]] constexpr manual_clock clock() const noexcept;
 
