@@ -341,7 +341,7 @@ PYBIND11_MODULE(utils, m) {
     py::class_<primitives::manual_time>(m, "ManualTime",
                                    "Time that moves only when told: a clock for testing timing code exactly.")
         .def(py::init<>())
-        .def("now", &primitives::manual_time::now_ns, "Nanoseconds since this time started at 0.")
+        .def("now", &primitives::manual_time::since_epoch, "The Duration since this time started: Duration() at first.")
         .def("advance",
              [](primitives::manual_time& time, std::optional<primitives::duration> by, const py::kwargs& units) {
                  if (by && units.size() != 0) throw py::type_error("advance() takes a Duration or units, not both");
@@ -352,12 +352,14 @@ PYBIND11_MODULE(utils, m) {
              "OverflowError and time does not move.");
 
     // A calendar moment (core/primitives/timestamp.h): nanoseconds since the Unix epoch, from the
-    // wall clock.
+    // wall clock. Python names it by its count, Timestamp(12333), as int() reads it back.
+    const auto nanoseconds_since_epoch = [](const primitives::timestamp& t) { return t.since_epoch().nanoseconds(); };
     py::class_<primitives::timestamp>(m, "Timestamp", "A moment: nanoseconds since the Unix epoch (1970-01-01T00:00:00Z).")
-        .def(py::init<std::int64_t>(), py::arg("nanoseconds"), "The moment `nanoseconds` after the epoch: Timestamp(12333).")
+        .def(py::init([](std::int64_t nanoseconds) { return primitives::timestamp(primitives::duration(nanoseconds)); }),
+             py::arg("nanoseconds"), "The moment `nanoseconds` after the epoch: Timestamp(12333).")
         .def_static("now", [] { return primitives::timestamp::now(); }, "The wall clock's current moment.")
-        .def_property_readonly("nanoseconds", &primitives::timestamp::nanoseconds, "Nanoseconds since the epoch.")
-        .def("__int__", &primitives::timestamp::nanoseconds)
+        .def_property_readonly("nanoseconds", nanoseconds_since_epoch, "Nanoseconds since the epoch.")
+        .def("__int__", nanoseconds_since_epoch)
         .def("__sub__", [](const primitives::timestamp& later, const primitives::timestamp& earlier) { return later - earlier; },
              py::is_operator(), "The Duration from the other moment to this one.")
         .def(py::self == py::self)
@@ -366,8 +368,8 @@ PYBIND11_MODULE(utils, m) {
         .def(py::self <= py::self)
         .def(py::self > py::self)
         .def(py::self >= py::self)
-        .def("__hash__", &primitives::timestamp::nanoseconds)
-        .def("__repr__", [](const primitives::timestamp& t) { return "Timestamp(" + std::to_string(t.nanoseconds()) + ")"; });
+        .def("__hash__", nanoseconds_since_epoch)
+        .def("__repr__", [=](const primitives::timestamp& t) { return "Timestamp(" + std::to_string(nanoseconds_since_epoch(t)) + ")"; });
 
     // One timer for a block and its laps (core/primitives/quick_timer.h), its clock and its report
     // given.

@@ -75,14 +75,14 @@ assert abs(now.nanoseconds - time.time_ns()) < 1_000_000_000
 # Code that keeps time takes its clock, so a test can give it this one and
 # know every reading exactly.
 clock = ManualTime()
-assert clock.now() == 0
+assert clock.now() == Duration()
 #             ┌─ units, as Duration takes them
 #             ▼
 clock.advance(min=1, s=30)
-assert clock.now() == 90_000_000_000
+assert clock.now() == Duration(min=1, s=30)
 #             ┌─ by: a Duration instead of units
 #             ▼
 clock.advance(Duration(s=-30))
-assert clock.now() == 60_000_000_000
+assert clock.now() == Duration(min=1)
 
 print("durations and timestamps example OK:", wait)

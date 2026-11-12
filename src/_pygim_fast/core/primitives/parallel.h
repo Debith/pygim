@@ -84,7 +84,7 @@ public:
 
 private:
     [[nodiscard]] constexpr duration work_of(std::size_t remaining) const noexcept {
-        if (m_items == 0) return duration(0);
+        if (m_items == 0) return 0_ns;
         return m_spent / static_cast<duration::rep>(m_items) * static_cast<duration::rep>(remaining);
     }
 
@@ -94,7 +94,7 @@ private:
 static_assert(item_cost(32_us, 32).width_for(30, 16) == 1);     // 30 µs of work: not worth a thread
 static_assert(item_cost(320_us, 32).width_for(32, 16) == 4);    // 320 µs: four
 static_assert(item_cost(320_us, 32).width_for(1'000, 16) == 16); // 10 ms: the cap
-static_assert(item_cost(duration(0), 0).width_for(1'000, 16) == 1);
+static_assert(item_cost(0_ns, 0).width_for(1'000, 16) == 1);
 
 /// How much of a task's time its thread spent on a CPU rather than waiting — on a disk, a network.
 /// Threads past the cores pay only for the waiting: a warm read copies pages and slows down past
@@ -108,8 +108,8 @@ public:
     /// cores x wall / on-CPU time — but never more than `cap`, nor fewer than the cores.
     [[nodiscard]] constexpr std::size_t threads_worth(std::size_t cores, std::size_t cap) const noexcept {
         const std::size_t floor = std::min(cores, cap);
-        if (m_on_cpu <= duration(0)) return floor;   // unmeasured
-        const auto scaled = static_cast<std::size_t>(m_wall.nanoseconds() / std::max<duration::rep>(m_on_cpu.nanoseconds() / static_cast<duration::rep>(cores), 1));
+        if (m_on_cpu <= 0_ns) return floor;   // unmeasured
+        const auto scaled = static_cast<std::size_t>(m_wall / std::max(m_on_cpu / static_cast<duration::rep>(cores), 1_ns));
         return std::clamp(scaled, floor, cap);
     }
 
@@ -120,7 +120,7 @@ private:
 static_assert(compute_share(10_ms, 10_ms).threads_worth(16, 32) == 16);   // computes: the cores
 static_assert(compute_share(1_ms, 10_ms).threads_worth(16, 32) == 32);    // waits 90%: the cap
 static_assert(compute_share(8_ms, 10_ms).threads_worth(16, 32) == 20);    // waits 20%: 16 / 0.8
-static_assert(compute_share(duration(0), duration(0)).threads_worth(16, 32) == 16);
+static_assert(compute_share(0_ns, 0_ns).threads_worth(16, 32) == 16);
 
 /// How many threads a pool runs, the consumer counted: before any task is measured, and after.
 template <class W>
@@ -506,20 +506,24 @@ public:
         class spent {
         public:
             spent(task_meter& meter, bool sampled) noexcept
-                : m_meter(meter), m_sampled(sampled), m_cpu_before(sampled ? meter.m_cpu_clock.now_ns() : 0), m_before(meter.m_clock.now_ns()) {}
+                : m_meter(meter), m_sampled(sampled), m_cpu_before(sampled ? cpu_moment::now(meter.m_cpu_clock) : cpu_moment::never()),
+                  m_before(moment::now(meter.m_clock)) {}
             ~spent() {
-                const std::int64_t took = m_meter.m_clock.now_ns() - m_before;
+                const duration took = moment::now(m_meter.m_clock) - m_before;
                 if (m_sampled) {
-                    m_meter.m_sampled_cpu_ns.fetch_add(m_meter.m_cpu_clock.now_ns() - m_cpu_before, std::memory_order_relaxed);
-                    m_meter.m_sampled_wall_ns.fetch_add(took, std::memory_order_relaxed);
+                    m_meter.m_sampled_cpu_ns.fetch_add((cpu_moment::now(m_meter.m_cpu_clock) - m_cpu_before).nanoseconds(), std::memory_order_relaxed);
+                    m_meter.m_sampled_wall_ns.fetch_add(took.nanoseconds(), std::memory_order_relaxed);
                 }
-                m_meter.m_spent_ns.fetch_add(took, std::memory_order_relaxed);
+                m_meter.m_spent_ns.fetch_add(took.nanoseconds(), std::memory_order_relaxed);
             }
 
         private:
+            using moment = basic_timestamp<Clock>;
+            using cpu_moment = basic_timestamp<CpuClock>;
             task_meter& m_meter;
             bool m_sampled;
-            std::int64_t m_cpu_before, m_before;
+            cpu_moment m_cpu_before;
+            moment m_before;
         } after(*this, k % sampled_every == 0);
         return f();
     }

@@ -147,7 +147,7 @@ def test_repr_round_trips():
 
 
 def test_manual_time_starts_at_zero():
-    assert pygim.ManualTime().now() == 0
+    assert pygim.ManualTime().now() == pygim.Duration()
 
 
 def test_manual_time_advances_by_units():
@@ -155,13 +155,13 @@ def test_manual_time_advances_by_units():
     time.advance(min=1, s=30)
     time.advance(min=1, s=90)
     time.advance(ns=50)
-    assert time.now() == 240_000_000_050
+    assert time.now() == pygim.Duration(min=4, ns=50)
 
 
 def test_manual_time_advances_by_a_duration():
     time = pygim.ManualTime()
     time.advance(pygim.Duration(yr=1))
-    assert time.now() == 31_556_952_000_000_000
+    assert time.now() == pygim.Duration(yr=1)
 
 
 def test_manual_time_refuses_to_pass_64_bits_and_does_not_move():
@@ -169,7 +169,7 @@ def test_manual_time_refuses_to_pass_64_bits_and_does_not_move():
     time.advance(yr=200)
     with pytest.raises(OverflowError):
         time.advance(yr=100)
-    assert time.now() == 200 * NS_PER["yr"]
+    assert time.now() == pygim.Duration(yr=200)
 
 
 def test_advance_takes_a_duration_or_units_not_both():
@@ -180,4 +180,4 @@ def test_advance_takes_a_duration_or_units_not_both():
 def test_advance_given_nothing_moves_nothing():
     time = pygim.ManualTime()
     time.advance()
-    assert time.now() == 0
+    assert time.now() == pygim.Duration()

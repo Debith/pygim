@@ -26,7 +26,7 @@ from pygim import Duration, ManualTime, QuickTimer, Report
 # ----------------------------------------------------------------------------
 clock = ManualTime()                         # starts at 0 ns
 clock.advance(us=1)                          # units add up into one 64-bit count of nanoseconds
-assert clock.now() == 1_000
+assert clock.now() == Duration(us=1)
 
 
 def tick_tock(ms):
@@ -35,7 +35,7 @@ def tick_tock(ms):
 
 
 tick_tock(2)
-assert clock.now() == 2_001_000
+assert clock.now() == Duration(ms=2, us=1)
 
 # ----------------------------------------------------------------------------
 # 2. Timing a block and its laps, silently

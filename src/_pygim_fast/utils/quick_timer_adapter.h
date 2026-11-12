@@ -57,8 +57,8 @@ class python_clock {
 public:
     python_clock() = default;
     explicit python_clock(const manual_time& time) : m_source(time.clock()) {}
-    [[nodiscard]] std::int64_t now_ns() const {
-        return std::visit([](const auto& clock) { return clock.now_ns(); }, m_source);
+    [[nodiscard]] duration since_epoch() const {
+        return std::visit([](const auto& clock) { return clock.since_epoch(); }, m_source);
     }
 
 private:

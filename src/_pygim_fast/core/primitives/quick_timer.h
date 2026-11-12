@@ -71,7 +71,7 @@ private:
     std::string_view m_name;
     duration m_took;
 };
-static_assert(lap_time("read", duration(2'000)).took() == duration(2'000));
+static_assert(lap_time("read", 2_us).took() == 2_us);
 
 /// What a timer measured: its name, its total and its laps in the order they first started. The
 /// names are views of the timer's, so a snapshot is read while they live (a Python snapshot copies them).
@@ -118,11 +118,11 @@ private:
     std::vector<lap_time> m_laps;
 };
 static_assert([] {
-    const timer_snapshot s("job", duration(6), {lap_time("read", duration(2)), lap_time("parse", duration(4))});
-    const timer_snapshot t("job", duration(7), {lap_time("parse", duration(1)), lap_time("write", duration(5))});   // another order
+    const timer_snapshot s("job", 6_ns, {lap_time("read", 2_ns), lap_time("parse", 4_ns)});
+    const timer_snapshot t("job", 7_ns, {lap_time("parse", 1_ns), lap_time("write", 5_ns)});   // another order
     const timer_snapshot u = s | t;
-    return s.lap("parse") == duration(4) && (s | s).total() == duration(12) && u.lap("read") == duration(2) &&
-           u.lap("parse") == duration(5) && u.lap("write") == duration(5) && u.laps().size() == 3;
+    return s.lap("parse") == 4_ns && (s | s).total() == 12_ns && u.lap("read") == 2_ns &&
+           u.lap("parse") == 5_ns && u.lap("write") == 5_ns && u.laps().size() == 3;
 }());
 
 // ── the report ───────────────────────────────────────────────────────────
@@ -469,9 +469,9 @@ static_assert([] {   // a lap and the total, by a clock that moves only when tol
     manual_time time;
     QuickTimerT<void, 8, manual_clock, silent> timer("job", time.clock());
     timer.start_lap("read");
-    time.advance(duration(5));
+    time.advance(5_ns);
     timer.finish();
-    return timer.total() == duration(5) && timer.lap("read") == duration(5) && timer.finished();
+    return timer.total() == 5_ns && timer.lap("read") == 5_ns && timer.finished();
 }());
 
 // String mode, 8 laps, the monotonic clock, text on stderr.

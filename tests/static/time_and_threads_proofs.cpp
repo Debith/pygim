@@ -29,13 +29,14 @@ using pygim::primitives::duration;
 using manual_timer = pygim::primitives::QuickTimerT<void, 8, manual_clock, pygim::primitives::silent>;
 using manual_moment = basic_timestamp<manual_clock>;
 
-// A moment read from a clock is that clock's count; the difference of two is the time between.
+// A moment read from a clock is the time since that clock's epoch; the difference of two is the
+// time between.
 consteval bool timestamps_read_their_clock() {
-    manual_time time(1'000);
+    manual_time time(1_us);
     const manual_moment a = manual_moment::now(time.clock());
-    time.advance(pygim::primitives::duration(2'500));
+    time.advance(2'500_ns);
     const manual_moment b = manual_moment::now(time.clock());
-    return a.nanoseconds() == 1'000 && b.nanoseconds() == 3'500 && b - a == pygim::primitives::duration(2'500) && a < b &&
+    return a.since_epoch() == 1_us && b.since_epoch() == 3'500_ns && b - a == 2'500_ns && a < b &&
            b.seconds_since(a) == 2.5e-6;
 }
 static_assert(timestamps_read_their_clock());
@@ -48,8 +49,8 @@ consteval bool a_clock_sees_every_advance() {
     const manual_moment start = manual_moment::now(clock);
     time.advance(1_min);
     time.advance(30_s);
-    time.advance(duration(-500));
-    return manual_moment::now(clock) - start == 90_s - duration(500);
+    time.advance(-500_ns);
+    return manual_moment::now(clock) - start == 90_s - 500_ns;
 }
 static_assert(a_clock_sees_every_advance());
 
@@ -57,15 +58,15 @@ static_assert(a_clock_sees_every_advance());
 consteval bool quick_timer_measures_with_its_clock() {
     manual_time time;
     manual_timer timer("job", time.clock());
-    time.advance(pygim::primitives::duration(1'000));
+    time.advance(1_us);
     timer.start_lap("read");
-    time.advance(pygim::primitives::duration(2'000));
+    time.advance(2_us);
     timer.start_lap("parse");   // stops "read"
-    time.advance(pygim::primitives::duration(4'000));
+    time.advance(4_us);
     timer.stop_lap("parse");
-    time.advance(pygim::primitives::duration(8'000));
-    return timer.total() == duration(15'000) && timer.lap("read") == duration(2'000) &&
-           timer.lap("parse") == duration(4'000) && timer.total_seconds() == 15e-6;
+    time.advance(8_us);
+    return timer.total() == 15_us && timer.lap("read") == 2_us &&
+           timer.lap("parse") == 4_us && timer.total_seconds() == 15e-6;
 }
 static_assert(quick_timer_measures_with_its_clock());
 
@@ -74,21 +75,21 @@ consteval bool a_running_lap_reports_up_to_now() {
     manual_time time;
     manual_timer timer("job", time.clock());
     timer.start_lap("wait");
-    time.advance(pygim::primitives::duration(3'000));
-    const bool running = timer.lap("wait") == duration(3'000);
+    time.advance(3_us);
+    const bool running = timer.lap("wait") == 3_us;
     timer.stop_lap("wait");
-    time.advance(pygim::primitives::duration(5'000));
-    return running && timer.stop_lap("wait") == duration(3'000);
+    time.advance(5_us);
+    return running && timer.stop_lap("wait") == 3_us;
 }
 static_assert(a_running_lap_reports_up_to_now());
 
 // "Not running" is never(), not the clock's zero: a lap started at time 0 is running.
 consteval bool a_lap_started_at_zero_runs() {
-    manual_time time(0);
+    manual_time time(0_ns);
     manual_timer timer("job", time.clock());
     timer.start_lap("first");
-    time.advance(pygim::primitives::duration(1'000));
-    return timer.stop_lap("first") == duration(1'000);
+    time.advance(1_us);
+    return timer.stop_lap("first") == 1_us;
 }
 static_assert(a_lap_started_at_zero_runs());
 
@@ -112,7 +113,7 @@ static_assert(units_convert_exactly());
 // A duration is spelt in whole units, longest first; the parts add back to it.
 consteval bool spelling_adds_back() {
     using pygim::primitives::duration;
-    const duration year_and_7ns = 1_yr + duration(7);
+    const duration year_and_7ns = 1_yr + 7_ns;
     const pygim::primitives::spelt_in_units s(year_and_7ns);
     const pygim::primitives::spelt_in_units negative(-(150_s));
     duration sum(0);
@@ -162,8 +163,8 @@ private:
 };
 static_assert([] {
     moment_log log;
-    log.note(moment_log::kind::lap_stopped, "read", duration(5));
-    return log.size() == 1 && log.lap_at(0) == "read" && log.took_at(0) == duration(5);
+    log.note(moment_log::kind::lap_stopped, "read", 5_ns);
+    return log.size() == 1 && log.lap_at(0) == "read" && log.took_at(0) == 5_ns;
 }());
 
 // A report for proofs: it notes each moment in a moment_log (a timer_report, constexpr throughout).
@@ -178,8 +179,8 @@ public:
 private:
     using kind = moment_log::kind;
     moment_log* m_log;
-    constexpr void note(pygim::primitives::timer_started, std::string_view) const { m_log->note(kind::timer_started, {}, duration(0)); }
-    constexpr void note(pygim::primitives::lap_started, std::string_view, std::string_view lap) const { m_log->note(kind::lap_started, lap, duration(0)); }
+    constexpr void note(pygim::primitives::timer_started, std::string_view) const { m_log->note(kind::timer_started, {}, 0_ns); }
+    constexpr void note(pygim::primitives::lap_started, std::string_view, std::string_view lap) const { m_log->note(kind::lap_started, lap, 0_ns); }
     constexpr void note(pygim::primitives::lap_stopped, std::string_view, std::string_view lap, duration took) const { m_log->note(kind::lap_stopped, lap, took); }
     constexpr void note(pygim::primitives::timer_finished, const pygim::primitives::timer_snapshot& s) const { m_log->note(kind::timer_finished, {}, s.total()); }
 };
@@ -196,16 +197,16 @@ consteval bool the_report_hears_every_moment_in_order() {
     {
         logged_timer timer("job", time.clock(), logging_report(log));
         timer.start_lap("read");
-        time.advance(duration(2'000));
+        time.advance(2_us);
         timer.start_lap("parse");
-        time.advance(duration(4'000));
+        time.advance(4_us);
     }
     return log.size() == 6 && log.kind_at(0) == kind::timer_started &&
            log.kind_at(1) == kind::lap_started && log.lap_at(1) == "read" &&
-           log.kind_at(2) == kind::lap_stopped && log.lap_at(2) == "read" && log.took_at(2) == duration(2'000) &&
+           log.kind_at(2) == kind::lap_stopped && log.lap_at(2) == "read" && log.took_at(2) == 2_us &&
            log.kind_at(3) == kind::lap_started && log.lap_at(3) == "parse" &&
-           log.kind_at(4) == kind::lap_stopped && log.took_at(4) == duration(4'000) &&
-           log.kind_at(5) == kind::timer_finished && log.took_at(5) == duration(6'000);
+           log.kind_at(4) == kind::lap_stopped && log.took_at(4) == 4_us &&
+           log.kind_at(5) == kind::timer_finished && log.took_at(5) == 6_us;
 }
 static_assert(the_report_hears_every_moment_in_order());
 
@@ -216,15 +217,15 @@ consteval bool a_finish_is_once_and_freezes_the_total() {
     moment_log log;
     logged_timer timer("job", time.clock(), logging_report(log));
     timer.start_lap("read");
-    time.advance(duration(2'000));
+    time.advance(2_us);
     timer.finish();
     timer.finish();
-    time.advance(duration(9'000));
+    time.advance(9_us);
     const auto snapshot = timer.snapshot();
     std::size_t finishes = 0;
     for (std::size_t i = 0; i < log.size(); ++i) finishes += log.kind_at(i) == kind::timer_finished ? 1 : 0;
-    return finishes == 1 && timer.finished() && timer.total() == duration(2'000) &&
-           snapshot.lap("read") == duration(2'000) && snapshot.laps().size() == 1;
+    return finishes == 1 && timer.finished() && timer.total() == 2_us &&
+           snapshot.lap("read") == 2_us && snapshot.laps().size() == 1;
 }
 static_assert(a_finish_is_once_and_freezes_the_total());
 
@@ -236,7 +237,7 @@ consteval bool a_moved_timer_reports_once() {
     {
         logged_timer first("job", time.clock(), logging_report(log));
         logged_timer second(std::move(first));
-        time.advance(duration(1'000));
+        time.advance(1_us);
     }
     std::size_t finishes = 0;
     for (std::size_t i = 0; i < log.size(); ++i) finishes += log.kind_at(i) == kind::timer_finished ? 1 : 0;
