@@ -10,15 +10,13 @@
 #include <cstdint>
 #include <exception>
 #include <functional>
-#include <mutex>
 #include <optional>
 #include <stdexcept>
-#include <system_error>
-#include <thread>
 #include <type_traits>
 #include <utility>
 #include <vector>
 
+#include "../scope_exit.h"
 #include "../timestamp.h"
 #include "crew.h"
 #include "meter.h"
@@ -65,11 +63,8 @@ public:
             m_finished();
             return;
         }
-        try {
-            grow_to(m_width.at_start());
-        } catch (const std::system_error&) {
-            if (m_workers_started.load(std::memory_order_relaxed) == 0) throw;   // fewer workers do the same work; none, none of it
-        }
+        grow_to(m_width.at_start());
+        m_crew.rethrow_if_none_run();   // fewer workers do the same work; none, none of it
     }
 
     /// Whether every result has been handed out.
@@ -89,10 +84,7 @@ public:
         if (j >= m_n) throw std::out_of_range("ordered_pool: every result was handed out");
         if (!m_started) {   // the workers start with the first result asked for, not with the pool
             m_started = true;
-            try {
-                grow_to(m_width.at_start());
-            } catch (const std::system_error&) {
-            }   // best effort: the consumer works, whatever starts beside it
+            grow_to(m_width.at_start());   // the consumer works, whatever starts beside it
         }
         std::size_t unclaimed = j;
         if (m_next_claim.compare_exchange_strong(unclaimed, j + 1)) return run_here(j);
@@ -215,44 +207,28 @@ private:
         if (done == m_n && m_finished) m_finished();
     }
 
-    // Workers until `threads` threads run — the consumer counted as one while it works too (next()),
-    // not under run_all — never more than half the window's slots, since no more can be let in at
-    // once when it drains by half: a 16-slot window on 16 threads took 215 ms for 20,000 small
-    // files, on 8 threads 18 ms. A window that holds every result (run_all's) has no such limit.
+    // Workers until `wanted` threads run, as far as the system lets them start.
     void grow_to(std::size_t wanted) {
-        const std::size_t room = m_slots.size() >= m_n ? wanted : std::max<std::size_t>(m_slots.size() / 2, 1);
-        const std::size_t threads = std::min({wanted, room, std::max<std::size_t>(m_n, 1)});   // never more threads than tasks
-        const std::size_t caller = m_caller_works ? 1 : 0;
-        if (threads <= m_workers_started.load(std::memory_order_relaxed) + caller) return;
-        std::lock_guard guard(m_spawn);
-        class counted {   // those that did start, even when the next cannot
-        public:
-            explicit counted(ordered_pool& pool) noexcept : m_pool(pool) {}
-            ~counted() { m_pool.m_workers_started.store(m_pool.m_workers.size(), std::memory_order_relaxed); }
+        m_crew.grow_to(workers_for(wanted), [this](std::size_t) { work(); });
+    }
 
-        private:
-            ordered_pool& m_pool;
-        } after(*this);
-        const signals_blocked quiet;   // inherited by the workers started here
-        while (!m_stopping.load(std::memory_order_relaxed) && m_workers.size() + caller < threads) {
-            m_workers.emplace_back([this] { name_this_thread("pygim-pool"); work(); });
-        }
+    // The workers `wanted` threads mean: the consumer counted as one while it works too (next()),
+    // not under run_all; never more threads than tasks, nor than half the window's slots, since no
+    // more can be let in at once when it drains by half: a 16-slot window on 16 threads took 215 ms
+    // for 20,000 small files, on 8 threads 18 ms. A window that holds every result (run_all's) has
+    // no such limit.
+    [[nodiscard]] std::size_t workers_for(std::size_t wanted) const noexcept {
+        const std::size_t room = m_slots.size() >= m_n ? wanted : std::max<std::size_t>(m_slots.size() / 2, 1);
+        const std::size_t threads = std::min({wanted, room, std::max<std::size_t>(m_n, 1)});
+        return threads - std::min<std::size_t>(threads, m_caller_works ? 1 : 0);
     }
 
     // Task j, in the consumer: handed out and counted done, returned or thrown.
     [[nodiscard]] result_type run_here(std::size_t j) {
-        class moves_on {
-        public:
-            moves_on(ordered_pool& pool, std::size_t j) noexcept : m_pool(pool), m_j(j) {}
-            ~moves_on() {
-                m_pool.release(m_j, 0);
-                m_pool.finished_one();
-            }
-
-        private:
-            ordered_pool& m_pool;
-            std::size_t m_j;
-        } after(*this, j);
+        const on_scope_exit moves_on([this, j] {
+            release(j, 0);
+            finished_one();
+        });
         return m_meter.timed(j, [&] { return m_task(j); });
     }
 
@@ -287,18 +263,11 @@ private:
 
     // Every waiter woken to find the pool stopping, then every worker joined.
     void stop() noexcept {
-        {
-            std::lock_guard guard(m_spawn);
-            m_stopping.store(true, std::memory_order_release);
-        }
+        m_stopping.store(true, std::memory_order_release);
         m_moved.fetch_add(1, std::memory_order_acq_rel);
         m_moved.notify_all();
-        std::vector<std::jthread> workers;
-        {
-            std::lock_guard guard(m_spawn);
-            workers = std::move(m_workers);
-        }
-    }   // joined here
+        m_crew.stop();
+    }
 
     std::size_t m_n;
     Task m_task;
@@ -314,12 +283,10 @@ private:
     std::size_t m_unannounced_bytes = 0;
     std::atomic<std::uint32_t> m_moved{0};        // moves at each wake-up: what those workers wait on
     std::atomic<bool> m_stopping{false};
-    std::atomic<std::size_t> m_workers_started{0};
     bool m_started = false;                       // the consumer's: workers start at run_all or the first next()
     bool m_caller_works = true;                   // false under run_all: every task on workers
     std::function<void()> m_finished;             // run_all's: called once the last task is done
-    std::mutex m_spawn;
-    std::vector<std::jthread> m_workers;
+    worker_crew m_crew{"pygim-pool"};             // last: its threads stop before what they use goes
 };
 
 }  // namespace pygim::primitives::parallel

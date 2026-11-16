@@ -33,12 +33,13 @@
 // CORE layer: pybind-free. A task may touch only what belongs to its index; next() is called from
 // one thread at a time.
 //
-// Each part is a header of its own in parallel/: width.h, window.h, meter.h, crew.h, for_each.h,
-// ordered_pool.h and task_pool.h.
+// Each part is a header of its own in parallel/: width.h, window.h, meter.h, first_error.h, crew.h,
+// for_each.h, ordered_pool.h and task_pool.h.
 
 #include "parallel/width.h"
 #include "parallel/window.h"
 #include "parallel/meter.h"
+#include "parallel/first_error.h"
 #include "parallel/crew.h"
 #include "parallel/for_each.h"
 #include "parallel/ordered_pool.h"

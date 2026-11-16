@@ -68,8 +68,8 @@ public:
     [[nodiscard]] constexpr std::size_t threads_worth(std::size_t cores, std::size_t cap) const noexcept {
         const std::size_t floor = std::min(cores, cap);
         if (m_on_cpu <= 0_ns) return floor;   // unmeasured
-        const auto scaled = static_cast<std::size_t>(m_wall / std::max(m_on_cpu / static_cast<duration::rep>(cores), 1_ns));
-        return std::clamp(scaled, floor, cap);
+        const duration on_cpu_per_core = std::max(m_on_cpu / static_cast<duration::rep>(cores), 1_ns);
+        return std::clamp(static_cast<std::size_t>(m_wall / on_cpu_per_core), floor, cap);
     }
 
 private:

@@ -9,6 +9,7 @@
 #include <cstdint>
 
 #include "../duration.h"
+#include "../scope_exit.h"
 #include "../timestamp.h"
 #include "width.h"
 
@@ -30,28 +31,14 @@ public:
     /// pool started is sampled on the CPU clock when k is a multiple of sampled_every.
     template <class F>
     decltype(auto) timed(std::size_t k, F&& f) {
-        class spent {
-        public:
-            spent(task_meter& meter, bool sampled) noexcept
-                : m_meter(meter), m_sampled(sampled), m_cpu_before(sampled ? cpu_moment::now(meter.m_cpu_clock) : cpu_moment::never()),
-                  m_before(moment::now(meter.m_clock)) {}
-            ~spent() {
-                const duration took = moment::now(m_meter.m_clock) - m_before;
-                if (m_sampled) {
-                    m_meter.m_sampled_cpu_ns.fetch_add((cpu_moment::now(m_meter.m_cpu_clock) - m_cpu_before).nanoseconds(), std::memory_order_relaxed);
-                    m_meter.m_sampled_wall_ns.fetch_add(took.nanoseconds(), std::memory_order_relaxed);
-                }
-                m_meter.m_spent_ns.fetch_add(took.nanoseconds(), std::memory_order_relaxed);
-            }
-
-        private:
-            using moment = basic_timestamp<Clock>;
-            using cpu_moment = basic_timestamp<CpuClock>;
-            task_meter& m_meter;
-            bool m_sampled;
-            cpu_moment m_cpu_before;
-            moment m_before;
-        } after(*this, k % sampled_every == 0);
+        const bool sampled = k % sampled_every == 0;
+        const cpu_moment cpu_before = sampled ? cpu_moment::now(m_cpu_clock) : cpu_moment::never();
+        const moment before = moment::now(m_clock);
+        const on_scope_exit spent([&] {
+            const duration took = moment::now(m_clock) - before;
+            if (sampled) add_sample(cpu_moment::now(m_cpu_clock) - cpu_before, took);
+            m_spent_ns.fetch_add(took.nanoseconds(), std::memory_order_relaxed);
+        });
         return f();
     }
 
@@ -74,6 +61,15 @@ public:
     }
 
 private:
+    using moment = basic_timestamp<Clock>;
+    using cpu_moment = basic_timestamp<CpuClock>;
+
+    // A sampled task: `on_cpu` of its `took` spent on a CPU.
+    void add_sample(duration on_cpu, duration took) noexcept {
+        m_sampled_cpu_ns.fetch_add(on_cpu.nanoseconds(), std::memory_order_relaxed);
+        m_sampled_wall_ns.fetch_add(took.nanoseconds(), std::memory_order_relaxed);
+    }
+
     [[no_unique_address]] Clock m_clock;
     [[no_unique_address]] CpuClock m_cpu_clock;
     std::atomic<std::int64_t> m_spent_ns{0};          // the finished tasks' time

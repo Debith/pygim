@@ -8,17 +8,15 @@
 #include <condition_variable>
 #include <cstddef>
 #include <deque>
-#include <exception>
 #include <functional>
 #include <mutex>
 #include <optional>
-#include <system_error>
-#include <thread>
 #include <utility>
 #include <vector>
 
 #include "../timestamp.h"
 #include "crew.h"
+#include "first_error.h"
 #include "meter.h"
 #include "width.h"
 
@@ -73,10 +71,7 @@ public:
     /// start — and returns when none is left; a task's exception is rethrown here once the others
     /// have finished.
     void run_here() {
-        try {
-            grow_to(m_width.at_start());
-        } catch (const std::system_error&) {
-        }   // best effort: the caller works, whatever starts beside it
+        grow_to(m_width.at_start());   // the caller works, whatever starts beside it
         work();
         rethrow_if_failed();
     }
@@ -98,45 +93,31 @@ public:
             m_finished();   // outside the lock, which it may take
             return;
         }
-        try {
-            grow_to(m_width.at_start());
-        } catch (const std::system_error&) {
-            if (m_workers_started.load(std::memory_order_relaxed) == 0) throw;   // fewer workers do the same work; none, none of it
-        }
+        grow_to(m_width.at_start());
+        m_crew.rethrow_if_none_run();   // fewer workers do the same work; none, none of it
     }
 
     /// A task's exception, rethrown: the first one, if any task threw.
-    void rethrow_if_failed() const {
-        std::lock_guard guard(m_lock);
-        if (m_error) std::rethrow_exception(m_error);
-    }
+    void rethrow_if_failed() const { m_errors.rethrow(); }
 
 private:
-    // One worker (or the caller, under run_here): tasks until none is queued or running. Whatever
-    // escapes a task's bookkeeping (a lock that cannot be taken, say) becomes the pool's error and
-    // ends the run for everyone, so no caller waits on tasks that will never end.
+    // One worker (or the caller, under run_here): tasks until none is queued or running.
     void work() {
         try {
-            for (;;) {
-                std::optional<Task> task;
-                {
-                    std::unique_lock guard(m_lock);
-                    m_wake.wait(guard, [&] { return m_stopping || !m_queue.empty() || m_pending == 0; });
-                    if (m_stopping || m_queue.empty()) return;   // stopped, or every task done
-                    task.emplace(std::move(m_queue.front()));
-                    m_queue.pop_front();
-                }
-                run_one(std::move(*task));
-            }
+            while (std::optional<Task> task = next_task()) run_one(std::move(*task));
         } catch (...) {
-            {
-                std::lock_guard guard(m_lock);
-                if (!m_error) m_error = std::current_exception();
-                m_stopping = true;
-            }
-            m_wake.notify_all();
-            if (m_finished) m_finished();
+            fail_everyone();
         }
+    }
+
+    // The next task, waited for; none once the pool stops or every task is done.
+    [[nodiscard]] std::optional<Task> next_task() {
+        std::unique_lock guard(m_lock);
+        m_wake.wait(guard, [&] { return m_stopping || !m_queue.empty() || m_pending == 0; });
+        if (m_stopping || m_queue.empty()) return std::nullopt;
+        std::optional<Task> task(std::move(m_queue.front()));
+        m_queue.pop_front();
+        return task;
     }
 
     // One task, timed; then the count of what is left, and maybe more workers.
@@ -144,78 +125,70 @@ private:
         try {
             m_meter.timed(m_started.fetch_add(1, std::memory_order_relaxed), [&] { m_run(std::move(task), adder(this)); });
         } catch (...) {
-            std::lock_guard guard(m_lock);
-            if (!m_error) m_error = std::current_exception();
+            m_errors.capture();
         }
         m_meter.count_done();
-        bool all_done = false;
-        std::size_t queued = 0;
-        {
-            std::lock_guard guard(m_lock);
-            all_done = --m_pending == 0;   // the tasks this one added were counted before it ends
-            queued = m_queue.size();
-        }
-        if (all_done) {
-            m_wake.notify_all();
-            if (m_finished) m_finished();   // run_all's caller wakes
-            return;
-        }
-        m_meter.consider(m_width, queued, [this](std::size_t w) { grow_to(w); });
-    }
-
-    // Workers until `threads` threads run, the caller counted as one under run_here; nothing to
-    // lock for when as many run already, as after the first few tasks they do.
-    void grow_to(std::size_t threads) {
-        const std::size_t caller = m_caller_works ? 1 : 0;
-        if (threads <= m_workers_started.load(std::memory_order_relaxed) + caller) return;
-        std::lock_guard guard(m_spawn);
-        class counted {   // those that did start, even when the next cannot
-        public:
-            explicit counted(task_pool& pool) noexcept : m_pool(pool) {}
-            ~counted() { m_pool.m_workers_started.store(m_pool.m_workers.size(), std::memory_order_relaxed); }
-
-        private:
-            task_pool& m_pool;
-        } after(*this);
-        const signals_blocked quiet;   // inherited by the workers started here
-        while (!m_stopping_spawn && m_workers.size() + caller < threads) {
-            m_workers.emplace_back([this] { name_this_thread("pygim-pool"); work(); });
+        if (const std::optional<std::size_t> queued = still_queued()) {
+            m_meter.consider(m_width, *queued, [this](std::size_t w) { grow_to(w); });
+        } else {
+            all_done();
         }
     }
 
-    void stop() noexcept {
-        {
-            std::lock_guard spawn(m_spawn);
-            m_stopping_spawn = true;
-        }
+    // One pending task fewer: how many are still queued, or nothing once that was the last one (the
+    // tasks a task added were counted before it ends).
+    [[nodiscard]] std::optional<std::size_t> still_queued() {
+        std::lock_guard guard(m_lock);
+        if (--m_pending == 0) return std::nullopt;
+        return m_queue.size();
+    }
+
+    // Every task is done: the waiting workers end, and run_all's caller wakes.
+    void all_done() {
+        m_wake.notify_all();
+        if (m_finished) m_finished();
+    }
+
+    // What escapes a task's bookkeeping (a lock that cannot be taken, say) becomes the pool's error
+    // and ends the run for everyone, so no caller waits on tasks that will never end.
+    void fail_everyone() noexcept {
+        m_errors.capture();
         {
             std::lock_guard guard(m_lock);
             m_stopping = true;
         }
         m_wake.notify_all();
-        std::vector<std::jthread> workers;
+        if (m_finished) m_finished();
+    }
+
+    // Workers until `threads` threads run, the caller counted as one under run_here.
+    void grow_to(std::size_t threads) {
+        m_crew.grow_to(threads - std::min<std::size_t>(threads, m_caller_works ? 1 : 0), [this](std::size_t) { work(); });
+    }
+
+    // Every waiter woken to find the pool stopping, then every worker joined.
+    void stop() noexcept {
         {
-            std::lock_guard spawn(m_spawn);
-            workers = std::move(m_workers);
+            std::lock_guard guard(m_lock);
+            m_stopping = true;
         }
-    }   // joined here
+        m_wake.notify_all();
+        m_crew.stop();
+    }
 
     Run m_run;
     Width m_width;
     task_meter<Clock, CpuClock> m_meter;
-    mutable std::mutex m_lock;                    // the queue, the count of what is left, the first error
+    std::mutex m_lock;                            // the queue and the count of what is left
     std::condition_variable m_wake;
     std::deque<Task> m_queue;
     std::size_t m_pending = 0;                    // queued and running
     bool m_stopping = false;
     bool m_caller_works = true;
     std::function<void()> m_finished;
-    std::exception_ptr m_error;
+    first_error m_errors;                         // a task's, or what escaped the bookkeeping
     std::atomic<std::size_t> m_started{0};        // tasks started: which the meter samples
-    std::mutex m_spawn;                           // the workers vector
-    bool m_stopping_spawn = false;
-    std::atomic<std::size_t> m_workers_started{0};
-    std::vector<std::jthread> m_workers;
+    worker_crew m_crew{"pygim-pool"};             // last: its threads stop before what they use goes
 };
 
 }  // namespace pygim::primitives::parallel
