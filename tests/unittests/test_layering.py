@@ -191,3 +191,26 @@ def test_every_package_that_ships_holds_something():
             if not init.read_text(encoding="utf-8").strip() and not others:
                 empty.append(init.parent.relative_to(src).as_posix())
     assert empty == [], "a package holding nothing: give it its code, or remove it"
+
+
+# pygim's C++ never imports a pygim module by name (#416): an extension that imported pygim's Python
+# as it loaded closed a loop with any of that Python which imported the extension back, and the loop
+# failed in one import order only (`import pygim.core.explib` first: "ImportError: initialization
+# failed", 2026-11-16). An extension reaches another through the C table it publishes: pygim.errors'
+# classes through errors/adapter.h, which imports pygim.errors, the one module that imports nothing of
+# pygim, by its table's constant. pygim's Python imports the extensions.
+PYGIM_IMPORT = re.compile(r'(?:module_::import|PyImport_ImportModule\w*)\s*\(\s*"_?pygim\b')
+
+
+def test_the_pygim_import_check_finds_what_it_is_for(tmp_path):
+    (tmp_path / "a.cpp").write_text(
+        'auto e = py::module_::import("pygim.core.explib");\n'
+        'auto s = py::module_::import("sys");\n'
+        'PyImport_ImportModule("_pygim._core");\n'
+        'auto t = PyCapsule_Import("pygim.errors._C_API", 0);\n'
+    )
+    assert matches_outside(tmp_path, PYGIM_IMPORT) == ["a.cpp:1", "a.cpp:3"]
+
+
+def test_no_extension_imports_a_pygim_module():
+    assert matches_outside(ROOT, PYGIM_IMPORT) == []

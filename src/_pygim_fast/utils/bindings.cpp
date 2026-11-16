@@ -3,6 +3,7 @@
 #include <pybind11/functional.h>
 #include <pybind11/operators.h>
 #include <pybind11/stl.h>
+#include <array>
 #include <cstdint>
 #include <optional>
 #include <string>
@@ -13,6 +14,7 @@
 #include "../core/primitives/duration.h"
 #include "../core/primitives/timestamp.h"
 #include "quick_timer_adapter.h"
+#include "../errors/adapter.h"
 #include "../mapping/dynamic_merge_map.h"
 
 namespace py = pybind11;
@@ -21,12 +23,19 @@ namespace {
 
 using MergeStrategy = pygim::mapping::MergeStrategy;
 
+std::string merge_strategy_name(MergeStrategy strategy);
+
+/// Every strategy a name can choose, in the order an unknown name's error lists them.
+constexpr std::array all_strategies{MergeStrategy::Sum, MergeStrategy::Max, MergeStrategy::Min, MergeStrategy::Replace};
+
+/// The strategy `value` names; GimOptionError(value, the names) when it names none.
 MergeStrategy parse_merge_strategy(const std::string& value) {
-      if (value == "sum") return MergeStrategy::Sum;
-      if (value == "max") return MergeStrategy::Max;
-      if (value == "min") return MergeStrategy::Min;
-      if (value == "replace") return MergeStrategy::Replace;
-      throw py::value_error("invalid merge strategy: " + value);
+      py::list names;
+      for (const MergeStrategy strategy : all_strategies) {
+            if (value == merge_strategy_name(strategy)) return strategy;
+            names.append(merge_strategy_name(strategy));
+      }
+      pygim::errors::raise(&pygim::errors::table::option_error, value, names);
 }
 
 std::string merge_strategy_name(MergeStrategy strategy) {
@@ -288,6 +297,7 @@ std::string duration_repr(primitives::duration d) {
 } // namespace
 
 PYBIND11_MODULE(utils, m) {
+    pygim::errors::load();
     m.doc() = "Utilities for Python.";
     m.def("is_dunder",
           py::overload_cast<const std::string &>(&is_dunder),

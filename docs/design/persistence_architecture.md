@@ -206,13 +206,15 @@ custom deleter that calls `release()` (if active) then `delete`. This eliminates
 the previous manual `new`/`delete` pattern and ensures cleanup on exception paths
 without explicit try/catch.
 
-### 4.9 GimError Exception Bridge
+### 4.9 Errors
 
-`bindings.cpp` registers `py::exception<std::runtime_error>(m, "GimError", PyExc_RuntimeError)`.
-This maps all C++ `std::runtime_error` exceptions to `GimError` (a `RuntimeError` subclass)
-at the Python boundary. Existing `except RuntimeError` catches remain compatible.
-This aligns with the project convention of using `GimError` hierarchy for library-level
-failures (defined in `pygim.core.explib`).
+A failed operation throws `std::runtime_error`, which pybind11 raises as `RuntimeError`.
+`bindings.cpp` used to make a class named `GimError` here
+(`py::exception<std::runtime_error>(m, "GimError", PyExc_RuntimeError)`), but that line registers no
+translation, so nothing ever raised it, and it was a second `GimError` beside pygim's own, which
+`except GimError` did not catch. It is gone: pygim's classes are made once, in `pygim.errors`
+([errors.md](errors.md)). Raising persistence's failures as its own class
+from there, a `GimError` and a `RuntimeError`, is persistence's next step.
 
 ### 4.10 Connection Pool
 
