@@ -12,10 +12,12 @@
 // A component with no logic above its calls, the file lock (platform/locks.h), is included only so
 // that every build compiles the running system's calls against their concept.
 
+#include "../../src/_pygim_fast/platform/caches.h"
 #include "../../src/_pygim_fast/platform/libraries.h"
 #include "../../src/_pygim_fast/platform/locks.h"
 #include "../../src/_pygim_fast/platform/memory.h"
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <string>
@@ -133,6 +135,48 @@ constexpr int linux_memory_holds() {
     return 0;
 }
 static_assert(linux_memory_holds() == 0);
+
+// ── Linux's caches: sysconf first, the kernel's list where it reports no L1d or L2 ──
+
+/// sysconf's report, and cpu0's list as the kernel writes it: a Zen 3 core, whose L1 instruction cache
+/// is larger than its L1d. `conf_sizes` false: sysconf reports no size (glibc on arm64, musl), only
+/// `conf_line`; `listed` false: no /sys either.
+template <bool conf_sizes, std::size_t conf_line = 64, bool listed = true>
+struct fake_cache_calls {
+    [[nodiscard]] static constexpr reported_caches sysconf_caches() noexcept {
+        return conf_sizes ? reported_caches{49152, 1310720, 25165824, conf_line} : reported_caches{0, 0, 0, conf_line};
+    }
+    [[nodiscard]] static constexpr std::string_view sys_cache_text(int index, const char* file, std::array<char, 32>& buffer) noexcept {
+        constexpr std::array<std::array<std::string_view, 4>, 4> cpu0{{   // level, type, size, coherency_line_size
+            {"1\n", "Data\n", "32K\n", "64\n"},
+            {"1\n", "Instruction\n", "64K\n", "64\n"},
+            {"2\n", "Unified\n", "512K\n", "64\n"},
+            {"3\n", "Unified\n", "32768K\n", "64\n"}}};
+        if (!listed || index >= static_cast<int>(cpu0.size())) return {};
+        const std::string_view name(file);
+        const std::size_t column = name == "level" ? 0 : name == "type" ? 1 : name == "size" ? 2 : 3;
+        const std::string_view text = cpu0[static_cast<std::size_t>(index)][column];
+        text.copy(buffer.data(), text.size());
+        return {buffer.data(), text.size()};
+    }
+};
+static_assert(cache_reports<basic_linux_caches<fake_cache_calls<true>>>);
+
+constexpr int linux_caches_hold() {
+    int step = 0;
+    using sysconf_says = basic_linux_caches<fake_cache_calls<true>>;
+    CHECK((sysconf_says::system_caches() == reported_caches{49152, 1310720, 25165824, 64}));   // sysconf's, as it says
+    using listed = basic_linux_caches<fake_cache_calls<false>>;
+    CHECK((listed::system_caches() == reported_caches{32768, 524288, 33554432, 64}));   // the list's data caches: not its larger L1i
+    using no_conf_line = basic_linux_caches<fake_cache_calls<false, 0>>;
+    CHECK(no_conf_line::system_caches().line() == 64);      // no line from sysconf: the list's
+    using conf_line = basic_linux_caches<fake_cache_calls<false, 128>>;
+    CHECK(conf_line::system_caches().line() == 128);        // sysconf's line kept over the list's
+    using nothing = basic_linux_caches<fake_cache_calls<false, 0, false>>;
+    CHECK(nothing::system_caches() == reported_caches());   // neither says: nothing, never a throw
+    return 0;
+}
+static_assert(linux_caches_hold() == 0);
 
 // ── The file lock: the running system's calls, open, lock, unlock and close over an int descriptor ──
 static_assert(file_lock_calls<native_lock_calls>);

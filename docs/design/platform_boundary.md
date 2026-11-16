@@ -62,7 +62,7 @@ allows none outside the folder. PR #39's branch had:
 | utils/interrupt.h | 7 | signal handlers and the wake-up pipe | calls |
 | core/primitives/parallel.h | 7 | the signal mask a pool's threads inherit; thread names | calls |
 | pathlike/file_reads.h | 4 | the reads; an errno's words; `open()`'s error for a folder | calls and rules |
-| utils/cpu.h, utils/memory.h | 8 | the caches; resident memory | calls |
+| core/primitives/cpu.h, utils/memory.h | 8 | the caches; resident memory | calls |
 | pathlike/adapter/path_text.h | 3 | a path's text at the Python boundary: the file system's encoding | rules |
 | persistence/strategy/mssql/bcp/bcp_api.h, persistence/odbc_headers.h | 4 | loading the ODBC driver (`dlopen` against `LoadLibraryW`); the SDK's headers | calls |
 | similarity/adapter/stream.h | 3 | whether the process forked since a stream opened | calls |
@@ -268,6 +268,8 @@ Each step a refactor under the tests as they are (#36), its own commit, the ratc
 | platform/posix/, linux/, macos/, windows/process.h | `posix_process` (the signal mask, `pthread_atfork`); `linux_process` and `macos_process` over it, each naming a thread its system's way; `windows_process`, which does nothing | calls |
 | platform/clocks.h | `thread_clocks`; `native_clocks`, the running system's, which core/primitives/timestamp.h's `thread_cpu_clock` reads | the choice |
 | platform/posix/, windows/clocks.h | `posix_clocks` (`CLOCK_THREAD_CPUTIME_ID`); `windows_clocks` (the measuring clock, standing in) | calls |
+| platform/caches.h | `cache_reports`; `reported_caches`; the kernel's /sys list read by rules compiled everywhere (`sys_size`, `listed_cache`, `data_caches`); `basic_linux_caches`, Linux's logic over its calls (sysconf, else the list), proven over fakes everywhere; `native_caches`, the running system's, which core/primitives/cpu.h reads | rules, logic, and the choice |
+| platform/linux/, macos/, windows/caches.h | `linux_cache_calls` (sysconf; one file of the list); `macos_caches` (sysctl, the fast cores' first); `windows_caches` (`GetLogicalProcessorInformationEx`) | calls |
 | platform/windows_headers.h | `<windows.h>` lean and without `min` and `max`, for every header that calls it | — |
 | pathlike/core.h | `posix_strategy`, `windows_strategy`: separators, case, parsing; `native_strategy` | rules |
 | persistence/.../bcp_api.h | `driver_files<F>`: the ODBC driver's library as each system names it | rules |
@@ -285,7 +287,6 @@ component's calls in the shape above, a class per system in a file of its own (D
 | platform/reads.h | `posix_reads`, `windows_reads` (posix/reads.h, windows/reads.h) behind the `file_reads` concept | calls |
 | platform/process.h | `process_id`, beside the calls the pools make | calls |
 | platform/signals.h | `interrupt_handlers` (Ctrl-C, SIGTERM), `wakeup` (a pipe; an event) | calls |
-| platform/caches.h | `system_caches`; the kernel's /sys list read by rules compiled everywhere | calls and rules |
 | platform/memory.h | `advise_huge_pages`, on each system's memory class beside the probes (Q51) | calls |
 
 ## Open
