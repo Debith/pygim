@@ -4,6 +4,7 @@
 #pragma once
 
 #include <cstddef>
+#include <format>
 #include <string>
 #include <utility>
 
@@ -16,12 +17,44 @@ namespace pygim::traits {
 
 namespace py = pybind11;
 
-/// Where a composed member came from. Example, for Greeter.greet composed into Person:
-/// {trait: 'tests.Greeter', defined: '/x/tests.py:12', composed: '/x/tests.py:40'}.
-struct Provenance {
-    std::string trait;     // the trait's module and qualified name
-    std::string defined;   // "file:line" of the member's code in the trait ("" for code that is not Python's)
-    std::string composed;  // "file:line" of the compose() call
+/// Where a composed member came from: the trait it first came from, where that trait defined it, and
+/// the compose() call that put it in the class. compose() knows the first two when it plans the member
+/// and the call's place only when it notes the record, so a Provenance is made in two steps, each
+/// named here: defined_by(), then composed_at().
+/// Example, for Greeter.greet composed into Person:
+/// Provenance::defined_by("tests.Greeter", "/x/tests.py:12").composed_at("/x/tests.py:40").
+class Provenance {
+public:
+    /// A member `trait` (its module and qualified name) defines at `defined` ("file:line"; "" for code
+    /// that is not Python's), not composed yet.
+    static Provenance defined_by(std::string trait, std::string defined) {
+        return Provenance(std::move(trait), std::move(defined), {});
+    }
+
+    /// The same member, composed by the call at `composed` ("file:line"). A member carried along from a
+    /// class composed earlier keeps its trait and definition; only this changes (R2).
+    [[nodiscard]] Provenance composed_at(std::string composed) const {
+        return Provenance(m_trait, m_defined, std::move(composed));
+    }
+
+    [[nodiscard]] const std::string& trait() const noexcept { return m_trait; }
+    [[nodiscard]] const std::string& defined() const noexcept { return m_defined; }
+    [[nodiscard]] const std::string& composed() const noexcept { return m_composed; }
+
+    /// What Python's repr() shows: "Provenance(trait='tests.Greeter', defined='...', composed='...')".
+    [[nodiscard]] std::string repr() const {
+        const auto quoted = [](const std::string& text) { return py::repr(py::str(text)).cast<std::string>(); };
+        return std::format("Provenance(trait={}, defined={}, composed={})", quoted(m_trait), quoted(m_defined),
+                           quoted(m_composed));
+    }
+
+private:
+    Provenance(std::string trait, std::string defined, std::string composed)
+        : m_trait(std::move(trait)), m_defined(std::move(defined)), m_composed(std::move(composed)) {}
+
+    std::string m_trait;
+    std::string m_defined;
+    std::string m_composed;
 };
 
 /// The composed members of one class, by name, in name order: a RegistryCore over the flat engine.

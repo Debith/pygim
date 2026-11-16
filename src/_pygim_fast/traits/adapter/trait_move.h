@@ -65,7 +65,7 @@ public:
     [[nodiscard]] Provenance attribution(const std::string& name, const py::handle& value,
                                          const py::object& code) const {
         if (m_carried != nullptr && m_carried->holds(name, value)) return m_carried->at(name);
-        return Provenance{m_name, where(code), {}};
+        return Provenance::defined_by(m_name, where(code));
     }
 
     /// `function`, rebuilt to belong to the target: its code by CodeBuilder with this move's rules

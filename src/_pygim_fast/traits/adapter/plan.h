@@ -36,7 +36,7 @@ public:
     [[nodiscard]] const std::string& name() const noexcept { return m_name; }
     [[nodiscard]] const py::object& name_object() const noexcept { return m_name_obj; }
     /// The trait it first came from (R2): the trait of this call, or one that trait was composed from.
-    [[nodiscard]] const std::string& trait() const noexcept { return m_origin.trait; }
+    [[nodiscard]] const std::string& trait() const noexcept { return m_origin.trait(); }
     /// The trait of this call that brings it.
     [[nodiscard]] const std::string& from() const noexcept { return m_from; }
 
@@ -54,7 +54,7 @@ public:
             if (PyErr_Occurred()) throw py::error_already_set();
             return;
         }
-        record.note(m_name, {m_origin.trait, m_origin.defined, composed}, py::reinterpret_borrow<py::object>(landed));
+        record.note(m_name, m_origin.composed_at(composed), py::reinterpret_borrow<py::object>(landed));
     }
 
 private:

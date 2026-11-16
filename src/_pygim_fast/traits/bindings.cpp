@@ -38,14 +38,10 @@ it. The original code object is never changed.
              "A new code object with every step applied, in order, to the code and every code object nested in it.");
 
     py::class_<Provenance>(m, "Provenance", "Where a composed member came from.")
-        .def_readonly("trait", &Provenance::trait, "The trait's module and qualified name.")
-        .def_readonly("defined", &Provenance::defined, "``file:line`` where the trait defined the member.")
-        .def_readonly("composed", &Provenance::composed, "``file:line`` of the ``compose()`` call.")
-        .def("__repr__", [](const Provenance& p) {
-            const auto quoted = [](const std::string& text) { return py::repr(py::str(text)).cast<std::string>(); };
-            return std::format("Provenance(trait={}, defined={}, composed={})",
-                               quoted(p.trait), quoted(p.defined), quoted(p.composed));
-        });
+        .def_property_readonly("trait", &Provenance::trait, "The trait's module and qualified name.")
+        .def_property_readonly("defined", &Provenance::defined, "``file:line`` where the trait defined the member.")
+        .def_property_readonly("composed", &Provenance::composed, "``file:line`` of the ``compose()`` call.")
+        .def("__repr__", &Provenance::repr);
 
     py::class_<TraitRecord>(m, "TraitRecord", "The members composed into one class, by name, in name order.")
         .def("__getitem__", &TraitRecord::at, py::arg("name"))
