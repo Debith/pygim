@@ -378,8 +378,8 @@ What changes, each from a measurement or a rule:
   its classes and a serial in the record's side table for every other; not taking over class
   creation for all classes (a metaclass for every class conflicts with `Enum`, `ABC` and pybind11
   classes, as D1 measured). Awaiting a decision.
-- **The supported Pythons, 3.9 to 3.14.** A code object has `co_qualname` only from 3.11; on 3.9
-  and 3.10 the function's `__qualname__` carries the name alone.
+- **The supported Pythons, 3.10 to 3.14** (pygim's, since main dropped 3.9). A code object has
+  `co_qualname` only from 3.11; on 3.10 the function's `__qualname__` carries the name alone.
 
 ## Sequence of work
 
