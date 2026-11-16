@@ -17,10 +17,12 @@ def measure_coverage(*, include=None, show_missing: bool = True):
 
     Parameters
     ----------
-    include : bool, optional
-        File to be included in the coverage report. If None, all shown.
+    include : str or pathlib.Path, optional
+        File (or file pattern) to be included in the coverage report. If None, all shown.
     show_missing : bool, optional
         True, if coverage report should include lines that were not run.
+
+    Coverage stops, saves and reports whether the code in the context returns or raises.
     """
     # FIXME: Running pytest fails, when `coverage` module is being imported.
     #        The error appears to be originating from os.getcwd(), which
@@ -29,12 +31,12 @@ def measure_coverage(*, include=None, show_missing: bool = True):
 
     cov = coverage.Coverage()
     cov.start()
-
-    yield
-
-    cov.stop()
-    cov.save()
-    cov.report(include=include, show_missing=show_missing)
+    try:
+        yield
+    finally:   # found 2026-10-31: a body that raised left coverage running, and nothing reported
+        cov.stop()
+        cov.save()
+        cov.report(include=include, show_missing=show_missing)
 
 
 def run_tests(test_file, module_name=None, pytest_args=None, *, coverage: bool = True):
@@ -44,9 +46,10 @@ def run_tests(test_file, module_name=None, pytest_args=None, *, coverage: bool =
     --------
     This function is typically included at the bottom of `test_<myfile>.py`.
 
-    .. code-block: python
+    .. code-block:: python
+
         if __name__ == "__main__":
-            from pygim.utils import run_tests
+            from pygim.core.testing import run_tests
             run_tests(__file__, MyClass.__module__, coverage=True)
 
     Notes
@@ -61,11 +64,16 @@ def run_tests(test_file, module_name=None, pytest_args=None, *, coverage: bool =
         Path to file to be tested.
     module_name : `str`
         Name of the module used for coverage. Usually works by passing object.__class__.__module__.
-    pytest_args : `tuple`, optional
-        Any arguments needed to be passed for pytest. (the default is None, which means default
-        argument set is given).
+    pytest_args : `list`, optional
+        Any arguments needed to be passed for pytest. (the default is None, which means
+        ``[test_file, "--tb=short"]``).
     coverage : `bool`, optional
         Runs the coverage. (the default is True, which runs the coverage).
+
+    Raises
+    ------
+    ValueError
+        When coverage is asked for a module that is not imported, or has no file to measure.
     """
     pytest_args = pytest_args or [str(test_file), "--tb=short"]
 
@@ -73,9 +81,11 @@ def run_tests(test_file, module_name=None, pytest_args=None, *, coverage: bool =
         pytest.main(pytest_args)
         return
 
-    module = sys.modules[module_name]
-    assert module, "When running the coverage, module must be specified!"
-    assert isinstance(module.__file__, str), "No file for the module!"
+    module = sys.modules.get(module_name)
+    if module is None:
+        raise ValueError(f"{module_name!r} is not imported: coverage measures a module that is")
+    if not isinstance(getattr(module, "__file__", None), str):
+        raise ValueError(f"{module_name!r} has no file to measure")
 
     with measure_coverage(include=module.__file__):
         reload(module)  # This is needed to include lines in module level in the report.

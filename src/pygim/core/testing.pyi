@@ -1,13 +1,13 @@
-from typing import Iterator, Text, Any, Optional, Iterable
+from typing import Any, ContextManager, Iterable, Optional, Text
 from _pygim.typing import PathLike
 
 def measure_coverage(
     *, include: Optional[PathLike] = ..., show_missing: bool = ...
-) -> Iterator[None]: ...
+) -> ContextManager[None]: ...
 def run_tests(
     test_file: PathLike,
-    module_name: Text,
-    pytest_args: Iterable[Any] = ...,
+    module_name: Optional[Text] = ...,
+    pytest_args: Optional[Iterable[Any]] = ...,
     *,
     coverage: bool = ...,
 ) -> None: ...
