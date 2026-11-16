@@ -9,13 +9,13 @@
 #include "../persistence/strategy/mssql/odbc_error.h"
 #include "../persistence/strategy/mssql/sql_type_map.h"
 #include "../persistence/strategy/mssql/stmt_handle.h"
+#include "../core/primitives/parallel/for_each.h"
 #include "../core/primitives/timestamp.h"
 
 #include <chrono>
 #include <cstdint>
 #include <string>
 #include <string_view>
-#include <thread>
 #include <utility>
 #include <vector>
 
@@ -163,24 +163,15 @@ inline ParallelFetchResult bench_fetch_parallel(
 
     const auto t_total = clock::now();
 
-    // Launch workers — each opens its own connection
-    std::vector<std::thread> threads;
-    threads.reserve(static_cast<std::size_t>(num_workers));
-
-    std::string conn_str_copy(conn_str);  // ensure stable storage for threads
-
-    for (int w = 0; w < num_workers; ++w) {
-        threads.emplace_back([&tasks, w, &conn_str_copy, block_size]() {
-            auto& task = tasks[static_cast<std::size_t>(w)];
-            OdbcConnection conn;
-            conn.open(conn_str_copy);
-            auto r = bench_fetch(conn, task.sql, block_size);
-            task.rows_fetched = r.total_rows;
-            task.fetch_s = r.fetch_s;
-        });
-    }
-
-    for (auto& t : threads) t.join();
+    // One thread per worker, each on a connection of its own; the first error is rethrown
+    primitives::parallel::for_each(tasks.size(), tasks.size(), [&](std::size_t w, std::size_t) {
+        auto& task = tasks[w];
+        OdbcConnection conn;
+        conn.open(conn_str);
+        auto r = bench_fetch(conn, task.sql, block_size);
+        task.rows_fetched = r.total_rows;
+        task.fetch_s = r.fetch_s;
+    });
 
     result.total_s = primitives::seconds_of(clock::now() - t_total);
 
