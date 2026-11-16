@@ -6,6 +6,8 @@
 //
 // CORE layer: pybind-free.
 
+#include <initializer_list>
+
 #include <pthread.h>
 #include <signal.h>
 
