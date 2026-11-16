@@ -7,54 +7,24 @@
 #pragma once
 
 #include "backend.h"
-#include <string>
+#include "../../../core/primitives/parallel/for_each.h"
+
+#include <algorithm>
 #include <string_view>
-#include <thread>
 #include <vector>
-#include <stdexcept>
-#include <exception>
 
 namespace pygim::strategy::mssql {
 
 class LoadConnectionPool {
 public:
-    /// Create @p pool_size connections to @p conn_str in parallel.
+    /// Create @p pool_size connections to @p conn_str in parallel, one thread each. The first error
+    /// is rethrown once every attempt has ended; the connections opened close with the pool.
     explicit LoadConnectionPool(std::string_view conn_str, int pool_size,
                                 int packet_size = 16384)
+        : m_connections(static_cast<std::size_t>(std::max(pool_size, 0)))
     {
-        if (pool_size <= 0) return;
-
-        m_connections.resize(static_cast<std::size_t>(pool_size));
-
-        if (pool_size == 1) {
-            m_connections[0].open(conn_str, packet_size);
-            return;
-        }
-
-        // Parallel connection establishment
-        std::vector<std::exception_ptr> errors(static_cast<std::size_t>(pool_size));
-        std::vector<std::thread> threads;
-        threads.reserve(static_cast<std::size_t>(pool_size));
-        std::string conn_str_copy(conn_str);  // stable storage for threads
-
-        for (int i = 0; i < pool_size; ++i) {
-            threads.emplace_back([this, &conn_str_copy, &errors, i, packet_size]() {
-                try {
-                    m_connections[static_cast<std::size_t>(i)].open(conn_str_copy, packet_size);
-                } catch (...) {
-                    errors[static_cast<std::size_t>(i)] = std::current_exception();
-                }
-            });
-        }
-
-        for (auto& t : threads) t.join();
-
-        // On any error, all connections close via OdbcConnection destructor
-        for (int i = 0; i < pool_size; ++i) {
-            if (errors[static_cast<std::size_t>(i)]) {
-                std::rethrow_exception(errors[static_cast<std::size_t>(i)]);
-            }
-        }
+        const std::size_t n = m_connections.size();
+        primitives::parallel::for_each(n, n, [&](std::size_t i, std::size_t) { m_connections[i].open(conn_str, packet_size); });
     }
 
     ~LoadConnectionPool() = default;  // OdbcConnection RAII handles cleanup

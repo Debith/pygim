@@ -14,11 +14,11 @@
 #include <numeric>
 #include <span>
 #include <string>
-#include <thread>
 #include <vector>
 
 #include <arrow/table.h>
 #include <arrow/table_builder.h>
+#include "../../../../core/primitives/parallel/for_each.h"
 #include "../../../../core/primitives/quick_timer.h"
 
 namespace pygim::strategy::mssql::bcp {
@@ -465,12 +465,12 @@ inline void finalize_bcp(BcpContext& ctx) {
 
     // 1. Resolve worker count
     const int desired = (num_workers <= 0)
-        ? std::min(4, static_cast<int>(std::thread::hardware_concurrency()))
+        ? std::min(4, static_cast<int>(primitives::parallel::this_machines_cores()))
         : num_workers;
 
     // Don't create more workers than rows
     int actual_workers = std::min(desired,
-        static_cast<int>(std::min<int64_t>(total_rows, std::thread::hardware_concurrency())));
+        static_cast<int>(std::min<int64_t>(total_rows, static_cast<int64_t>(primitives::parallel::this_machines_cores()))));
     actual_workers = std::max(actual_workers, 1);
 
     // 2. Fallback to single-connection if only 1 worker
@@ -499,13 +499,11 @@ inline void finalize_bcp(BcpContext& ctx) {
     auto qualified = sql::qualify_table(table);
     const int64_t effective_batch = batch_size > 0 ? batch_size : 100000LL;
 
-    // 5. Spawn worker threads — each gets its own Table slice
+    // 5. One thread per slice, each on its own connection; a worker keeps its error in its result
     std::vector<ParallelWorkerResult> results(static_cast<size_t>(actual_workers));
-    std::vector<std::thread>  threads;
-    threads.reserve(static_cast<size_t>(actual_workers));
-
-    for (int w = 0; w < actual_workers; ++w) {
-        threads.emplace_back([&, w]() {
+    const auto workers = static_cast<size_t>(actual_workers);
+    primitives::parallel::for_each(workers, workers, [&](size_t slice, size_t) {
+            const int w = static_cast<int>(slice);
             auto& res = results[static_cast<size_t>(w)];
             auto& conn = pool[w];
             auto& my_slice = slices[static_cast<size_t>(w)];
@@ -559,14 +557,9 @@ inline void finalize_bcp(BcpContext& ctx) {
             } catch (...) {
                 res.error = std::current_exception();
             }
-        });
-    }
+    });
 
-    // 6. Join all workers
-    for (auto& t : threads)
-        t.join();
-
-    // 7. Check for errors (rethrow first encountered)
+    // 6. Check for errors (rethrow the first worker's)
     for (int w = 0; w < actual_workers; ++w) {
         if (results[static_cast<size_t>(w)].error) {
             try {
@@ -583,7 +576,7 @@ inline void finalize_bcp(BcpContext& ctx) {
         }
     }
 
-    // 8. Merge metrics
+    // 7. Merge metrics
     return make_parallel_metrics(timer, results);
 }
 

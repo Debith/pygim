@@ -18,6 +18,7 @@
 
 #include "../../core/arrow_builder.h"
 #include "../../core/load_result.h"
+#include "../../../core/primitives/parallel/for_each.h"
 #include "../../../utils/logging.h"
 
 #include <arrow/table.h>
@@ -27,7 +28,6 @@
 #include <format>
 #include <string>
 #include <string_view>
-#include <thread>
 #include <utility>
 #include <vector>
 
@@ -322,28 +322,14 @@ inline core::LoadResult execute_parallel(
         PYGIM_LOG_FMT("[parallel_load] %d extra connections in %.3fs\n",
                       load_workers - 1, metrics.connect_seconds);
 
-        std::vector<detail::WorkerResult> results(static_cast<std::size_t>(load_workers));
-
-        {
-            std::vector<std::thread> threads;
-            threads.reserve(static_cast<std::size_t>(load_workers - 1));
-
-            // Workers 1..N-1 on extra connections
-            for (int w = 1; w < load_workers; ++w) {
-                threads.emplace_back([&, w]() {
-                    detail::run_worker((*extra_pool)[w - 1],
-                                       queries[static_cast<std::size_t>(w)],
-                                       schema_info, block_size,
-                                       results[static_cast<std::size_t>(w)]);
-                });
-            }
-
-            // Worker 0 on primary connection (this thread)
-            detail::run_worker(conn, queries[0], schema_info, block_size, results[0]);
-
-            for (auto& t : threads) t.join();
-        }
-
+        // One thread per query: query 0 on the primary connection, the others on the extra ones.
+        // run_worker keeps each worker's error in its result, so every query runs.
+        const auto workers = static_cast<std::size_t>(load_workers);
+        std::vector<detail::WorkerResult> results(workers);
+        primitives::parallel::for_each(workers, workers, [&](std::size_t w, std::size_t) {
+            OdbcConnection& on = w == 0 ? conn : (*extra_pool)[static_cast<int>(w) - 1];
+            detail::run_worker(on, queries[w], schema_info, block_size, results[w]);
+        });
         return results;
     };
 
