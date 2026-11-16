@@ -26,13 +26,17 @@ that picks the running system's class, and a system's own file (`platform/linux/
 What is built so far: the headers the code on `main` asks of the system — `native.h` (the family,
 decided once), `windows_headers.h`, `files.h` (a path's text), `memory.h` (the resident-memory probes,
 a class per system under `linux/`, `macos/` and `windows/`) and `libraries.h` (loading the ODBC driver,
-a class each under `posix/` and `windows/`) — and that code moved behind them. One header came ahead of
-its caller: `locks.h` (a file locked across processes, the calls each under `posix/` and `windows/`),
-whose first caller is a file store's commit lock on a branch not yet in `main`. It is here so that CI,
-which runs for pull requests into `main`, compiles each system's calls; that branch has no pull
-request. The other headers this document names (the listing, the reads, the process's and the signals'
-calls, the caches, the clocks) arrive with the code that calls them, each behind the same boundary and
-in the same shape.
+a class each under `posix/` and `windows/`) — and that code moved behind them. Three headers came ahead
+of their callers, so that CI, which runs for pull requests into `main`, compiles each system's calls:
+`locks.h` (a file locked across processes, the calls each under `posix/` and `windows/`), whose first
+caller is a file store's commit lock on a branch not yet in `main`, which has no pull request; and
+`process.h` (the pools' thread names, signal mask and fork hooks, POSIX's calls under `posix/` with
+Linux's and macOS's thread names over them, and Windows') and `clocks.h` (a thread's CPU time, a class
+each under `posix/` and `windows/`), whose caller, core/primitives/parallel.h's pools, came with them ahead of
+the parallel reads, the parser and similarity that call it, and is driven under the sanitizers by CI's
+threads-stress job meanwhile. The other headers this document names (the listing, the reads, the
+signals' calls, the caches) arrive with the code that calls them, each behind the same boundary and in
+the same shape.
 
 ## Scenario
 
@@ -56,14 +60,14 @@ allows none outside the folder. PR #39's branch had:
 | pathlike/glob_walk.h | 11 | the case and separator rules; the listing (`opendir` against `directory_iterator`); a name's native spelling; Linux's one-`lstat` shortcut | rules and calls |
 | pathlike/core.h | 7 | exclusive create, `fsync` (`F_FULLFSYNC` on macOS), unlink, a path's UTF-8, the native path strategy | calls, and the choice of rules |
 | utils/interrupt.h | 7 | signal handlers and the wake-up pipe | calls |
-| utils/parallel.h | 7 | the signal mask a pool's threads inherit; thread names | calls |
+| core/primitives/parallel.h | 7 | the signal mask a pool's threads inherit; thread names | calls |
 | pathlike/file_reads.h | 4 | the reads; an errno's words; `open()`'s error for a folder | calls and rules |
 | utils/cpu.h, utils/memory.h | 8 | the caches; resident memory | calls |
 | pathlike/adapter/path_text.h | 3 | a path's text at the Python boundary: the file system's encoding | rules |
 | persistence/strategy/mssql/bcp/bcp_api.h, persistence/odbc_headers.h | 4 | loading the ODBC driver (`dlopen` against `LoadLibraryW`); the SDK's headers | calls |
 | similarity/adapter/stream.h | 3 | whether the process forked since a stream opened | calls |
 | utils/huge_pages.h, utils/kept_blocks.h | 4 | `madvise` for huge pages; `pthread_atfork` | calls |
-| utils/timestamp.h | 1 | the clock | calls |
+| core/primitives/timestamp.h | 1 | the clock | calls |
 
 pathlike already has the shape in two places: `posix_strategy` and `windows_strategy` (core.h) are the
 path rules as compile-time classes, both compiled everywhere and proven against pathlib's
@@ -97,6 +101,8 @@ platform/
     libraries.h           library_loader; basic_posix_loader and basic_windows_loader, the logic over each system's
                           calls (D138); the choice of native_loader; basic_library, and library over it
     memory.h              process_memory; basic_linux_memory, the logic over Linux's calls (D138); the choice of native_memory
+    process.h             process_calls; the choice of native_process; name_this_thread, signals_blocked, at_fork over it
+    clocks.h              thread_clocks; the choice of native_clocks
     posix/libraries.h     posix_dl_calls: dlopen, dlsym, glob; posix_loader over them
     windows/libraries.h   win32_library_calls: LoadLibraryW, GetProcAddress; windows_loader over them
     linux/memory.h        linux_proc_calls: a pread of /proc/self/statm, the page size, getrusage; linux_memory over them
@@ -105,6 +111,12 @@ platform/
     locks.h               file_lock_calls; the choice of native_lock_calls (no logic above the calls, no policy)
     posix/locks.h         posix_lock_calls: open, flock, close
     windows/locks.h       win32_lock_calls: _wsopen_s, LockFileEx and UnlockFileEx through the descriptor's handle, _close
+    posix/process.h       posix_process: pthread_sigmask (posix_signals_blocked), pthread_atfork
+    linux/process.h       linux_process: posix_process, and pthread_setname_np(pthread_self(), name)
+    macos/process.h       macos_process: posix_process, and pthread_setname_np(name)
+    windows/process.h     windows_process: nothing to block, no fork, threads unnamed
+    posix/clocks.h        posix_clocks: clock_gettime(CLOCK_THREAD_CPUTIME_ID)
+    windows/clocks.h      windows_clocks: the measuring clock (GetThreadTimes counts in ~15 ms ticks)
     (tests/static/platform_proofs.cpp proves every logic class over fake calls, in every build, on every system)
 ```
 
@@ -252,6 +264,10 @@ Each step a refactor under the tests as they are (#36), its own commit, the ratc
 | tests/static/platform_proofs.cpp | every logic class over constexpr fake calls, compiled by every build of `pygim.utils`: the first name that opens, a missing library and symbol, the newest match and no match, Windows' widened name and missing glob, statm's resident count, the kilobyte peak, a peak below the present, a failed getrusage, procfs absent; and the running system's file-lock calls, compiled against their concept | the proofs |
 | platform/locks.h | `file_lock_calls`: open, lock, unlock and close a file locked across processes, over an `int` descriptor on every system; `native_lock_calls`, the running system's. No caller on `main` yet | the choice |
 | platform/posix/, windows/locks.h | `posix_lock_calls` (open, flock retried on EINTR, close), `win32_lock_calls` (_wsopen_s, LockFileEx and UnlockFileEx through the descriptor's handle, _close) | calls |
+| platform/process.h | `process_calls`; `native_process`, the running system's; `name_this_thread`, `signals_blocked` and `at_fork` over it, what core/primitives/parallel.h's pools call | the choice |
+| platform/posix/, linux/, macos/, windows/process.h | `posix_process` (the signal mask, `pthread_atfork`); `linux_process` and `macos_process` over it, each naming a thread its system's way; `windows_process`, which does nothing | calls |
+| platform/clocks.h | `thread_clocks`; `native_clocks`, the running system's, which core/primitives/timestamp.h's `thread_cpu_clock` reads | the choice |
+| platform/posix/, windows/clocks.h | `posix_clocks` (`CLOCK_THREAD_CPUTIME_ID`); `windows_clocks` (the measuring clock, standing in) | calls |
 | platform/windows_headers.h | `<windows.h>` lean and without `min` and `max`, for every header that calls it | — |
 | pathlike/core.h | `posix_strategy`, `windows_strategy`: separators, case, parsing; `native_strategy` | rules |
 | persistence/.../bcp_api.h | `driver_files<F>`: the ODBC driver's library as each system names it | rules |
@@ -267,11 +283,10 @@ component's calls in the shape above, a class per system in a file of its own (D
 | platform/home.h | `home_of(user)`: whose home `~` names; posixpath's and ntpath's rules | rules and calls |
 | platform/listing.h | a directory's listing with each entry's kind (`directory`, `file`, `link`, `other`), `entry_at`, `finds_a_name_by_stat` | calls |
 | platform/reads.h | `posix_reads`, `windows_reads` (posix/reads.h, windows/reads.h) behind the `file_reads` concept | calls |
-| platform/process.h | a thread's name, the signal mask its threads inherit, `at_fork`, `process_id` | calls |
+| platform/process.h | `process_id`, beside the calls the pools make | calls |
 | platform/signals.h | `interrupt_handlers` (Ctrl-C, SIGTERM), `wakeup` (a pipe; an event) | calls |
 | platform/caches.h | `system_caches`; the kernel's /sys list read by rules compiled everywhere | calls and rules |
 | platform/memory.h | `advise_huge_pages`, on each system's memory class beside the probes (Q51) | calls |
-| platform/clocks.h | `thread_cpu_ns`, `counts_thread_cpu_time` | calls |
 
 ## Open
 

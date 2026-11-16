@@ -6,11 +6,11 @@
 
 #include "bcp_api.h"
 #include "../odbc_error.h"
+#include "../../../../core/primitives/parallel/for_each.h"
 
-#include <exception>
+#include <algorithm>
 #include <stdexcept>
 #include <string>
-#include <thread>
 #include <vector>
 
 namespace pygim::strategy::mssql::bcp {
@@ -24,42 +24,17 @@ public:
     };
 
     /// Create a pool of @p pool_size connections to @p conn_str.
-    /// Connections are established in parallel — O(1×latency) vs O(N×latency).
+    /// Connections are established in parallel, one thread each — O(1×latency) vs O(N×latency).
+    /// On any failure every connection is cleaned up and the first error rethrown.
     explicit BcpConnectionPool(const std::string& conn_str, int pool_size)
+        : m_connections(static_cast<size_t>(std::max(pool_size, 0)))
     {
-        m_connections.resize(static_cast<size_t>(pool_size));
-
-        if (pool_size <= 1) {
-            // Single connection: skip thread overhead
-            alloc_and_connect(m_connections[0], conn_str, 0);
-            return;
-        }
-
-        // Parallel connection establishment
-        std::vector<std::exception_ptr> errors(static_cast<size_t>(pool_size));
-        std::vector<std::thread> threads;
-        threads.reserve(static_cast<size_t>(pool_size));
-
-        for (int i = 0; i < pool_size; ++i) {
-            threads.emplace_back([this, &conn_str, &errors, i]() {
-                try {
-                    alloc_and_connect(m_connections[static_cast<size_t>(i)],
-                                      conn_str, i);
-                } catch (...) {
-                    errors[static_cast<size_t>(i)] = std::current_exception();
-                }
-            });
-        }
-
-        for (auto& t : threads) t.join();
-
-        // Check for errors; cleanup all on any failure
-        for (int i = 0; i < pool_size; ++i) {
-            if (errors[static_cast<size_t>(i)]) {
-                for (int j = 0; j < pool_size; ++j)
-                    cleanup_connection(m_connections[static_cast<size_t>(j)]);
-                std::rethrow_exception(errors[static_cast<size_t>(i)]);
-            }
+        const size_t n = m_connections.size();
+        try {
+            primitives::parallel::for_each(n, n, [&](size_t i, size_t) { alloc_and_connect(m_connections[i], conn_str, static_cast<int>(i)); });
+        } catch (...) {
+            for (auto& c : m_connections) cleanup_connection(c);
+            throw;
         }
     }
 

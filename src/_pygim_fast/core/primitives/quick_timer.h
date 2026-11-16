@@ -1,6 +1,6 @@
 #pragma once
-// utils/quick_timer.h — one timer measures a block and the laps inside it. Its CLOCK and its
-// REPORT are given to it, never built in.
+// core/primitives/quick_timer.h — one timer measures a block and the laps inside it. Its CLOCK and
+// its REPORT are given to it, never built in.
 //
 //     QuickTimer timer("load csv");                     // the monotonic clock, the stderr report
 //     timer.start_lap("read");   ...              // a lap: starting one stops the one running
@@ -14,18 +14,18 @@
 //     hooks.add<lap_stopped>([](std::string_view timer, std::string_view lap, duration took) { ... });
 //     QuickTimerT<void, 8, manual_clock, timer_hooks> timer("job", time.clock(), hooks);
 //
-// The clock is a clock_source (utils/timestamp.h). The report hears four moments, each as plain values:
+// The clock is a clock_source (timestamp.h). The report hears four moments, each as plain values:
 //
 //     timer_started(timer)  lap_started(timer, lap)  lap_stopped(timer, lap, took)  timer_finished(snapshot)
 //
 // Reports that ship: silent (no_hooks: compiles away, keeping the timer a literal type), timer_hooks
-// (your callbacks, utils/hooks.h), stderr_report (text: started lines, stopped lines and the summary,
+// (your callbacks, core/primitives/hooks.h), stderr_report (text: started lines, stopped lines and the summary,
 // each on or off) and both<A, B>. A lap's `took` is all the time that lap has run.
 //
 // Two modes, by PhaseEnum. String mode (void): laps are named at run time — string_views the caller
 // keeps alive. Enum mode: laps are an enum's values, named by phase_name(PhaseEnum) found by ADL,
 // capacity PhaseEnum::COUNT. The timer allocates nothing; a snapshot allocates its list of laps.
-// Every time is one 64-bit count of nanoseconds (utils/duration.h); seconds are views of it.
+// Every time is one 64-bit count of nanoseconds (duration.h); seconds are views of it.
 //
 // CORE layer: pybind-free.
 
@@ -35,6 +35,7 @@
 #include <concepts>
 #include <cstddef>
 #include <cstdio>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -46,7 +47,7 @@
 #include "hooks.h"
 #include "timestamp.h"
 
-namespace pygim {
+namespace pygim::primitives {
 
 namespace detail {
 template <typename E> struct timer_capacity {
@@ -71,7 +72,7 @@ private:
     std::string_view m_name;
     duration m_took;
 };
-static_assert(lap_time("read", duration(2'000)).took() == duration(2'000));
+static_assert(lap_time("read", 2_us).took() == 2_us);
 
 /// What a timer measured: its name, its total and its laps in the order they first started. The
 /// names are views of the timer's, so a snapshot is read while they live (a Python snapshot copies them).
@@ -118,11 +119,11 @@ private:
     std::vector<lap_time> m_laps;
 };
 static_assert([] {
-    const timer_snapshot s("job", duration(6), {lap_time("read", duration(2)), lap_time("parse", duration(4))});
-    const timer_snapshot t("job", duration(7), {lap_time("parse", duration(1)), lap_time("write", duration(5))});   // another order
+    const timer_snapshot s("job", 6_ns, {lap_time("read", 2_ns), lap_time("parse", 4_ns)});
+    const timer_snapshot t("job", 7_ns, {lap_time("parse", 1_ns), lap_time("write", 5_ns)});   // another order
     const timer_snapshot u = s | t;
-    return s.lap("parse") == duration(4) && (s | s).total() == duration(12) && u.lap("read") == duration(2) &&
-           u.lap("parse") == duration(5) && u.lap("write") == duration(5) && u.laps().size() == 3;
+    return s.lap("parse") == 4_ns && (s | s).total() == 12_ns && u.lap("read") == 2_ns &&
+           u.lap("parse") == 5_ns && u.lap("write") == 5_ns && u.laps().size() == 3;
 }());
 
 // ── the report ───────────────────────────────────────────────────────────
@@ -345,9 +346,7 @@ public:
     }
 
     [[nodiscard]] constexpr lap_id lap_id_of(std::string_view name) requires (!by_phase) {
-        for (std::size_t i = 0; i < m_lap_count; ++i) {
-            if (m_laps[i].name == name) return i;
-        }
+        if (const std::optional<std::size_t> found = find_lap(name)) return *found;
         if (m_lap_count >= MaxLaps) [[unlikely]] {
             throw std::out_of_range("no room for another lap");
         }
@@ -391,10 +390,7 @@ public:
     [[nodiscard]] constexpr double total_seconds() const { return seconds_of(total()); }
 
     [[nodiscard]] constexpr duration lap(std::string_view name) const requires (!by_phase) {
-        for (std::size_t i = 0; i < m_lap_count; ++i) {
-            if (m_laps[i].name == name) return lap_elapsed(m_laps[i]);
-        }
-        throw std::out_of_range("no lap of that name");
+        return lap_elapsed(m_laps[named_lap(name)]);
     }
     [[nodiscard]] constexpr duration lap(lap_id phase) const requires (by_phase) {
         return lap_elapsed(m_laps[to_index(phase)]);
@@ -445,14 +441,23 @@ private:
     }
 
     [[nodiscard]] constexpr std::size_t lap_index_of(std::string_view name) const requires (!by_phase) {
-        if (!name.empty()) {
-            for (std::size_t i = 0; i < m_lap_count; ++i) {
-                if (m_laps[i].name == name) return i;
-            }
-            throw std::out_of_range("no lap of that name");
-        }
+        if (!name.empty()) return named_lap(name);
         if (m_running == no_lap) [[unlikely]] throw std::runtime_error("no lap is running");
         return m_running;
+    }
+
+    // The lap named `name`, if it has been made.
+    [[nodiscard]] constexpr std::optional<std::size_t> find_lap(std::string_view name) const noexcept requires (!by_phase) {
+        for (std::size_t i = 0; i < m_lap_count; ++i) {
+            if (m_laps[i].name == name) return i;
+        }
+        return std::nullopt;
+    }
+
+    // The lap named `name`; std::out_of_range when there is none.
+    [[nodiscard]] constexpr std::size_t named_lap(std::string_view name) const requires (!by_phase) {
+        if (const std::optional<std::size_t> found = find_lap(name)) return *found;
+        throw std::out_of_range("no lap of that name");
     }
 
     std::string_view m_name;
@@ -469,9 +474,9 @@ static_assert([] {   // a lap and the total, by a clock that moves only when tol
     manual_time time;
     QuickTimerT<void, 8, manual_clock, silent> timer("job", time.clock());
     timer.start_lap("read");
-    time.advance(duration(5));
+    time.advance(5_ns);
     timer.finish();
-    return timer.total() == duration(5) && timer.lap("read") == duration(5) && timer.finished();
+    return timer.total() == 5_ns && timer.lap("read") == 5_ns && timer.finished();
 }());
 
 // String mode, 8 laps, the monotonic clock, text on stderr.
@@ -482,4 +487,4 @@ using QuickTimer = QuickTimerT<>;
 template <typename PhaseEnum = void, clock_source Clock = monotonic_clock>
 using SilentTimer = QuickTimerT<PhaseEnum, detail::timer_capacity<PhaseEnum>::value, Clock, silent>;
 
-} // namespace pygim
+}  // namespace pygim::primitives

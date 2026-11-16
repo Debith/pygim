@@ -1,7 +1,7 @@
 #pragma once
 // BCP Pipeline: single-connection and parallel bulk insert orchestrator.
 // Combines archive's bcp_strategy.cpp, bcp_row_loop.h, bcp_entry.h into a
-// single header-only file; its stages are timed by a SilentTimer (utils/quick_timer.h).
+// single header-only file; its stages are timed by a SilentTimer (core/primitives/quick_timer.h).
 
 #include "bcp_helpers.h"
 #include "bcp_pool.h"
@@ -14,12 +14,12 @@
 #include <numeric>
 #include <span>
 #include <string>
-#include <thread>
 #include <vector>
 
 #include <arrow/table.h>
 #include <arrow/table_builder.h>
-#include "../../../../utils/quick_timer.h"
+#include "../../../../core/primitives/parallel/for_each.h"
+#include "../../../../core/primitives/quick_timer.h"
 
 namespace pygim::strategy::mssql::bcp {
 
@@ -116,7 +116,7 @@ struct ParallelWorkerResult {
 };
 
 /// Build metrics for single-connection insert path.
-inline BcpMetrics make_single_metrics(const pygim::SilentTimer<BcpPhase>& timer,
+inline BcpMetrics make_single_metrics(const pygim::primitives::SilentTimer<BcpPhase>& timer,
                                       const BcpContext& ctx,
                                       const BcpProfiler& profiler) {
     const auto timing = timer.snapshot();
@@ -132,7 +132,7 @@ inline BcpMetrics make_single_metrics(const pygim::SilentTimer<BcpPhase>& timer,
 }
 
 /// Build metrics for a parallel worker path.
-inline BcpMetrics make_worker_metrics(const pygim::SilentTimer<BcpWorkerPhase>& timer,
+inline BcpMetrics make_worker_metrics(const pygim::primitives::SilentTimer<BcpWorkerPhase>& timer,
                                       const BcpContext& ctx,
                                       const BcpProfiler& profiler) {
     const auto timing = timer.snapshot();
@@ -148,7 +148,7 @@ inline BcpMetrics make_worker_metrics(const pygim::SilentTimer<BcpWorkerPhase>& 
 }
 
 /// Build final metrics for parallel orchestrator path.
-inline BcpMetrics make_parallel_metrics(const pygim::SilentTimer<BcpParallelPhase>& timer,
+inline BcpMetrics make_parallel_metrics(const pygim::primitives::SilentTimer<BcpParallelPhase>& timer,
                                         const std::vector<ParallelWorkerResult>& results) {
     const auto timing = timer.snapshot();
     BcpMetrics merged{};
@@ -350,7 +350,7 @@ inline void finalize_bcp(BcpContext& ctx) {
     if (ctx.sent_rows > 0 && ctx.rows_until_flush < ctx.batch_size) {
         auto ret = ctx.bcp.batch(ctx.dbc);
         if (ret == -1) [[unlikely]] {
-            std::this_thread::sleep_for(std::chrono::milliseconds(50));
+            primitives::sleep_for(50_ms);
             ret = ctx.bcp.batch(ctx.dbc);
         }
         if (ret == -1) [[unlikely]]
@@ -382,7 +382,7 @@ inline void finalize_bcp(BcpContext& ctx) {
     int64_t batch_size,
     const std::string& table_hint)
 {
-    pygim::SilentTimer<BcpPhase> timer("bcp_insert");
+    pygim::primitives::SilentTimer<BcpPhase> timer("bcp_insert");
 
     if (!table_data || table_data->num_rows() == 0)
         throw std::runtime_error("Arrow BCP received zero rows from payload");
@@ -456,7 +456,7 @@ inline void finalize_bcp(BcpContext& ctx) {
     const std::string& table_hint,
     int num_workers)
 {
-    pygim::SilentTimer<BcpParallelPhase> timer("bcp_parallel");
+    pygim::primitives::SilentTimer<BcpParallelPhase> timer("bcp_parallel");
 
     if (!table_data || table_data->num_rows() == 0)
         throw std::runtime_error("Arrow BCP received zero rows from payload");
@@ -465,12 +465,12 @@ inline void finalize_bcp(BcpContext& ctx) {
 
     // 1. Resolve worker count
     const int desired = (num_workers <= 0)
-        ? std::min(4, static_cast<int>(std::thread::hardware_concurrency()))
+        ? std::min(4, static_cast<int>(primitives::parallel::this_machines_cores()))
         : num_workers;
 
     // Don't create more workers than rows
     int actual_workers = std::min(desired,
-        static_cast<int>(std::min<int64_t>(total_rows, std::thread::hardware_concurrency())));
+        static_cast<int>(std::min<int64_t>(total_rows, static_cast<int64_t>(primitives::parallel::this_machines_cores()))));
     actual_workers = std::max(actual_workers, 1);
 
     // 2. Fallback to single-connection if only 1 worker
@@ -499,19 +499,17 @@ inline void finalize_bcp(BcpContext& ctx) {
     auto qualified = sql::qualify_table(table);
     const int64_t effective_batch = batch_size > 0 ? batch_size : 100000LL;
 
-    // 5. Spawn worker threads — each gets its own Table slice
+    // 5. One thread per slice, each on its own connection; a worker keeps its error in its result
     std::vector<ParallelWorkerResult> results(static_cast<size_t>(actual_workers));
-    std::vector<std::thread>  threads;
-    threads.reserve(static_cast<size_t>(actual_workers));
-
-    for (int w = 0; w < actual_workers; ++w) {
-        threads.emplace_back([&, w]() {
+    const auto workers = static_cast<size_t>(actual_workers);
+    primitives::parallel::for_each(workers, workers, [&](size_t slice, size_t) {
+            const int w = static_cast<int>(slice);
             auto& res = results[static_cast<size_t>(w)];
             auto& conn = pool[w];
             auto& my_slice = slices[static_cast<size_t>(w)];
 
             try {
-                pygim::SilentTimer<BcpWorkerPhase> wtimer("bcp_worker");
+                pygim::primitives::SilentTimer<BcpWorkerPhase> wtimer("bcp_worker");
                 BCP_PROF_DECL(prof);
 
                 {
@@ -559,14 +557,9 @@ inline void finalize_bcp(BcpContext& ctx) {
             } catch (...) {
                 res.error = std::current_exception();
             }
-        });
-    }
+    });
 
-    // 6. Join all workers
-    for (auto& t : threads)
-        t.join();
-
-    // 7. Check for errors (rethrow first encountered)
+    // 6. Check for errors (rethrow the first worker's)
     for (int w = 0; w < actual_workers; ++w) {
         if (results[static_cast<size_t>(w)].error) {
             try {
@@ -583,7 +576,7 @@ inline void finalize_bcp(BcpContext& ctx) {
         }
     }
 
-    // 8. Merge metrics
+    // 7. Merge metrics
     return make_parallel_metrics(timer, results);
 }
 

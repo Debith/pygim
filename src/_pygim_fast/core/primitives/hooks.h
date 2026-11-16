@@ -1,5 +1,5 @@
 #pragma once
-// utils/hooks.h — callbacks per named event; or, with the same API, none at all.
+// core/primitives/hooks.h — callbacks per named event; or, with the same API, none at all.
 //
 // An EVENT is a tag type naming a moment and what its callbacks receive:
 //
@@ -24,7 +24,7 @@
 #include <utility>
 #include <vector>
 
-namespace pygim {
+namespace pygim::primitives {
 
 /// A moment callbacks can be attached to: a type naming it, with the signature they receive.
 template <class E>
@@ -103,4 +103,4 @@ static_assert(!one_of<detail::proof_event, detail::other_event>);
 static_assert(!no_hooks<detail::proof_event>{}.has<detail::proof_event>());
 static_assert(std::is_empty_v<no_hooks<detail::proof_event>>);
 
-}  // namespace pygim
+}  // namespace pygim::primitives

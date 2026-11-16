@@ -11,6 +11,14 @@ _LAZY_EXPORTS = {
     "Registry": ("pygim.registry", "Registry"),
     "Factory": ("pygim.factory", "Factory"),
     "Container": ("pygim.ioc", "Container"),
+    # Time and timing are primitives, made by the utils extension (core/primitives/ in C++).
+    "Duration": ("pygim.utils", "Duration"),
+    "ManualTime": ("pygim.utils", "ManualTime"),
+    "Timestamp": ("pygim.utils", "Timestamp"),
+    "QuickTimer": ("pygim.utils", "QuickTimer"),
+    "Report": ("pygim.utils", "Report"),
+    "TimerLap": ("pygim.utils", "TimerLap"),
+    "TimerSnapshot": ("pygim.utils", "TimerSnapshot"),
     # Re-exported from the Python module (not the compiled extension directly)
     # so the top-level entry point shares its SQLAlchemy-URL translation.
     "DataStore": ("pygim.persistence", "DataStore"),

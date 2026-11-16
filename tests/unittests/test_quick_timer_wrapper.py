@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """pygim.core.timing_and_profiling.quick_timer: what it prints, which its rebuild on
-pygim.utils.QuickTimer must keep."""
+pygim.QuickTimer must keep."""
 
 import re
 
