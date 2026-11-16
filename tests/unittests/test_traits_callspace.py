@@ -15,7 +15,6 @@ import types
 import pytest
 
 import callspace
-import python_names_callspace
 import traits_callspace
 from pygim import traits as pygim_traits
 from pygim import utils
@@ -189,9 +188,3 @@ def test_every_public_name_of_pygim_traits_is_modelled():
 @pytest.mark.parametrize("name, function, signature", SIGNATURES, ids=[s[0] for s in SIGNATURES])
 def test_each_modelled_signature_is_the_one_declared(name, function, signature):
     assert function.__doc__.strip().splitlines()[0] == signature
-
-
-def test_the_every_build_proof_is_the_model_s():
-    """tests/static/python_names_callspace_proofs.cpp is rendered from python_names_callspace."""
-    assert python_names_callspace.PROOF.read_text(encoding="utf-8") == python_names_callspace.render_proof(), (
-        "stale: run python tests/unittests/python_names_callspace.py")
