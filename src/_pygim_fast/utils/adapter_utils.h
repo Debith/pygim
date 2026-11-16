@@ -10,11 +10,14 @@
 
 namespace py = pybind11;
 
-// Whether `instance` is a generator. CPython exposes the test directly as the PyGen_Check macro
-// (Py_TYPE(op) == &PyGen_Type), which is exactly what isinstance(x, types.GeneratorType) asks — so
-// no `import types` at run time and no per-call attribute lookup are needed.
+// Whether `instance` is a generator, as isinstance(x, types.GeneratorType) says — Python's own
+// answer, which inspect.isgenerator gives too. types.GeneratorType is PyGen_Type, so the C API asks
+// it directly: no `import types` at run time. Not PyGen_Check: that reads the type alone, where
+// isinstance also believes an object's __class__.
 inline bool is_generator(const py::object &instance) {
-    return PyGen_Check(instance.ptr());
+    const int answer = PyObject_IsInstance(instance.ptr(), reinterpret_cast<PyObject*>(&PyGen_Type));
+    if (answer < 0) throw py::error_already_set();
+    return answer == 1;
 }
 
 namespace pygim::adapter {
