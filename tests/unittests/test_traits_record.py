@@ -13,6 +13,8 @@ that record along, attributed to where each member came from (R2), and nothing n
 import gc
 import sys
 
+import pytest
+
 from pygim.traits import compose, traits_of
 
 MODULE = __name__
@@ -58,6 +60,17 @@ class TestTheRecordIsKeptOffTheClass:
         assert list(traits_of(first)) == ["greet"]
         assert list(traits_of(second)) == ["wave"]
         assert asked == []
+
+    def test_a_record_entry_shows_its_three_parts_and_none_can_be_changed(self):
+        trait = type("Trait", (), {"greet": _function("hi"), "__module__": MODULE})
+        target = type("Target", (), {})
+        compose(target, trait)
+        record = traits_of(target)["greet"]
+        assert repr(record) == (f"Provenance(trait={record.trait!r}, defined={record.defined!r}, "
+                                f"composed={record.composed!r})")
+        for part in ("trait", "defined", "composed"):
+            with pytest.raises(AttributeError):
+                setattr(record, part, "elsewhere")
 
     def test_a_dead_classs_record_never_reaches_a_new_class_at_its_address(self):
         """CPython hands a freed class's memory to the next class almost every time (200 of 200 when
