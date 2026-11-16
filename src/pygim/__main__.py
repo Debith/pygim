@@ -3,20 +3,16 @@
 Python Gimmicks Command-Line Interface.
 """
 
+import sys
+
 import click
+from _pygim._cli._banner import BannerGroup
 from _pygim._cli._cli_app import GimmicksCliApp, flag_opt
 
 
-@click.group()
+@click.group(cls=BannerGroup, tagline="Python Gimmicks")
 def cli():
-    r"""\b
-     ___        ___ _
-    | _ \_  _  / __(_)\_ __
-    |  _/ || || (_ | | '  \ \b
-    |_|  \_, / \___|_|_|_|_|
-        |_/Python Gimmicks
-
-    """
+    pass
 
 
 @cli.command()
@@ -53,36 +49,37 @@ def stubs(check):
     GimmicksCliApp().stubs(check=check)
 
 
-class _OoGroup(click.Group):
-    """`oo <verb> ...` runs a verb (``docs serve``); anything else is free text
-    for the assistant; nothing at all shows the help."""
+class _OoGroup(BannerGroup):
+    """`oo <verb> ...` runs a verb; nothing at all shows the help; anything else is an error.
 
-    def parse_args(self, ctx, args):
-        if args and not args[0].startswith("-") and args[0] not in self.commands:
-            ctx.meta["free_text"] = " ".join(args)
-            ctx.args = []
-            return []
-        return super().parse_args(ctx, args)
+    An unknown word used to be taken as free text for an assistant that was never built, which
+    printed a sentence and exited 0, so a mistyped or renamed command reported success and did
+    nothing. A command that does not exist has to say so, and say it with a status a script can see."""
 
-    def invoke(self, ctx):
-        text = ctx.meta.get("free_text")
-        if text is not None:
-            return GimmicksCliApp().ai(text)
-        return super().invoke(ctx)
+    def resolve_command(self, ctx, args):
+        name = click.utils.make_str(args[0]) if args else ""
+        if args and not name.startswith("-") and self.get_command(ctx, name) is None:
+            import difflib
+
+            near = difflib.get_close_matches(name, self.list_commands(ctx), n=1, cutoff=0.6)
+            ctx.fail(f"No such command {name!r}." + (f" Did you mean {near[0]!r}?" if near else "")
+                     + " Run `oo --help` for the list.")
+        return super().resolve_command(ctx, args)
 
 
-@click.group(cls=_OoGroup, invoke_without_command=True)
+@click.group(cls=_OoGroup, invoke_without_command=True, tagline="AI powered Python Gimmicks")
+@flag_opt("--no-color", "no_color", help="Never colour the output. Colour is already off when the output is "
+                                         "not a terminal, when NO_COLOR is set, or when TERM is dumb.")
 @click.pass_context
-def cli_oo(ctx):
-    r"""\b
-     ___        ___ _
-    | _ \_  _  / __(_)\_ __
-    |  _/ || || (_ | | '  \ \b
-    |_|  \_, / \___|_|_|_|_|
-        |_/ AI powered Python Gimmicks
+def cli_oo(ctx, no_color):
+    """The composition root for the commands: the environment is read once, here, and every command
+    is handed the result. Nothing below reads it again (see `_pygim._config`)."""
+    from _pygim import _config
+    from _pygim._cli import _style
 
-    """
-    if ctx.invoked_subcommand is None and ctx.meta.get("free_text") is None:
+    ctx.obj = _config.from_process(colour=False if no_color else None)
+    _style.use(ctx.obj.colour)
+    if ctx.invoked_subcommand is None:
         click.echo(ctx.get_help())
 
 
@@ -107,3 +104,8 @@ def docs_serve(port, directory, host, index, rebuild):
     commenter (comments land in __notes__/site-comments.jsonl under the served
     root) and images dropped on a page are written under images/."""
     GimmicksCliApp().docs_serve(port=port, directory=directory, host=host, index=index, rebuild=rebuild)
+
+
+if __name__ == "__main__":
+    # `python -m pygim` runs what the `pygim` script runs; `oo` is the other entry point.
+    cli()
