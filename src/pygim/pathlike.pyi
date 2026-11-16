@@ -11,7 +11,7 @@ a test.
 """
 
 import os
-from typing import Any, Iterable, Iterator, Literal, NamedTuple, overload
+from typing import Any, Iterable, Iterator, Literal, overload
 
 PathLike = str | bytes | os.PathLike[str] | path
 
@@ -103,13 +103,18 @@ class path(os.PathLike[str]):
         """The glob results as a PathSet over this path's table."""
 
 
-class EngineInfo(NamedTuple):
-    """One entry of ``ENGINES``: the registry as data."""
-    name: str
-    label: str
-    extensions: tuple[str, ...]
-    aliases: tuple[str, ...]
-    doc: str
+class EngineInfo:
+    """One entry of ``ENGINES``: an engine's descriptor, read-only."""
+    @property
+    def name(self) -> str: ...
+    @property
+    def label(self) -> str: ...
+    @property
+    def extensions(self) -> tuple[str, ...]: ...
+    @property
+    def aliases(self) -> tuple[str, ...]: ...
+    @property
+    def doc(self) -> str: ...
 
 class PathSet:
     """Many paths as ONE table: every distinct component stored once, every

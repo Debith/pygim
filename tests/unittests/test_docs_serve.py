@@ -2,6 +2,7 @@
 """Tests for ``oo docs serve`` — the static docs server with the ✎ review layer."""
 
 import json
+import socket
 import threading
 import urllib.error
 import urllib.request
@@ -214,6 +215,29 @@ class TestComments:
 
     def test_unknown_post_route(self, server):
         assert _post(server + "/nope", {})[0] == 404
+
+
+class TestRefusal:
+    """Found 2026-11-02 on Windows: an upload refused for its path left its body unread, the server
+    closed the connection over it, and Windows reset the connection, so the client saw WinError
+    10053 instead of the 400. The server reads the body before it answers, so a refusal waits
+    for all of it, on every system."""
+
+    @pytest.mark.parametrize("route, status", [
+        ("/upload?path=hero.png", b"400"),
+        ("/comment", b"400"),
+        ("/nope", b"404"),
+    ])
+    def test_a_refusal_waits_for_the_whole_body(self, server, route, status):
+        host, port = server.removeprefix("http://").split(":")
+        with socket.create_connection((host, int(port)), timeout=5) as conn:
+            conn.sendall(f"POST {route} HTTP/1.1\r\nHost: {host}\r\nContent-Length: 2\r\n\r\nX".encode())
+            conn.settimeout(0.2)
+            with pytest.raises(TimeoutError):
+                conn.recv(1)
+            conn.settimeout(5)
+            conn.sendall(b"X")
+            assert conn.recv(64).split(b" ")[1] == status
 
 
 class TestUpload:

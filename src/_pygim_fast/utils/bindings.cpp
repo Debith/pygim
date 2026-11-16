@@ -1,7 +1,9 @@
 
 #include <pybind11/pybind11.h>
 #include <pybind11/functional.h>
+#include <pybind11/operators.h>
 #include <pybind11/stl.h>
+#include <cstdint>
 #include <optional>
 #include <string>
 #include <unordered_map>
@@ -11,6 +13,9 @@
 #include "adapter_utils.h"
 #include "python_names.h"
 #include "memory.h"
+#include "../core/primitives/duration.h"
+#include "../core/primitives/timestamp.h"
+#include "quick_timer_adapter.h"
 #include "../mapping/dynamic_merge_map.h"
 
 namespace py = pybind11;
@@ -229,6 +234,60 @@ private:
       std::optional<MergeStrategy> m_explicit_default{};
 };
 
+namespace primitives = pygim::primitives;   // time and timing (core/primitives/), given a Python face here
+
+// One keyword amount of one unit, as Python writes it: an integer exactly — an int, or anything
+// with __index__ (numpy's integers); any other real number (float, Fraction, Decimal) through its
+// float, rounded exactly by the core. A bool is no amount of time.
+primitives::duration amount_of(const primitives::time_unit& unit, py::handle amount) {
+    if (PyBool_Check(amount.ptr())) throw py::type_error(std::string(unit.name()) + " must be a real number, not bool");
+    if (PyLong_Check(amount.ptr()) || PyIndex_Check(amount.ptr())) {
+        const py::object integer = py::reinterpret_steal<py::object>(PyNumber_Index(amount.ptr()));
+        if (!integer) throw py::error_already_set();
+        int overflow = 0;
+        const long long whole = PyLong_AsLongLongAndOverflow(integer.ptr(), &overflow);
+        if (overflow != 0) throw std::overflow_error("a duration past 64 bits of nanoseconds (about 292 years)");
+        if (whole == -1 && PyErr_Occurred()) throw py::error_already_set();
+        return unit.of(static_cast<std::int64_t>(whole));
+    }
+    if (!PyNumber_Check(amount.ptr())) {
+        throw py::type_error(std::string(unit.name()) + " must be a real number, not " + Py_TYPE(amount.ptr())->tp_name);
+    }
+    const double real = PyFloat_AsDouble(amount.ptr());
+    if (real == -1.0 && PyErr_Occurred()) throw py::error_already_set();
+    return unit.of(real);
+}
+
+// The duration that **units name: each amount converted, then added exactly.
+primitives::duration duration_of_units(const py::kwargs& units) {
+    primitives::duration total(0);
+    for (const auto& [name, amount] : units) {
+        const std::string unit_name = py::str(name);
+        const auto unit = primitives::time_unit::named(unit_name);
+        if (!unit) {
+            std::string known;
+            for (std::size_t i = 0; i < primitives::time_units.size(); ++i) {
+                known += i == 0 ? "" : i + 1 == primitives::time_units.size() ? " and " : ", ";
+                known += primitives::time_units[i].name();
+            }
+            throw py::type_error("unknown unit '" + unit_name + "'; the units are " + known);
+        }
+        total = primitives::sum_exactly(total, amount_of(*unit, amount));
+    }
+    return total;
+}
+
+// Duration(min=2, s=30): the units it is spelt in, longest first, which eval() reads back.
+std::string duration_repr(primitives::duration d) {
+    std::string out = "Duration(";
+    std::string_view separator;
+    for (const primitives::unit_amount& part : primitives::spelt_in_units(d)) {
+        out += std::string(separator) + std::string(part.unit_name()) + "=" + std::to_string(part.amount());
+        separator = ", ";
+    }
+    return out + ")";
+}
+
 } // namespace
 
 PYBIND11_MODULE(utils, m) {
@@ -257,6 +316,73 @@ PYBIND11_MODULE(utils, m) {
     m.def("peak_rss_bytes", &pygim::memory::peak_resident_bytes,
           "The process's peak resident set size in bytes (its high-water mark).");
     m.def("peak_rss_mb", &pygim::memory::peak_resident_mb, "peak_rss_bytes() in mebibytes.");
+
+    // A length of time (core/primitives/duration.h): one signed 64-bit count of nanoseconds; units
+    // are conversions.
+    py::class_<primitives::duration>(m, "Duration",
+                                "A length of time: one signed 64-bit count of nanoseconds. Duration(min=1, s=30).\n"
+                                "Units: yr (365.2425 days, as C++ counts a year), wk, day, hr, min, s, ms, us, ns.\n"
+                                "They add up; an amount may be negative or a fraction, rounded exactly to\n"
+                                "the nearest nanosecond (ties to even). Past 64 bits (about 292 years) is an OverflowError.")
+        .def(py::init([](const py::kwargs& units) { return duration_of_units(units); }))
+        .def_property_readonly("nanoseconds", [](primitives::duration d) { return d.nanoseconds(); }, "The number itself.")
+        .def_property_readonly("seconds", [](primitives::duration d) { return primitives::seconds_of(d); },
+                               "The same in seconds, as a float: a view, not a second store.")
+        .def("__int__", [](primitives::duration d) { return d.nanoseconds(); })
+        .def(py::self == py::self)
+        .def(py::self != py::self)
+        .def(py::self < py::self)
+        .def(py::self <= py::self)
+        .def(py::self > py::self)
+        .def(py::self >= py::self)
+        .def("__hash__", [](primitives::duration d) { return d.nanoseconds(); })
+        .def("__repr__", &duration_repr);
+
+    // Time that moves only when told (core/primitives/timestamp.h): the clock for testing timing
+    // code exactly.
+    py::class_<primitives::manual_time>(m, "ManualTime",
+                                   "Time that moves only when told: a clock for testing timing code exactly.")
+        .def(py::init<>())
+        .def("now", &primitives::manual_time::since_epoch, "The Duration since this time started: Duration() at first.")
+        .def("advance",
+             [](primitives::manual_time& time, std::optional<primitives::duration> by, const py::kwargs& units) {
+                 if (by && units.size() != 0) throw py::type_error("advance() takes a Duration or units, not both");
+                 time.advance(by ? *by : duration_of_units(units));
+             },
+             py::arg("by") = py::none(),
+             "Moves time by a Duration or by units: advance(min=1, s=30). Past 64 bits it raises\n"
+             "OverflowError and time does not move.");
+
+    // A calendar moment (core/primitives/timestamp.h): nanoseconds since the Unix epoch, from the
+    // wall clock. Python names it by its count, Timestamp(12333), as int() reads it back.
+    const auto nanoseconds_since_epoch = [](const primitives::timestamp& t) { return t.since_epoch().nanoseconds(); };
+    py::class_<primitives::timestamp>(m, "Timestamp", "A moment: nanoseconds since the Unix epoch (1970-01-01T00:00:00Z).")
+        .def(py::init([](std::int64_t nanoseconds) { return primitives::timestamp(primitives::duration(nanoseconds)); }),
+             py::arg("nanoseconds"), "The moment `nanoseconds` after the epoch: Timestamp(12333).")
+        .def_static("now", [] { return primitives::timestamp::now(); }, "The wall clock's current moment.")
+        .def_property_readonly("nanoseconds", nanoseconds_since_epoch, "Nanoseconds since the epoch.")
+        .def("__int__", nanoseconds_since_epoch)
+        .def("__sub__", [](const primitives::timestamp& later, const primitives::timestamp& earlier) { return later - earlier; },
+             py::is_operator(), "The Duration from the other moment to this one.")
+        .def(py::self == py::self)
+        .def(py::self != py::self)
+        .def(py::self < py::self)
+        .def(py::self <= py::self)
+        .def(py::self > py::self)
+        .def(py::self >= py::self)
+        .def("__hash__", nanoseconds_since_epoch)
+        .def("__repr__", [=](const primitives::timestamp& t) { return "Timestamp(" + std::to_string(nanoseconds_since_epoch(t)) + ")"; });
+
+    // One timer for a block and its laps (core/primitives/quick_timer.h), its clock and its report
+    // given.
+    pygim::adapter::bind_quick_timer(m);
+
+    // Time and timing are primitives (core/primitives/), not utilities: this module makes their
+    // Python types, and pygim exports them, `from pygim import Duration`. Each names pygim as its
+    // home, so repr(type), help() and a traceback show pygim.Duration.
+    for (const char* name : {"Duration", "ManualTime", "Timestamp", "QuickTimer", "Report", "TimerLap", "TimerSnapshot"}) {
+        m.attr(name).attr("__module__") = "pygim";
+    }
 
     m.def("calculate_rate",
           &calculate_rate,

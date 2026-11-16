@@ -37,7 +37,7 @@ for f in docs/examples/*/example_*.py; do python "$f" || break; done
 | pathlike | [example_03_pathlib_parity.py](pathlike/example_03_pathlib_parity.py) | os.PathLike integration, name components, `/` composition |
 | pathlike | [example_04_yaml_12_scalars.py](pathlike/example_04_yaml_12_scalars.py) | YAML 1.2 scalar typing: hex/octal/big ints, 1.1-isms staying strings, dot-form floats, quoting |
 | pathlike | [example_05_json_and_toml.py](pathlike/example_05_json_and_toml.py) | Strict JSON with filename in errors; TOML with real datetime objects |
-| pathlike | [example_06_engine_pinning.py](pathlike/example_06_engine_pinning.py) | Pinning an engine at construction, refusal to guess, pin inheritance, per-call override |
+| pathlike | [example_06_engine_pinning.py](pathlike/example_06_engine_pinning.py) | Pinning an engine at construction, refusal to guess, pin inheritance, per-call override, one engine reading and writing a path, `pathlike.ENGINES` and every name `engine=` takes |
 | pathlike | [example_07_writing.py](pathlike/example_07_writing.py) | write() round-trips for all three formats, trap-string quoting, non-finite float policies, TOML mapping roots |
 | pathlike | [example_08_traversal.py](pathlike/example_08_traversal.py) | glob/rglob/iterdir, sorted+deduplicated results, pin inheritance, the PathSet bridge |
 | pathlike | [example_09_parallel_and_key_cache.py](pathlike/example_09_parallel_and_key_cache.py) | GIL-released parallel reads, key_cache interning semantics and proof |
@@ -45,6 +45,8 @@ for f in docs/examples/*/example_*.py; do python "$f" || break; done
 | utils | [example_01_process_memory.py](utils/example_01_process_memory.py) | `rss_bytes` / `peak_rss_bytes` and the MiB forms: a before/after delta around an allocation, and why only the delta means anything |
 | traits | [example_01_code_builder.py](traits/example_01_code_builder.py) | `CodeBuilder`: a method's code rebuilt for another class — private names, qualified names, nested code; the original untouched |
 | traits | [example_02_compose.py](traits/example_02_compose.py) | `compose` and `traits_of`: a trait's functions, properties and classmethods copied into a class, `super()` resolving there, a conflict refused before anything is written, `override=True`, the record of where each member came from |
+| primitives | [example_01_durations_and_timestamps.py](primitives/example_01_durations_and_timestamps.py) | `from pygim import Duration, Timestamp, ManualTime`: `Duration` spelt in units and held as nanoseconds, exact rounding and the refusals past 64 bits; `Timestamp` and the duration between two moments; `ManualTime` for testing code that keeps time |
+| primitives | [example_02_quick_timer.py](primitives/example_02_quick_timer.py) | `from pygim import QuickTimer, Report`: `QuickTimer` with its clock and report given: laps measured exactly on a `ManualTime`, laps as with blocks on `QuickTimer.silent()`, `Report.hooks()` callbacks, the default stderr text |
 | pathlike | [example_11_path_collections.py](pathlike/example_11_path_collections.py) | `PathSet` as one table: set semantics, `+`/`-` with paths or sets, `clone`, Filters (`ext`/`name`/`absolute`, `& | ~`) and lazy Queries, `read_all_files`, `match_pattern`, counting without building |
 | persistence | [arrow_bcp_quickstart.md](arrow_bcp_quickstart.md) | Quickstart for the Arrow/BCP persistence layer (prose walkthrough, requires a database) |
 

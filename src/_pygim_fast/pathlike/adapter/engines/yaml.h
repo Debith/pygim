@@ -23,6 +23,7 @@
 
 #include "../third_party/rapidyaml/ryml_all.hpp"
 #include "../../core.h"
+#include "../../engine_list.h"
 #include "../common.h"
 #include "../materialize.h"
 

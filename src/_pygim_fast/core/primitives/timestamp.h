@@ -1,0 +1,158 @@
+#pragma once
+// core/primitives/timestamp.h — a moment as nanoseconds since its clock's epoch, read from a clock
+// that is GIVEN, never fetched: code that keeps time takes its clock, so a test can hand it a
+// manual one.
+//
+//     timestamp t = timestamp::now();                       // the wall clock: since the Unix epoch
+//     timestamp(12'333_ns).since_epoch()        -> 12'333_ns
+//     monotonic_timestamp a = monotonic_timestamp::now();   // for measuring: never jumps
+//     monotonic_timestamp::now().seconds_since(a)            -> seconds, as a timer reports them
+//
+//     manual_time time;                                     // a clock that moves only when told
+//     const auto t0 = basic_timestamp<manual_clock>::now(time.clock());
+//     time.advance(1_min + 30_s);                           // the units' literals (duration.h)
+//     basic_timestamp<manual_clock>::now(time.clock()) - t0 -> 90_s
+//
+// Every moment and every length of time is ONE signed 64-bit count of nanoseconds, held by
+// duration (duration.h): a clock answers the duration since its epoch, a timestamp is that
+// duration, and the difference of two is a duration again, so nothing here converts a count.
+// Units, seconds as a float and calendar forms are conversions of that number, never a second
+// store.
+//
+// CORE layer: pybind-free, and constexpr except for the operating-system clocks. The OS is read in
+// exactly three places, wall_clock::since_epoch(), monotonic_clock::since_epoch() and
+// thread_cpu_clock::since_epoch() (the last through platform/clocks.h); timing code elsewhere in pygim
+// takes one of these as its clock and never reads a clock itself (#264; utils/logging.h's ScopeLog,
+// the BCP profiler and the fetch benchmark too, which test_layering's
+// test_time_is_read_in_one_header holds). A timestamp's clock is part of its type, so a wall-clock
+// moment cannot be subtracted from a monotonic one.
+
+#include <chrono>
+#include <concepts>
+#include <limits>
+#include <thread>
+
+#include "../../platform/clocks.h"
+#include "duration.h"
+
+namespace pygim::primitives {
+
+/// Where `now` comes from: a copyable value whose since_epoch() is the time from its epoch to now.
+template <class C>
+concept clock_source = std::copyable<C> && requires(const C& c) {
+    { c.since_epoch() } -> std::same_as<duration>;
+};
+
+/// The calendar clock: nanoseconds since 1970-01-01T00:00:00Z. It jumps when the system time is
+/// set, so it is for naming moments, not for measuring between them.
+class wall_clock {
+public:
+    [[nodiscard]] duration since_epoch() const noexcept {
+        return duration::from_chrono(std::chrono::system_clock::now().time_since_epoch());
+    }
+};
+
+/// The measuring clock: never goes backwards; its epoch is unspecified (typically the boot).
+class monotonic_clock {
+public:
+    [[nodiscard]] duration since_epoch() const noexcept {
+        return duration::from_chrono(std::chrono::steady_clock::now().time_since_epoch());
+    }
+};
+
+/// The calling thread's CPU time: nanoseconds it has run, its waiting left out — what tells work
+/// that waits on a disk from work that computes. Its epoch is the thread's start, so only a
+/// difference read on one thread means anything. Windows reads the measuring clock instead (no
+/// waiting is seen there; platform/windows/clocks.h). About 500 ns a read on Linux: sample it, do
+/// not read it per item.
+class thread_cpu_clock {
+public:
+    [[nodiscard]] duration since_epoch() const noexcept { return duration(platform::native_clocks::thread_cpu_ns()); }
+};
+
+/// The calling thread waits `d` on the OS's clock: the one sleep pygim's code makes, here beside the
+/// clocks so no other file names std::chrono. Code that a test must time exactly takes a clock
+/// instead; a sleep is for waiting on something outside the process (a server, a retry).
+inline void sleep_for(duration d) { std::this_thread::sleep_for(d.as_chrono()); }
+
+class manual_clock;
+
+/// Time that moves only when told: what makes timing code testable, and provable at compile time.
+/// Its clock() is a view of it, so a timer given that clock sees every advance().
+class manual_time {
+public:
+    /// Time that stands `start` after its epoch: at the epoch unless given.
+    constexpr explicit manual_time(duration start = {}) noexcept : m_since_epoch(start) {}
+    /// Moves time by `by` (negative moves it back); std::overflow_error past 64 bits, and then
+    /// time has not moved.
+    constexpr void advance(duration by) { m_since_epoch = sum_exactly(m_since_epoch, by); }
+    [[nodiscard]] constexpr duration since_epoch() const noexcept { return m_since_epoch; }
+    [[nodiscard]] constexpr manual_clock clock() const noexcept;
+
+private:
+    duration m_since_epoch;
+};
+
+/// A view of a manual_time: the clock_source a test gives to the code it times.
+class manual_clock {
+public:
+    constexpr explicit manual_clock(const manual_time& time) noexcept : m_time(&time) {}
+    [[nodiscard]] constexpr duration since_epoch() const noexcept { return m_time->since_epoch(); }
+
+private:
+    const manual_time* m_time;
+};
+
+constexpr manual_clock manual_time::clock() const noexcept { return manual_clock(*this); }
+
+static_assert(clock_source<wall_clock> && clock_source<monotonic_clock> && clock_source<thread_cpu_clock> &&
+              clock_source<manual_clock>);
+static_assert([] {
+    manual_time time(5_ns);
+    const manual_clock clock = time.clock();
+    time.advance(10_ns);
+    return clock.since_epoch() == 15_ns;
+}());
+
+/// A moment: the time since Clock's epoch. basic_timestamp(12'333_ns) is 12,333 ns after it.
+template <clock_source Clock>
+class basic_timestamp {
+public:
+    using clock_type = Clock;
+
+    constexpr explicit basic_timestamp(duration since_epoch) noexcept : m_since_epoch(since_epoch) {}
+
+    /// The clock's current moment.
+    [[nodiscard]] static constexpr basic_timestamp now(const Clock& clock = Clock{}) noexcept {
+        return basic_timestamp(clock.since_epoch());
+    }
+    /// Before every reading of any clock: the moment a timer that has not started holds.
+    [[nodiscard]] static constexpr basic_timestamp never() noexcept {
+        return basic_timestamp(duration(std::numeric_limits<duration::rep>::min()));
+    }
+
+    /// The time from the clock's epoch to this moment.
+    [[nodiscard]] constexpr duration since_epoch() const noexcept { return m_since_epoch; }
+    /// The time from `earlier` to this moment.
+    [[nodiscard]] constexpr duration operator-(const basic_timestamp& earlier) const noexcept { return m_since_epoch - earlier.m_since_epoch; }
+    /// The same in seconds, as a timer reports them.
+    [[nodiscard]] constexpr double seconds_since(const basic_timestamp& earlier) const noexcept {
+        return seconds_of(*this - earlier);
+    }
+    [[nodiscard]] constexpr auto operator<=>(const basic_timestamp&) const noexcept = default;
+
+private:
+    duration m_since_epoch;
+};
+
+/// A calendar moment: nanoseconds since the Unix epoch. Python's pygim.Timestamp.
+using timestamp = basic_timestamp<wall_clock>;
+/// A moment to measure from: what a timer, a profiler or a scope log starts at.
+using monotonic_timestamp = basic_timestamp<monotonic_clock>;
+
+static_assert(timestamp(12'333_ns).since_epoch() == 12'333_ns);
+static_assert(timestamp(3'500_ns) - timestamp(1_us) == 2'500_ns && timestamp(3'500_ns).seconds_since(timestamp(1_us)) == 2.5e-6);
+static_assert(timestamp(1_us) < timestamp(3'500_ns) && timestamp(7_ns) == timestamp(7_ns));
+static_assert(timestamp::never() < timestamp(duration(std::numeric_limits<duration::rep>::min() + 1)));
+
+}  // namespace pygim::primitives

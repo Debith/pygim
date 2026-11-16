@@ -20,7 +20,6 @@
 // in adapter/.
 
 #include <algorithm>
-#include <array>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
@@ -29,57 +28,17 @@
 #include <string>
 #include <string_view>
 #include <tuple>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
+#include "../platform/files.h"
 #include "../utils/hash.h"
 #include "uri.h"
 
 namespace pygim::pathlike {
 
 namespace fs = std::filesystem;
-
-// A borrowed view over an engine's constexpr string list — a deliberately
-// minimal stand-in for std::span that is usable in constant expressions on
-// every compiler in the build matrix.
-struct sv_list {
-    const std::string_view* first = nullptr;
-    std::size_t count = 0;
-
-    constexpr sv_list() = default;
-    template <std::size_t N>
-    constexpr sv_list(const std::array<std::string_view, N>& items) noexcept  // implicit by design
-        : first(items.data()), count(N) {}
-
-    [[nodiscard]] constexpr const std::string_view* begin() const noexcept { return first; }
-    [[nodiscard]] constexpr const std::string_view* end() const noexcept { return first + count; }
-    [[nodiscard]] constexpr std::size_t size() const noexcept { return count; }
-    [[nodiscard]] constexpr bool empty() const noexcept { return count == 0; }
-    [[nodiscard]] constexpr bool contains(std::string_view s) const noexcept {
-        for (std::string_view x : *this) {
-            if (x == s) return true;
-        }
-        return false;
-    }
-};
-
-// The pybind-free face of one engine: everything the registry, the proofs and
-// `file` need to know. Every engine header declares one as `static constexpr
-// engine_info info`; its address is the engine's identity at run time (static
-// constexpr members are inline variables, so there is exactly one per program).
-struct engine_info {
-    std::string_view name;     // format name: engine="json"; the Python class is "<name>path"
-    std::string_view label;    // LIBRARY label reported by .engine: "simdjson"
-    std::string_view doc;      // one sentence, used by every derived docstring
-    sv_list exts;              // auto-dispatch extensions: lower-case, leading dot
-    sv_list aliases;           // extra engine= spellings: "yml", "ndjson", "tomlplusplus"
-
-    // engine= selectors: the format name, the library label and the aliases.
-    [[nodiscard]] constexpr bool selects(std::string_view n) const noexcept {
-        return n == name || n == label || aliases.contains(n);
-    }
-    [[nodiscard]] constexpr bool owns(std::string_view ext) const noexcept { return exts.contains(ext); }
-};
 
 namespace detail {
 // The value hash of basic_file and path_table: one definition, in utils/hash.h.
@@ -136,26 +95,10 @@ template <class Strategy>
     return p == pattern.size();
 }
 
-// The OS boundary: the internal text form is the NATIVE byte string on POSIX
-// (so non-UTF-8 file names round-trip) and UTF-8 on Windows (lossless from the
-// wide native form, and what Python's str carries). fs::path::string() would
-// narrow through the ACP on Windows and can mangle non-ASCII paths.
-[[nodiscard]] inline std::string text_from_fs(const fs::path& p) {
-#ifdef _WIN32
-    const std::u8string u = p.u8string();
-    return std::string(u.begin(), u.end());
-#else
-    return p.native();
-#endif
-}
-
-[[nodiscard]] inline fs::path fs_from_text(std::string_view text) {
-#ifdef _WIN32
-    return fs::path(std::u8string(text.begin(), text.end()));
-#else
-    return fs::path(std::string(text));
-#endif
-}
+// The internal text form is the system's own byte string on POSIX and UTF-8 on Windows: the
+// platform boundary says which (platform/files.h, D77).
+using platform::fs_from_text;
+using platform::text_from_fs;
 
 // Split native path text on separators, dropping "" and "." components and
 // keeping ".." — pathlib's rule for the non-anchor part of a path.
@@ -416,17 +359,15 @@ struct windows_strategy : strategy_base<windows_strategy> {
     }
 };
 
-#ifdef _WIN32
-using native_strategy = windows_strategy;
-#else
-using native_strategy = posix_strategy;
-#endif
+// The running system's rules, chosen by the platform's family (D77): both strategies are compiled,
+// and proven, on every system.
+using native_strategy = std::conditional_t<platform::native == platform::family::windows, windows_strategy, posix_strategy>;
 
 // A path that reads and decodes itself. Models os.PathLike (it exposes
 // __fspath__ through the binding), so it drops straight into open(), Path(),
-// etc. An engine may be pinned at construction (nullptr = auto by extension);
-// derived paths (parent(), with_suffix(), ...) inherit the pin. Resolution
-// itself lives in the registry (registry.h: engine_list::resolve).
+// etc. Which engine reads it is the registry's to say (engine_list.h) and an
+// engine pinned to a path is the handle's (adapter/pathview.h): the value
+// carries neither.
 template <class Strategy>
 class basic_file {
 public:
@@ -435,13 +376,11 @@ public:
     constexpr basic_file() = default;   // "."
 
     // From a value already in the model (a path_table row, a parsed uri).
-    constexpr explicit basic_file(uri value, const engine_info* pin = nullptr) : m_uri(std::move(value)), m_pin(pin) {}
+    constexpr explicit basic_file(uri value) : m_uri(std::move(value)) {}
 
     // From native path text — or a file:// URI (RFC 8089, decoded as
     // pathlib.Path.from_uri does). Any other "scheme://" text is rejected.
-    constexpr explicit basic_file(std::string_view text, const engine_info* pin = nullptr) : m_pin(pin) {
-        assign_text(m_uri, text);
-    }
+    constexpr explicit basic_file(std::string_view text) { assign_text(m_uri, text); }
 
     // ── construction rules (constexpr, so provable) ────────────────────────
     [[nodiscard]] static constexpr bool is_file_scheme(std::string_view sch) noexcept {
@@ -494,7 +433,6 @@ public:
 
     // ── value ──────────────────────────────────────────────────────────────
     [[nodiscard]] constexpr const uri& value() const noexcept { return m_uri; }
-    [[nodiscard]] constexpr const engine_info* pinned() const noexcept { return m_pin; }
 
     // os.PathLike: the native path text, in pathlib's normalised spelling.
     [[nodiscard]] constexpr std::string fspath() const { return Strategy::render(m_uri); }
@@ -579,9 +517,10 @@ public:
         return out;
     }
 
-    [[nodiscard]] constexpr std::string repr() const {
+    // `engine`: the label of the engine pinned to the path, if one is.
+    [[nodiscard]] constexpr std::string repr(std::string_view engine = {}) const {
         std::string out = "path(\"" + as_uri() + "\"";
-        if (m_pin) out += ", engine=" + std::string(m_pin->label);
+        if (!engine.empty()) out += ", engine=" + std::string(engine);
         return out + ")";
     }
 
@@ -593,7 +532,7 @@ public:
         return out;
     }
     [[nodiscard]] constexpr basic_file rjoined(std::string_view other) const {   // other / self
-        basic_file out(other, m_pin);
+        basic_file out(other);
         Strategy::join_into(out.m_uri, m_uri);
         return out;
     }
@@ -732,7 +671,6 @@ private:
 
     [[nodiscard]] basic_file from_fs(const fs::path& p) const {
         basic_file out;
-        out.m_pin = m_pin;
         Strategy::parse_into(out.m_uri, detail::text_from_fs(p));
         return out;
     }
@@ -772,7 +710,6 @@ private:
     }
 
     uri m_uri;
-    const engine_info* m_pin{nullptr};   // pinned at construction; nullptr = auto by extension
 };
 
 using file = basic_file<native_strategy>;

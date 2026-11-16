@@ -1,6 +1,7 @@
 #pragma once
 
-#include "quick_timer.h"
+#include "../core/primitives/quick_timer.h"
+#include "../core/primitives/timestamp.h"
 
 #include <chrono>
 #include <cstdarg>
@@ -24,7 +25,7 @@ namespace pygim::logging {
 
 // ── ScopeLog ─────────────────────────────────────────────────────
 // Lightweight RAII enter/exit trace with file:line info.
-// Zero heap allocations — raw steady_clock + fprintf to stderr.
+// Zero heap allocations — the monotonic clock (core/primitives/timestamp.h) + fprintf to stderr.
 class ScopeLog {
 public:
     explicit ScopeLog(std::string_view tag = {},
@@ -35,15 +36,14 @@ public:
           m_line(static_cast<int>(loc.line())),
           m_tag(tag),
           m_note(note),
-          m_start(std::chrono::steady_clock::now())
+          m_start(primitives::monotonic_timestamp::now())
     {
         write_enter();
     }
 
     ~ScopeLog() {
-        const auto micros = std::chrono::duration_cast<
-            std::chrono::microseconds>(
-            std::chrono::steady_clock::now() - m_start).count();
+        using namespace primitives::time_literals;
+        const auto micros = (primitives::monotonic_timestamp::now() - m_start) / 1_us;
         write_exit(micros);
     }
 
@@ -101,7 +101,7 @@ private:
     int m_line;
     std::string_view m_tag;
     std::string_view m_note;
-    std::chrono::steady_clock::time_point m_start;
+    primitives::monotonic_timestamp m_start;
 };
 
 } // namespace pygim::logging
@@ -143,18 +143,18 @@ inline void log_fmt(const char* fmt, ...) {
 
 #define PYGIM_LOG_FMT(fmt, ...) ::pygim::logging::log_fmt(fmt, ##__VA_ARGS__)
 
-// RAII QuickTimer — prints summary with sub-timer breakdown at scope exit.
+// RAII QuickTimer — prints a summary with its laps at scope exit.
 // Output goes to stderr (same stream as PYGIM_LOG_FMT and ScopeLog).
-// Use PYGIM_TIMED_SUB("phase") within the same scope to add sub-timers.
+// Use PYGIM_TIMED_SUB("phase") within the same scope to time a lap.
 // Variable name is always pygim_timer_ so PYGIM_TIMED_SUB can reference it.
 #define PYGIM_TIMED_SCOPE(name)                                                 \
-    ::pygim::QuickTimer pygim_timer_((name), stderr,                            \
-                                     /*print_on_end=*/true,                     \
-                                     /*print_on_start=*/false)
+    ::pygim::primitives::QuickTimer pygim_timer_(                               \
+        (name), ::pygim::primitives::monotonic_clock{},                         \
+        ::pygim::primitives::stderr_report(::pygim::primitives::report_lines::summary))
 
-// Start a sub-timer phase on the enclosing PYGIM_TIMED_SCOPE timer.
-// Starting a new sub-timer automatically stops the previous one.
-#define PYGIM_TIMED_SUB(phase) pygim_timer_.start_sub_timer((phase), false)
+// Start a lap on the enclosing PYGIM_TIMED_SCOPE timer.
+// Starting a lap stops the one running.
+#define PYGIM_TIMED_SUB(phase) pygim_timer_.start_lap((phase))
 
 #else
 

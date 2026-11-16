@@ -21,6 +21,7 @@
 
 #include "../third_party/simdjson/simdjson.h"
 #include "../../core.h"
+#include "../../engine_list.h"
 #include "../common.h"
 #include "json.h"
 #include "yaml.h"

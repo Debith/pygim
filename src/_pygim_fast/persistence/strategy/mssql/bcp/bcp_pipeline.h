@@ -1,7 +1,7 @@
 #pragma once
 // BCP Pipeline: single-connection and parallel bulk insert orchestrator.
 // Combines archive's bcp_strategy.cpp, bcp_row_loop.h, bcp_entry.h into a
-// single header-only file with simplified timing (stage-level chrono only).
+// single header-only file; its stages are timed by a SilentTimer (core/primitives/quick_timer.h).
 
 #include "bcp_helpers.h"
 #include "bcp_pool.h"
@@ -14,12 +14,12 @@
 #include <numeric>
 #include <span>
 #include <string>
-#include <thread>
 #include <vector>
 
 #include <arrow/table.h>
 #include <arrow/table_builder.h>
-#include "../../../../utils/quick_timer.h"
+#include "../../../../core/primitives/parallel/for_each.h"
+#include "../../../../core/primitives/quick_timer.h"
 
 namespace pygim::strategy::mssql::bcp {
 
@@ -116,46 +116,46 @@ struct ParallelWorkerResult {
 };
 
 /// Build metrics for single-connection insert path.
-inline BcpMetrics make_single_metrics(const pygim::QuickTimerT<BcpPhase>& timer,
+inline BcpMetrics make_single_metrics(const pygim::primitives::SilentTimer<BcpPhase>& timer,
                                       const BcpContext& ctx,
                                       const BcpProfiler& profiler) {
     const auto timing = timer.snapshot();
     BcpMetrics metrics;
     metrics.profiler = profiler;
-    metrics.row_loop_seconds = timing.sub_timer_seconds(BcpPhase::row_loop);
-    metrics.batch_flush_seconds = timing.sub_timer_seconds(BcpPhase::flush);
+    metrics.row_loop_seconds = timing.lap_seconds(BcpPhase::row_loop);
+    metrics.batch_flush_seconds = timing.lap_seconds(BcpPhase::flush);
     metrics.processed_rows = ctx.processed_rows;
     metrics.sent_rows = ctx.sent_rows;
     metrics.record_batches = ctx.record_batches;
-    metrics.total_seconds = timing.total_seconds;
+    metrics.total_seconds = timing.total_seconds();
     return metrics;
 }
 
 /// Build metrics for a parallel worker path.
-inline BcpMetrics make_worker_metrics(const pygim::QuickTimerT<BcpWorkerPhase>& timer,
+inline BcpMetrics make_worker_metrics(const pygim::primitives::SilentTimer<BcpWorkerPhase>& timer,
                                       const BcpContext& ctx,
                                       const BcpProfiler& profiler) {
     const auto timing = timer.snapshot();
     BcpMetrics metrics;
     metrics.profiler = profiler;
-    metrics.row_loop_seconds = timing.sub_timer_seconds(BcpWorkerPhase::row_loop);
-    metrics.batch_flush_seconds = timing.sub_timer_seconds(BcpWorkerPhase::flush);
+    metrics.row_loop_seconds = timing.lap_seconds(BcpWorkerPhase::row_loop);
+    metrics.batch_flush_seconds = timing.lap_seconds(BcpWorkerPhase::flush);
     metrics.processed_rows = ctx.processed_rows;
     metrics.sent_rows = ctx.sent_rows;
     metrics.record_batches = ctx.record_batches;
-    metrics.total_seconds = timing.total_seconds;
+    metrics.total_seconds = timing.total_seconds();
     return metrics;
 }
 
 /// Build final metrics for parallel orchestrator path.
-inline BcpMetrics make_parallel_metrics(const pygim::QuickTimerT<BcpParallelPhase>& timer,
+inline BcpMetrics make_parallel_metrics(const pygim::primitives::SilentTimer<BcpParallelPhase>& timer,
                                         const std::vector<ParallelWorkerResult>& results) {
     const auto timing = timer.snapshot();
     BcpMetrics merged{};
-    merged.connect_seconds = timing.sub_timer_seconds(BcpParallelPhase::connect);
+    merged.connect_seconds = timing.lap_seconds(BcpParallelPhase::connect);
     for (const auto& result : results)
         merged.merge_parallel(result.metrics);
-    merged.total_seconds = timing.total_seconds;
+    merged.total_seconds = timing.total_seconds();
     return merged;
 }
 
@@ -195,7 +195,7 @@ inline void init_session(const BcpApi& api, SQLHDBC dbc,
     w.reserve(qualified_table.size());
     for (char ch : qualified_table) w.push_back(static_cast<char16_t>(ch));
 
-    if (api.init(dbc, reinterpret_cast<LPCWSTR>(w.c_str()),
+    if (api.init(dbc, reinterpret_cast<wide_text>(w.c_str()),
                  nullptr, nullptr, DB_IN) != kSucceed) {
         odbc::raise_if_error(
             SQL_ERROR, SQL_HANDLE_DBC, dbc,
@@ -350,7 +350,7 @@ inline void finalize_bcp(BcpContext& ctx) {
     if (ctx.sent_rows > 0 && ctx.rows_until_flush < ctx.batch_size) {
         auto ret = ctx.bcp.batch(ctx.dbc);
         if (ret == -1) [[unlikely]] {
-            std::this_thread::sleep_for(std::chrono::milliseconds(50));
+            primitives::sleep_for(50_ms);
             ret = ctx.bcp.batch(ctx.dbc);
         }
         if (ret == -1) [[unlikely]]
@@ -382,7 +382,7 @@ inline void finalize_bcp(BcpContext& ctx) {
     int64_t batch_size,
     const std::string& table_hint)
 {
-    pygim::QuickTimerT<BcpPhase> timer("bcp_insert", nullptr, false, false);
+    pygim::primitives::SilentTimer<BcpPhase> timer("bcp_insert");
 
     if (!table_data || table_data->num_rows() == 0)
         throw std::runtime_error("Arrow BCP received zero rows from payload");
@@ -414,18 +414,18 @@ inline void finalize_bcp(BcpContext& ctx) {
         }
         if (!batch) break;
 
-        timer.start_sub_timer(BcpPhase::row_loop, false);
+        timer.start_lap(BcpPhase::row_loop);
         process_batch(ctx, batch, binding_state, prof);
-        timer.stop_sub_timer(BcpPhase::row_loop, false);
+        timer.stop_lap(BcpPhase::row_loop);
     }
 
-    timer.start_sub_timer(BcpPhase::flush, false);
+    timer.start_lap(BcpPhase::flush);
     session_guard.dismiss();
     {
         BCP_PROF_SCOPE(prof, final_flush);
         finalize_bcp(ctx);
     }
-    timer.stop_sub_timer(BcpPhase::flush, false);
+    timer.stop_lap(BcpPhase::flush);
 
     BCP_PROF_DUMP(prof, 0);
     return make_single_metrics(timer, ctx, prof);
@@ -456,7 +456,7 @@ inline void finalize_bcp(BcpContext& ctx) {
     const std::string& table_hint,
     int num_workers)
 {
-    pygim::QuickTimerT<BcpParallelPhase> timer("bcp_parallel", nullptr, false, false);
+    pygim::primitives::SilentTimer<BcpParallelPhase> timer("bcp_parallel");
 
     if (!table_data || table_data->num_rows() == 0)
         throw std::runtime_error("Arrow BCP received zero rows from payload");
@@ -465,12 +465,12 @@ inline void finalize_bcp(BcpContext& ctx) {
 
     // 1. Resolve worker count
     const int desired = (num_workers <= 0)
-        ? std::min(4, static_cast<int>(std::thread::hardware_concurrency()))
+        ? std::min(4, static_cast<int>(primitives::parallel::this_machines_cores()))
         : num_workers;
 
     // Don't create more workers than rows
     int actual_workers = std::min(desired,
-        static_cast<int>(std::min<int64_t>(total_rows, std::thread::hardware_concurrency())));
+        static_cast<int>(std::min<int64_t>(total_rows, static_cast<int64_t>(primitives::parallel::this_machines_cores()))));
     actual_workers = std::max(actual_workers, 1);
 
     // 2. Fallback to single-connection if only 1 worker
@@ -491,27 +491,25 @@ inline void finalize_bcp(BcpContext& ctx) {
     }
 
     // 4. Create connection pool (parallel establishment)
-    timer.start_sub_timer(BcpParallelPhase::connect, false);
+    timer.start_lap(BcpParallelPhase::connect);
     BcpConnectionPool pool(conn_str, actual_workers);
-    timer.stop_sub_timer(BcpParallelPhase::connect, false);
+    timer.stop_lap(BcpParallelPhase::connect);
 
     const auto& api = ensure_bcp_api();
     auto qualified = sql::qualify_table(table);
     const int64_t effective_batch = batch_size > 0 ? batch_size : 100000LL;
 
-    // 5. Spawn worker threads — each gets its own Table slice
+    // 5. One thread per slice, each on its own connection; a worker keeps its error in its result
     std::vector<ParallelWorkerResult> results(static_cast<size_t>(actual_workers));
-    std::vector<std::thread>  threads;
-    threads.reserve(static_cast<size_t>(actual_workers));
-
-    for (int w = 0; w < actual_workers; ++w) {
-        threads.emplace_back([&, w]() {
+    const auto workers = static_cast<size_t>(actual_workers);
+    primitives::parallel::for_each(workers, workers, [&](size_t slice, size_t) {
+            const int w = static_cast<int>(slice);
             auto& res = results[static_cast<size_t>(w)];
             auto& conn = pool[w];
             auto& my_slice = slices[static_cast<size_t>(w)];
 
             try {
-                pygim::QuickTimerT<BcpWorkerPhase> wtimer("bcp_worker", nullptr, false, false);
+                pygim::primitives::SilentTimer<BcpWorkerPhase> wtimer("bcp_worker");
                 BCP_PROF_DECL(prof);
 
                 {
@@ -541,32 +539,27 @@ inline void finalize_bcp(BcpContext& ctx) {
                     }
                     if (!batch) break;
 
-                    wtimer.start_sub_timer(BcpWorkerPhase::row_loop, false);
+                    wtimer.start_lap(BcpWorkerPhase::row_loop);
                     process_batch(ctx, batch, state, prof);
-                    wtimer.stop_sub_timer(BcpWorkerPhase::row_loop, false);
+                    wtimer.stop_lap(BcpWorkerPhase::row_loop);
                 }
 
-                wtimer.start_sub_timer(BcpWorkerPhase::flush, false);
+                wtimer.start_lap(BcpWorkerPhase::flush);
                 guard.dismiss();
                 {
                     BCP_PROF_SCOPE(prof, final_flush);
                     finalize_bcp(ctx);
                 }
-                wtimer.stop_sub_timer(BcpWorkerPhase::flush, false);
+                wtimer.stop_lap(BcpWorkerPhase::flush);
 
                 BCP_PROF_DUMP(prof, w);
                 res.metrics = make_worker_metrics(wtimer, ctx, prof);
             } catch (...) {
                 res.error = std::current_exception();
             }
-        });
-    }
+    });
 
-    // 6. Join all workers
-    for (auto& t : threads)
-        t.join();
-
-    // 7. Check for errors (rethrow first encountered)
+    // 6. Check for errors (rethrow the first worker's)
     for (int w = 0; w < actual_workers; ++w) {
         if (results[static_cast<size_t>(w)].error) {
             try {
@@ -583,7 +576,7 @@ inline void finalize_bcp(BcpContext& ctx) {
         }
     }
 
-    // 8. Merge metrics
+    // 7. Merge metrics
     return make_parallel_metrics(timer, results);
 }
 

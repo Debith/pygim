@@ -59,8 +59,8 @@
 
 #include "../../mapping/id_set.h"
 #include "../path_table.h"
-#include "adapter.h"
 #include "path_store.h"
+#include "path_text.h"
 #include "pathview.h"
 
 namespace pygim::pathlike {
