@@ -1,3 +1,5 @@
+import types
+
 import pytest
 
 from pygim.each import each
@@ -172,6 +174,46 @@ def test_each_broadcast_over_builtin_iterables():
     """
     assert each(("a", "bb")).upper() == ["A", "BB"]
     assert each(range(3)).bit_length() == [0, 1, 2]
+
+
+def _a_fleet():
+    """A class holding the descriptor, with instances that iterate."""
+    class Fleet:
+        each = each()
+
+        def __iter__(self):
+            return iter(())
+
+    return Fleet
+
+
+def test_the_descriptor_refuses_a_generator():
+    """A generator is single-pass, and the proxy reads its iterable twice, so a generator is refused
+    rather than drained. Only the descriptor's own __get__ can be handed one: no class makes its
+    instances generators."""
+    Fleet = _a_fleet()
+    with pytest.raises(TypeError, match="^`each` cannot be used on generator instances$"):
+        vars(Fleet)["each"].__get__((item for item in [Dummy(1)]), Fleet)
+
+
+class _SaysItIsAGenerator:
+    """Iterable, and a generator by isinstance() — which believes __class__ — though not by its type."""
+
+    @property
+    def __class__(self):
+        return types.GeneratorType
+
+    def __iter__(self):
+        return iter(())
+
+
+def test_the_descriptor_refuses_what_isinstance_calls_a_generator():
+    """What counts as a generator is isinstance(x, types.GeneratorType), Python's own answer (as
+    inspect.isgenerator gives it), and that believes an object's __class__."""
+    Fleet = _a_fleet()
+    assert isinstance(_SaysItIsAGenerator(), types.GeneratorType)
+    with pytest.raises(TypeError, match="^`each` cannot be used on generator instances$"):
+        vars(Fleet)["each"].__get__(_SaysItIsAGenerator(), Fleet)
 
 
 if __name__ == "__main__":
