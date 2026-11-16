@@ -10,6 +10,7 @@
 #include "core_utils.h"
 #include "adapter_utils.h"
 #include "memory.h"
+#include "../core/primitives/cpu.h"
 #include "../core/primitives/duration.h"
 #include "../core/primitives/timestamp.h"
 #include "quick_timer_adapter.h"
@@ -314,6 +315,21 @@ PYBIND11_MODULE(utils, m) {
     m.def("peak_rss_bytes", &pygim::memory::peak_resident_bytes,
           "The process's peak resident set size in bytes (its high-water mark).");
     m.def("peak_rss_mb", &pygim::memory::peak_resident_mb, "peak_rss_bytes() in mebibytes.");
+
+    // The processor pygim's kernels size their work for (core/primitives/cpu.h): read once, never 0.
+    m.def("cpu", [] {
+              const primitives::cpu& c = primitives::this_cpu();
+              py::dict d;
+              d["l1d"] = c.caches().l1d();
+              d["l2"] = c.caches().l2();
+              d["l3"] = c.caches().l3();
+              d["line"] = c.caches().line();
+              d["avx2"] = c.avx2();
+              return d;
+          },
+          "This machine's processor as pygim's kernels see it: the data caches in bytes as one core sees\n"
+          "them (l1d, l2, l3 the last level; a size the system does not report is a typical one, never 0),\n"
+          "the cache line, and whether AVX2 kernels may run.");
 
     // A length of time (core/primitives/duration.h): one signed 64-bit count of nanoseconds; units
     // are conversions.

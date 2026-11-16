@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import itertools
+import os
+import platform
+import sys
 
 import pytest
 
-from pygim import utils
+from pygim import path, utils
 
 
 DATA_UNIT_FACTORS = {
@@ -175,3 +178,52 @@ def test_rss_probe_is_cheap():
         utils.rss_bytes()
     per_call = (time.perf_counter() - t0) / n
     assert per_call < 20e-6, per_call                              # ~1 us on Linux (a procfs pread); generous for CI
+
+
+# ── the processor (core/primitives/cpu.h) ──
+SYS_CACHES = path("/sys/devices/system/cpu/cpu0/cache")
+
+
+def test_cpu_reports_caches_never_zero():
+    c = utils.cpu()
+    assert set(c) == {"l1d", "l2", "l3", "line", "avx2"}
+    assert 0 < c["l1d"] <= c["l2"] <= c["l3"] and c["line"] in (32, 64, 128, 256)
+
+
+@pytest.mark.skipif(not hasattr(os, "sysconf") or "SC_LEVEL2_CACHE_SIZE" not in os.sysconf_names
+                    or os.sysconf("SC_LEVEL2_CACHE_SIZE") <= 0, reason="the system reports no L2 here")
+def test_cpu_caches_are_the_systems():
+    c = utils.cpu()
+    assert (c["l1d"], c["l2"]) == (os.sysconf("SC_LEVEL1_DCACHE_SIZE"), os.sysconf("SC_LEVEL2_CACHE_SIZE"))
+
+
+def _listed_data_caches():
+    """{level: bytes} of the largest cache of each level that holds data, as the kernel lists cpu0's."""
+    def read(index, what):
+        return index.joinpath(what).read_bytes().decode().strip()
+
+    found = {}
+    for index in SYS_CACHES.glob("index*"):
+        size = read(index, "size")
+        bytes_ = int(size[:-1]) * {"K": 1024, "M": 1 << 20}[size[-1]] if size[-1] in "KM" else int(size)
+        level = int(read(index, "level"))
+        if read(index, "type") != "Instruction":
+            found[level] = max(found.get(level, 0), bytes_)
+    return found
+
+
+@pytest.mark.skipif(not SYS_CACHES.exists(), reason="the kernel lists no caches here")
+def test_cpu_caches_are_the_kernels_data_caches():
+    """The L1d and L2 are the largest caches of their level the kernel lists as holding data — type
+    "Data" or "Unified", never "Instruction" — whichever source pygim read: sysconf, or that list
+    where sysconf says nothing (glibc on arm64, musl). Found 2026-10-29: the list's reader took the
+    type from the size's first byte, so a larger L1 instruction cache stood as the L1d."""
+    listed = _listed_data_caches()
+    c = utils.cpu()
+    assert (c["l1d"], c["l2"]) == (listed[1], listed[2])
+
+
+@pytest.mark.skipif(sys.platform != "linux" or platform.machine() not in ("x86_64", "AMD64"), reason="reads /proc/cpuinfo's x86 flags")
+def test_cpu_avx2_is_the_processors():
+    flags = next(line for line in path("/proc/cpuinfo").read_bytes().decode().splitlines() if line.startswith("flags")).split()
+    assert utils.cpu()["avx2"] == ("avx2" in flags)
