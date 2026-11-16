@@ -30,6 +30,19 @@ def _code(header):
     return "\n".join(re.sub(r"//.*$", "", line) for line in header.read_text(encoding="utf-8").splitlines())
 
 
+def matches_outside(root, pattern, exempt=()):
+    """Each match of `pattern` in the code of a header or source under `root` (line comments left
+    out), outside platform/, third_party/ and the `exempt` files, as "file:line" under `root`."""
+    found = []
+    for file in sorted([*root.rglob("*.h"), *root.rglob("*.cpp")]):
+        relative = file.relative_to(root).as_posix()
+        if "third_party" in file.parts or relative.startswith("platform/") or relative in exempt:
+            continue
+        text = _code(file)
+        found += [f"{relative}:{text.count(chr(10), 0, m.start()) + 1}" for m in pattern.finditer(text)]
+    return found
+
+
 @pytest.mark.parametrize("header", CORE or [ROOT], ids=lambda p: str(p.relative_to(ROOT.parent)))
 def test_core_header_is_pybind_free(header):
     text = _code(header)
@@ -53,28 +66,15 @@ def test_core_headers_include_only_core():
 OS_MACRO = re.compile(r"^[ \t]*#[ \t]*(?:if|ifdef|ifndef|elif)\b.*\b(?:_WIN32|_WIN64|__APPLE__|__linux__|__unix__|__FreeBSD__)\b", re.M)
 
 
-def os_conditionals(root):
-    """Each conditional on the operating system in a header or source under `root` outside
-    platform/ and third_party/, as "file:line"."""
-    found = []
-    for file in sorted([*root.rglob("*.h"), *root.rglob("*.cpp")]):
-        relative = file.relative_to(root).as_posix()
-        if "third_party" in file.parts or relative.startswith("platform/"):
-            continue
-        text = file.read_text(encoding="utf-8", errors="replace")
-        found += [f"{relative}:{text.count(chr(10), 0, m.start()) + 1}" for m in OS_MACRO.finditer(text)]
-    return found
-
-
 def test_the_os_check_finds_what_it_is_for(tmp_path):
     (tmp_path / "platform").mkdir()
     (tmp_path / "platform" / "native.h").write_text("#ifdef _WIN32\n#endif\n")
     (tmp_path / "a.h").write_text("int x;\n#if defined(__APPLE__)\n#endif\n#ifdef _MSC_VER\n#endif\n")
-    assert os_conditionals(tmp_path) == ["a.h:2"]
+    assert matches_outside(tmp_path, OS_MACRO) == ["a.h:2"]
 
 
 def test_the_operating_system_is_asked_only_behind_the_platform_boundary():
-    found = os_conditionals(ROOT)
+    found = matches_outside(ROOT, OS_MACRO)
     assert found == [], "a conditional on the operating system outside platform/: put the system's rules and calls behind the boundary:\n" + "\n".join(found)
 
 
@@ -85,28 +85,15 @@ def test_the_operating_system_is_asked_only_behind_the_platform_boundary():
 PLATFORM_BRANCH = re.compile(r"\bif\s*(?:constexpr\s*)?\(\s*!?\s*platform::")
 
 
-def platform_branches(root):
-    """Each branch on a platform value in a header or source under `root` outside platform/ and
-    third_party/, as "file:line"."""
-    found = []
-    for file in sorted([*root.rglob("*.h"), *root.rglob("*.cpp")]):
-        relative = file.relative_to(root).as_posix()
-        if "third_party" in file.parts or relative.startswith("platform/"):
-            continue
-        text = file.read_text(encoding="utf-8", errors="replace")
-        found += [f"{relative}:{text.count(chr(10), 0, m.start()) + 1}" for m in PLATFORM_BRANCH.finditer(text)]
-    return found
-
-
 def test_the_platform_branch_check_finds_what_it_is_for(tmp_path):
     (tmp_path / "platform").mkdir()
     (tmp_path / "platform" / "files.h").write_text("if constexpr (platform::x) {}\n")
     (tmp_path / "a.h").write_text("using t = std::conditional_t<platform::native == platform::family::windows, W, P>;\nif constexpr (!platform::x) {}\nif (platform::y) {}\n")
-    assert platform_branches(tmp_path) == ["a.h:2", "a.h:3"]
+    assert matches_outside(tmp_path, PLATFORM_BRANCH) == ["a.h:2", "a.h:3"]
 
 
 def test_no_behaviour_branches_on_the_platform_outside_the_boundary():
-    found = platform_branches(ROOT)
+    found = matches_outside(ROOT, PLATFORM_BRANCH)
     assert found == [], "a branch on a platform value outside platform/: give each system its class and let the family choose it once:\n" + "\n".join(found)
 
 
@@ -115,19 +102,7 @@ def test_no_behaviour_branches_on_the_platform_outside_the_boundary():
 # test can hand it a manual one. Found 2026-10-30:
 # ScopeLog, the BCP profiler and the fetch benchmark each read steady_clock themselves.
 CLOCK_READ = re.compile(r"std::chrono::(?:steady_clock|system_clock|high_resolution_clock)\b")
-
-
-def clock_readers(root):
-    """Each header or source under `root` that reads a std::chrono clock itself, outside
-    core/primitives/timestamp.h, platform/ and third_party/, as its path under `root`."""
-    found = []
-    for file in sorted([*root.rglob("*.h"), *root.rglob("*.cpp")]):
-        relative = file.relative_to(root).as_posix()
-        if "third_party" in file.parts or relative.startswith("platform/") or relative == "core/primitives/timestamp.h":
-            continue
-        if CLOCK_READ.search(_code(file)):
-            found.append(relative)
-    return found
+CLOCK_HOME = ("core/primitives/timestamp.h",)
 
 
 def test_the_clock_check_finds_what_it_is_for(tmp_path):
@@ -137,7 +112,7 @@ def test_the_clock_check_finds_what_it_is_for(tmp_path):
     (tmp_path / "core" / "primitives" / "timestamp.h").write_text("auto t = std::chrono::system_clock::now();\n")
     (tmp_path / "a.h").write_text("auto t = std::chrono::steady_clock::now();\n")
     (tmp_path / "b.h").write_text("// std::chrono::steady_clock, named in a comment only\nusing d = std::chrono::nanoseconds;\n")
-    assert clock_readers(tmp_path) == ["a.h"]
+    assert matches_outside(tmp_path, CLOCK_READ, CLOCK_HOME) == ["a.h:1"]
 
 
 def test_the_primitives_are_core():
@@ -148,7 +123,7 @@ def test_the_primitives_are_core():
 
 
 def test_time_is_read_in_one_header():
-    found = clock_readers(ROOT) + [f"tests/static/{f}" for f in clock_readers(ROOT.parents[1] / "tests" / "static")]
+    found = matches_outside(ROOT, CLOCK_READ, CLOCK_HOME) + [f"tests/static/{f}" for f in matches_outside(ROOT.parents[1] / "tests" / "static", CLOCK_READ)]
     assert found == [], "a clock read outside core/primitives/timestamp.h: take a clock (wall_clock, monotonic_clock) instead"
 
 
@@ -162,30 +137,17 @@ CHRONO_LENGTH = re.compile(r"std::chrono::(?:duration\b|duration_cast|nanosecond
 TIME_PRIMITIVES = ("core/primitives/duration.h", "core/primitives/timestamp.h")
 
 
-def chrono_lengths(root):
-    """Each header or source under `root` that names a std::chrono length or clock outside the time
-    primitives, platform/ and third_party/, as "file:line"."""
-    found = []
-    for file in sorted([*root.rglob("*.h"), *root.rglob("*.cpp")]):
-        relative = file.relative_to(root).as_posix()
-        if "third_party" in file.parts or relative.startswith("platform/") or relative in TIME_PRIMITIVES:
-            continue
-        text = _code(file)
-        found += [f"{relative}:{text.count(chr(10), 0, m.start()) + 1}" for m in CHRONO_LENGTH.finditer(text)]
-    return found
-
-
 def test_the_length_check_finds_what_it_is_for(tmp_path):
     (tmp_path / "core" / "primitives").mkdir(parents=True)
     (tmp_path / "core" / "primitives" / "duration.h").write_text("using rep = std::chrono::nanoseconds;\n")
     (tmp_path / "a.h").write_text("auto t = std::chrono::milliseconds(50);\n")
     (tmp_path / "b.h").write_text("using namespace std::chrono;\nyear_month_day ymd{sys_days{days{3}}};\n")
     (tmp_path / "c.h").write_text("// std::chrono::seconds, named in a comment only\nauto t = 50_ms;\n")
-    assert chrono_lengths(tmp_path) == ["a.h:1"]
+    assert matches_outside(tmp_path, CHRONO_LENGTH, TIME_PRIMITIVES) == ["a.h:1"]
 
 
 def test_a_length_of_time_is_spelt_by_the_duration_primitive():
-    found = chrono_lengths(ROOT)
+    found = matches_outside(ROOT, CHRONO_LENGTH, TIME_PRIMITIVES)
     assert found == [], "a std::chrono length outside the time primitives: use pygim::primitives::duration and its literals (20_us, 1_min):\n" + "\n".join(found)
 
 
