@@ -4,6 +4,7 @@
 #include <pybind11/gil_safe_call_once.h>
 #include <pybind11/operators.h>
 #include <pybind11/stl.h>
+#include <array>
 #include <cstdint>
 #include <optional>
 #include <string>
@@ -21,17 +22,6 @@ namespace py = pybind11;
 namespace {
 
 using MergeStrategy = pygim::mapping::MergeStrategy;
-
-MergeStrategy parse_merge_strategy(const std::string& value) {
-      if (value == "sum") return MergeStrategy::Sum;
-      if (value == "max") return MergeStrategy::Max;
-      if (value == "min") return MergeStrategy::Min;
-      if (value == "replace") return MergeStrategy::Replace;
-      if (value == "extend") return MergeStrategy::Extend;
-      if (value == "union") return MergeStrategy::Union;
-      if (value == "deep") return MergeStrategy::Deep;
-      throw py::value_error("invalid merge strategy: " + value);
-}
 
 std::string merge_strategy_name(MergeStrategy strategy) {
       switch (strategy) {
@@ -53,6 +43,30 @@ std::string merge_strategy_name(MergeStrategy strategy) {
       return "replace";
 }
 
+// Every strategy, in the order a message lists them: parsing a name and refusing one read this list.
+constexpr std::array all_strategies{MergeStrategy::Replace, MergeStrategy::Extend, MergeStrategy::Union, MergeStrategy::Deep,
+                                    MergeStrategy::Sum,     MergeStrategy::Max,    MergeStrategy::Min};
+
+// pygim.core.explib's GimOptionError, fetched as the module loads (never while running) and kept
+// for the process's life, as the module keeps explib imported.
+PyObject* option_error = nullptr;
+
+// Raises GimOptionError: `given` is none of the strategies, which it names.
+[[noreturn]] void refuse_strategy(const py::handle& given) {
+      py::list strategies;
+      for (MergeStrategy s : all_strategies) strategies.append(merge_strategy_name(s));
+      const py::object error = py::reinterpret_borrow<py::object>(option_error)(given, strategies);
+      PyErr_SetObject(option_error, error.ptr());
+      throw py::error_already_set();
+}
+
+MergeStrategy parse_merge_strategy(const std::string& value) {
+      for (MergeStrategy s : all_strategies) {
+            if (merge_strategy_name(s) == value) return s;
+      }
+      refuse_strategy(py::str(value));
+}
+
 MergeStrategy parse_merge_strategy_obj(py::handle obj) {
       if (py::isinstance<py::str>(obj)) {
             return parse_merge_strategy(obj.cast<std::string>());
@@ -60,7 +74,7 @@ MergeStrategy parse_merge_strategy_obj(py::handle obj) {
       if (py::hasattr(obj, "__name__")) {
             return parse_merge_strategy(py::str(obj.attr("__name__")).cast<std::string>());
       }
-      throw py::value_error("invalid merge strategy object");
+      refuse_strategy(obj);
 }
 
 std::string py_type_name(py::handle obj) {
@@ -411,6 +425,8 @@ std::string duration_repr(primitives::duration d) {
 } // namespace
 
 PYBIND11_MODULE(utils, m) {
+    option_error = py::object(py::module_::import("pygim.core.explib").attr("GimOptionError")).release().ptr();
+
     m.doc() = "Utilities for Python.";
     m.def("is_dunder",
           py::overload_cast<const std::string &>(&is_dunder),

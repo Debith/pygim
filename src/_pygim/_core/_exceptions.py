@@ -42,8 +42,8 @@ class GimError(GimException):
 
 
 @dataclass
-class GimOptionError(GimError):
-    """Raised when value not among options."""
+class GimOptionError(GimError, ValueError):
+    """Raised when value not among options; a ValueError too, as Python raises for a bad value."""
 
     _input_value: t.Any
     _choices: t.Iterable

@@ -7,6 +7,7 @@ from types import MappingProxyType
 import pytest
 
 from pygim import utils
+from pygim.core.explib import GimError, GimOptionError
 
 # What a MutableMapping is (its abstract methods and its mixins), as collections.abc says it; what
 # the ABC itself carries to be one is left out.
@@ -117,14 +118,23 @@ def test_gimdict_accepts_strategy_aliases(strategy):
 @pytest.mark.parametrize("strategy", ["", "AVG", "unknown", object()])
 def test_gimdict_rejects_invalid_strategies(strategy):
     d = utils.gimdict()
-    with pytest.raises(ValueError):
+    with pytest.raises(GimOptionError):
         d.set_default_strategy(strategy)
-    with pytest.raises(ValueError):
+    with pytest.raises(GimOptionError):
         d.set_strategy("a", strategy)
-    with pytest.raises(ValueError):
+    with pytest.raises(GimOptionError):
         d.set_type_strategy("int", strategy)
-    with pytest.raises(ValueError):
+    with pytest.raises(GimOptionError):
         utils.gimdict({}, int=strategy)
+
+
+def test_an_unknown_strategy_is_pygims_error_and_a_value_error_naming_the_strategies():
+    """A strategy none of the strategies is a GimOptionError, which is also the ValueError Python
+    raises for a bad value, and says what was given and what may be."""
+    with pytest.raises(GimOptionError) as refused:
+        utils.gimdict().set_default_strategy("avg")
+    assert isinstance(refused.value, ValueError) and isinstance(refused.value, GimError)
+    assert str(refused.value) == "Given input ``avg`` not among: replace, extend, union, deep, sum, max, min"
 
 
 def test_gimdict_rejects_non_mapping_initializer():
