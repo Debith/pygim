@@ -101,7 +101,8 @@ assert len(events["post"]) == 2
 # 4. Introspection works as usual alongside hooks
 # ----------------------------------------------------------------------------
 keys = [key[0] for key in reg.registered_keys()]
-assert "task.process" in keys and "task.square" in keys
+assert "task.process" in keys
+assert "task.square" in keys
 assert reg.find_id("task.process") is reg["task.process"]
 
 print("Hooks registry example OK:", reg, {k: len(v) for k, v in events.items()})

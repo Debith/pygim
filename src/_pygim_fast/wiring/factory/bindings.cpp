@@ -1,6 +1,7 @@
 #include <pybind11/functional.h>
 #include <pybind11/pybind11.h>
 
+#include "../common/adapter_errors.h"
 #include "adapter.h"
 
 namespace pygim {
@@ -8,6 +9,7 @@ namespace py = pybind11;
 
 PYBIND11_MODULE(factory, m) {
     m.doc() = "Factory for creating objects using registered callables, with optional interface enforcement.";
+    pygim::wiring::detail::register_wiring_errors();   // a missing key is KeyError
 
     py::class_<Factory>(m, "Factory")
         .def(py::init<>())

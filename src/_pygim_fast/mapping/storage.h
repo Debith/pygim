@@ -13,6 +13,9 @@
 #include <concepts>
 #include <cstddef>
 #include <initializer_list>
+#include <string>
+#include <string_view>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -24,6 +27,8 @@ concept storage =
     requires(S s, const S cs, const typename S::key_type& k, typename S::mapped_type v) {
         { cs.find(k) } -> std::same_as<const typename S::mapped_type*>;
         { s.find(k) } -> std::same_as<typename S::mapped_type*>;
+        { cs.contains(k) } -> std::convertible_to<bool>;               // no pointer compared: a constexpr table's
+        { cs.value_or(k, v) } -> std::same_as<typename S::mapped_type>;  // answers in a sanitizer build too (#287)
         { s.insert(k, std::move(v)) };            // insert-or-assign semantics
         { s.erase(k) } -> std::same_as<bool>;     // true when something was removed
         { cs.size() } -> std::convertible_to<std::size_t>;
@@ -55,15 +60,28 @@ public:
         for (const auto& [key, value] : items) insert(key, value);
     }
 
-    [[nodiscard]] constexpr V* find(const K& key) {
-        const std::size_t idx = lower_bound_idx(key);
-        if (idx < m_items.size() && m_items[idx].first == key) return &m_items[idx].second;
-        return nullptr;
+    /// The value at `key`, or none; as const as the storage (C++23's deduced `this`: one body).
+    template <class Self>
+    [[nodiscard]] constexpr auto find(this Self& self, const K& key) -> decltype(&self.m_items[0].second) {
+        const std::size_t at = self.index_of(key);
+        return at != npos ? &self.m_items[at].second : nullptr;
     }
-    [[nodiscard]] constexpr const V* find(const K& key) const {
-        const std::size_t idx = lower_bound_idx(key);
-        if (idx < m_items.size() && m_items[idx].first == key) return &m_items[idx].second;
-        return nullptr;
+    /// find() by a key of another type that compares with K both ways — a string_view for a
+    /// std::string key — so no K is made to look one up.
+    template <class Q>
+        requires(!std::is_convertible_v<const Q&, const K&>) && requires(const K& k, const Q& q) {
+            { k < q } -> std::convertible_to<bool>;
+            { k == q } -> std::convertible_to<bool>;
+        }
+    [[nodiscard]] constexpr const V* find(const Q& key) const {
+        const std::size_t at = index_of(key);
+        return at != npos ? &m_items[at].second : nullptr;
+    }
+    /// Whether `key` is held, and its value or `fallback`: an index compared, never a pointer.
+    [[nodiscard]] constexpr bool contains(const K& key) const { return index_of(key) != npos; }
+    [[nodiscard]] constexpr V value_or(const K& key, V fallback) const {
+        const std::size_t at = index_of(key);
+        return at != npos ? m_items[at].second : std::move(fallback);
     }
     constexpr void insert(const K& key, V value) {
         const std::size_t idx = lower_bound_idx(key);
@@ -83,19 +101,22 @@ public:
 
     // Bulk load, REPLACING the contents: sort once, keep the LAST of equal
     // keys (matching repeated insert-or-assign). O(n log n) where n repeated
-    // insert() calls on unsorted input degrade to O(n^2) tail-shifting.
+    // insert() calls on unsorted input degrade to O(n^2) tail-shifting. Sorted
+    // by (key, position) with std::sort, which a constant evaluation runs too:
+    // std::stable_sort is constexpr only from C++26.
     constexpr void assign_bulk(std::vector<item_type> items) {
-        std::stable_sort(items.begin(), items.end(),
-                         [](const item_type& a, const item_type& b) {
-                             return a.first < b.first;
-                         });
+        std::vector<std::size_t> order(items.size());
+        for (std::size_t i = 0; i < order.size(); ++i) order[i] = i;
+        std::sort(order.begin(), order.end(), [&](std::size_t a, std::size_t b) {
+            return items[a].first < items[b].first || (!(items[b].first < items[a].first) && a < b);
+        });
         std::vector<item_type> unique;
         unique.reserve(items.size());
-        for (std::size_t i = 0; i < items.size(); ++i) {
-            if (i + 1 < items.size() && items[i + 1].first == items[i].first) {
+        for (std::size_t k = 0; k < order.size(); ++k) {
+            if (k + 1 < order.size() && items[order[k + 1]].first == items[order[k]].first) {
                 continue;   // superseded by a later write to the same key
             }
-            unique.push_back(std::move(items[i]));
+            unique.push_back(std::move(items[order[k]]));
         }
         m_items = std::move(unique);
     }
@@ -117,7 +138,16 @@ public:
     }
 
 private:
-    [[nodiscard]] constexpr std::size_t lower_bound_idx(const K& key) const {
+    static constexpr std::size_t npos = static_cast<std::size_t>(-1);
+    // Where `key`'s item is, or npos.
+    template <class Q>
+    [[nodiscard]] constexpr std::size_t index_of(const Q& key) const {
+        const std::size_t idx = lower_bound_idx(key);
+        return idx < m_items.size() && m_items[idx].first == key ? idx : npos;
+    }
+
+    template <class Q>
+    [[nodiscard]] constexpr std::size_t lower_bound_idx(const Q& key) const {
         std::size_t lo = 0;
         std::size_t hi = m_items.size();
         while (lo < hi) {
@@ -135,5 +165,16 @@ private:
 // tests/static/mapping_core_proofs.cpp, compiled by every build.
 static_assert(storage<flat_storage<int, int>>);
 static_assert(flat_storage<int, int>::ordered);
+static_assert([] {   // a bulk load keeps the last of equal keys, in a constant evaluation too
+    flat_storage<int, int> s;
+    s.assign_bulk({{2, 1}, {1, 5}, {2, 7}});
+    return s.size() == 2 && *s.find(2) == 7 && *s.find(1) == 5 && s.contains(1) && !s.contains(3) && s.value_or(3, -1) == -1;
+}());
+static_assert([] {   // a std::string key found by a view: no string made
+    flat_storage<std::string, int> s;
+    s.insert("osp", 1);
+    const auto& cs = s;
+    return cs.find(std::string_view("osp")) != nullptr && *cs.find(std::string_view("osp")) == 1 && cs.find(std::string_view("os")) == nullptr;
+}());
 
 }  // namespace pygim::mapping
