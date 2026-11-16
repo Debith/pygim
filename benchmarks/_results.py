@@ -2,15 +2,15 @@
 
 Each run appends ONE record to ``results/<bench>.jsonl``: the raw measurements
 (numeric, full precision — formatting is the printer's job) plus the metadata
-needed to compare runs honestly later: commit, dirty flag, Python version,
-CPU model and hostname. Records from different machines or dirty trees are
-still recorded — the metadata is what lets an analysis *filter* them, so a
-trend line never silently mixes incomparable environments.
+needed to compare runs honestly later: commit, dirty flag, Python version and a
+coarse platform tag (OS and architecture). A dirty tree is still recorded — the
+metadata is what lets an analysis *filter* records, so a trend line never
+silently mixes incomparable environments. The identifying host details (hostname
+and CPU model) are deliberately not stored.
 """
 
 import json
 import platform
-import socket
 import subprocess
 import sys
 from datetime import datetime, timezone
@@ -28,17 +28,6 @@ def _git(*args):
         ).stdout.strip()
     except (OSError, subprocess.CalledProcessError):
         return None
-
-
-def _cpu_model():
-    if platform.system() == "Linux":
-        try:
-            for line in Path("/proc/cpuinfo").read_text().splitlines():
-                if line.startswith("model name"):
-                    return line.split(":", 1)[1].strip()
-        except OSError:
-            pass
-    return platform.processor() or platform.machine()
 
 
 # The convention: results ride IN the merge commit they describe, so the
@@ -67,9 +56,7 @@ def save(bench, sections, *, reps, in_tree=True):
         "dirty": bool(_git("status", "--porcelain")),
         "python": platform.python_version(),
         "impl": platform.python_implementation(),
-        "platform": platform.platform(),
-        "cpu": _cpu_model(),
-        "hostname": socket.gethostname(),
+        "platform": f"{platform.system()}-{platform.machine()}",  # coarse: OS and arch, no kernel/host detail
         "reps": reps,
         "sections": sections,
     }
