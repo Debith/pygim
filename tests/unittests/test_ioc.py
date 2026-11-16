@@ -4,6 +4,7 @@ import pytest
 
 from pygim import Container as TopLevelContainer
 from pygim.ioc import Container, ServiceDescriptor
+from pygim.core.explib import GimError, GimOptionError, MissingKeyError
 
 
 @pytest.fixture
@@ -202,7 +203,7 @@ def test_invalid_inputs_raise(container):
     with pytest.raises(TypeError):
         container.register(IService, lambda: object(), autowire=True)
 
-    with pytest.raises(ValueError):
+    with pytest.raises(GimOptionError, match="``scoped`` not among: transient, singleton"):
         container.register(IService, lambda: object(), lifecycle="scoped")
 
 
@@ -339,7 +340,7 @@ def test_resolve_missing_key_error_names_key(container):
     class IService:
         pass
 
-    with pytest.raises(KeyError, match="No provider for key.*IService"):
+    with pytest.raises(MissingKeyError, match="No provider for key.*IService"):
         container.resolve(IService)
 
 
@@ -347,7 +348,7 @@ def test_describe_missing_key_error_names_key(container):
     class IService:
         pass
 
-    with pytest.raises(KeyError, match="No provider for key.*IService"):
+    with pytest.raises(MissingKeyError, match="No provider for key.*IService"):
         container.describe(IService)
 
 
@@ -371,7 +372,7 @@ def test_autowire_missing_typed_dependency_raises(container):
 
     container.register(NeedsDatabase, NeedsDatabase, autowire=True)
 
-    with pytest.raises(KeyError, match="No provider registered for autowired dependency 'database'"):
+    with pytest.raises(MissingKeyError, match="No provider registered for autowired dependency 'database'"):
         container.resolve(NeedsDatabase)
 
 
@@ -645,3 +646,19 @@ if __name__ == "__main__":
     from pygim.core.testing import run_tests
 
     run_tests(__file__, Container.__module__, coverage=False)
+
+def test_a_wiring_error_is_pygims_and_pythons_both(container):
+    """What wiring raises is a GimError, and also the Python exception its contract needs: a lookup
+    that finds nothing is a KeyError, as a mapping's is; a lifecycle none of the options is a
+    ValueError. So `except GimError` catches every one, and `except KeyError` still works."""
+
+    class IService:
+        pass
+
+    with pytest.raises(MissingKeyError) as missing:
+        container.resolve(IService)
+    assert isinstance(missing.value, KeyError) and isinstance(missing.value, GimError)
+
+    with pytest.raises(GimOptionError) as option:
+        container.register(IService, lambda: object(), lifecycle="scoped")
+    assert isinstance(option.value, ValueError) and isinstance(option.value, GimError)

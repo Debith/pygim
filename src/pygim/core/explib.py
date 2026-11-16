@@ -8,6 +8,7 @@ from _pygim._core._exceptions import (
     DispatchError,
     UnrecognizedTypeError,
     GimOptionError,
+    MissingKeyError,
 )
 
 from _pygim._core._error_msgs import (
@@ -19,6 +20,7 @@ __all__ = [
     "GimException",
     "GimError",
     "GimOptionError",
+    "MissingKeyError",
     "EntangledError",
     "DispatchError",
     "EntangledClassError",

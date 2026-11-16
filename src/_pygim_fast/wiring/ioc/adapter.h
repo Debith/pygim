@@ -112,13 +112,14 @@ public:
 
         auto normalized_name = normalize_name(name);
         auto key = InterfaceKeyPolicy::make_from_python(interface, normalized_name);
+        const core::Lifecycle parsed = core::parse_lifecycle(lifecycle);   // an unknown one is GimOptionError, which names it
         try {
             m_core.register_or_override(
                 key,
                 DescriptorType{
                     py::object(interface),
                     py::object(provider),
-                    core::parse_lifecycle(lifecycle),
+                    parsed,
                     std::move(normalized_name),
                     std::move(decorators),
                     autowire},

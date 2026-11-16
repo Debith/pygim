@@ -29,7 +29,7 @@ enum class Lifecycle { Transient = 0, Singleton = 1 };
     if (lifecycle == "singleton") {
         return Lifecycle::Singleton;
     }
-    throw std::invalid_argument("lifecycle must be 'transient' or 'singleton'");
+    throw unknown_option(std::string(lifecycle), {"transient", "singleton"});
 }
 
 static_assert(parse_lifecycle("transient") == Lifecycle::Transient);
