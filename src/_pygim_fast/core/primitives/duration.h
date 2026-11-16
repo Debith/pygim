@@ -306,33 +306,24 @@ static_assert(spelt_in_units(duration(0)).size() == 0);
 /// `using namespace pygim::primitives::time_literals;`.
 inline namespace time_literals {
 
-namespace detail_literals {
-[[nodiscard]] consteval const time_unit& unit(std::string_view name) {
-    for (const time_unit& u : time_units) {
-        if (u.name() == name) return u;
-    }
-    throw std::logic_error("no such unit");
-}
-}  // namespace detail_literals
-
-[[nodiscard]] consteval duration operator""_yr(unsigned long long n) { return detail_literals::unit("yr").of(n); }
-[[nodiscard]] consteval duration operator""_yr(long double x) { return detail_literals::unit("yr").of(static_cast<double>(x)); }
-[[nodiscard]] consteval duration operator""_wk(unsigned long long n) { return detail_literals::unit("wk").of(n); }
-[[nodiscard]] consteval duration operator""_wk(long double x) { return detail_literals::unit("wk").of(static_cast<double>(x)); }
-[[nodiscard]] consteval duration operator""_day(unsigned long long n) { return detail_literals::unit("day").of(n); }
-[[nodiscard]] consteval duration operator""_day(long double x) { return detail_literals::unit("day").of(static_cast<double>(x)); }
-[[nodiscard]] consteval duration operator""_hr(unsigned long long n) { return detail_literals::unit("hr").of(n); }
-[[nodiscard]] consteval duration operator""_hr(long double x) { return detail_literals::unit("hr").of(static_cast<double>(x)); }
-[[nodiscard]] consteval duration operator""_min(unsigned long long n) { return detail_literals::unit("min").of(n); }
-[[nodiscard]] consteval duration operator""_min(long double x) { return detail_literals::unit("min").of(static_cast<double>(x)); }
-[[nodiscard]] consteval duration operator""_s(unsigned long long n) { return detail_literals::unit("s").of(n); }
-[[nodiscard]] consteval duration operator""_s(long double x) { return detail_literals::unit("s").of(static_cast<double>(x)); }
-[[nodiscard]] consteval duration operator""_ms(unsigned long long n) { return detail_literals::unit("ms").of(n); }
-[[nodiscard]] consteval duration operator""_ms(long double x) { return detail_literals::unit("ms").of(static_cast<double>(x)); }
-[[nodiscard]] consteval duration operator""_us(unsigned long long n) { return detail_literals::unit("us").of(n); }
-[[nodiscard]] consteval duration operator""_us(long double x) { return detail_literals::unit("us").of(static_cast<double>(x)); }
-[[nodiscard]] consteval duration operator""_ns(unsigned long long n) { return detail_literals::unit("ns").of(n); }
-[[nodiscard]] consteval duration operator""_ns(long double x) { return detail_literals::unit("ns").of(static_cast<double>(x)); }
+[[nodiscard]] consteval duration operator""_yr(unsigned long long n) { return time_unit::named("yr").value().of(n); }
+[[nodiscard]] consteval duration operator""_yr(long double x) { return time_unit::named("yr").value().of(static_cast<double>(x)); }
+[[nodiscard]] consteval duration operator""_wk(unsigned long long n) { return time_unit::named("wk").value().of(n); }
+[[nodiscard]] consteval duration operator""_wk(long double x) { return time_unit::named("wk").value().of(static_cast<double>(x)); }
+[[nodiscard]] consteval duration operator""_day(unsigned long long n) { return time_unit::named("day").value().of(n); }
+[[nodiscard]] consteval duration operator""_day(long double x) { return time_unit::named("day").value().of(static_cast<double>(x)); }
+[[nodiscard]] consteval duration operator""_hr(unsigned long long n) { return time_unit::named("hr").value().of(n); }
+[[nodiscard]] consteval duration operator""_hr(long double x) { return time_unit::named("hr").value().of(static_cast<double>(x)); }
+[[nodiscard]] consteval duration operator""_min(unsigned long long n) { return time_unit::named("min").value().of(n); }
+[[nodiscard]] consteval duration operator""_min(long double x) { return time_unit::named("min").value().of(static_cast<double>(x)); }
+[[nodiscard]] consteval duration operator""_s(unsigned long long n) { return time_unit::named("s").value().of(n); }
+[[nodiscard]] consteval duration operator""_s(long double x) { return time_unit::named("s").value().of(static_cast<double>(x)); }
+[[nodiscard]] consteval duration operator""_ms(unsigned long long n) { return time_unit::named("ms").value().of(n); }
+[[nodiscard]] consteval duration operator""_ms(long double x) { return time_unit::named("ms").value().of(static_cast<double>(x)); }
+[[nodiscard]] consteval duration operator""_us(unsigned long long n) { return time_unit::named("us").value().of(n); }
+[[nodiscard]] consteval duration operator""_us(long double x) { return time_unit::named("us").value().of(static_cast<double>(x)); }
+[[nodiscard]] consteval duration operator""_ns(unsigned long long n) { return time_unit::named("ns").value().of(n); }
+[[nodiscard]] consteval duration operator""_ns(long double x) { return time_unit::named("ns").value().of(static_cast<double>(x)); }
 
 }  // namespace time_literals
 
