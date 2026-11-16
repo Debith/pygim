@@ -42,6 +42,27 @@ PyObject* interned() {
     return name;
 }
 
+// getattr(object, name) asked once, as hasattr asks: the attribute, or a null object when it has
+// none (an AttributeError, dropped); any other error raises. A miss makes no exception where Python
+// lets it (3.12 on, for classes too); pybind11's py::hasattr (PyObject_HasAttrString) makes the
+// AttributeError, its message formatted, then drops it — half a microsecond a miss — and drops any
+// other error with it.
+inline py::object optional_attribute(const py::handle& object, const py::handle& name) {
+    PyObject* found = nullptr;
+#if PY_VERSION_HEX >= 0x030D0000
+    const int got = PyObject_GetOptionalAttr(object.ptr(), name.ptr(), &found);
+#else
+    const int got = _PyObject_LookupAttr(object.ptr(), name.ptr(), &found);
+#endif
+    if (got < 0) throw py::error_already_set();
+    return py::reinterpret_steal<py::object>(found);
+}
+
+// hasattr(object, name) as Python asks it: an AttributeError is "no", any other error raises.
+inline bool has_attribute(const py::handle& object, const py::handle& name) {
+    return static_cast<bool>(optional_attribute(object, name));
+}
+
 /// A Python class's names as a NamePolicy: its __name__ (what mangling uses) and __qualname__ (what its
 /// functions' qualified names start with), each read as str() of the attribute.
 /// Example: name_policy_of(Outer.Inner).mangled("__x") is "_Inner__x".

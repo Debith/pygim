@@ -50,7 +50,7 @@ public:
 private:
     /// The new function: the code, the original's globals, the qualified name.
     [[nodiscard]] py::object made() const {
-        const py::object globals = m_function.attr("__globals__");
+        const py::object globals = py::getattr(m_function, interned<"__globals__">());
         const py::str qualname(m_qualname);
         auto copy = py::reinterpret_steal<py::object>(
             PyFunction_NewWithQualName(m_code.ptr(), globals.ptr(), qualname.ptr()));
@@ -61,18 +61,18 @@ private:
     /// The original's closure, its __class__ cell replaced by one holding the class; checked against
     /// the new code's free variables, as types.FunctionType checks and PyFunction_SetClosure does not.
     void set_closure(const py::object& copy) const {
-        const py::object closure = m_function.attr("__closure__");
-        const py::tuple freevars = m_code.attr("co_freevars");
+        const py::object closure = py::getattr(m_function, interned<"__closure__">());
+        const py::tuple freevars = py::getattr(m_code, interned<"co_freevars">());
         if (closure.is_none()) {
             if (!freevars.empty())
                 throw py::value_error(std::format("{} needs a closure of {} cells and has none",
-                                                  text(m_function.attr("__qualname__")), freevars.size()));
+                                                  original_qualname(), freevars.size()));
             return;
         }
         const py::tuple cells = closure;
         if (cells.size() != freevars.size())
             throw py::value_error(std::format("{} has {} closure cells for {} free variables",
-                                              text(m_function.attr("__qualname__")), cells.size(), freevars.size()));
+                                              original_qualname(), cells.size(), freevars.size()));
         py::tuple rebound(cells.size());
         for (std::size_t i = 0; i < cells.size(); ++i)
             rebound[i] = m_class && text(freevars[i]) == "__class__" ? class_cell() : py::object(cells[i]);
@@ -87,15 +87,27 @@ private:
 
     /// Everything else the original carries, as it is.
     void carry_attributes(const py::object& copy) const {
-        for (const char* attribute : {"__name__", "__defaults__", "__kwdefaults__", "__doc__", "__module__"})
-            copy.attr(attribute) = m_function.attr(attribute);
-        copy.attr("__dict__").attr("update")(m_function.attr("__dict__"));
-        if (py::hasattr(m_function, "__annotate__"))  // Python 3.14: annotations are evaluated lazily
-            copy.attr("__annotate__") = m_function.attr("__annotate__");
+        carry<"__name__", "__defaults__", "__kwdefaults__", "__doc__", "__module__">(copy);
+        const py::dict own = py::getattr(copy, interned<"__dict__">());
+        for (const auto& [key, value] : py::dict(py::getattr(m_function, interned<"__dict__">()))) own[key] = value;
+        if (has_attribute(m_function, interned<"__annotate__">()))  // Python 3.14: annotations are evaluated lazily
+            carry<"__annotate__">(copy);
         else
-            copy.attr("__annotations__") = py::dict(m_function.attr("__annotations__"));
-        if (py::hasattr(m_function, "__type_params__"))  // Python 3.12 and later
-            copy.attr("__type_params__") = m_function.attr("__type_params__");
+            py::setattr(copy, interned<"__annotations__">(),
+                        py::dict(py::getattr(m_function, interned<"__annotations__">())));
+        if (has_attribute(m_function, interned<"__type_params__">()))  // Python 3.12 and later
+            carry<"__type_params__">(copy);
+    }
+
+    /// Each attribute in `Names` set on `copy` as the original has it.
+    template <literal... Names>
+    void carry(const py::object& copy) const {
+        (py::setattr(copy, interned<Names>(), py::getattr(m_function, interned<Names>())), ...);
+    }
+
+    /// The original's qualified name, as the refusals name it.
+    [[nodiscard]] std::string original_qualname() const {
+        return text(py::getattr(m_function, interned<"__qualname__">()));
     }
 
     py::object m_function;

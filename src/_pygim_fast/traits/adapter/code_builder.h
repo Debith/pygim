@@ -67,7 +67,9 @@ public:
     CodeBuilder(py::object code, python_names::Reowning rules) : m_code(std::move(code)), m_rules(std::move(rules)) {
         if (!PyCode_Check(m_code.ptr()))
             throw py::type_error(std::format("CodeBuilder takes a code object, not {}",
-                                             py::str(py::type::of(m_code).attr("__name__")).cast<std::string>()));
+                                             py::str(py::getattr(py::type::of(m_code),
+                                                                 ::pygim::adapter::interned<"__name__">()))
+                                                 .cast<std::string>()));
     }
 
     /// Move the code from class `source` to class `target`: its private names (by the classes'

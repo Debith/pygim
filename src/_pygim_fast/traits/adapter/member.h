@@ -23,7 +23,7 @@ namespace detail {
 
 /// The code of `value` when it is a Python function; None for anything else (None, a builtin).
 inline py::object code_or_none(const py::object& value) {
-    return PyFunction_Check(value.ptr()) ? py::object(value.attr("__code__")) : py::object(py::none());
+    return PyFunction_Check(value.ptr()) ? py::getattr(value, interned<"__code__">()) : py::object(py::none());
 }
 
 // ── the kinds of member, one class each ───────────────────────────────────────────────────────
@@ -35,7 +35,7 @@ public:
     explicit FunctionMember(py::object function) : m_function(std::move(function)) {}
 
     [[nodiscard]] py::object rewritten(const TraitMove& trait) const { return trait.function(m_function); }
-    [[nodiscard]] py::object code() const { return m_function.attr("__code__"); }
+    [[nodiscard]] py::object code() const { return py::getattr(m_function, interned<"__code__">()); }
 
 private:
     py::object m_function;
@@ -48,14 +48,15 @@ public:
     explicit PropertyMember(py::object property) : m_property(std::move(property)) {}
 
     [[nodiscard]] py::object rewritten(const TraitMove& trait) const {
-        return py::type::of(m_property)(trait.function_or_same(accessor("fget")),
-                                        trait.function_or_same(accessor("fset")),
-                                        trait.function_or_same(accessor("fdel")), m_property.attr("__doc__"));
+        return py::type::of(m_property)(trait.function_or_same(attribute<"fget">()),
+                                        trait.function_or_same(attribute<"fset">()),
+                                        trait.function_or_same(attribute<"fdel">()), attribute<"__doc__">());
     }
-    [[nodiscard]] py::object code() const { return code_or_none(accessor("fget")); }
+    [[nodiscard]] py::object code() const { return code_or_none(attribute<"fget">()); }
 
 private:
-    [[nodiscard]] py::object accessor(const char* name) const { return m_property.attr(name); }
+    template <literal Name>
+    [[nodiscard]] py::object attribute() const { return py::getattr(m_property, interned<Name>()); }
     py::object m_property;
 };
 
@@ -74,7 +75,7 @@ public:
     [[nodiscard]] py::object code() const { return code_or_none(function()); }
 
 private:
-    [[nodiscard]] py::object function() const { return m_method.attr("__func__"); }
+    [[nodiscard]] py::object function() const { return py::getattr(m_method, interned<"__func__">()); }
     py::object m_method;
 };
 

@@ -1,5 +1,8 @@
 // traits/adapter/introspection.h — what compose() reads from Python objects: text, a type's name, a class's
 // own namespace, where code was defined and called from, an attribute's name.
+//
+// Every attribute is read by an interned name (utils/adapter_utils.h's interned<"...">()): one str
+// kept for the process, which CPython's attribute cache recognises; a str made for each read misses it.
 
 #pragma once
 
@@ -10,14 +13,22 @@
 
 #include <pybind11/pybind11.h>
 
+#include "../../utils/adapter_utils.h"
+
 namespace pygim::traits {
 
 namespace py = pybind11;
 
 namespace detail {
 
+using ::pygim::adapter::has_attribute;
+using ::pygim::adapter::interned;
+using ::pygim::adapter::literal;
+
 inline std::string text(const py::handle& value) { return py::str(value).cast<std::string>(); }
-inline std::string type_name(const py::handle& value) { return text(py::type::of(value).attr("__name__")); }
+inline std::string type_name(const py::handle& value) {
+    return text(py::getattr(py::type::of(value), interned<"__name__">()));
+}
 
 /// A class's own namespace, through the C API: the dict itself, so no metaclass attribute named
 /// `__dict__` and no descriptor is asked. compose() reads every class namespace this way — the
@@ -36,7 +47,8 @@ inline py::dict own_namespace(const py::handle& cls) {
 /// "file:line" of a code object; "" for None.
 inline std::string where(const py::handle& code) {
     if (code.is_none()) return {};
-    return std::format("{}:{}", text(code.attr("co_filename")), text(code.attr("co_firstlineno")));
+    return std::format("{}:{}", text(py::getattr(code, interned<"co_filename">())),
+                       text(py::getattr(code, interned<"co_firstlineno">())));
 }
 
 /// "file:line" of the Python code that called into C++: the innermost Python frame, which a pybind11
@@ -46,7 +58,7 @@ inline std::string caller() {
     PyFrameObject* frame = PyEval_GetFrame();  // borrowed
     if (frame == nullptr) return {};
     const auto code = py::reinterpret_steal<py::object>(reinterpret_cast<PyObject*>(PyFrame_GetCode(frame)));
-    return std::format("{}:{}", text(code.attr("co_filename")), PyFrame_GetLineNumber(frame));
+    return std::format("{}:{}", text(py::getattr(code, interned<"co_filename">())), PyFrame_GetLineNumber(frame));
 }
 
 /// The attribute name a dict key spells, by its real characters, and that name as a fresh str. The

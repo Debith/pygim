@@ -37,7 +37,7 @@ public:
         : m_trait(trait_of(candidate)),
           m_target(std::move(target)),
           m_trait_names(::pygim::adapter::name_policy_of(m_trait)),
-          m_name(std::format("{}.{}", text(m_trait.attr("__module__")), m_trait_names.qualname())),
+          m_name(std::format("{}.{}", text(py::getattr(m_trait, interned<"__module__">())), m_trait_names.qualname())),
           m_rules(python_names::Reowning{}.then(m_trait_names, ::pygim::adapter::name_policy_of(m_target))),
           m_carried(records().find(m_trait)) {}
 
@@ -73,8 +73,8 @@ public:
     /// holding the target, so zero-argument super() resolves there.
     [[nodiscard]] py::object function(const py::handle& function) const {
         return FunctionCopy(function)
-            .with_code(CodeBuilder(function.attr("__code__"), m_rules).build())
-            .with_qualname(m_rules.requalified(text(function.attr("__qualname__"))))
+            .with_code(CodeBuilder(py::getattr(function, interned<"__code__">()), m_rules).build())
+            .with_qualname(m_rules.requalified(text(py::getattr(function, interned<"__qualname__">()))))
             .with_class_cell(m_target)
             .make();
     }

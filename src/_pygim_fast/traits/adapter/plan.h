@@ -95,7 +95,7 @@ public:
         : m_target(std::move(target)),
           m_override(override_existing),
           m_own(own_namespace(m_target)),
-          m_target_name(text(m_target.attr("__qualname__"))) {}
+          m_target_name(text(py::getattr(m_target, interned<"__qualname__">()))) {}
 
     void admit(PlannedMember member) {
         if (const auto clash = clash_of(member); clash && !m_override)
