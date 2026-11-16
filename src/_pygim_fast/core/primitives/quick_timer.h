@@ -35,6 +35,7 @@
 #include <concepts>
 #include <cstddef>
 #include <cstdio>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -345,9 +346,7 @@ public:
     }
 
     [[nodiscard]] constexpr lap_id lap_id_of(std::string_view name) requires (!by_phase) {
-        for (std::size_t i = 0; i < m_lap_count; ++i) {
-            if (m_laps[i].name == name) return i;
-        }
+        if (const std::optional<std::size_t> found = find_lap(name)) return *found;
         if (m_lap_count >= MaxLaps) [[unlikely]] {
             throw std::out_of_range("no room for another lap");
         }
@@ -391,10 +390,7 @@ public:
     [[nodiscard]] constexpr double total_seconds() const { return seconds_of(total()); }
 
     [[nodiscard]] constexpr duration lap(std::string_view name) const requires (!by_phase) {
-        for (std::size_t i = 0; i < m_lap_count; ++i) {
-            if (m_laps[i].name == name) return lap_elapsed(m_laps[i]);
-        }
-        throw std::out_of_range("no lap of that name");
+        return lap_elapsed(m_laps[named_lap(name)]);
     }
     [[nodiscard]] constexpr duration lap(lap_id phase) const requires (by_phase) {
         return lap_elapsed(m_laps[to_index(phase)]);
@@ -445,14 +441,23 @@ private:
     }
 
     [[nodiscard]] constexpr std::size_t lap_index_of(std::string_view name) const requires (!by_phase) {
-        if (!name.empty()) {
-            for (std::size_t i = 0; i < m_lap_count; ++i) {
-                if (m_laps[i].name == name) return i;
-            }
-            throw std::out_of_range("no lap of that name");
-        }
+        if (!name.empty()) return named_lap(name);
         if (m_running == no_lap) [[unlikely]] throw std::runtime_error("no lap is running");
         return m_running;
+    }
+
+    // The lap named `name`, if it has been made.
+    [[nodiscard]] constexpr std::optional<std::size_t> find_lap(std::string_view name) const noexcept requires (!by_phase) {
+        for (std::size_t i = 0; i < m_lap_count; ++i) {
+            if (m_laps[i].name == name) return i;
+        }
+        return std::nullopt;
+    }
+
+    // The lap named `name`; std::out_of_range when there is none.
+    [[nodiscard]] constexpr std::size_t named_lap(std::string_view name) const requires (!by_phase) {
+        if (const std::optional<std::size_t> found = find_lap(name)) return *found;
+        throw std::out_of_range("no lap of that name");
     }
 
     std::string_view m_name;

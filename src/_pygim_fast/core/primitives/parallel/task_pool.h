@@ -153,11 +153,7 @@ private:
     // and ends the run for everyone, so no caller waits on tasks that will never end.
     void fail_everyone() noexcept {
         m_errors.capture();
-        {
-            std::lock_guard guard(m_lock);
-            m_stopping = true;
-        }
-        m_wake.notify_all();
+        halt();
         if (m_finished) m_finished();
     }
 
@@ -168,12 +164,17 @@ private:
 
     // Every waiter woken to find the pool stopping, then every worker joined.
     void stop() noexcept {
+        halt();
+        m_crew.stop();
+    }
+
+    // The pool stops: every worker waiting for a task wakes to find none.
+    void halt() noexcept {
         {
             std::lock_guard guard(m_lock);
             m_stopping = true;
         }
         m_wake.notify_all();
-        m_crew.stop();
     }
 
     Run m_run;
