@@ -1,6 +1,7 @@
 import re
 import pytest
 from pygim.registry import Registry, KeyPolicyKind
+from pygim.core.explib import GimError, GimOptionError, MissingKeyError
 
 
 @pytest.fixture(params=[False, True], ids=["no_hooks", "hooks"])
@@ -89,7 +90,7 @@ def test_decorator_usage(registry):
 
 
 def test_missing_key_raises(registry):
-    with pytest.raises(RuntimeError):
+    with pytest.raises(MissingKeyError):
         _ = registry["missing"]
 
 

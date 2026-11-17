@@ -123,7 +123,7 @@ else construct instance
         PROVIDER --> C : py::object instance
         deactivate PROVIDER
     else descriptor.autowire == true
-        C -> C : introspect_constructor(provider)\nParamSpecs cached in descriptor autowire_slot
+        C -> C : introspect_constructor(provider)\ncode object, or inspect for other shapes;\nParamSpecs cached in descriptor autowire_slot
         C -> CORE : plan_autowiring(specs, contains)
         note right of C
           Pure core policy decides per parameter: inject, keep the

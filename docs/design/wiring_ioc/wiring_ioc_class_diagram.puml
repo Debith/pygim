@@ -79,6 +79,10 @@ package "pygim adapter (adapter.h)" as ADAPTER #E3F2FD {
       - invoke_provider(descriptor) : py::object
       - invoke_autowired(descriptor) : py::object
       - introspect_constructor(provider) : shared_ptr<const ParamSpecs>
+      - plain_init(cls) : py::object
+      - from_code(init) : shared_ptr<const ParamSpecs>
+      - hints_of(init) : py::dict
+      - inspected(provider) : shared_ptr<const ParamSpecs>
       - make_key(key) : InterfaceKeyPolicy::key_type
       - key_suffix(key) : string
     }
@@ -87,6 +91,11 @@ package "pygim adapter (adapter.h)" as ADAPTER #E3F2FD {
       Python-aware adapter around ContainerCore.
       Owns key parsing, constructor introspection (ParamSpec extraction),
       provider/decorator invocation, and IoC-specific validation.
+      Introspection reads a plain Python __init__ from its code object and
+      __annotations__ (from_code, hints_of); any other shape - a metaclass
+      __call__, a Python __new__, a wrapper, __signature__, an annotation
+      that is not a class - goes through inspect.signature and
+      typing.get_type_hints (inspected), which say what Python says.
       Wiring decisions come from core::plan_autowiring; resolve errors
       are enriched with the resolved key before reaching Python.
     end note

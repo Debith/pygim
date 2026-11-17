@@ -3,10 +3,13 @@
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 
+#include "../common/errors.h"
+
 #include <string>
 #include <type_traits>
 #include <variant>
 
+#include "../../utils/adapter_utils.h"
 #include "../../utils/hash.h"
 #include "core.h"
 
@@ -27,6 +30,7 @@ struct PyIdentityKeyPolicy {
     struct key_type {
         PyObject* ptr;
         std::string name;
+        bool operator==(const key_type&) const = default;
     };
 
     struct Hash {
@@ -35,11 +39,7 @@ struct PyIdentityKeyPolicy {
         }
     };
 
-    struct Eq {
-        bool operator()(const key_type& lhs, const key_type& rhs) const noexcept {
-            return lhs.ptr == rhs.ptr && lhs.name == rhs.name;
-        }
-    };
+    using Eq = std::equal_to<key_type>;   // identity and variant, member by member
 
     /**
      * \brief Build identity key from Python object and variant.
@@ -79,8 +79,8 @@ struct QualnameKeyPolicy {
      * \note Exists to canonicalize Python entities into stable string identifiers.
      */
     static key_type make_from_python(py::object obj, std::string name) {
-        auto module = py::str(obj.attr("__module__")).cast<std::string>();
-        auto qualname = py::str(obj.attr("__qualname__")).cast<std::string>();
+        auto module = py::str(obj.attr(adapter::interned<"__module__">())).cast<std::string>();
+        auto qualname = py::str(obj.attr(adapter::interned<"__qualname__">())).cast<std::string>();
         return {module + "." + qualname, std::move(name)};
     }
 
@@ -227,7 +227,7 @@ public:
                 if (auto* found = reg.try_get(make_key<R>(key))) {
                     return *found;
                 }
-                throw std::runtime_error("Unknown registry key");
+                throw core::missing_key("Unknown registry key");
             },
             m_var);
     }

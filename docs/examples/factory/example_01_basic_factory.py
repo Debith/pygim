@@ -62,10 +62,10 @@ for shape_name, argument in [("circle", 1), ("square", 2)]:
     product = factory.create(shape_name, argument)
     assert product  # no if/elif over shape names anywhere
 
-# Asking for an unknown name fails loudly.
+# Asking for an unknown name fails loudly, with KeyError, as a mapping does.
 try:
     factory.create("triangle")
-except RuntimeError:
+except KeyError:
     pass
 else:
     raise AssertionError("Expected unknown name to raise")

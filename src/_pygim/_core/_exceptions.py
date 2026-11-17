@@ -11,6 +11,7 @@ __all__ = [
     "GimException",
     "GimError",
     "GimOptionError",
+    "MissingKeyError",
     "EntangledError",
     "EntangledClassError",
     "EntangledMethodError",
@@ -42,8 +43,8 @@ class GimError(GimException):
 
 
 @dataclass
-class GimOptionError(GimError):
-    """Raised when value not among options."""
+class GimOptionError(GimError, ValueError):
+    """Raised when value not among options; a ValueError too, as Python raises for a bad value."""
 
     _input_value: t.Any
     _choices: t.Iterable
@@ -51,6 +52,11 @@ class GimOptionError(GimError):
     def __str__(self):
         choices = ", ".join(str(c) for c in self._choices)
         return f"Given input ``{self._input_value}`` not among: {choices}"
+
+
+class MissingKeyError(GimError, KeyError):
+    """Raised when a lookup finds nothing: a key with no provider, a name never registered. A
+    KeyError too, as a mapping's lookup raises."""
 
 
 class EntangledError(GimError):
