@@ -18,6 +18,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <system_error>
 #include <utility>
 #include <vector>
 
@@ -139,22 +140,67 @@ constexpr std::string missing_key_message(std::string_view key, std::string_view
     return "Key ``" + std::string(key) + "`` not found in `" + std::string(where) + "`";
 }
 
-/// Everything pygim's C++ throws; its Python counterpart is GimError.
+/// What each of pygim's C++ errors means: one value for each pygim.errors class it becomes, which
+/// the translator in errors/adapter.h maps, and refuses to build without.
+enum class kind : unsigned char {
+    error,                     ///< GimError
+    missing_key,               ///< MissingKeyError, also a KeyError
+    option,                    ///< GimOptionError, also a ValueError
+    argument,                  ///< ArgumentError, also a TypeError
+    signature,                 ///< SignatureError, also a TypeError
+    invalid_value,             ///< InvalidValueError, also a ValueError
+    parse,                     ///< ParseError, also a ValueError
+    invalid_state,             ///< InvalidStateError, also a RuntimeError
+    duplicate_key,             ///< DuplicateKeyError, also a ValueError
+    circular_dependency,       ///< CircularDependencyError, also a ValueError
+    unsupported_column_type,   ///< UnsupportedColumnTypeError, also a TypeError
+    backend,                   ///< BackendError, also a RuntimeError
+    file,                      ///< GimOSError, or the one of its family the errno names
+    overflow,                  ///< GimOverflowError, also an OverflowError
+    index_out_of_range,        ///< IndexOutOfRangeError, also an IndexError
+    missing_attribute,         ///< MissingAttributeError, also an AttributeError
+};
+/// How many kinds there are: the translator's table has one row for each.
+inline constexpr std::size_t kinds = static_cast<std::size_t>(kind::missing_attribute) + 1;
+
+/// Everything pygim's C++ throws; its Python counterpart is GimError, or the class its kind names.
 class error : public std::exception {
 public:
-    explicit error(std::string message) : m_message(std::move(message)) {}
+    explicit error(std::string message, kind meaning = kind::error) : m_message(std::move(message)), m_kind(meaning) {}
     [[nodiscard]] const char* what() const noexcept override { return m_message.c_str(); }
+    [[nodiscard]] kind meaning() const noexcept { return m_kind; }
 
 private:
     std::string m_message;
+    kind m_kind;
 };
+
+/// An error whose message is all it carries, of the kind `Meaning`.
+template <kind Meaning>
+class error_of : public error {
+public:
+    explicit error_of(std::string message) : error(std::move(message), Meaning) {}
+};
+
+using argument_error = error_of<kind::argument>;                   ///< a call pygim cannot take as given
+using signature_error = error_of<kind::signature>;                 ///< a callable whose signature pygim cannot use
+using invalid_value = error_of<kind::invalid_value>;               ///< the right type, outside what is accepted
+using parse_error = error_of<kind::parse>;                         ///< text that is not its format
+using invalid_state = error_of<kind::invalid_state>;               ///< not allowed in the object's state
+using duplicate_key = error_of<kind::duplicate_key>;               ///< a key registered twice
+using circular_dependency = error_of<kind::circular_dependency>;   ///< wiring that depends on itself
+using unsupported_column_type = error_of<kind::unsupported_column_type>;   ///< a column type pygim cannot map
+using backend_error = error_of<kind::backend>;                     ///< a library or driver pygim calls failed
+using overflow = error_of<kind::overflow>;                         ///< past what its type holds
+using index_out_of_range = error_of<kind::index_out_of_range>;     ///< a position past the end
+using missing_attribute = error_of<kind::missing_attribute>;       ///< an attribute that is not there
 
 /// A lookup found nothing: the key, and the keys it was looked for among (none when not known).
 /// Python: MissingKeyError(key, within), also a KeyError.
 class missing_key : public error {
 public:
     explicit missing_key(std::string key, std::vector<std::string> keys = {})
-        : error(missing_key_message(key, keys)), m_key(std::move(key)), m_keys(std::move(keys)) {}
+        : error(missing_key_message(key, keys), kind::missing_key), m_key(std::move(key)), m_keys(std::move(keys)) {}
     [[nodiscard]] const std::string& key() const noexcept { return m_key; }
     [[nodiscard]] std::span<const std::string> keys() const noexcept { return m_keys; }
 
@@ -167,13 +213,35 @@ private:
 class option_error : public error {
 public:
     option_error(std::string value, std::vector<std::string> options)
-        : error(option_message(value, options)), m_value(std::move(value)), m_options(std::move(options)) {}
+        : error(option_message(value, options), kind::option), m_value(std::move(value)), m_options(std::move(options)) {}
     [[nodiscard]] const std::string& value() const noexcept { return m_value; }
     [[nodiscard]] std::span<const std::string> options() const noexcept { return m_options; }
 
 private:
     std::string m_value;
     std::vector<std::string> m_options;
+};
+
+/// The system refused a file operation: its errno, said as the system says it, and the file.
+/// Python: GimOSError, or GimFileNotFoundError and the rest of its family by the errno, as pathlib
+/// raises them: "[Errno 2] No such file or directory: 'x.toml'".
+class file_error : public error {
+public:
+    file_error(int number, std::string file)
+        : error(said(number, file), kind::file), m_number(number), m_reason(reason(number)), m_file(std::move(file)) {}
+    [[nodiscard]] int number() const noexcept { return m_number; }
+    [[nodiscard]] const std::string& reason() const noexcept { return m_reason; }
+    [[nodiscard]] const std::string& file() const noexcept { return m_file; }
+
+private:
+    static std::string reason(int number) { return std::error_code(number, std::generic_category()).message(); }
+    static std::string said(int number, const std::string& file) {
+        return "[Errno " + std::to_string(number) + "] " + reason(number) + ": '" + file + "'";
+    }
+
+    int m_number;
+    std::string m_reason;
+    std::string m_file;
 };
 
 namespace proofs {

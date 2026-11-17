@@ -11,15 +11,38 @@ import pytest
 import pygim.errors
 from pygim import utils
 from pygim.errors import (
+    ArgumentError,
+    BackendError,
+    CircularDependencyError,
     DispatchError,
+    DuplicateKeyError,
     GimError,
     GimException,
+    GimFileExistsError,
+    GimFileNotFoundError,
+    GimNotADirectoryError,
     GimOptionError,
+    GimOSError,
+    GimOverflowError,
+    GimPermissionError,
+    IndexOutOfRangeError,
+    InvalidStateError,
+    InvalidValueError,
+    MissingAttributeError,
     MissingKeyError,
+    ParseError,
+    SignatureError,
     UnrecognizedTypeError,
+    UnsupportedColumnTypeError,
 )
 
-CLASSES = (GimException, GimError, MissingKeyError, GimOptionError, DispatchError, UnrecognizedTypeError)
+CLASSES = (
+    GimException, GimError, MissingKeyError, GimOptionError, DispatchError, UnrecognizedTypeError,
+    ArgumentError, SignatureError, InvalidValueError, ParseError, InvalidStateError, DuplicateKeyError,
+    CircularDependencyError, UnsupportedColumnTypeError, BackendError, GimOSError, GimFileNotFoundError,
+    GimFileExistsError, GimNotADirectoryError, GimPermissionError, GimOverflowError, IndexOutOfRangeError,
+    MissingAttributeError,
+)
 
 
 @pytest.mark.parametrize(
@@ -29,12 +52,36 @@ CLASSES = (GimException, GimError, MissingKeyError, GimOptionError, DispatchErro
         (MissingKeyError, (GimError, KeyError)),
         (GimOptionError, (GimError, ValueError)),
         (DispatchError, (GimError,)),
-        (UnrecognizedTypeError, (DispatchError,)),
+        (UnrecognizedTypeError, (GimError, TypeError)),
+        (ArgumentError, (GimError, TypeError)),
+        (SignatureError, (GimError, TypeError)),
+        (InvalidValueError, (GimError, ValueError)),
+        (ParseError, (GimError, ValueError)),
+        (InvalidStateError, (GimError, RuntimeError)),
+        (DuplicateKeyError, (GimError, ValueError)),
+        (CircularDependencyError, (GimError, ValueError)),
+        (UnsupportedColumnTypeError, (GimError, TypeError)),
+        (BackendError, (GimError, RuntimeError)),
+        (GimOSError, (GimError, OSError)),
+        (GimFileNotFoundError, (GimOSError, FileNotFoundError)),
+        (GimFileExistsError, (GimOSError, FileExistsError)),
+        (GimNotADirectoryError, (GimOSError, NotADirectoryError)),
+        (GimPermissionError, (GimOSError, PermissionError)),
+        (GimOverflowError, (GimError, OverflowError)),
+        (IndexOutOfRangeError, (GimError, IndexError)),
+        (MissingAttributeError, (GimError, AttributeError)),
     ],
     ids=lambda v: v.__name__ if isinstance(v, type) else "",
 )
 def test_each_error_is_pygims_and_the_python_exception_its_contract_needs(cls, bases):
     assert cls.__bases__ == bases and issubclass(cls, GimError)
+
+
+def test_a_file_error_is_made_and_said_as_pythons_own():
+    """As pathlib raises it: errno, strerror and the file, said "[Errno 2] ...: 'x'"."""
+    error = GimFileNotFoundError(2, "No such file or directory", "x.toml")
+    assert (error.errno, error.strerror, error.filename) == (2, "No such file or directory", "x.toml")
+    assert str(error) == str(FileNotFoundError(2, "No such file or directory", "x.toml"))
 
 
 def test_the_module_names_every_class_and_each_names_the_module_its_home():
@@ -65,6 +112,22 @@ def test_an_option_error_takes_its_values_by_name_and_its_options_from_any_itera
 def test_an_unrecognized_type_says_what_was_given_and_what_was_expected(given, expected, said):
     error = UnrecognizedTypeError(given, expected)
     assert (str(error), error.args) == (said, (given, expected))
+
+
+@pytest.mark.parametrize(
+    "args, said",
+    [
+        ((5, "a mapping"), "Expected a mapping, got `5 [int]`"),
+        ((5, dict, "gimdict's initial"), "gimdict's initial: Expected to get type `dict`, got `5 [int]`"),
+        ((5, "a callable", "provider"), "provider: Expected a callable, got `5 [int]`"),
+    ],
+    ids=["what was expected, said in words", "a subject first", "both"],
+)
+def test_an_unrecognized_type_may_say_what_it_expected_in_words_and_whose_it_was(args, said):
+    """Not every expectation is a type (a callable, an iterable class), and the subject says which
+    argument or member was given the value."""
+    error = UnrecognizedTypeError(*args)
+    assert (str(error), error.args) == (said, args)
 
 
 def test_a_missing_key_is_said_as_a_key_error_says_it():
@@ -135,7 +198,11 @@ def test_a_core_error_reaches_python_as_its_pygim_class():
 
 @pytest.mark.parametrize(
     "error",
-    [GimError("failed"), MissingKeyError("x"), GimOptionError("v", ["a", "b"]), UnrecognizedTypeError(2, str)],
+    [GimError("failed"), MissingKeyError("x"), GimOptionError("v", ["a", "b"]), UnrecognizedTypeError(2, str),
+     UnrecognizedTypeError(5, "a callable", "provider"), GimFileNotFoundError(2, "No such file or directory", "x"),
+     *(cls("said") for cls in (ArgumentError, SignatureError, InvalidValueError, ParseError, InvalidStateError,
+                               DuplicateKeyError, CircularDependencyError, UnsupportedColumnTypeError, BackendError,
+                               GimOverflowError, IndexOutOfRangeError, MissingAttributeError))],
     ids=lambda e: type(e).__name__,
 )
 def test_an_error_is_the_same_error_after_pickling(error):
