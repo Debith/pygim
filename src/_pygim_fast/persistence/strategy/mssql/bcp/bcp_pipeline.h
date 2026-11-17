@@ -20,6 +20,7 @@
 #include <arrow/table_builder.h>
 #include "../../../../core/primitives/parallel/for_each.h"
 #include "../../../../core/primitives/quick_timer.h"
+#include "../../../../errors/core.h"
 
 namespace pygim::strategy::mssql::bcp {
 
@@ -203,7 +204,7 @@ inline void init_session(const BcpApi& api, SQLHDBC dbc,
     }
     if (!hint.empty()) {
         if (!api.control) [[unlikely]]
-            throw std::runtime_error(
+            throw pygim::errors::backend_error(
                 "BCP hint '" + hint + "' requested but bcp_control not available; "
                 "ODBC Driver 17+ required");
         if (api.control(dbc, kBcpHints,
@@ -385,7 +386,7 @@ inline void finalize_bcp(BcpContext& ctx) {
     pygim::primitives::SilentTimer<BcpPhase> timer("bcp_insert");
 
     if (!table_data || table_data->num_rows() == 0)
-        throw std::runtime_error("Arrow BCP received zero rows from payload");
+        throw pygim::errors::invalid_value("Arrow BCP received zero rows from payload");
 
     const auto& api = ensure_bcp_api();
     auto qualified = sql::qualify_table(table);
@@ -410,7 +411,7 @@ inline void finalize_bcp(BcpContext& ctx) {
             BCP_PROF_SCOPE(prof, reader_next);
             auto st = reader->ReadNext(&batch);
             if (!st.ok())
-                throw std::runtime_error("Failed reading Arrow batch: " + st.ToString());
+                throw pygim::errors::backend_error("Failed reading Arrow batch: " + st.ToString());
         }
         if (!batch) break;
 
@@ -459,7 +460,7 @@ inline void finalize_bcp(BcpContext& ctx) {
     pygim::primitives::SilentTimer<BcpParallelPhase> timer("bcp_parallel");
 
     if (!table_data || table_data->num_rows() == 0)
-        throw std::runtime_error("Arrow BCP received zero rows from payload");
+        throw pygim::errors::invalid_value("Arrow BCP received zero rows from payload");
 
     const int64_t total_rows = table_data->num_rows();
 
@@ -535,7 +536,7 @@ inline void finalize_bcp(BcpContext& ctx) {
                         BCP_PROF_SCOPE(prof, reader_next);
                         auto st = reader->ReadNext(&batch);
                         if (!st.ok())
-                            throw std::runtime_error("Failed reading Arrow batch: " + st.ToString());
+                            throw pygim::errors::backend_error("Failed reading Arrow batch: " + st.ToString());
                     }
                     if (!batch) break;
 
@@ -566,7 +567,7 @@ inline void finalize_bcp(BcpContext& ctx) {
                 std::rethrow_exception(results[static_cast<size_t>(w)].error);
             } catch (const std::exception& e) {
                 const auto& wm = results[static_cast<size_t>(w)].metrics;
-                throw std::runtime_error(
+                throw pygim::errors::backend_error(
                     std::string("Parallel BCP worker ") + std::to_string(w)
                     + "/" + std::to_string(actual_workers)
                     + " failed (sent " + std::to_string(wm.sent_rows)

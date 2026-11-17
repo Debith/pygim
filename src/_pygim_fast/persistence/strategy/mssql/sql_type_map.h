@@ -22,6 +22,7 @@
 #endif
 
 #include "../../odbc_compat.h"
+#include "../../../errors/core.h"
 
 namespace pygim::strategy::mssql {
 
@@ -118,7 +119,7 @@ struct TypeMapping {
         return {arrow::fixed_size_binary(16), SQL_C_GUID, 16};
 
     default:
-        throw std::runtime_error(
+        throw pygim::errors::unsupported_column_type(
             "sql_type_map: unsupported SQL type " + std::to_string(sql_type));
     }
 }

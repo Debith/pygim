@@ -30,6 +30,7 @@
 #include <string_view>
 #include <utility>
 #include <vector>
+#include "../../../errors/core.h"
 
 namespace pygim::strategy::mssql {
 
@@ -342,7 +343,7 @@ inline core::LoadResult execute_parallel(
         if (r.error) {
             try {
                 std::rethrow_exception(r.error);
-            } catch (std::runtime_error const& e) {
+            } catch (std::exception const& e) {   // pygim's errors derive from it; the message carries the ODBC state
                 std::string_view msg(e.what());
                 if (msg.contains("08S01") || msg.contains("08001") ||
                     msg.contains("HY000") || msg.contains("Communication link")) {
@@ -387,7 +388,7 @@ inline core::LoadResult execute_parallel(
     } else {
         auto concat_result = arrow::ConcatenateTables(tables);
         if (!concat_result.ok()) {
-            throw std::runtime_error(
+            throw pygim::errors::backend_error(
                 std::string("parallel_load: ConcatenateTables failed: ") +
                 concat_result.status().ToString());
         }

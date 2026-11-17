@@ -14,6 +14,7 @@
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 #include <pybind11/functional.h>
+#include "../../errors/adapter.h"
 
 namespace py = pybind11;
 using namespace pygim;
@@ -21,6 +22,7 @@ using namespace pygim;
 using MssqlRepo = adapter::RepositoryAdapter<strategy::mssql::MssqlBackend>;
 
 PYBIND11_MODULE(_persistence_test, m) {
+    pygim::errors::load();
     m.doc() = "Test-only bindings for persistence internals";
 
     // Query builder — needed for testing structured queries

@@ -17,6 +17,7 @@
 #include <stdexcept>
 #include <string>
 #include <vector>
+#include "../../errors/core.h"
 
 namespace pygim::core {
 
@@ -29,7 +30,7 @@ namespace detail {
 /// Throw on non-OK Arrow status.  Keeps call-sites terse.
 inline void check_arrow(const arrow::Status& s, const char* context) {
     if (!s.ok()) [[unlikely]]
-        throw std::runtime_error(std::string(context) + ": " + s.ToString());
+        throw pygim::errors::backend_error(std::string(context) + ": " + s.ToString());
 }
 
 /// Howard Hinnant's civil_from_days — days since Unix epoch from y/m/d.

@@ -14,6 +14,7 @@
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 #include <pybind11/functional.h>
+#include "../../errors/adapter.h"
 
 namespace py = pybind11;
 using namespace pygim;
@@ -38,6 +39,7 @@ static py::object acquire_datastore(const std::string& conn_str,
 }
 
 PYBIND11_MODULE(_persistence, m) {
+    pygim::errors::load();
     m.doc() = "DataStore — database access with Arrow core and format conversion";
 
     // Format enum exposed to Python

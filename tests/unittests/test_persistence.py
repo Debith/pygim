@@ -9,6 +9,7 @@ import pytest
 # (tests/conftest.py preloads Arrow so the raw extension resolves libarrow.)
 from pygim import _persistence_test
 from pygim import persistence as _persistence_module
+from pygim.errors import GimOptionError
 
 LocalDataStore = _persistence_test.DataStore
 Query = _persistence_test.Query
@@ -108,7 +109,7 @@ def test_load_with_query_fails_without_odbc(repo):
 
 
 def test_invalid_format():
-    with pytest.raises(ValueError, match="Unknown format"):
+    with pytest.raises(GimOptionError, match="Given input ``arrow`` not among: polars, pandas"):
         LocalDataStore("conn", format="arrow", pool_size=1)
 
 
@@ -299,7 +300,7 @@ def test_acquire_datastore_save_load(fmt):
 
 
 def test_acquire_datastore_invalid_format():
-    with pytest.raises(ValueError, match="Unknown format"):
+    with pytest.raises(GimOptionError, match="Given input ``arrow`` not among: polars, pandas"):
         acquire_datastore("conn", format="arrow")
 
 

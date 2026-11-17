@@ -15,6 +15,7 @@
 #include <pybind11/pybind11.h>
 #include <memory>
 #include <stdexcept>
+#include "../../errors/adapter.h"
 
 namespace pygim::adapter {
 
@@ -33,11 +34,11 @@ import_record_batch_reader(py::object obj, int depth = 0) {
         auto* c_stream = reinterpret_cast<ArrowArrayStream*>(
             PyCapsule_GetPointer(capsule.ptr(), "arrow_array_stream"));
         if (!c_stream)
-            throw std::runtime_error("Arrow PyCapsule returned null stream pointer");
+            throw pygim::errors::backend_error("Arrow PyCapsule returned null stream pointer");
 
         auto result = arrow::ImportRecordBatchReader(c_stream);
         if (!result.ok())
-            throw std::runtime_error("Failed to import Arrow stream: " + result.status().ToString());
+            throw pygim::errors::backend_error("Failed to import Arrow stream: " + result.status().ToString());
         return *result;
     }
 
@@ -49,7 +50,7 @@ import_record_batch_reader(py::object obj, int depth = 0) {
 
         auto result = arrow::ImportRecordBatchReader(&c_stream);
         if (!result.ok())
-            throw std::runtime_error("Failed to import via _export_to_c: " + result.status().ToString());
+            throw pygim::errors::backend_error("Failed to import via _export_to_c: " + result.status().ToString());
         return *result;
     }
 
@@ -59,9 +60,9 @@ import_record_batch_reader(py::object obj, int depth = 0) {
         return import_record_batch_reader(std::move(arrow_obj), depth + 1);
     }
 
-    throw py::type_error(
-        "Expected an Arrow-compatible object (Polars DataFrame, PyArrow Table/RecordBatchReader) "
-        "with __arrow_c_stream__ or _export_to_c protocol");
+    pygim::errors::raise(&pygim::errors::table::unrecognized_type_error, obj,
+                         "an Arrow-compatible object (a Polars DataFrame, a PyArrow Table or RecordBatchReader) "
+                         "with __arrow_c_stream__ or _export_to_c", "data");
 }
 
 /// Import a Python Arrow-compatible object as a materialized arrow::Table.
@@ -74,7 +75,7 @@ import_table(py::object obj) {
     auto reader = import_record_batch_reader(std::move(obj));
     auto result = reader->ToTable();
     if (!result.ok())
-        throw std::runtime_error("Failed to materialize Arrow Table: " + result.status().ToString());
+        throw pygim::errors::backend_error("Failed to materialize Arrow Table: " + result.status().ToString());
     return *result;
 }
 

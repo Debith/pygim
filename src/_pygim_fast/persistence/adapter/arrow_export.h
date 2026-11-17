@@ -16,6 +16,7 @@
 #include <cstring>
 #include <memory>
 #include <stdexcept>
+#include "../../errors/core.h"
 
 namespace pygim::adapter {
 
@@ -44,7 +45,7 @@ inline py::object export_table(std::shared_ptr<arrow::Table> table,
 
     auto status = arrow::ExportRecordBatchReader(reader, c_stream.get());
     if (!status.ok()) [[unlikely]] {
-        throw std::runtime_error("export_table: ExportRecordBatchReader failed: "
+        throw pygim::errors::backend_error("export_table: ExportRecordBatchReader failed: "
                                  + status.ToString());
     }
 

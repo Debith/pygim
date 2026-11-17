@@ -5,6 +5,7 @@
 
 #include "bcp_bind_dispatch.h"
 #include "bcp_rebind_dispatch.h"
+#include "../../../../errors/core.h"
 
 namespace pygim::strategy::mssql::bcp {
 
@@ -28,7 +29,7 @@ inline std::vector<ColumnBinding> bind_columns(
 
         auto fn = (id < arrow::Type::MAX_ID) ? bind_dispatch[id] : nullptr;
         if (!fn) [[unlikely]]
-            throw std::runtime_error("Unsupported Arrow type: " + field->type()->ToString());
+            throw pygim::errors::unsupported_column_type("Unsupported Arrow type: " + field->type()->ToString());
 
         bindings.push_back(fn(bcp, dbc, array, ordinal));
     }

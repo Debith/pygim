@@ -27,6 +27,7 @@
 #include <string_view>
 #include <utility>
 #include <vector>
+#include "../../errors/core.h"
 
 namespace pygim::adapter {
 
@@ -43,8 +44,7 @@ enum class Format { Polars, Pandas };
 constexpr Format parse_format(std::string_view fmt) {
     if (fmt == "polars") return Format::Polars;
     if (fmt == "pandas") return Format::Pandas;
-    throw py::value_error("Unknown format: '" + std::string(fmt) +
-                          "'. Use 'polars' or 'pandas'.");
+    throw pygim::errors::option_error(std::string(fmt), {"polars", "pandas"});
 }
 
 /// Human-readable format label for logging/repr.

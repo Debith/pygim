@@ -12,6 +12,7 @@
 #include <array>
 #include <cstdint>
 #include <vector>
+#include "../../../errors/core.h"
 
 namespace pygim::strategy::mssql {
 
@@ -181,7 +182,7 @@ build_column_dispatch(const std::shared_ptr<arrow::Schema>& schema,
 
         BlockAppendFn fn = (idx < append_dispatch.size()) ? append_dispatch[idx] : nullptr;
         if (!fn) [[unlikely]] {
-            throw std::runtime_error(
+            throw pygim::errors::unsupported_column_type(
                 "load_dispatch: unsupported Arrow type "
                 + std::to_string(static_cast<int>(type_id))
                 + " for column " + schema->field(i)->name());

@@ -219,17 +219,15 @@ def test_no_extension_imports_a_pygim_module():
 
 
 # Every failure pygim raises is a class of pygim.errors (docs/design/errors.md). A raise of a builtin
-# (py::type_error, std::runtime_error, Python's `raise ValueError`) escapes `except GimError`. The
-# count may only fall: each module converted lowers it, and it ends at none. 151 on 2026-11-17. An
-# extension that refuses to load raises ImportError, which Python's import machinery catches: not
-# counted.
+# (py::type_error, std::runtime_error, Python's `raise ValueError`) escapes `except GimError`: there
+# is none (151 on 2026-11-17, before the conversion). An extension that refuses to load raises
+# ImportError, which Python's import machinery catches: not counted.
 BUILTIN_RAISE_CPP = re.compile(
     r"\bthrow\s+(?:py::(?:key|value|type|index|attribute|stop_iteration|buffer|cast)_error"
     r"|std::(?:[a-z_]+_error|invalid_argument|out_of_range|exception|bad_[a-z_]+))\b")
 BUILTIN_RAISE_PY = re.compile(
     r"^\s*raise\s+(?:KeyError|ValueError|TypeError|IndexError|AttributeError|RuntimeError|NotImplementedError"
     r"|FileNotFoundError|OSError|LookupError|OverflowError)\b", re.M)
-BUILTIN_RAISES_LEFT = 33
 
 
 def builtin_raises():
@@ -256,6 +254,6 @@ def test_the_builtin_raise_check_finds_what_it_is_for(tmp_path):
     assert BUILTIN_RAISE_PY.search("    raise ValueError('x')") and not BUILTIN_RAISE_PY.search("    raise GimError('x')")
 
 
-def test_pygim_raises_its_own_classes_and_the_count_of_builtins_only_falls():
+def test_pygim_raises_only_its_own_classes():
     found = builtin_raises()
-    assert len(found) <= BUILTIN_RAISES_LEFT, "a new builtin raise; raise a class of pygim.errors:\n" + "\n".join(found)
+    assert found == [], "a builtin raise; raise a class of pygim.errors:\n" + "\n".join(found)

@@ -8,6 +8,7 @@
 
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
+#include "../errors/adapter.h"
 
 namespace py = pybind11;
 
@@ -83,6 +84,7 @@ static py::dict run_parallel_fetch_benchmark(
 }
 
 PYBIND11_MODULE(_fetch_benchmark, m) {
+    pygim::errors::load();
     m.doc() = "Raw ODBC fetch throughput benchmarks (not part of production API)";
 
     m.def("fetch_benchmark", &run_fetch_benchmark,
