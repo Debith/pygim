@@ -89,7 +89,9 @@ MergeStrategy default_strategy_for_type(const std::string& type_name) {
 }
 
 // collections.abc.Mapping, kept when the module loads, where gimdict registers as a MutableMapping: a
-// Mapping's == asks isinstance(other, Mapping), and nothing is imported while running (#248).
+// Mapping's == asks isinstance(other, Mapping), and nothing is imported while running, where every
+// call would look the module up again (Debith, 2026-10-18, of imports inside C++ code: they "should
+// be seriously discouraged").
 PYBIND11_CONSTINIT py::gil_safe_call_once_and_store<py::object> mapping_abc;
 
 class PyGimDict {

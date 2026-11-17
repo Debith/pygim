@@ -100,7 +100,7 @@ def test_a_merge_leaves_both_sides_as_they_were():
 
 
 def test_a_gimdict_is_handed_over_by_dict_not_a_typed_method():
-    """It already is a mapping, so dict(d) is its plain copy (D96, Debith on PR #39 of to_dict: "That
+    """It already is a mapping, so dict(d) is its plain copy (Debith on PR #39 of to_dict: "That
     is funny as it already is a dictionary"; and of typed methods: "It associates type into class")."""
     d = utils.gimdict({"a": 1, "n": {"x": 1}})
     assert not hasattr(d, "to_dict")
@@ -144,7 +144,7 @@ def test_gimdict_rejects_non_mapping_initializer():
 
 def test_every_method_of_the_contract_is_its_own():
     """gimdict registers as a MutableMapping, so it is one in full: until 2026-10-30 it had no keys,
-    items, values, pop, popitem, clear, update or setdefault, and get(missing) raised (D66). The
+    items, values, pop, popitem, clear, update or setdefault, and get(missing) raised. The
     registration lends no method — each is gimdict's own."""
     assert [name for name in CONTRACT if name not in vars(utils.gimdict)] == []
 
