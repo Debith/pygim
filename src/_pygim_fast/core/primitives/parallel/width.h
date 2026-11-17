@@ -157,7 +157,7 @@ static_assert(width_policy<chosen_width> && chosen_width(fixed_width(3)).at_star
 
 /// What `threads=None` means for an operation, as a policy type: its width on `cores`, and how
 /// the refusal of 0 names it. Work that may wait on reads grows its width while more threads help
-/// (elastic); work that computes takes one thread per core from the start (Debith, Q39: on 16
+/// (elastic); work that computes takes one thread per core from the start (Debith's choice: on 16
 /// cores code.parse read CPython's Lib in 75 ms fixed, 145 ms elastic at 20-24 workers).
 class grown_while_it_helps {
 public:

@@ -1,7 +1,7 @@
 #pragma once
 // platform/posix/locks.h — the calls a POSIX file lock makes, one thin wrapper each: open, flock,
 // close. Only platform/locks.h includes this, and only where the system is not Windows: nothing
-// here asks which system it runs on (D106).
+// here asks which system it runs on.
 //
 // CORE layer: pybind-free.
 

@@ -1,6 +1,6 @@
 #pragma once
 // platform/libraries.h — a shared library loaded at run time and its functions looked up.
-// Infrastructure behind the platform boundary (docs/design/platform_boundary.md, D77): the BCP
+// Infrastructure behind the platform boundary (docs/design/platform_boundary.md): the BCP
 // loader (persistence/strategy/mssql/bcp/bcp_api.h) names the driver's files, as each system names
 // them, and never asks which system it runs on.
 //
@@ -8,11 +8,11 @@
 //     if (!lib) lib = library::last_match("/opt/x*/lib*.so.*");  // or the newest installed file
 //     auto init = lib.function<init_fn>("init");              // nullptr when it is not there
 //
-// The logic a system puts above its calls lives here, as templates on those calls (D138):
+// The logic a system puts above its calls lives here, as templates on those calls:
 // basic_posix_loader (the newest file is the last of glob's sorted matches) and basic_windows_loader
 // (a name widened, no glob), and basic_library over either (the first name that opens). It compiles
 // on every system and is proven there over fake calls (tests/static/platform_proofs.cpp). The calls
-// are one thin wrapper each, in a file of the system's own that asks nothing (D106):
+// are one thin wrapper each, in a file of the system's own that asks nothing:
 // posix/libraries.h (dlopen, dlsym, glob) and windows/libraries.h (LoadLibraryW, GetProcAddress).
 // They are a type whose static functions inline, so what runs is the logic with the calls in place.
 //

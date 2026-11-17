@@ -78,7 +78,7 @@ Fixed
 
 Removed
 ~~~~~~~
-- ``pygim.ai``, an empty package that shipped in every wheel since 2025-08-07 and offered nothing (D78, Debith, 2026-10-31). ``test_every_package_that_ships_holds_something`` refuses another.
+- ``pygim.ai``, an empty package that shipped in every wheel since 2025-08-07 and offered nothing (Debith, 2026-10-31). ``test_every_package_that_ships_holds_something`` refuses another.
 - Python 3.9 (end of life since October 2025; Debith, 2026-10-31): pygim needs 3.10 or later (``requires-python = ">=3.10"``, which no release told pip before), CI tests 3.10–3.14 on every system, and a release builds 15 wheels. ``tests/unittests/test_supported_pythons.py`` holds the floor, the classifiers, the CI matrix and the release's wheels to one list.
 - Remove 7 dead ``x_test_*`` functions from ``test_pathset.py`` (tested APIs that no longer exist: ``prefixed``, ``dirs``, ``files``, ``by_suffix``, ``drop``, ``dropped``, ``FS.delete_all``).
 - Remove ``DomainEventType`` enum (empty, unused) from interfaces.

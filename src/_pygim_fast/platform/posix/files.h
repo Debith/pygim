@@ -2,7 +2,7 @@
 // platform/posix/files.h — a path's text as POSIX keeps it: the system's own bytes, so a name that
 // is not UTF-8 round-trips. fs::path::string() and a path made from a std::string convert nothing
 // here. Standard library alone, so it compiles on every system; platform/files.h chooses it where
-// the family is POSIX (D106).
+// the family is POSIX.
 //
 // CORE layer: pybind-free.
 

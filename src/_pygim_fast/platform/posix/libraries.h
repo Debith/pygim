@@ -1,8 +1,8 @@
 #pragma once
 // platform/posix/libraries.h — the calls a POSIX loader makes, one thin wrapper each: dlopen, dlsym,
 // glob. The logic over them is basic_posix_loader's, in platform/libraries.h, proven over fake calls
-// on every system (D138). Only that header includes this, and only where the system is not Windows:
-// nothing here asks which system it runs on (D106).
+// on every system. Only that header includes this, and only where the system is not Windows:
+// nothing here asks which system it runs on.
 //
 // CORE layer: pybind-free.
 

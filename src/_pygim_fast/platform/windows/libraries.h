@@ -1,8 +1,8 @@
 #pragma once
 // platform/windows/libraries.h — the calls a Windows loader makes, one thin wrapper each:
 // LoadLibraryW and GetProcAddress. The logic over them is basic_windows_loader's, in
-// platform/libraries.h, proven over fake calls on every system (D138). Only that header includes
-// this, and only on Windows: nothing here asks which system it runs on (D106).
+// platform/libraries.h, proven over fake calls on every system. Only that header includes
+// this, and only on Windows: nothing here asks which system it runs on.
 //
 // CORE layer: pybind-free.
 
