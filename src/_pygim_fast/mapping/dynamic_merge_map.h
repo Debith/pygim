@@ -5,6 +5,7 @@
 #include <stdexcept>
 #include <type_traits>
 #include <unordered_map>
+#include "../errors/core.h"
 
 namespace pygim::mapping {
 
@@ -134,7 +135,7 @@ private:
                 if constexpr (std::is_arithmetic_v<T>) return std::min(lhs, rhs);
                 return rhs;
         }
-        throw std::runtime_error("unsupported merge strategy");
+        throw pygim::errors::invalid_state("unsupported merge strategy");   // every strategy is a case above
     }
 
 private:

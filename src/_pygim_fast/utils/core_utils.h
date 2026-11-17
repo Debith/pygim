@@ -144,7 +144,7 @@ template <std::size_t N>
                                   const std::string &duration_unit,
                                   int precision = 2) {
     if (duration <= 0.0) {
-        throw std::invalid_argument("duration must be positive");
+        throw pygim::errors::invalid_value("duration must be positive");
     }
     double bytes = to_bytes(quantity, quantity_unit);
     double seconds = to_seconds(duration, duration_unit);

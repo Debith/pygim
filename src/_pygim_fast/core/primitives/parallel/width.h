@@ -17,6 +17,7 @@
 #include <variant>
 
 #include "../duration.h"
+#include "../../../errors/core.h"
 
 namespace pygim::primitives::parallel {
 
@@ -187,7 +188,7 @@ concept unset_policy = requires(std::size_t cores) {
 template <unset_policy Unset = grown_while_it_helps>
 [[nodiscard]] constexpr chosen_width width_for(std::optional<std::size_t> threads, std::string_view who, std::size_t cores) {
     if (!threads) return Unset::width(cores);
-    if (*threads == 0) throw std::invalid_argument(std::string(who) + ": threads must be at least 1, or None for " + std::string(Unset::meaning));
+    if (*threads == 0) throw pygim::errors::invalid_value(std::string(who) + ": threads must be at least 1, or None for " + std::string(Unset::meaning));
     return chosen_width(fixed_width(*threads));
 }
 static_assert(width_for<one_per_core>(std::nullopt, "parse", 16).at_start() == 16 && width_for(std::nullopt, "read_each", 16).at_start() == 1 &&

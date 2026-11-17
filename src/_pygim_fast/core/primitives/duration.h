@@ -34,6 +34,7 @@
 #include <string_view>
 #include <type_traits>
 #include <utility>
+#include "../../errors/core.h"
 
 namespace pygim::primitives {
 
@@ -96,7 +97,7 @@ static_assert(seconds_of(duration(2'500)) == 2.5e-6);
     constexpr auto min = std::numeric_limits<duration::rep>::min();
     const auto x = a.nanoseconds(), y = b.nanoseconds();
     if ((y > 0 && x > max - y) || (y < 0 && x < min - y)) {
-        throw std::overflow_error("a duration past 64 bits of nanoseconds (about 292 years)");
+        throw pygim::errors::overflow("a duration past 64 bits of nanoseconds (about 292 years)");
     }
     return a + b;
 }
@@ -195,7 +196,7 @@ private:
     duration m_length;
 
     [[noreturn]] static void throw_past_64_bits() {
-        throw std::overflow_error("a duration past 64 bits of nanoseconds (about 292 years)");
+        throw pygim::errors::overflow("a duration past 64 bits of nanoseconds (about 292 years)");
     }
 
     [[nodiscard]] constexpr duration of_count(std::int64_t amount) const {
@@ -210,7 +211,7 @@ private:
         const auto bits = std::bit_cast<std::uint64_t>(amount);
         const bool negative = (bits >> 63) != 0;
         const int biased = static_cast<int>((bits >> 52) & 0x7ffu);
-        if (biased == 0x7ff) throw std::domain_error("a duration of a NaN or an infinity");
+        if (biased == 0x7ff) throw pygim::errors::invalid_value("a duration of a NaN or an infinity");
         const std::uint64_t fraction = bits & ((std::uint64_t{1} << 52) - 1);
         const std::uint64_t mantissa = biased == 0 ? fraction : fraction | (std::uint64_t{1} << 52);
         const int exponent = (biased == 0 ? 1 : biased) - 1075;   // amount = ±mantissa × 2^exponent

@@ -8,6 +8,7 @@ import time as time_module   # `time` is the manual clock's fixture here
 import pytest
 
 import pygim
+from pygim.errors import MissingKeyError
 
 
 def ms(n):
@@ -225,8 +226,9 @@ def test_stopping_no_lap_or_an_unknown_one_is_refused(time):
     with pytest.raises(RuntimeError, match="no lap is running"):
         timer.stop_lap()
     timer.start_lap("a")
-    with pytest.raises(IndexError, match="no lap of that name"):
+    with pytest.raises(MissingKeyError) as unknown:     # a lookup by name: a KeyError, naming the laps there are
         timer.stop_lap("b")
+    assert str(unknown.value) == "Key ``b`` not among: a"
     timer.stop_lap("a")                                   # the refusals left the lap as it was
     assert list(timer.snapshot().laps) == ["a"]
 
