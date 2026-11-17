@@ -162,7 +162,7 @@ consteval bool duplicate_is_rejected() {
     Static r = three();
     try {
         r.register_or_override("yaml", 9, false);
-    } catch (const std::runtime_error&) {
+    } catch (const pygim::errors::duplicate_key&) {
         return r.size() == 3 && *r.try_get_const("yaml") == 1;
     }
     return false;
@@ -173,7 +173,7 @@ consteval bool override_of_missing_is_rejected() {
     Static r = three();
     try {
         r.register_or_override("csv", 4, true);
-    } catch (const std::runtime_error&) {
+    } catch (const pygim::errors::missing_key&) {
         return !r.contains("csv");
     }
     return false;

@@ -103,18 +103,18 @@ constexpr std::size_t edit_cost(std::string_view a, std::string_view b, std::siz
 constexpr std::vector<std::string> closest(std::string_view name, std::span<const std::string> candidates,
                                            std::size_t at_most = closest_at_most) {
     if (candidates.size() >= detail::suggested_among_fewer_than) return {};
-    std::vector<std::pair<std::size_t, std::size_t>> near;   // (cost, index)
+    std::vector<std::pair<std::size_t, std::size_t>> close_ones;   // (cost, index)
     for (std::size_t i = 0; i < candidates.size(); ++i) {
         const std::string_view candidate = candidates[i];
         if (candidate == name) continue;
         const std::size_t max_cost = (name.size() + candidate.size() + 3) * detail::move_cost / 6;
         const std::size_t cost = detail::edit_cost(name, candidate, max_cost);
-        if (cost <= max_cost) near.emplace_back(cost, i);
+        if (cost <= max_cost) close_ones.emplace_back(cost, i);
     }
     // By cost, then by the candidates' order (std::stable_sort is not constexpr).
-    std::sort(near.begin(), near.end());
+    std::sort(close_ones.begin(), close_ones.end());
     std::vector<std::string> names;
-    for (std::size_t i = 0; i < near.size() && i < at_most; ++i) names.push_back(candidates[near[i].second]);
+    for (std::size_t i = 0; i < close_ones.size() && i < at_most; ++i) names.push_back(candidates[close_ones[i].second]);
     return names;
 }
 
@@ -131,8 +131,8 @@ constexpr std::string missing_key_message(std::string_view key, std::span<const 
     if (keys.empty()) return said + " not found";
     if (keys.size() <= listed_at_most) return said + " not among: " + detail::joined(keys, ", ");
     said += " not among " + detail::decimal(keys.size()) + " keys";
-    const std::vector<std::string> near = closest(key, keys);
-    if (!near.empty()) said += "; closest: " + detail::joined(near, ", ");
+    const std::vector<std::string> close_ones = closest(key, keys);
+    if (!close_ones.empty()) said += "; closest: " + detail::joined(close_ones, ", ");
     return said;
 }
 
@@ -164,17 +164,26 @@ enum class kind : unsigned char {
 /// How many kinds there are: the translator's table has one row for each.
 inline constexpr std::size_t kinds = static_cast<std::size_t>(kind::missing_attribute) + 1;
 
+/// constexpr where constant evaluation can throw and catch an exception (C++26, P3068: GCC 16), as it
+/// can std::runtime_error there; elsewhere a constructor over std::exception's is not one.
+#if defined(__cpp_constexpr_exceptions)
+#define PYGIM_ERRORS_CONSTEXPR constexpr
+#else
+#define PYGIM_ERRORS_CONSTEXPR
+#endif
+
 /// Everything pygim's C++ throws; its Python counterpart is GimError, or the class its kind names.
 /// A frame the error passes through may add a note, as Python's add_note does (PEP 678): what it was
 /// doing, such as which key it was resolving. The notes reach Python as the exception's __notes__,
 /// shown under its message in a traceback, and leave the message itself as the class says it.
+/// constexpr, as std::runtime_error is in C++26: constant evaluation can throw and catch it there.
 class error : public std::exception {
 public:
-    explicit error(std::string message, kind meaning = kind::error) : m_message(std::move(message)), m_kind(meaning) {}
-    [[nodiscard]] const char* what() const noexcept override { return m_message.c_str(); }
-    [[nodiscard]] kind meaning() const noexcept { return m_kind; }
-    void add_note(std::string note) { m_notes.push_back(std::move(note)); }
-    [[nodiscard]] std::span<const std::string> notes() const noexcept { return m_notes; }
+    PYGIM_ERRORS_CONSTEXPR explicit error(std::string message, kind meaning = kind::error) : m_message(std::move(message)), m_kind(meaning) {}
+    [[nodiscard]] PYGIM_ERRORS_CONSTEXPR const char* what() const noexcept override { return m_message.c_str(); }
+    [[nodiscard]] PYGIM_ERRORS_CONSTEXPR kind meaning() const noexcept { return m_kind; }
+    PYGIM_ERRORS_CONSTEXPR void add_note(std::string note) { m_notes.push_back(std::move(note)); }
+    [[nodiscard]] PYGIM_ERRORS_CONSTEXPR std::span<const std::string> notes() const noexcept { return m_notes; }
 
 private:
     std::string m_message;
@@ -185,7 +194,7 @@ private:
 /// A key as a message says it: its own text where it has one; a core generic over its key, which
 /// cannot say any other, leaves naming it to the adapter that can.
 template <class Key>
-std::string key_text(const Key& key) {
+constexpr std::string key_text(const Key& key) {
     if constexpr (std::is_convertible_v<const Key&, std::string_view>) return std::string(std::string_view(key));
     else return "(a key this core cannot name)";
 }
@@ -194,7 +203,7 @@ std::string key_text(const Key& key) {
 template <kind Meaning>
 class error_of : public error {
 public:
-    explicit error_of(std::string message) : error(std::move(message), Meaning) {}
+    PYGIM_ERRORS_CONSTEXPR explicit error_of(std::string message) : error(std::move(message), Meaning) {}
 };
 
 using argument_error = error_of<kind::argument>;                   ///< a call pygim cannot take as given
@@ -214,10 +223,10 @@ using missing_attribute = error_of<kind::missing_attribute>;       ///< an attri
 /// Python: MissingKeyError(key, within), also a KeyError.
 class missing_key : public error {
 public:
-    explicit missing_key(std::string key, std::vector<std::string> keys = {})
+    PYGIM_ERRORS_CONSTEXPR explicit missing_key(std::string key, std::vector<std::string> keys = {})
         : error(missing_key_message(key, keys), kind::missing_key), m_key(std::move(key)), m_keys(std::move(keys)) {}
-    [[nodiscard]] const std::string& key() const noexcept { return m_key; }
-    [[nodiscard]] std::span<const std::string> keys() const noexcept { return m_keys; }
+    [[nodiscard]] PYGIM_ERRORS_CONSTEXPR const std::string& key() const noexcept { return m_key; }
+    [[nodiscard]] PYGIM_ERRORS_CONSTEXPR std::span<const std::string> keys() const noexcept { return m_keys; }
 
 private:
     std::string m_key;
@@ -227,10 +236,10 @@ private:
 /// A value none of its options. Python: GimOptionError(value, options), also a ValueError.
 class option_error : public error {
 public:
-    option_error(std::string value, std::vector<std::string> options)
+    PYGIM_ERRORS_CONSTEXPR option_error(std::string value, std::vector<std::string> options)
         : error(option_message(value, options), kind::option), m_value(std::move(value)), m_options(std::move(options)) {}
-    [[nodiscard]] const std::string& value() const noexcept { return m_value; }
-    [[nodiscard]] std::span<const std::string> options() const noexcept { return m_options; }
+    [[nodiscard]] PYGIM_ERRORS_CONSTEXPR const std::string& value() const noexcept { return m_value; }
+    [[nodiscard]] PYGIM_ERRORS_CONSTEXPR std::span<const std::string> options() const noexcept { return m_options; }
 
 private:
     std::string m_value;
