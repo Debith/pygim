@@ -1,7 +1,7 @@
 #pragma once
 // platform/windows/process.h — the process's calls on Windows, behind platform/process.h's
 // process_calls. Only that header includes it, and only on Windows: nothing here asks which system
-// it runs on (D106).
+// it runs on.
 //
 // Windows has no fork and no POSIX signals (Ctrl-C reaches a handler on a thread of its own), so the
 // signal mask and the fork hooks do nothing; the pools' threads go unnamed here.

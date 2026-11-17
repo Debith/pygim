@@ -1,6 +1,6 @@
 # The operating system behind a boundary
 
-Status: decided and built 2026-10-31 (D77); a component's shape decided and built 2026-11-03 (D106); the calls as a policy, so every system's logic is proven on every system, decided and built 2026-11-08 (D138) · Owner: Debith
+Status: decided and built 2026-10-31; a component's shape decided and built 2026-11-03; the calls as a policy, so every system's logic is proven on every system, decided and built 2026-11-08 · Owner: Debith
 
 The operating system is a model foreign to pygim's domain, as Python's object model is. The domain —
 pathlib's rules, the glob, the parser, similarity — states its rules once, the same on every system.
@@ -82,11 +82,11 @@ behind the `file_reads` concept. The boundary extends that pattern to the rest.
 | **B. the system's rules as data, its calls as engines** | `platform/` holds a rules table per system and an engine per system behind each concept; the domain is a template on the rules; a test_layering ratchet counts the conditionals left outside | **chosen** (Debith, 2026-10-31: "I like B") |
 | C. a runtime interface | one abstract system, real or fake, called through virtual functions | rejected: a virtual call on the hot paths (a listing, a read), against making a component a template on its policy |
 
-## The shape of a component (D106)
+## The shape of a component
 
 A component is one subject of the system's calls: the process's memory, loading a library, and with
 PR #39's code the listing, the reads, the writes, the process. Each system gets one class for it,
-holding all of that component's calls (Q51: the huge-page advice joins the memory probes, not a
+holding all of that component's calls (the huge-page advice joins the memory probes, not a
 contract of its own), in a file of its own under the folder of the most general system it serves.
 The component's header in `platform/` states what every class answers, as a concept, and picks the
 running system's, once:
@@ -99,8 +99,8 @@ platform/
     posix/files.h         posix_files: the system's own bytes, string() both ways
     windows/files.h       windows_files: UTF-8 from the wide native form, u8string() both ways
     libraries.h           library_loader; basic_posix_loader and basic_windows_loader, the logic over each system's
-                          calls (D138); the choice of native_loader; basic_library, and library over it
-    memory.h              process_memory; basic_linux_memory, the logic over Linux's calls (D138); the choice of native_memory
+                          calls; the choice of native_loader; basic_library, and library over it
+    memory.h              process_memory; basic_linux_memory, the logic over Linux's calls; the choice of native_memory
     process.h             process_calls; the choice of native_process; name_this_thread, signals_blocked, at_fork over it
     clocks.h              thread_clocks; the choice of native_clocks
     posix/libraries.h     posix_dl_calls: dlopen, dlsym, glob; posix_loader over them
@@ -152,9 +152,9 @@ pick the system's rule itself; the layering test now refuses a branch on a platf
 | --- | --- | --- |
 | A. `#if` inside the functions | one header per component, each system's code interleaved in every function (as first built, 2026-11-01) | rejected: a flag in every function, and no shape the systems are held to |
 | **B. a class per system, a file each** | the component's header holds the concept and the one choice; a system's files ask nothing | **chosen** (Debith, 2026-11-03: "let's do with B") |
-| C. B, and every system's class checked on every build | each class's declaration compiled everywhere, its system calls only on its own system | not now: it splits classes of two or three functions in two, and CI's matrix catches the same drift in the same run; worth it when a component grows large (the listing, the reads) — taken up by D138, which splits each class into its logic and its calls |
+| C. B, and every system's class checked on every build | each class's declaration compiled everywhere, its system calls only on its own system | not now: it splits classes of two or three functions in two, and CI's matrix catches the same drift in the same run; worth it when a component grows large (the listing, the reads) — taken up by the calls as a policy (below), which splits each class into its logic and its calls |
 
-## The calls as a policy (D138)
+## The calls as a policy
 
 Where to draw the line between what a test can prove anywhere and what only the system can prove:
 at the system call. A per-system class is two things. Its **logic** — which name to open first, that
@@ -190,7 +190,7 @@ symbol that is missing, a peak the kernel has not caught up with, procfs absent.
 | Option | What it is | Verdict |
 | --- | --- | --- |
 | **A. a type parameter per class** | `basic_posix_loader<Calls>`, `basic_linux_memory<Calls>`: the calls struct is a type whose static functions inline; the system's file holds only the struct and the alias | **chosen**: no cost at run time, the logic constexpr and proven everywhere, the calls struct an inventory of what pygim asks each system for |
-| B. a table of function pointers swapped at test time | one runtime table per component, a fake installed by a test hook | rejected: an indirect call on every probe, a hook in the library (#133), and D77 already rejected a runtime interface |
+| B. a table of function pointers swapped at test time | one runtime table per component, a fake installed by a test hook | rejected: an indirect call on every probe, a hook in the library (#133), and the boundary's first decision (2026-10-31) already rejected a runtime interface |
 | C. link-time substitution | a fake calls file compiled in place of the system's | rejected: per build, not per test, so the real and the fake cannot be proven in one run |
 
 The line it draws: wrap what only an operating system can answer, never the standard library
@@ -256,10 +256,10 @@ Each step a refactor under the tests as they are (#36), its own commit, the ratc
 | --- | --- | --- |
 | platform/native.h | `native`: the running system's family, decided once | the choice |
 | platform/files.h | a path's text: `posix_files` and `windows_files`, the `native_files` the family chooses, and `text_from_fs` and `fs_from_text` over it | rules |
-| platform/memory.h | `process_memory`; `basic_linux_memory`, Linux's logic over its calls, proven over fakes everywhere (D138); `native_memory`, the running system's | logic, and the choice |
+| platform/memory.h | `process_memory`; `basic_linux_memory`, Linux's logic over its calls, proven over fakes everywhere; `native_memory`, the running system's | logic, and the choice |
 | platform/linux/memory.h | `linux_proc_calls`: one wrapper a call (the statm line, the page size, the peak in kilobytes); `linux_memory` over them | calls |
 | platform/macos/, windows/memory.h | `macos_memory`, `windows_memory`: `resident_bytes`, `peak_resident_bytes`, the system's reading as it is | calls |
-| platform/libraries.h | `library_loader`; `basic_posix_loader`, `basic_windows_loader`, the logic over each system's calls (D138); `native_loader`; `basic_library` and `library` over it: `first_of`, `last_match`, `function<F>`, `address_of` | logic, and the choice |
+| platform/libraries.h | `library_loader`; `basic_posix_loader`, `basic_windows_loader`, the logic over each system's calls; `native_loader`; `basic_library` and `library` over it: `first_of`, `last_match`, `function<F>`, `address_of` | logic, and the choice |
 | platform/posix/, windows/libraries.h | `posix_dl_calls`, `win32_library_calls`: one wrapper a call; `posix_loader`, `windows_loader` over them | calls |
 | tests/static/platform_proofs.cpp | every logic class over constexpr fake calls, compiled by every build of `pygim.utils`: the first name that opens, a missing library and symbol, the newest match and no match, Windows' widened name and missing glob, statm's resident count, the kilobyte peak, a peak below the present, a failed getrusage, procfs absent; and the running system's file-lock calls, compiled against their concept | the proofs |
 | platform/locks.h | `file_lock_calls`: open, lock, unlock and close a file locked across processes, over an `int` descriptor on every system; `native_lock_calls`, the running system's. No caller on `main` yet | the choice |
@@ -273,7 +273,7 @@ Each step a refactor under the tests as they are (#36), its own commit, the ratc
 | persistence/.../bcp_api.h | `driver_files<F>`: the ODBC driver's library as each system names it | rules |
 
 Arriving with the code that calls them, from PR #39's branch, each behind the same boundary; each
-component's calls in the shape above, a class per system in a file of its own (D106):
+component's calls in the shape above, a class per system in a file of its own:
 
 | Header | What it will hold | Kind |
 | --- | --- | --- |
@@ -286,10 +286,10 @@ component's calls in the shape above, a class per system in a file of its own (D
 | platform/process.h | `process_id`, beside the calls the pools make | calls |
 | platform/signals.h | `interrupt_handlers` (Ctrl-C, SIGTERM), `wakeup` (a pipe; an event) | calls |
 | platform/caches.h | `system_caches`; the kernel's /sys list read by rules compiled everywhere | calls and rules |
-| platform/memory.h | `advise_huge_pages`, on each system's memory class beside the probes (Q51) | calls |
+| platform/memory.h | `advise_huge_pages`, on each system's memory class beside the probes | calls |
 
 ## Open
 
 | Question | Lean |
 | --- | --- |
-| Q42: should Windows' rules be usable on Linux from Python, as pathlib's PureWindowsPath is? | yes, later: with the rules as data it costs little, but it is a feature, not the boundary |
+| Should Windows' rules be usable on Linux from Python, as pathlib's PureWindowsPath is? | yes, later: with the rules as data it costs little, but it is a feature, not the boundary |

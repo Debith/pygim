@@ -2,9 +2,9 @@
 // pathlike/adapter/path_text.h — path text between Python and the internal form.
 //
 // The internal text of a path is the system's own bytes on POSIX and UTF-8 on
-// Windows (platform/files.h, D77). A str, bytes or os.PathLike argument becomes
+// Windows (platform/files.h). A str, bytes or os.PathLike argument becomes
 // that text here, and the text becomes a str here, without the fs::path round
-// trip pybind11's caster would take. One class per family (D106): posix_path_text
+// trip pybind11's caster would take. One class per family: posix_path_text
 // goes through os.fsencode and os.fsdecode, so a name that is not UTF-8
 // round-trips; windows_path_text takes a str's UTF-8 as it is. Both compile on
 // every system; the family chooses one, once, as platform/native.h says.

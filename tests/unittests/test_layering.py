@@ -58,7 +58,7 @@ def test_core_headers_include_only_core():
 
 
 # Every conditional on the operating system outside src/_pygim_fast/platform/, the boundary the
-# system's rules and calls belong behind (docs/design/platform_boundary.md, D77): 14 on main before
+# system's rules and calls belong behind (docs/design/platform_boundary.md): 14 on main before
 # the boundary, in five files — pathlike's path text and native rules, the ODBC headers and driver
 # loading, the memory probes. None is left: a new one fails here, and belongs behind the boundary.
 # A compiler's own checks (_MSC_VER, __clang__) are build portability, not the system's, and are
@@ -80,7 +80,7 @@ def test_the_operating_system_is_asked_only_behind_the_platform_boundary():
 
 # A branch on a platform value is the same conditional in another spelling: `if constexpr
 # (platform::some_flag)` lets a component pick the system's rule itself, where the one sanctioned form
-# is a class per system chosen once by the family (platform/native.h, D106). Five of them sat in
+# is a class per system chosen once by the family (platform/native.h). Five of them sat in
 # pathlike's path text and the platform's own files header until 2026-11-08.
 PLATFORM_BRANCH = re.compile(r"\bif\s*(?:constexpr\s*)?\(\s*!?\s*platform::")
 
@@ -127,7 +127,7 @@ def test_time_is_read_in_one_header():
     assert found == [], "a clock read outside core/primitives/timestamp.h: take a clock (wall_clock, monotonic_clock) instead"
 
 
-# A length of time is the duration primitive's (D142, D143): pygim's own class over one count of
+# A length of time is the duration primitive's: pygim's own class over one count of
 # nanoseconds, spelt in its units' literals (20_us, 1_min), with std::chrono behind it. Outside the
 # time primitives (core/primitives/duration.h, timestamp.h) no code names std::chrono's lengths or
 # clocks. A calendar conversion is not a length: bcp_types.h's dates take std::chrono's calendar
@@ -151,7 +151,7 @@ def test_a_length_of_time_is_spelt_by_the_duration_primitive():
     assert found == [], "a std::chrono length outside the time primitives: use pygim::primitives::duration and its literals (20_us, 1_min):\n" + "\n".join(found)
 
 
-# Inside the boundary (D106): each system's calls are a class in a folder of its own — platform/posix/,
+# Inside the boundary: each system's calls are a class in a folder of its own — platform/posix/,
 # linux/, macos/, windows/ — and never ask which system they run on; a header directly in platform/
 # asks once, in the one #if chain that picks the running system's class (an #elif continues it).
 SYSTEM_FOLDERS = ("posix", "linux", "macos", "windows")
@@ -182,7 +182,7 @@ def test_inside_the_boundary_a_header_asks_once_and_a_systems_own_file_never():
 
 def test_every_package_that_ships_holds_something():
     """A package of one empty __init__.py ships in every wheel and imports as if it offered
-    something: pygim.ai did from 2025-08-07 until Debith dropped it (D78, 2026-10-31)."""
+    something: pygim.ai did from 2025-08-07 until Debith dropped it on 2026-10-31."""
     src = ROOT.parent
     empty = []
     for package in ("pygim", "_pygim"):

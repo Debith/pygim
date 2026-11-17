@@ -96,7 +96,7 @@ template <class Strategy>
 }
 
 // The internal text form is the system's own byte string on POSIX and UTF-8 on Windows: the
-// platform boundary says which (platform/files.h, D77).
+// platform boundary says which (platform/files.h).
 using platform::fs_from_text;
 using platform::text_from_fs;
 
@@ -359,7 +359,7 @@ struct windows_strategy : strategy_base<windows_strategy> {
     }
 };
 
-// The running system's rules, chosen by the platform's family (D77): both strategies are compiled,
+// The running system's rules, chosen by the platform's family: both strategies are compiled,
 // and proven, on every system.
 using native_strategy = std::conditional_t<platform::native == platform::family::windows, windows_strategy, posix_strategy>;
 

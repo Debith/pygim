@@ -1,7 +1,7 @@
 #pragma once
 // platform/windows/memory.h — the process's memory as Windows keeps it, behind platform/memory.h's
 // process_memory. Only that header includes it, and only on Windows: nothing here asks which system
-// it runs on (D106).
+// it runs on.
 //
 // Cost: one kernel call each (GetProcessMemoryInfo).
 //

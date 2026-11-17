@@ -1,7 +1,7 @@
 #pragma once
 // platform/native.h — the family of operating systems this build follows, decided once. Outside
-// platform/, everything chooses by this value, never by an #if (docs/design/platform_boundary.md,
-// D77): every family's rules are compiled on every system, so the domain is proven and tested under
+// platform/, everything chooses by this value, never by an #if (docs/design/platform_boundary.md):
+// every family's rules are compiled on every system, so the domain is proven and tested under
 // each of them on any. Inside platform/, a call written against one system's own headers and types
 // is the only code left that asks the compiler.
 //

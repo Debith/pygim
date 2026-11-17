@@ -1,17 +1,17 @@
 #pragma once
 // platform/clocks.h — the calling thread's CPU time, as each system counts it. Infrastructure
-// behind the platform boundary (docs/design/platform_boundary.md, D77):
+// behind the platform boundary (docs/design/platform_boundary.md):
 // core/primitives/timestamp.h's thread_cpu_clock reads it, and never asks which system it runs on.
 // The wall and measuring clocks are std::chrono's, the same everywhere, and read in timestamp.h
 // itself.
 //
-// One class per system, each in a file of its own that asks nothing (D106): posix/clocks.h and
+// One class per system, each in a file of its own that asks nothing: posix/clocks.h and
 // windows/clocks.h. This header states what every one of them answers and picks the running
 // system's, once:
 //
 //     platform::native_clocks::thread_cpu_ns()   -> nanoseconds the calling thread has run
 //
-// Neither class puts logic above its call, so neither is a template on its calls (D138): a fake would
+// Neither class puts logic above its call, so neither is a template on its calls: a fake would
 // prove only itself. They are their calls, proven by CI on their own systems.
 //
 // CORE layer: pybind-free.

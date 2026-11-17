@@ -1,7 +1,7 @@
 #pragma once
 // platform/macos/process.h — the process's calls on macOS, behind platform/process.h's process_calls:
 // POSIX's (posix/process.h), and a thread named as macOS names one. Only that header includes it,
-// and only on macOS: nothing here asks which system it runs on (D106).
+// and only on macOS: nothing here asks which system it runs on.
 //
 // CORE layer: pybind-free.
 

@@ -1,9 +1,9 @@
 #pragma once
 // platform/linux/memory.h — the calls Linux's memory probes make, one thin wrapper each: a pread of
 // /proc/self/statm, the page size, getrusage. The logic over them is basic_linux_memory's, in
-// platform/memory.h, proven over fake calls on every system (D138). Only that header includes this,
-// and only where the system is neither Windows nor macOS: nothing here asks which system it runs on
-// (D106).
+// platform/memory.h, proven over fake calls on every system. Only that header includes this,
+// and only where the system is neither Windows nor macOS: nothing here asks which system it runs
+// on.
 //
 // Cost: resident_bytes() is one pread through a descriptor opened once (no open/close per call —
 // about a microsecond, the kernel renders the text); the peak adds getrusage.
