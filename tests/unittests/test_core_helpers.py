@@ -187,7 +187,7 @@ def test_get_schema_describes_any_value_as_any():
 
 def test_get_schema_refuses_a_type_it_has_no_form_for():
     """Found 2026-10-31: a type it did not know was described as a string — a dict, an
-    Optional[int], a tuple alike (D79, Debith: refuse what it cannot describe)."""
+    Optional[int], a tuple alike (Debith: refuse what it cannot describe)."""
     class Point:
         pass
 
