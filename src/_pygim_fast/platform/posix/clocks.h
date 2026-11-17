@@ -1,7 +1,7 @@
 #pragma once
 // platform/posix/clocks.h — the calling thread's CPU time on POSIX, behind platform/clocks.h's
 // thread_clocks. Only that header includes it, and only where the system is not Windows: nothing
-// here asks which system it runs on (D106).
+// here asks which system it runs on.
 //
 // Cost: one clock_gettime, about 500 ns on Linux: sample it, do not read it per item.
 //

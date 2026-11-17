@@ -1,11 +1,11 @@
 #pragma once
 // platform/process.h — the process's calls the pools make: naming a thread, the signal mask the
 // threads a thread starts inherit, hooks around a fork. Infrastructure behind the platform boundary
-// (docs/design/platform_boundary.md, D77): the pools (core/primitives/parallel/crew.h and
+// (docs/design/platform_boundary.md): the pools (core/primitives/parallel/crew.h and
 // for_each.h) call these and never ask which system they run on. Where a system has no such thing
 // (Windows has no fork and no POSIX signals), the call does nothing.
 //
-// One class per system, each in a file of its own that asks nothing (D106): POSIX's signal mask and
+// One class per system, each in a file of its own that asks nothing: POSIX's signal mask and
 // fork hooks in posix/process.h, and naming a thread, which Linux and macOS spell differently, in
 // linux/process.h and macos/process.h over it; windows/process.h. This header states what every one
 // of them answers and picks the running system's once:
@@ -14,7 +14,7 @@
 //     const platform::native_process::signals_blocked quiet;       // threads started while it lives inherit the mask
 //     platform::native_process::at_fork(prepare, parent, child);   // pthread_atfork, where there is a fork
 //
-// No class puts logic above its calls, so none is a template on its calls (D138): a fake would prove
+// No class puts logic above its calls, so none is a template on its calls: a fake would prove
 // only itself. They are their calls, proven by CI on their own systems and by the threads stress
 // (tests/static/threads_stress.cpp) on Linux.
 //

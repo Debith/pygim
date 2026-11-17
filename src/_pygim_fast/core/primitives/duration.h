@@ -7,10 +7,10 @@
 //     time_unit::named("yr")->of(0.286)                           -> 9'025'288'271'999'999ns
 //     spelt_in_units(150_s)                                       -> {min 2, s 30}
 //
-// The units are yr, wk, day, hr, min, s, ms, us and ns (D143), in C++ as literals (1_min) and in
+// The units are yr, wk, day, hr, min, s, ms, us and ns, in C++ as literals (1_min) and in
 // Python as Duration's keywords (Duration(min=1)): one table names them both.
 //
-// `duration` is pygim's own class, not std::chrono's (D142): a primitive puts what it builds on
+// `duration` is pygim's own class, not std::chrono's: a primitive puts what it builds on
 // behind a class of pygim's, so std::chrono is named here and in timestamp.h only, and the layering
 // check holds every other file to that. The lengths are std::chrono's all the same, a year its
 // 365.2425 days, so C++ and Python agree. An amount may be a fraction: the float's exact value times
@@ -230,7 +230,7 @@ private:
 };
 static_assert(time_unit("s", duration(1'000'000'000)).of(2) == duration(2'000'000'000) && time_unit("s", duration(1)).name() == "s");
 
-/// Every unit, longest first: the names Duration(**units) takes and the literals spell (D143), the
+/// Every unit, longest first: the names Duration(**units) takes and the literals spell, the
 /// order repr spells them in. Each length is std::chrono's, a year its 365.2425 days.
 inline constexpr std::array<time_unit, 9> time_units{{
     {"yr", duration::from_chrono(std::chrono::years(1))},
@@ -300,7 +300,7 @@ static_assert([] {
 }());
 static_assert(spelt_in_units(duration(0)).size() == 0);
 
-/// The units as C++ literals, the names Python's Duration takes (D143): 20_us, 1_min, 1.5_s. A whole
+/// The units as C++ literals, the names Python's Duration takes: 20_us, 1_min, 1.5_s. A whole
 /// amount is exact; a fraction rounds as time_unit::of does. Evaluated at compile time, so a literal
 /// past 64 bits does not compile. In namespace pygim::primitives they are in scope; elsewhere,
 /// `using namespace pygim::primitives::time_literals;`.

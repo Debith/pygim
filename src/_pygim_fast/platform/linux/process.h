@@ -1,8 +1,8 @@
 #pragma once
 // platform/linux/process.h — the process's calls on Linux, behind platform/process.h's process_calls:
 // POSIX's (posix/process.h), and a thread named as Linux names one. Only that header includes it,
-// and only where the system is neither Windows nor macOS: nothing here asks which system it runs on
-// (D106).
+// and only where the system is neither Windows nor macOS: nothing here asks which system it runs
+// on.
 //
 // CORE layer: pybind-free.
 

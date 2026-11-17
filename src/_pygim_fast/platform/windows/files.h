@@ -2,7 +2,7 @@
 // platform/windows/files.h — a path's text as Windows keeps it: UTF-8, lossless from the wide native
 // form and what Python's str carries. fs::path::string() would narrow through the ACP there and can
 // mangle a non-ASCII name, so the text goes through u8string both ways. Standard library alone, so
-// it compiles on every system; platform/files.h chooses it where the family is Windows (D106).
+// it compiles on every system; platform/files.h chooses it where the family is Windows.
 //
 // CORE layer: pybind-free.
 

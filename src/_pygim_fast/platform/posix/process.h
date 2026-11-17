@@ -2,7 +2,7 @@
 // platform/posix/process.h — the process's calls every POSIX system makes alike: the signal mask a
 // thread's new threads inherit, and the hooks around a fork. linux/process.h and macos/process.h
 // build on it, adding how each names a thread; only they include it, and nothing here asks which
-// system it runs on (D106).
+// system it runs on.
 //
 // CORE layer: pybind-free.
 
