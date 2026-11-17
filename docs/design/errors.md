@@ -19,15 +19,36 @@ Python's contracts. This page is about where those classes are made and how a mo
 
 ## The classes
 
+Each is a `GimError`, and also the builtin its meaning needs: where Python's own machinery catches
+that builtin (`get()` and `in` catch `KeyError`, `getattr(o, n, default)` catches `AttributeError`,
+iteration by index stops at `IndexError`) or where the type pygim stands in for raises it (pathlib's
+`FileNotFoundError`, `json.dumps`'s `TypeError`). A meaning nothing in Python catches is `GimError`
+alone.
+
 | Class | Also | Meaning |
 |---|---|---|
 | `GimError` (under `GimException`) | | everything pygim raises |
 | `MissingKeyError(key, within=None)` | `KeyError` | a lookup found nothing; `within` is where it looked |
 | `GimOptionError(value, options)` | `ValueError` | a value none of its options; `value` and `options` say which |
-| `UnrecognizedTypeError(given_type, expected_types)` (under `DispatchError`) | | a value, or a type, that is none of the types expected |
+| `UnrecognizedTypeError(given_type, expected_types, subject=None)` | `TypeError` | a value, or a type, that is none of the types expected, said by type or in words |
+| `ArgumentError` | `TypeError` | a call pygim cannot take: an unknown keyword, an argument missing or too many |
+| `SignatureError` | `TypeError` | a callable whose signature pygim cannot use (autowire, `get_schema`) |
+| `UnsupportedColumnTypeError` | `TypeError` | an Arrow or SQL column type pygim cannot map |
+| `InvalidValueError` | `ValueError` | the right type, outside what is accepted |
+| `ParseError` | `ValueError` | text that is not its format, or bytes that are not UTF-8, naming the file and line |
+| `DuplicateKeyError` | `ValueError` | a key registered twice; not a `KeyError`, which `get()` would swallow |
+| `CircularDependencyError` | `ValueError` | wiring that depends on itself, as `graphlib.CycleError` |
+| `InvalidStateError` | `RuntimeError` | an operation the object's state does not allow, and pygim's own "cannot happen" |
+| `BackendError` | `RuntimeError` | ODBC, BCP or Arrow reported a failure |
+| `GimOSError(errno, strerror, filename)` and `GimFileNotFoundError`, `GimFileExistsError`, `GimNotADirectoryError`, `GimPermissionError` | `OSError` and the one errno names | the system refused a file operation, as pathlib raises it |
+| `GimOverflowError` | `OverflowError` | a quantity past what its type holds |
+| `IndexOutOfRangeError` | `IndexError` | a position past the end |
+| `MissingAttributeError` | `AttributeError` | an attribute that is not there |
+| `DispatchError` | | a call could not be dispatched; nothing raises it since `UnrecognizedTypeError` left it |
 
-One class per meaning, each also the builtin its meaning needs. A class with arguments keeps them
-as its `args`, so a pickled error is made again the same way.
+A class with arguments keeps them as its `args`, so a pickled error is made again the same way.
+`test_layering` refuses a raise of a builtin anywhere in pygim's C++ or Python: 151 on 2026-11-17,
+none since.
 
 ## Where they are made: `pygim.errors`
 
@@ -130,11 +151,5 @@ catch and nothing raised.
 
 ## Open
 
-- The classes for the raise sites no class here means yet: a file the system refused, a document
-  that does not parse, a value out of range, a wiring mistake, a failure persistence's driver
-  reports. 151 sites raised a builtin on 2026-11-17.
-
-- `UnrecognizedTypeError`'s shape: a `TypeError` base, its `DispatchError` parent, a subject in its
-  message.
+- `DispatchError` is left with no subclass and nothing that raises it.
 - What replaces `type_error_msg` and `file_error_msg` for assertions.
-- Persistence's failures as a class of their own here, a `GimError` and a `RuntimeError`.
