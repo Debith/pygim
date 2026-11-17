@@ -85,9 +85,9 @@ def test_a_state_defect_is_caught(composer, obligation):
 def test_a_stale_bookkeeping_defect_is_caught():
     """A composer that leaves bookkeeping behind on a refusal must fail the state obligations.
 
-    Since D15 (2026-10-19) traits_of() reports only members the class still holds, so a record entry
-    whose member is gone is invisible by design; this control leaves the whole ghost behind — the
-    member and its entry — which a refusal must not."""
+    Since 2026-10-19 (Debith) traits_of() reports only members the class still holds, so a record
+    entry whose member is gone is invisible by design; this control leaves the whole ghost behind —
+    the member and its entry — which a refusal must not."""
 
     def _stale(target, *traits, override=False):
         try:

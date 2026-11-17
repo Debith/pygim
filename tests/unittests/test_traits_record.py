@@ -118,7 +118,7 @@ class TestComposingAComposedClass:
 
 
 class TestTheRecordIsAccurate:
-    """D15 (Debith, 2026-10-19: "A, accurately"): traits_of(cls) lists only the members cls still holds
+    """Debith, 2026-10-19 ("A, accurately"): traits_of(cls) lists only the members cls still holds
     as compose() left them. A member replaced or deleted since is the class's own business, and
     composing the class elsewhere attributes it to the class, not to the trait it once came from."""
 

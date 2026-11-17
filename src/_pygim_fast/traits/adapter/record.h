@@ -59,7 +59,8 @@ private:
 
 /// The composed members of one class, by name, in name order: a RegistryCore over the flat engine.
 /// Each entry keeps the object compose() left in the class, so the record can tell a member still
-/// composed from one replaced or deleted since (D15: traits_of reports only the former).
+/// composed from one replaced or deleted since (Debith, 2026-10-19: traits_of reports only the
+/// former).
 /// Cost: a binary search to read; a sorted insert to note. Example: names() of Person above is ['greet'].
 class TraitRecord {
 public:

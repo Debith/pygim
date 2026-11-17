@@ -62,7 +62,7 @@ inline py::type compose(const py::type& target, const py::args& traits, bool ove
 }
 
 /// The record of what was composed into `cls` itself and is still there: a member replaced or
-/// deleted since is left out (D15). Empty for a class nothing was composed into.
+/// deleted since is left out (Debith, 2026-10-19). Empty for a class nothing was composed into.
 /// Example: list(traits_of(Person)) is ['greet'].
 inline py::object traits_of(const py::type& cls) {
     const TraitRecord* found = detail::records().find(cls);

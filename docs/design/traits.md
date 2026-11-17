@@ -1,7 +1,8 @@
 # Traits: behaviour composed into classes
 
 Status: `CodeBuilder`, `compose()` and `traits_of()` built 2026-10-16; `gim_type`, `gimmick` and
-the quantity traits not yet; D3 open (below) · Owner: Debith · Branch: `core/traits`
+the quantity traits not yet; whether a decorator is enough for a quantity is open (below) ·
+Owner: Debith · Branch: `core/traits`
 Where: `src/_pygim_fast/traits/` (adapter, bindings), public as `pygim.traits`; the naming rules it
 relies on in the base header `src/_pygim_fast/utils/python_names.h`, proven in
 `tests/static/python_names_proofs.cpp`
@@ -126,7 +127,7 @@ so the second moves it on, where a direct `reown(A, C)` leaves it as B's.
 What the builder leaves as it is, and why:
 
 - the `__class__` cell — the closure belongs to the function, not to its code, so composing
-  rebinds it (D5);
+  rebinds it (decided below);
 - local variable names — mangled too (`__z = 1` is the local `_Trait__z`), but they never leave
   the function, and a nested function that closes over one names the same spelling (checked: the
   moved code still returns the value its lambda closed over).
@@ -249,10 +250,10 @@ name truthfully. No test pins a wrong-answer case; it is left as the open choice
 
 | | Decision | Rejected, and why |
 |---|---|---|
-| D1 | Any class takes a trait: `compose()` is the operation. `gim_type` and `gimmick`, in C++, give the classes that choose them built-in support: `<<`, ownership transfer when a function is assigned to the class, a record from the moment the class is made | only `gim_type` classes taking traits: a class has one metaclass, so an `Enum`, an ABC or a pybind11 class could never take one (measured: "metaclass conflict" for `Enum` and for `ABC`), and `dataclass(slots=True)` runs a metaclass's `__new__` twice (measured) |
-| D2 | the quantity traits are C++ callables, composed as methods | Python trait classes: pygim's behaviour lives in C++ (the definition of done) |
-| D4 | a name the target's own namespace holds, or two traits of one call both define, is refused; `override=True` replaces, the later trait winning — the registry's rule for a duplicate key | replacing silently: a composed member would hide the class's own without a word |
-| D5 | the `__class__` cell is rebound to the target, so a zero-argument `super()` resolves there | refusing traits that use `super()`: rebinding works (measured: `"trait+base"` after, `TypeError` before) and keeps a trait ordinary code |
+| Who takes a trait | Any class takes a trait: `compose()` is the operation. `gim_type` and `gimmick`, in C++, give the classes that choose them built-in support: `<<`, ownership transfer when a function is assigned to the class, a record from the moment the class is made | only `gim_type` classes taking traits: a class has one metaclass, so an `Enum`, an ABC or a pybind11 class could never take one (measured: "metaclass conflict" for `Enum` and for `ABC`), and `dataclass(slots=True)` runs a metaclass's `__new__` twice (measured) |
+| The quantity traits | the quantity traits are C++ callables, composed as methods | Python trait classes: pygim's behaviour lives in C++ (the definition of done) |
+| A name taken twice | a name the target's own namespace holds, or two traits of one call both define, is refused; `override=True` replaces, the later trait winning — the registry's rule for a duplicate key | replacing silently: a composed member would hide the class's own without a word |
+| `super()` in a trait | the `__class__` cell is rebound to the target, so a zero-argument `super()` resolves there | refusing traits that use `super()`: rebinding works (measured: `"trait+base"` after, `TypeError` before) and keeps a trait ordinary code |
 
 Python's naming rules are not trait-specific, so they are not traits' (decided the same day): the
 dunder rule and the private-name rule live in `utils/python_names.h`, a dependency-free base header,
@@ -270,7 +271,7 @@ trait it came from, where the trait defined it, and where it was composed.
 |---|---|---|
 | R1 | For any class `compose()` accepts, the record lives in a side table in C++ (`traits/adapter/compose.h`, `RecordStore`): a `RegistryCore` over the hashed engine (#131), keyed by the class's address, each entry holding a weak reference to its class whose callback removes the entry while the class is destroyed, before its memory is freed. A class made by `gim_type` will carry its record as a private member instead, beside the unique id it is to have (open, below) | **the class attribute `__pygim_traits__`:** visible, so a trait member or the class's own attribute of that name collided with it (F2 crashed the interpreter, F6 broke `compose()`), and guarding the name only refused the collision; **a private slot on every class:** CPython gives a class none — its layout is its metaclass's, and a metaclass cannot gain a field from Python (measured: `nonempty __slots__ not supported for subtype of 'type'`); **a `WeakKeyDictionary`,** functools.singledispatch's table: it hashes and compares the class, so a metaclass whose `__hash__`/`__eq__` lie merges two classes' records (the test asks and is never answered); **no eviction:** CPython reuses a freed class's address almost every time (200 of 200 measured), so a dead class's record would be read as the new class's own (the test sees the reuse and fails when the callback does nothing) |
 | R2 | Composing a class that has a record carries the record along: in `compose(class1, class2)`, where `class2` was composed from traits, each member is attributed to the trait it first came from and where that trait defined it, and composed at the new call; `class2`'s own members are attributed to `class2` | attributing every member to `class2`: `class1` would forget the traits behind it, so `class1 << class2` would lose what `class2 << trait1 << trait2` knew |
-| R4 | The record is accurate (D15, Debith: "A, accurately"): each entry keeps the object `compose()` left in the class — read from its own namespace after the writes, so a metaclass hook that stores something else is still followed — and `traits_of(cls)` lists only the members `cls` still holds as that object. A member replaced or deleted since is the class's own; R2 carries an entry only while the composed class still holds it, so `class1 << class2` attributes a member `class2` replaced to `class2` | **a log of what `compose()` once wrote:** after `Middle.greet = custom`, `traits_of(Middle)` still named the trait, and R2 carried that into every class composed from `Middle`, crediting `custom` to the trait and its line (found 2026-10-19, reproduced); **marking a replaced entry instead of dropping it:** a record that lists what is no longer there is the inaccuracy, kept |
+| R4 | The record is accurate (Debith, 2026-10-19: "A, accurately"): each entry keeps the object `compose()` left in the class — read from its own namespace after the writes, so a metaclass hook that stores something else is still followed — and `traits_of(cls)` lists only the members `cls` still holds as that object. A member replaced or deleted since is the class's own; R2 carries an entry only while the composed class still holds it, so `class1 << class2` attributes a member `class2` replaced to `class2` | **a log of what `compose()` once wrote:** after `Middle.greet = custom`, `traits_of(Middle)` still named the trait, and R2 carried that into every class composed from `Middle`, crediting `custom` to the trait and its line (found 2026-10-19, reproduced); **marking a replaced entry instead of dropping it:** a record that lists what is no longer there is the inaccuracy, kept |
 | R3 | No name is reserved: a member named `__pygim_traits__`, or a class's own attribute of that name, is an ordinary one; the guards that refused them (F2, F6) are removed | keeping them: with the record off the class the collision cannot happen, so they would refuse a legitimate name for nothing |
 
 `RegistryCore` gained `remove(key)` for R1, proven in `tests/static/registry_core_proofs.cpp`; every
@@ -298,10 +299,10 @@ TraitMove::function: FunctionCopy(f).with_code(CodeBuilder(code, rules).build())
 | S1 | `Composer` is a builder over the target (`add`, `override`, `compose`), C++-only for now; `compose()` and later `gim_type`'s `<<` are its entries | py3traits' fixed pair `Composer(target, source)`: options (override, later renames or cherry-picking) have no home, and conflicts between traits need an object above the pairs anyway (Debith: "the pair may be bit inflexible") |
 | S2 | `TraitMove` owns one trait's move into the target, built once when compose() reaches it: the trait's `NamePolicy`, the `Reowning` to the target, the record it carries | four places deriving the same names (each class's `__qualname__` was read 5× for a 3-method trait; now once per trait) |
 | S3 | `Plan` holds the members in write order; `Clash` holds the two conflict rules and their messages | the rules inline in a 12-line `admit` |
-| S4 | one class per kind of member (`FunctionMember`, `PropertyMember`, `ClassMethodMember`, `StaticMethodMember`) behind `Member`, a `std::variant` classified once by `Member::of`; the last two are one template, `WrappedFunctionMember<Wrapper>`, a class each, specialised where one needs behaviour of its own (D43, 2026-11-08: they were identical but for the type checked, found by `pygim similar`) | four static descriptor structs plus `Rewritten` and a fold: one rule encoded four times, and no place for behaviour specific to a kind (Debith: "we can bind very specific behavior for each of them") |
+| S4 | one class per kind of member (`FunctionMember`, `PropertyMember`, `ClassMethodMember`, `StaticMethodMember`) behind `Member`, a `std::variant` classified once by `Member::of`; the last two are one template, `WrappedFunctionMember<Wrapper>`, a class each, specialised where one needs behaviour of its own (2026-11-08: they were identical but for the type checked, found by `pygim similar`) | four static descriptor structs plus `Rewritten` and a fold: one rule encoded four times, and no place for behaviour specific to a kind (Debith: "we can bind very specific behavior for each of them") |
 | S5 | `FunctionCopy` makes a function again in three named steps; `CodeBuilder` takes a `TraitMove`'s rules through a C++-only constructor | 18 lines mixing pybind11 and the C API; a `reown()` per function re-reading the classes' names |
 | S6 | one concept per header: `composer.h`, `trait_move.h`, `member.h`, `plan.h`, `function_copy.h`, `record.h`, `introspection.h`; `compose.h` is the overview and the API | a 504-line compose.h holding nine concepts |
-| S7 | every class namespace is read one way, `PyType_GetDict` (D27) | `cls.__dict__` through attribute lookup: a metaclass could hide a name from the conflict check (found and fixed test-first) |
+| S7 | every class namespace is read one way, `PyType_GetDict` | `cls.__dict__` through attribute lookup: a metaclass could hide a name from the conflict check (found and fixed test-first) |
 
 Order of refusals is unchanged: a trait is checked when compose() reaches it and each member is
 admitted as soon as it is classified, so with two errors the same one is raised as before.
@@ -310,7 +311,7 @@ Still to show, before the quantity traits are built: that a composed C++ `+` is 
 A/B in one process against the hand-written one (`benchmarks/`) — and that a pybind11 function can
 be composed as a method at all (it is not a descriptor, so it needs a wrapper that binds it).
 
-## Open — D3: is a decorator enough for a quantity?
+## Open: is a decorator enough for a quantity?
 
 For behaviour, yes, and it is the safest hook: it runs once, on the finished class. The
 alternative — a base class taking class keywords, `class Money(Quantity, magnitude="amount",
@@ -377,7 +378,7 @@ What changes, each from a measurement or a rule:
   unlike `id()`, which a new class reuses (above). Proposed: one id space, the `gim_type` member for
   its classes and a serial in the record's side table for every other; not taking over class
   creation for all classes (a metaclass for every class conflicts with `Enum`, `ABC` and pybind11
-  classes, as D1 measured). Awaiting a decision.
+  classes, as measured for who takes a trait, above). Awaiting a decision.
 - **The supported Pythons, 3.10 to 3.14** (pygim's, since main dropped 3.9). A code object has
   `co_qualname` only from 3.11; on 3.10 the function's `__qualname__` carries the name alone.
 
