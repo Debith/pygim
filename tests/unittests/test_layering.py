@@ -193,7 +193,7 @@ def test_every_package_that_ships_holds_something():
     assert empty == [], "a package holding nothing: give it its code, or remove it"
 
 
-# pygim's C++ never imports a pygim module by name (#416): an extension that imported pygim's Python
+# pygim's C++ never imports a pygim module by name (docs/design/errors.md): an extension that imported pygim's Python
 # as it loaded closed a loop with any of that Python which imported the extension back, and the loop
 # failed in one import order only (`import pygim.core.explib` first: "ImportError: initialization
 # failed", 2026-11-16). An extension reaches another through the C table it publishes: pygim.errors'
