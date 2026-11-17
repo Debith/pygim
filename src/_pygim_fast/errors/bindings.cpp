@@ -11,11 +11,14 @@
 //     GimOptionError("scoped", ["transient", "singleton"])
 //     # Given input ``scoped`` not among: transient, singleton
 
+#include "core.h"
 #include "table.h"
 
 #include <pybind11/pybind11.h>
 
+#include <string>
 #include <utility>
+#include <vector>
 
 namespace py = pybind11;
 
@@ -40,12 +43,15 @@ py::str interned(const char* name) {
 /// The names the classes' methods read and write, interned as the module loads.
 struct names {
     py::str args = interned("args"), value = interned("value"), options = interned("options"),
-            name = interned("__name__"), init = interned("__init__"), str = interned("__str__");
+            within = interned("within"), name = interned("__name__"), init = interned("__init__"),
+            str = interned("__str__"), reduce = interned("__reduce__");
 };
 
+/// Made once and never destroyed: CPython frees the interned strings it does not keep forever as it
+/// finalizes, and a static destroyed after that would release freed memory ("within" is one).
 const names& name() {
-    static const names made;
-    return made;
+    static const names* const made = new names();
+    return *made;
 }
 
 /// `parts` joined by `separator`, each said by str().
@@ -55,6 +61,16 @@ py::str joined(const char* separator, py::iterable parts) {
     PyObject* made = PyUnicode_Join(py::str(separator).ptr(), said.ptr());
     if (made == nullptr) throw py::error_already_set();
     return py::reinterpret_steal<py::str>(made);
+}
+
+/// `object` as str() says it, in UTF-8.
+std::string said(py::handle object) { return py::str(object).cast<std::string>(); }
+
+/// Each of `parts` as str() says it, in UTF-8.
+std::vector<std::string> each_said(py::handle parts) {
+    std::vector<std::string> made;
+    for (const py::handle part : py::iter(parts)) made.push_back(said(part));
+    return made;
 }
 
 /// A message made by PyUnicode_FromFormat.
@@ -85,8 +101,40 @@ void give_option_error_its_values(py::handle option_error) {
                },
                py::arg("value"), py::arg("options"));
     set_method(option_error, name().str, "say", [](py::handle self) {
-        const py::object value = py::getattr(self, name().value);
-        return formatted("Given input ``%S`` not among: %U", value.ptr(), joined(", ", py::getattr(self, name().options)).ptr());
+        return py::str(errors::option_message(said(py::getattr(self, name().value)), each_said(py::getattr(self, name().options))));
+    });
+}
+
+/// MissingKeyError(key, within=None): the key, as a KeyError's args[0], and what it was looked for
+/// in, as `within` — the mapping, container or registry itself, kept by reference and read only
+/// when the message is: "Key ``hots`` not among: host, port" (errors/core.h). Without `within` it
+/// says the key as a KeyError does. A pickled one keeps the key and drops `within`, as a pickled
+/// AttributeError drops `obj`: what was looked in may be large, or not picklable.
+void give_missing_key_error_its_place(py::handle missing_key) {
+    set_method(missing_key, name().init, "initialise",
+               [](py::handle self, py::object key, py::object within) {
+                   py::setattr(self, name().args, py::make_tuple(key));
+                   py::setattr(self, name().within, within);
+               },
+               py::arg("key"), py::arg("within") = py::none());
+    set_method(missing_key, name().str, "say", [](py::handle self) -> py::str {
+        const py::object within = py::getattr(self, name().within, py::none());
+        if (within.is_none()) {
+            PyObject* made = reinterpret_cast<PyTypeObject*>(PyExc_KeyError)->tp_str(self.ptr());
+            if (made == nullptr) throw py::error_already_set();
+            return py::reinterpret_steal<py::str>(made);
+        }
+        const std::string key = said(py::tuple(py::getattr(self, name().args))[0]);
+        std::vector<std::string> keys;
+        try {
+            keys = each_said(within);
+        } catch (const py::error_already_set&) {   // the keys cannot be read: say where it looked
+            return py::str(errors::missing_key_message(key, said(py::getattr(py::type::of(within), name().name))));
+        }
+        return py::str(errors::missing_key_message(key, keys));
+    });
+    set_method(missing_key, name().reduce, "reduce", [](py::handle self) {
+        return py::make_tuple(py::type::of(self), py::getattr(self, name().args));
     });
 }
 
@@ -132,6 +180,7 @@ errors::table& the_classes() {
         "A lookup found nothing: a key with no provider, a name never registered. A KeyError too, as a\n"
         "mapping's lookup raises.",
         py::make_tuple(gim_error, py::handle(PyExc_KeyError)));
+    give_missing_key_error_its_place(missing_key);
     py::object option_error = new_class("pygim.errors.GimOptionError",
         "GimOptionError(value, options): a value none of its options. A ValueError too, as Python raises\n"
         "for a bad value; `value` and `options` say which.",

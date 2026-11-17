@@ -71,6 +71,68 @@ def test_a_missing_key_is_said_as_a_key_error_says_it():
     assert str(MissingKeyError("x")) == str(KeyError("x")) == "'x'"
 
 
+THIRTEEN_KEYS = {"host": 1, **{f"port{i}": i for i in range(12)}}
+
+
+@pytest.mark.parametrize(
+    "key, within, said",
+    [
+        ("hots", {"host": 1, "port": 2}, "Key ``hots`` not among: host, port"),
+        ("hots", (), "Key ``hots`` not found"),
+        ("hostt", THIRTEEN_KEYS, "Key ``hostt`` not among 13 keys; closest: host"),
+        ("port1x", THIRTEEN_KEYS, "Key ``port1x`` not among 13 keys; closest: port1, port10, port11"),
+        ("hots", THIRTEEN_KEYS, "Key ``hots`` not among 13 keys"),
+    ],
+    ids=["listed", "nothing to look in", "one close", "three close", "none close as Python judges"],
+)
+def test_a_missing_key_says_the_keys_it_was_not_among(key, within, said):
+    """Up to ten keys are listed; past that, how many, and the closest by Python's own "Did you mean"
+    measure (it judges "hots" too far from "host")."""
+    error = MissingKeyError(key, within)
+    assert (str(error), error.args, error.within) == (said, (key,), within)
+
+
+def test_a_missing_key_reads_the_keys_only_when_said():
+    keys = {"host": 1}
+    error = MissingKeyError("port", keys)
+    keys["port"] = 2
+    assert str(error) == "Key ``port`` not among: host, port"
+
+
+def test_a_missing_key_whose_keys_cannot_be_read_names_where_it_looked():
+    class Unreadable:
+        def __iter__(self):
+            raise RuntimeError("no")
+
+    assert str(MissingKeyError("port", Unreadable())) == "Key ``port`` not found in `Unreadable`"
+
+
+def test_a_pickled_missing_key_keeps_its_key_and_drops_where_it_looked():
+    """As a pickled AttributeError drops `obj`: the mapping may be large, or not picklable."""
+    again = pickle.loads(pickle.dumps(MissingKeyError("port", {"host": 1})))
+    assert (type(again), again.args, again.within, str(again)) == (MissingKeyError, ("port",), None, "'port'")
+
+
+def test_gimdict_says_a_missing_key_as_pygims_error_with_where_it_looked():
+    d = utils.gimdict({"host": 1, "port": 2})
+    for miss in (lambda: d["hots"], lambda: d.__delitem__("hots")):
+        with pytest.raises(MissingKeyError) as raised:
+            miss()
+        assert isinstance(raised.value, KeyError)
+        assert (str(raised.value), raised.value.args, raised.value.within) == (
+            "Key ``hots`` not among: host, port", ("hots",), d)
+
+
+def test_a_core_error_reaches_python_as_its_pygim_class():
+    """core_utils.h has no Python: it throws pygim::errors::option_error, and the translator that
+    errors::load() registered raises GimOptionError, still a ValueError, from it."""
+    with pytest.raises(GimOptionError) as raised:
+        utils.calculate_rate(1, "XB", 1, "s")
+    assert isinstance(raised.value, ValueError)
+    assert raised.value.value == "XB" and "kb" in raised.value.options
+    assert str(raised.value) == "Given input ``XB`` not among: " + ", ".join(raised.value.options)
+
+
 @pytest.mark.parametrize(
     "error",
     [GimError("failed"), MissingKeyError("x"), GimOptionError("v", ["a", "b"]), UnrecognizedTypeError(2, str)],

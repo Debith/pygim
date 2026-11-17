@@ -1,6 +1,6 @@
 # Errors: one home for every exception pygim raises
 
-Status: built 2026-11-16 · Owner: Debith
+Status: built 2026-11-16; pygim's own C++ errors 2026-11-17 · Owner: Debith
 
 Everything pygim raises is a `GimError`, and also the Python exception its contract needs, so
 `except GimError` catches it all while `except KeyError` keeps working for code written against
@@ -14,13 +14,15 @@ Python's contracts. This page is about where those classes are made and how a mo
 | `gimdict().set_default_strategy("AVG")` | `GimOptionError: Given input ``AVG`` not among: sum, max, min, replace`, a `ValueError` too |
 | `except GimOptionError as e` | `e.value == "AVG"`, `e.options == ("sum", "max", "min", "replace")` |
 | `import pygim.utils` in a fresh interpreter | `pygim.errors` imported by utils' load, nothing else of pygim |
+| `gimdict({"host": 1, "port": 2})["hots"]` | ```MissingKeyError: Key ``hots`` not among: host, port```, a `KeyError` too; `e.within` is the gimdict |
+| `utils.calculate_rate(1, "XB", 1, "s")` | C++ with no Python throws `pygim::errors::option_error`; Python sees `GimOptionError`, a `ValueError` too |
 
 ## The classes
 
 | Class | Also | Meaning |
 |---|---|---|
 | `GimError` (under `GimException`) | | everything pygim raises |
-| `MissingKeyError` | `KeyError` | a lookup found nothing |
+| `MissingKeyError(key, within=None)` | `KeyError` | a lookup found nothing; `within` is where it looked |
 | `GimOptionError(value, options)` | `ValueError` | a value none of its options; `value` and `options` say which |
 | `UnrecognizedTypeError(given_type, expected_types)` (under `DispatchError`) | | a value, or a type, that is none of the types expected |
 
@@ -43,6 +45,38 @@ Only plain C data crosses between the shared objects: the table's version and th
 interpreter's own objects, as `datetime` and NumPy publish theirs to other extensions. A reader built
 for a newer table than the one it finds refuses it with `ImportError`; a new class goes at the
 table's end, with the version raised.
+
+## C++ with no Python throws pygim's own errors
+
+Code with no Python, such as a core header, throws a class of pygim's own (`errors/core.h`): one per
+meaning, each the counterpart of a `pygim.errors` class. A C++-only consumer catches it by class.
+`errors::load()` registers a translator, local to the extension, that turns each into its Python
+class as it reaches Python:
+
+| C++ (`errors/core.h`) | Python |
+|---|---|
+| `pygim::errors::missing_key(key, keys)` | `MissingKeyError(key, within)`, `within` the keys as a tuple |
+| `pygim::errors::option_error(value, options)` | `GimOptionError(value, options)` |
+| `pygim::errors::error(message)` | `GimError(message)` |
+
+Code that holds the Python values raises the Python class directly (`errors::raise`), so the
+caller's own key object, not a C++ copy of it, is the error's `args[0]`.
+
+The messages are made once, in `errors/core.h`: `what()` says them in C++, and the Python classes'
+`__str__` call the same functions, so the two cannot drift apart. A missing key lists up to ten
+keys; past that it says how many, and the closest by CPython's own "Did you mean" measure (a third
+of the characters may change; nothing among 750 or more): ```Key ``hostt`` not among 13 keys;
+closest: host```. Its keys are read only when the message is, so a miss that `get()` or `in` catches
+costs no message.
+
+What holds the design together:
+- a C++ error holds plain data only: one that held a Python object would release it without the
+  GIL when code that released the GIL threw it;
+- an error is caught in the extension that threw it: each compiles its own copy of the core
+  headers, and no C++ exception crosses between extensions;
+- the translator is local to each extension: one registered globally would be added again by
+  every extension's load, and each one adds a rethrow (measured: today's raise 2.9 µs, a
+  translated one 3.5 µs, 1.4 µs more for each translator before it).
 
 ## Imports run from Python to C++, never back
 
@@ -80,7 +114,25 @@ catch and nothing raised.
   in any build: a URL or a connection string may carry a password, so an error names its kind or
   its host instead of repeating it.
 
+## Decided and rejected (2026-11-17)
+
+- **pygim's own C++ exception classes**, translated by each extension (Debith: "can't we specify
+  our own c++ exceptions that we throw?"). Rejected: an abstract factory with a Python family and a
+  C++ family of errors, since a thrown exception already serves a C++-only consumer and there is
+  no second family to choose; mapping the standard library's exceptions to pygim's classes, since
+  `std::runtime_error`, 75 of the 107 standard throws, names no meaning.
+- **`MissingKeyError(key, within)`**, `within` kept by reference and read when the message is, as
+  `AttributeError.obj` is. Rejected: copying the keys when raising, which costs every miss that
+  `get()` or `in` catches; a hand-written string naming where it looked, which drifts from the
+  truth. A pickled one drops `within`, as a pickled `AttributeError` drops `obj`.
+- **Every raise site converted** (Debith: "all"): each of pygim's raises becomes a class of
+  `pygim.errors`, so `except GimError` holds for all of them.
+
 ## Open
+
+- The classes for the raise sites no class here means yet: a file the system refused, a document
+  that does not parse, a value out of range, a wiring mistake, a failure persistence's driver
+  reports. 151 sites raised a builtin on 2026-11-17.
 
 - `UnrecognizedTypeError`'s shape: a `TypeError` base, its `DispatchError` parent, a subject in its
   message.

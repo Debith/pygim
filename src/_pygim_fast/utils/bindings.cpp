@@ -100,9 +100,15 @@ public:
             return m_values.contains(key);
       }
 
+      /// MissingKeyError(key, this gimdict): the key and where it was looked for, said as
+      /// "Key ``hots`` not among: host, port". The gimdict is the Python object this one already is.
+      [[noreturn]] void raise_missing(py::handle key) const {
+            pygim::errors::raise(&pygim::errors::table::missing_key_error, key, py::cast(this, py::return_value_policy::reference));
+      }
+
       py::object getitem(py::handle key) const {
             if (!m_values.contains(key)) {
-                  throw py::key_error("key not found");
+                  raise_missing(key);
             }
             return py::reinterpret_borrow<py::object>(m_values[key]);
       }
@@ -113,7 +119,7 @@ public:
 
       void delitem(py::handle key) {
             if (!m_values.contains(key)) {
-                  throw py::key_error("key not found");
+                  raise_missing(key);
             }
             m_values.attr("pop")(key);
       }
@@ -123,7 +129,7 @@ public:
                   return py::reinterpret_borrow<py::object>(m_values[key]);
             }
             if (default_value.is_none()) {
-                  throw py::key_error("key not found");
+                  raise_missing(key);
             }
             return default_value;
       }

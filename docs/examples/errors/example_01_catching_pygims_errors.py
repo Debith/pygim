@@ -9,6 +9,7 @@ once, in C++, and every pygim module raises these same class objects.
 
 This example demonstrates:
 - The classes: each a GimError and the Python exception its meaning needs
+- A missing key says the keys it was not among
 - Catching everything pygim raises with one ``except GimError``
 - Catching the same error by its Python contract, as code written before it does
 - Reading what went wrong: a GimOptionError's ``value`` and ``options``
@@ -30,9 +31,15 @@ assert issubclass(MissingKeyError, KeyError)       # ...is a KeyError, as a mapp
 assert issubclass(GimOptionError, GimError)        # a value that is none of its options...
 assert issubclass(GimOptionError, ValueError)      # ...is a ValueError, as Python's bad value is
 
-said = str(MissingKeyError("port"))
-assert said == str(KeyError("port"))               # said the way a KeyError says it
-assert said == "'port'"
+settings = gimdict({"host": "db", "port": 5432})
+try:
+    settings["hots"]                               # a key it does not have
+except KeyError as error:                          # a mapping's miss, caught as Python catches one
+    missed = error
+assert type(missed) is MissingKeyError
+assert missed.args == ("hots",)                    # the key, where a KeyError keeps it
+assert missed.within is settings                   # and where it was looked for
+assert str(missed) == "Key ``hots`` not among: host, port"
 
 # ----------------------------------------------------------------------------
 # 2. One except clause for everything pygim raises
