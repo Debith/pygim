@@ -29,8 +29,8 @@ namespace pygim::primitives::parallel {
 /// is done when nothing is queued and nothing runs. Its threads grow as ordered_pool's do (the
 /// width policy, each task's cost by Clock, the share of it on a CPU by CpuClock), with what is
 /// queued as the rest of the work. Tasks are handed out first in, first out through one lock: a
-/// walk of 100,000 files in 1,000 directories still scaled 7.8x to 32 threads that way (#274);
-/// per-thread queues with stealing are the next step for trees much larger.
+/// walk of 100,000 files in 1,000 directories still scaled 7.8x to 32 threads that way (measured
+/// 2026-10-25); per-thread queues with stealing are the next step for trees much larger.
 ///
 ///     task_pool pool([&](dir_task t, const auto& add) { for (auto& sub : list(t)) add(sub); }, width);
 ///     pool.submit(root);
