@@ -28,6 +28,7 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <system_error>
 #include <tuple>
 #include <type_traits>
 #include <utility>
@@ -650,6 +651,15 @@ public:
         if (!ofs) throw pygim::errors::file_error(errno != 0 ? errno : EIO, fspath());
     }
 
+    // The errno `ec` means: std::filesystem reports the system's own code (on Windows a Windows
+    // error, ERROR_PATH_NOT_FOUND = 3, which as an errno would read "no such process"), and its
+    // default_error_condition() maps it to the generic, errno, category where a mapping exists.
+    [[nodiscard]] static int errno_of(const std::error_code& ec, int otherwise) {
+        if (!ec) return otherwise;
+        const std::error_condition generic = ec.default_error_condition();
+        return generic.category() == std::generic_category() ? generic.value() : otherwise;
+    }
+
     // Create this directory (pathlib parity): `parents` creates missing
     // ancestors, `exist_ok` tolerates an existing directory. A non-directory
     // in the way always fails.
@@ -665,7 +675,7 @@ public:
         }
         const bool made = parents ? fs::create_directories(p, ec) : fs::create_directory(p, ec);
         if (ec || !made) {
-            throw pygim::errors::file_error(ec ? ec.value() : EEXIST, fspath());
+            throw pygim::errors::file_error(errno_of(ec, EEXIST), fspath());
         }
     }
 

@@ -67,7 +67,7 @@ for shape_name, argument in [("circle", 1), ("square", 2)]:
 try:
     factory.create("triangle")
 except MissingKeyError as error:                   # a KeyError too
-    assert str(error) == "Key ``triangle`` not among: square, circle"
+    assert error.args == ("triangle",) and set(error.within) == {"square", "circle"}   # the names it has, in its own order
     pass
 else:
     raise AssertionError("Expected unknown name to raise")
