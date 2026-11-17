@@ -8,6 +8,8 @@ import pytest
 import pygim
 from pygim import pathlike
 import pathlib
+from pygim.errors import (GimFileExistsError, GimFileNotFoundError, GimOptionError, InvalidValueError, ParseError,
+                          UnrecognizedTypeError)
 
 
 def _write(temp_dir, name, text):
@@ -133,7 +135,7 @@ def test_malformed_yaml_raises_not_aborts(temp_dir):
     # An undefined alias is a resolve error; the throwing callback must turn it into
     # a Python exception rather than aborting the process.
     f = _write(temp_dir, "bad.yaml", "ref: *missing\n")
-    with pytest.raises(RuntimeError):
+    with pytest.raises(ParseError):
         pygim.path(f).read()
 
 
@@ -264,13 +266,13 @@ def test_read_engine_overrides_construction_pin(temp_dir):
 
 
 def test_unknown_engine_name_raises_at_construction():
-    with pytest.raises(ValueError, match="unknown engine: 'xml'"):
+    with pytest.raises(GimOptionError, match="Given input ``xml`` not among"):
         pygim.path("a.yaml", engine="xml")
 
 
 def test_unknown_extension_without_pin_still_refuses(temp_dir):
     f = _write(temp_dir, "mystery.dat", "k: v\n")
-    with pytest.raises(ValueError, match="no engine for extension"):
+    with pytest.raises(GimOptionError, match="no engine for this extension"):
         pygim.path(f).read()
 
 
@@ -301,7 +303,7 @@ def test_json_engine_is_strict_not_yaml(temp_dir):
     # {a: 1} is valid YAML but invalid JSON: proves .json is NOT routed to the
     # YAML engine, and that the engine override still rescues the read.
     f = _write(temp_dir, "notjson.json", "{a: 1}")
-    with pytest.raises(RuntimeError, match="JSON parse error"):
+    with pytest.raises(ParseError, match="JSON parse error"):
         pygim.path(f).read()
     assert pygim.path(f).read(engine="yaml") == {"a": 1}
 
@@ -426,17 +428,17 @@ def test_toml_write_datetimes_roundtrip(temp_dir):
 
 def test_toml_write_rejections_are_loud(temp_dir):
     p = pygim.path(temp_dir / "bad.toml")
-    with pytest.raises(ValueError, match="must be a mapping"):
+    with pytest.raises(UnrecognizedTypeError, match="a TOML document is a table"):
         p.write([1, 2])                       # TOML documents are tables
-    with pytest.raises(ValueError, match="no null"):
+    with pytest.raises(InvalidValueError, match="no null"):
         p.write({"a": None})
-    with pytest.raises(ValueError, match="64-bit"):
+    with pytest.raises(InvalidValueError, match="64-bit"):
         p.write({"a": 2**70})
 
 
 def test_toml_parse_error_has_filename_and_line(temp_dir):
     f = _write(temp_dir, "broken.toml", "a = \n")
-    with pytest.raises(RuntimeError, match="TOML parse error.*broken.toml.*line"):
+    with pytest.raises(ParseError, match="TOML parse error.*broken.toml.*line"):
         pygim.path(f).read()
 
 
@@ -484,15 +486,15 @@ def test_json_write_matches_stdlib(temp_dir, obj):
 
 
 def test_json_write_rejects_non_finite(temp_dir):
-    with pytest.raises(ValueError, match="non-finite"):
+    with pytest.raises(InvalidValueError, match="non-finite"):
         pygim.path(temp_dir / "x.json").write({"v": float("inf")})
 
 
 def test_write_rejects_non_str_keys_and_unknown_types(temp_dir):
     p = pygim.path(temp_dir / "x.yaml")
-    with pytest.raises(ValueError, match="keys must be str"):
+    with pytest.raises(UnrecognizedTypeError, match="a mapping's key"):
         p.write({1: "a"})
-    with pytest.raises(ValueError, match="unsupported type"):
+    with pytest.raises(UnrecognizedTypeError, match="the value written"):
         p.write({"a": {1, 2}})
 
 
@@ -502,7 +504,7 @@ def test_write_resolves_engine_like_read(temp_dir):
     import json
 
     assert json.loads(open(p).read()) == {"a": 1}
-    with pytest.raises(ValueError, match="no engine"):
+    with pytest.raises(GimOptionError, match="no engine"):
         pygim.path(temp_dir / "x.dat").write({"a": 1})     # nothing resolves
 
 
@@ -628,7 +630,7 @@ def test_merge_keys_are_expanded(temp_dir):
 
 def test_yaml_parse_error_includes_filename(temp_dir):
     f = _write(temp_dir, "broken.yaml", "a: [1, 2\n")
-    with pytest.raises(RuntimeError, match="broken.yaml"):
+    with pytest.raises(ParseError, match="broken.yaml"):
         pygim.path(f).read()
 
 
@@ -654,7 +656,7 @@ def test_json_bigint_limitation_is_loud(temp_dir):
     p = pygim.path(temp_dir / "big.json")
     p.write({"big": 12345678901234567890123})
     assert json.loads(open(str(p)).read()) == {"big": 12345678901234567890123}
-    with pytest.raises(RuntimeError, match="BIGINT"):
+    with pytest.raises(ParseError, match="BIGINT"):
         p.read()
 
 
@@ -732,7 +734,7 @@ def test_utf16_fails_loudly(temp_dir, name, doc):
     # YAML engine parsed this into NUL-riddled garbage strings — found by
     # this corpus. Garbage-out is never acceptable; a clear error is.
     f = _write_bytes(temp_dir, name, doc.encode("utf-16"))
-    with pytest.raises(RuntimeError, match="UTF-16|UTF8|utf-8|invalid"):
+    with pytest.raises(ParseError, match="UTF-16|UTF8|utf-8|invalid"):
         pygim.path(f).read()
 
 
@@ -746,13 +748,13 @@ def test_invalid_utf8_fails_loudly_with_filename(temp_dir, name, doc):
     # UnicodeDecodeError at materialisation time — or NOTHING when the bad
     # byte sat in a comment; now every engine rejects up front, naming the file.
     f = _write_bytes(temp_dir, name, doc)
-    with pytest.raises(RuntimeError, match=name.split(".")[0]):
+    with pytest.raises(ParseError, match=name.split(".")[0]):
         pygim.path(f).read()
 
 
 def test_invalid_utf8_in_comment_still_fails(temp_dir):
     f = _write_bytes(temp_dir, "cmt.yaml", b"k: 1  # h\xe4t\xe4\n")
-    with pytest.raises(RuntimeError, match="not valid UTF-8"):
+    with pytest.raises(ParseError, match="not valid UTF-8"):
         pygim.path(f).read()
 
 
@@ -772,7 +774,7 @@ def test_concurrent_parse_errors_propagate_cleanly(temp_dir):
         f = bad if i % 2 else good
         try:
             return f.read()
-        except RuntimeError as e:
+        except ParseError as e:
             return f"error:{'bad.yaml' in str(e)}"
 
     with ThreadPoolExecutor(max_workers=8) as ex:
@@ -884,13 +886,13 @@ def test_jsonl_bom_tolerated_and_utf16_refused(temp_dir):
     f = _write_bytes(temp_dir, "bom.jsonl", b"\xef\xbb\xbf" + b'{"k": 1}\n')
     assert pygim.path(f).read() == [{"k": 1}]
     g = _write_bytes(temp_dir, "u16.jsonl", '{"k": 1}\n'.encode("utf-16"))
-    with pytest.raises(RuntimeError, match="UTF-8"):
+    with pytest.raises(ParseError, match="UTF-8"):
         pygim.path(g).read()
 
 
 def test_jsonl_parse_error_names_file_and_line(temp_dir):
     f = _write(temp_dir, "bad.jsonl", '{"a": 1}\n{"b": 2}\nnot json\n{"c": 3}\n')
-    with pytest.raises(RuntimeError, match=r"bad\.jsonl, line 3"):
+    with pytest.raises(ParseError, match=r"bad\.jsonl, line 3"):
         pygim.path(f).read()
 
 
@@ -914,7 +916,7 @@ def test_jsonl_write_read_roundtrip_one_document_per_line(temp_dir, rows):
 
 def test_jsonl_write_requires_a_list_root(temp_dir):
     p = pygim.path(temp_dir / "out.jsonl")
-    with pytest.raises(ValueError, match="list or tuple"):
+    with pytest.raises(UnrecognizedTypeError, match="list or tuple"):
         p.write({"a": 1})
     p.write(({"a": 1},))                                    # tuples are sequences too
     assert p.read() == [{"a": 1}]
@@ -947,22 +949,22 @@ def test_write_bytes_roundtrips_raw(temp_dir):
 
 
 def test_write_bytes_into_missing_directory_fails_loudly(temp_dir):
-    with pytest.raises(RuntimeError, match="cannot open file for writing"):
+    with pytest.raises(GimFileNotFoundError, match="blob.bin"):        # as pathlib's write_bytes raises
         pygim.path(temp_dir / "missing" / "blob.bin").write_bytes(b"x")
 
 
 def test_mkdir_semantics_match_pathlib(temp_dir):
     d = pygim.path(temp_dir / "a" / "b")
-    with pytest.raises(RuntimeError):
+    with pytest.raises(GimFileNotFoundError):
         d.mkdir()                                            # parent missing
     d.mkdir(parents=True)
     assert d.is_dir()
-    with pytest.raises(RuntimeError, match="exists"):
+    with pytest.raises(GimFileExistsError, match="exists"):
         d.mkdir()
     d.mkdir(exist_ok=True)                                   # idempotent
     d.mkdir(parents=True, exist_ok=True)
     (temp_dir / "file").write_text("x")
-    with pytest.raises(RuntimeError, match="not a directory"):
+    with pytest.raises(GimFileExistsError):                  # a file in the way, as pathlib's mkdir raises
         pygim.path(temp_dir / "file").mkdir(exist_ok=True)
 
 
@@ -1021,21 +1023,22 @@ def test_every_engine_is_fully_wired(engine, temp_dir):
 
 
 def test_unknown_engine_error_lists_every_engine():
-    with pytest.raises(ValueError, match="unknown engine: 'xml'") as info:
+    with pytest.raises(GimOptionError, match="Given input ``xml`` not among") as info:
         pygim.path("a.yaml", engine="xml")
     for e in _engines():
-        assert f"{e.name}/{e.label}" in str(info.value)
-    with pytest.raises(ValueError, match="unknown engine: 'xml'"):
+        assert e.name in info.value.options
+    with pytest.raises(GimOptionError, match="Given input ``xml`` not among"):
         pygim.path("a.yaml").read(engine="xml")
 
 
 def test_unknown_extension_error_lists_every_extension(temp_dir):
     f = _write(temp_dir, "mystery.weird", "k: v\n")
-    with pytest.raises(ValueError, match="no engine for extension '.weird'") as info:
+    with pytest.raises(GimOptionError, match=r"Given input ``\.weird`` not among") as info:
         pygim.path(f).read()
     for e in _engines():
         for ext in e.extensions:
-            assert ext in str(info.value)
+            assert ext in info.value.options
+    assert "pass engine=" in "\n".join(info.value.__notes__)
 
 
 def test_typed_classes_are_exactly_the_registry():

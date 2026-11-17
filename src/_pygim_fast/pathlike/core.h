@@ -20,6 +20,7 @@
 // in adapter/.
 
 #include <algorithm>
+#include <cerrno>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
@@ -35,6 +36,7 @@
 #include "../platform/files.h"
 #include "../utils/hash.h"
 #include "uri.h"
+#include "../errors/core.h"
 
 namespace pygim::pathlike {
 
@@ -428,7 +430,7 @@ public:
     // Assign path text or a file URI to `u`; throws std::invalid_argument (ValueError) when rejected.
     static constexpr void assign_text(uri& u, std::string_view text) {
         const std::string why = parse_or_problem(u, text);
-        if (!why.empty()) throw std::invalid_argument(why);
+        if (!why.empty()) throw pygim::errors::invalid_value(why);
     }
 
     // ── value ──────────────────────────────────────────────────────────────
@@ -560,18 +562,18 @@ public:
     // pathlib's rule: a name is any non-empty component without a separator
     // that is not "." (".." is allowed, as in pathlib).
     [[nodiscard]] constexpr basic_file with_name(std::string_view n) const {
-        if (n.empty() || n == ".") throw std::invalid_argument("invalid name: '" + std::string(n) + "'");
+        if (n.empty() || n == ".") throw pygim::errors::invalid_value("invalid name: '" + std::string(n) + "'");
         for (char c : n) {
-            if (Strategy::is_sep(c)) throw std::invalid_argument("invalid name: '" + std::string(n) + "'");
+            if (Strategy::is_sep(c)) throw pygim::errors::invalid_value("invalid name: '" + std::string(n) + "'");
         }
-        if (!has_name()) throw std::invalid_argument("'" + fspath() + "' has an empty name");
+        if (!has_name()) throw pygim::errors::invalid_value("'" + fspath() + "' has an empty name");
         basic_file out = *this;
         out.m_uri.segments.back() = std::string(n);
         return out;
     }
     [[nodiscard]] constexpr basic_file with_suffix(std::string_view s) const {
         if (!s.empty() && (s.front() != '.' || s.size() == 1)) {
-            throw std::invalid_argument("invalid suffix: '" + std::string(s) + "'");
+            throw pygim::errors::invalid_value("invalid suffix: '" + std::string(s) + "'");
         }
         return with_name(stem() + std::string(s));
     }
@@ -601,7 +603,7 @@ public:
     // `**` matches any number of directories (and, as the final component,
     // every descendant). Sorted, deduplicated.
     [[nodiscard]] std::vector<basic_file> glob(std::string_view pattern) const {
-        if (pattern.empty()) throw std::invalid_argument("glob: empty pattern");
+        if (pattern.empty()) throw pygim::errors::invalid_value("glob: empty pattern");
         std::vector<std::string> segs;
         for (std::size_t start = 0; start <= pattern.size();) {
             const std::size_t slash = pattern.find('/', start);
@@ -614,7 +616,7 @@ public:
         // NOT is_absolute() (no drive), yet the pattern is clearly not
         // relative in the caller's intent.
         if (segs.empty() || pattern.front() == '/' || fs::path(pattern).is_absolute()) {
-            throw std::invalid_argument("glob: pattern must be relative, got '" +
+            throw pygim::errors::invalid_value("glob: pattern must be relative, got '" +
                                         std::string(pattern) + "'");
         }
         std::vector<basic_file> out;
@@ -631,8 +633,9 @@ public:
 
     // The raw bytes of the file, undecoded (binary, no newline translation).
     [[nodiscard]] std::string read_bytes() const {
+        errno = 0;
         std::ifstream ifs(to_fs(), std::ios::binary);
-        if (!ifs) throw std::runtime_error("cannot open file: " + fspath());
+        if (!ifs) throw pygim::errors::file_error(errno != 0 ? errno : ENOENT, fspath());   // as pathlib's read_bytes raises
         std::ostringstream buffer;
         buffer << ifs.rdbuf();
         return buffer.str();
@@ -640,10 +643,11 @@ public:
 
     // Replace the file's contents with `data`, byte for byte (pathlib parity).
     void write_bytes(std::string_view data) const {
+        errno = 0;
         std::ofstream ofs(to_fs(), std::ios::binary | std::ios::trunc);
-        if (!ofs) throw std::runtime_error("cannot open file for writing: " + fspath());
+        if (!ofs) throw pygim::errors::file_error(errno != 0 ? errno : EACCES, fspath());
         ofs.write(data.data(), static_cast<std::streamsize>(data.size()));
-        if (!ofs) throw std::runtime_error("write failed: " + fspath());
+        if (!ofs) throw pygim::errors::file_error(errno != 0 ? errno : EIO, fspath());
     }
 
     // Create this directory (pathlib parity): `parents` creates missing
@@ -654,15 +658,14 @@ public:
         std::error_code ec;
         if (fs::is_directory(p, ec)) {
             if (exist_ok) return;
-            throw std::runtime_error("directory exists: " + fspath());
+            throw pygim::errors::file_error(EEXIST, fspath());
         }
-        if (fs::exists(p, ec)) {
-            throw std::runtime_error("not a directory: " + fspath());
+        if (fs::exists(p, ec)) {   // a file in the way: pathlib's mkdir raises FileExistsError too
+            throw pygim::errors::file_error(EEXIST, fspath());
         }
         const bool made = parents ? fs::create_directories(p, ec) : fs::create_directory(p, ec);
         if (ec || !made) {
-            throw std::runtime_error("cannot create directory " + fspath() +
-                                     (ec ? ": " + ec.message() : std::string{}));
+            throw pygim::errors::file_error(ec ? ec.value() : EEXIST, fspath());
         }
     }
 

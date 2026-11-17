@@ -45,7 +45,7 @@ import urllib.parse
 import pygim
 from pygim.pathlike import PathStore
 from _pygim._cli import _commenter
-from pygim.errors import GimFileNotFoundError
+from pygim.errors import GimFileNotFoundError, GimOSError, ParseError
 
 __all__ = ["ServeError", "make_server", "rebuild", "serve", "site_pages"]
 
@@ -168,7 +168,7 @@ def _make_handler(root, index: str | None):
             if page.suffix.lower() == ".html" and page.is_file():
                 try:
                     text = page.read_bytes().decode("utf-8")
-                except (RuntimeError, UnicodeDecodeError):
+                except (GimOSError, UnicodeDecodeError):
                     super().do_GET()
                     return
                 body = _commenter.inject(text).encode("utf-8")
@@ -185,7 +185,7 @@ def _make_handler(root, index: str | None):
             """Run *action*; a comments-file decode error becomes a 500 that names the file and line."""
             try:
                 action()
-            except RuntimeError as exc:
+            except ParseError as exc:
                 self.send_error(500, str(exc))
 
         def _send_json(self, obj, status=200):

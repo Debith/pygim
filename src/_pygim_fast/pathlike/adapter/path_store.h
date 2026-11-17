@@ -28,6 +28,7 @@
 #include <pybind11/pybind11.h>
 
 #include "../path_table.h"
+#include "../../errors/adapter.h"
 
 namespace pygim::pathlike {
 
@@ -59,7 +60,7 @@ private:
 /// `obj` as a store, or a TypeError naming both types.
 [[nodiscard]] inline path_store& as_store(py::handle obj) {
     if (!py::isinstance<path_store>(obj)) {
-        throw py::type_error("expected a pathlike.PathStore, got " + py::str(py::type::of(obj)).cast<std::string>());
+        pygim::errors::raise(&pygim::errors::table::unrecognized_type_error, obj, "a pathlike.PathStore", "store");
     }
     return py::cast<path_store&>(obj);
 }

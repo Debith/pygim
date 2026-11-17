@@ -68,6 +68,7 @@
 #include <algorithm>
 #include <meta>
 #include <vector>
+#include "../errors/core.h"
 #endif
 
 namespace pygim::pathlike {
@@ -342,6 +343,17 @@ struct engine_list {
         (detail::put_known<Es>(t), ...);
         return std::move(t.out);
     }
+    // The engines' names, and every extension one claims, as an error lists them.
+    [[nodiscard]] static std::vector<std::string> known_names() {
+        std::vector<std::string> names;
+        (names.emplace_back(Es::info.name), ...);
+        return names;
+    }
+    [[nodiscard]] static std::vector<std::string> known_exts() {
+        std::vector<std::string> exts;
+        ((exts.insert(exts.end(), Es::info.exts.begin(), Es::info.exts.end())), ...);
+        return exts;
+    }
     [[nodiscard]] static std::string ext_inventory_text() {
         detail::text t;
         (detail::put_exts<Es>(t), ...);
@@ -354,7 +366,7 @@ struct engine_list {
     template <class Row>
     [[nodiscard]] static typename Row::value named(std::string_view name) {
         if (const auto e = from_name_at_runtime<Row>(name)) return e;
-        throw std::invalid_argument("unknown engine: '" + std::string(name) + "' (known: " + known_text() + ")");
+        throw pygim::errors::option_error(std::string(name), known_names());
     }
 
     // The engine a read or write uses: an explicit engine= wins, then the pin,
@@ -365,9 +377,9 @@ struct engine_list {
         if (!requested.empty()) return named<Row>(requested);
         if (pin) return pin;
         if (const auto e = for_ext_at_runtime<Row>(ext)) return e;
-        throw std::invalid_argument("no engine for extension '" + std::string(ext) + "' (known: " +
-                                    ext_inventory_text() +
-                                    ") — pass engine= at construction or read(engine=...)");
+        pygim::errors::option_error unknown(std::string(ext), known_exts());
+        unknown.add_note("no engine for this extension: pass engine= at construction or read(engine=...)");
+        throw unknown;
     }
 
     // ── proofs (constexpr predicates; every build asserts holds()) ────────

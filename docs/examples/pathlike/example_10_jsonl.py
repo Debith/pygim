@@ -18,6 +18,7 @@ import tempfile
 from pathlib import Path
 
 import pygim
+from pygim.errors import ParseError
 
 tmp = tempfile.TemporaryDirectory()
 root = Path(tmp.name)
@@ -46,7 +47,7 @@ bad = root / "bad.jsonl"
 bad.write_text('{"id": 1}\n{oops}\n')
 try:
     pygim.path(bad).read()
-except RuntimeError as e:
+except ParseError as e:                             # a ValueError too
     assert "bad.jsonl" in str(e) and "line 2" in str(e)
 else:
     raise AssertionError("Expected the malformed line to be reported")
