@@ -2,6 +2,7 @@
 
 #include "core.h"
 #include <pybind11/pybind11.h>
+#include "../errors/adapter.h"
 
 namespace py = pybind11;
 
@@ -18,7 +19,7 @@ struct ArrowStreamExporter {
     py::capsule arrow_c_stream(py::object /*requested_schema*/ = py::none()) const {
         auto reader_result = arrow::RecordBatchReader::Make({batch}, batch->schema());
         if (!reader_result.ok())
-            throw std::runtime_error(reader_result.status().ToString());
+            throw pygim::errors::backend_error(reader_result.status().ToString());
 
         auto* c_stream = new ArrowArrayStream;
         std::memset(c_stream, 0, sizeof(*c_stream));
@@ -27,7 +28,7 @@ struct ArrowStreamExporter {
             std::move(*reader_result), c_stream);
         if (!status.ok()) {
             delete c_stream;
-            throw std::runtime_error(status.ToString());
+            throw pygim::errors::backend_error(status.ToString());
         }
 
         return py::capsule(
@@ -48,9 +49,9 @@ inline ArrowStreamExporter generate(
     double null_fraction = 0.0)
 {
     if (rows <= 0)
-        throw std::invalid_argument("rows must be positive");
+        throw pygim::errors::invalid_value("rows must be positive");
     if (null_fraction < 0.0 || null_fraction > 1.0)
-        throw std::invalid_argument("null_fraction must be in [0.0, 1.0]");
+        throw pygim::errors::invalid_value("null_fraction must be in [0.0, 1.0]");
 
     std::vector<ColumnSpec> columns;
     columns.reserve(py::len(schema_dict));
@@ -63,7 +64,7 @@ inline ArrowStreamExporter generate(
     }
 
     if (columns.empty())
-        throw std::invalid_argument("schema must have at least one column");
+        throw pygim::errors::invalid_value("schema must have at least one column");
 
     auto batch = generate_batch(columns, rows, seed, null_fraction);
     return ArrowStreamExporter{std::move(batch)};

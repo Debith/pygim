@@ -7,12 +7,14 @@
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 #include "adapter.h"
+#include "../errors/adapter.h"
 
 namespace py = pybind11;
 
 using namespace pygim::datagen;
 
 PYBIND11_MODULE(datagen, m) {
+    pygim::errors::load();
     m.doc() = "Fast test-data generator backed by Arrow array builders.\n"
               "Generates columnar Arrow data entirely in C++ — typically\n"
               "50–100× faster than equivalent pure-Python generation.";

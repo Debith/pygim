@@ -25,6 +25,7 @@
 #include <string>
 #include <utility>  // std::unreachable (C++23)
 #include <vector>
+#include "../errors/core.h"
 
 namespace pygim::datagen {
 
@@ -33,14 +34,14 @@ namespace pygim::datagen {
 #define DATAGEN_THROW_NOT_OK(expr)                          \
     do {                                                    \
         auto _s = (expr);                                   \
-        if (!_s.ok()) throw std::runtime_error(_s.ToString()); \
+        if (!_s.ok()) throw pygim::errors::backend_error(_s.ToString()); \
     } while (0)
 
 #define DATAGEN_FINISH(builder, out)                        \
     do {                                                    \
         auto _r = (builder).Finish();                       \
         if (!_r.ok())                                       \
-            throw std::runtime_error(_r.status().ToString()); \
+            throw pygim::errors::backend_error(_r.status().ToString()); \
         (out) = std::move(*_r);                             \
     } while (0)
 
@@ -130,10 +131,9 @@ inline ColType parse_type(const std::string& s) {
     if (t == "serial" || t == "sequence" || t == "identity")
                                                              return ColType::Serial;
 
-    throw std::invalid_argument(
-        "Unknown column type: '" + s + "'.  Supported: "
-        "int8, int16, int32, int64, uint8–uint64, bool, float32, float64, "
-        "string, date, time, timestamp, duration, binary, uuid, serial");
+    throw pygim::errors::option_error(s, {"int8", "int16", "int32", "int64", "uint8", "uint16", "uint32", "uint64", "bool",
+                                          "float32", "float64", "string", "date", "time", "timestamp", "duration",
+                                          "binary", "uuid", "serial"});
 }
 
 /// Map ColType → Arrow DataType.

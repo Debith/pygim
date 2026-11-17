@@ -45,6 +45,7 @@ import urllib.parse
 import pygim
 from pygim.pathlike import PathStore
 from _pygim._cli import _commenter
+from pygim.errors import GimFileNotFoundError
 
 __all__ = ["ServeError", "make_server", "rebuild", "serve", "site_pages"]
 
@@ -321,7 +322,7 @@ def make_server(doc_root, *, port: int = 8000, host: str | None = None,
     *doc_root* is not a directory. ``port=0`` picks a free port (tests)."""
     root = pygim.path(doc_root, store=store or PathStore()).resolve()
     if not root.is_dir():
-        raise FileNotFoundError(f"doc root not found: {root}")
+        raise GimFileNotFoundError(errno.ENOENT, "doc root not found", str(root))
 
     # Bind all interfaces by default so the page is reachable via the WSL IP even
     # when Windows→WSL localhost forwarding hiccups (a common "can't connect").

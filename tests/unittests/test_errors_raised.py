@@ -8,13 +8,18 @@ import math
 
 import pytest
 
+import pygim
 from pygim import utils
+from pygim.core.funcs import get_schema
+from pygim.each import each
 from pygim.errors import (
     ArgumentError,
+    MissingAttributeError,
     GimOptionError,
     GimOverflowError,
     InvalidStateError,
     InvalidValueError,
+    SignatureError,
     UnrecognizedTypeError,
 )
 
@@ -50,6 +55,10 @@ CASES = [
     (_lap_after_finish, InvalidStateError, "the timer has finished; a lap cannot start after it"),
     (lambda: utils.QuickTimer("t", report=utils.Report.silent()).stop_lap(), InvalidStateError, "no lap is running"),
     (lambda: utils.calculate_rate(1, "kb", 0, "s"), InvalidValueError, "duration must be positive"),
+    (lambda: each([1, 2]).nope, MissingAttributeError, None),
+    (lambda: getattr(each([1, 2]), "__nope__"), MissingAttributeError, "Cannot access dunder attributes with `each`"),
+    (lambda: pygim.no_such_thing, MissingAttributeError, "module 'pygim' has no attribute 'no_such_thing'"),
+    (lambda: get_schema(lambda x: x), SignatureError, None),
 ]
 
 

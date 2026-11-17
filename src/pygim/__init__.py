@@ -32,7 +32,9 @@ def __getattr__(name):
     try:
         module_name, attr = _LAZY_EXPORTS[name]
     except KeyError:
-        raise AttributeError(f"module {__name__!r} has no attribute {name!r}") from None
+        from pygim.errors import MissingAttributeError   # here, so importing pygim loads no extension
+
+        raise MissingAttributeError(f"module {__name__!r} has no attribute {name!r}") from None
     import importlib
 
     value = getattr(importlib.import_module(module_name), attr)
