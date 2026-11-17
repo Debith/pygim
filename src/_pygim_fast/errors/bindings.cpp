@@ -44,8 +44,8 @@ py::str interned(const char* name) {
 /// The names the classes' methods read and write, interned as the module loads.
 struct names {
     py::str args = interned("args"), value = interned("value"), options = interned("options"),
-            within = interned("within"), name = interned("__name__"), init = interned("__init__"),
-            str = interned("__str__"), reduce = interned("__reduce__");
+            within = interned("within"), name = interned("__name__"), qualname = interned("__qualname__"),
+            init = interned("__init__"), str = interned("__str__"), reduce = interned("__reduce__");
 };
 
 /// Made once and never destroyed: CPython frees the interned strings it does not keep forever as it
@@ -70,7 +70,7 @@ std::string said(py::handle object) { return py::str(object).cast<std::string>()
 /// A key as a message says it: a type by its qualified name (`IService`, not
 /// "<class 'app.IService'>"), anything else as str() says it.
 std::string key_said(py::handle key) {
-    if (PyType_Check(key.ptr())) return said(py::getattr(key, "__qualname__", py::getattr(key, name().name)));
+    if (PyType_Check(key.ptr())) return said(py::getattr(key, name().qualname, py::getattr(key, name().name)));
     if (PyTuple_Check(key.ptr())) {   // a key of parts, such as (interface, name): each said as a key, or by repr
         std::string parts;
         for (const py::handle part : py::reinterpret_borrow<py::tuple>(key))

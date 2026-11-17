@@ -38,12 +38,30 @@ inline const table* loaded = nullptr;
 /// The classes load() took.
 [[nodiscard]] inline const table& classes() noexcept { return *detail::loaded; }
 
+namespace detail {
+
+/// "__notes__", interned once, on first use inside a call (so under the GIL), and never released:
+/// CPython frees mortal interned strings as it finalizes.
+inline const pybind11::str& notes_name() {
+    static const pybind11::str* const made = [] {
+        PyObject* interned = PyUnicode_InternFromString("__notes__");
+        if (interned == nullptr) throw pybind11::error_already_set();
+        return new pybind11::str(pybind11::reinterpret_steal<pybind11::str>(interned));
+    }();
+    return *made;
+}
+
+}  // namespace detail
+
 /// Adds `note` to a Python exception, as its add_note() does (PEP 678); written out, as 3.10 has no
 /// add_note and keeps __notes__ only.
 inline void add_note(pybind11::handle exception, const std::string& note) {
-    const pybind11::object notes = pybind11::getattr(exception, "__notes__", pybind11::none());
-    if (notes.is_none()) pybind11::setattr(exception, "__notes__", pybind11::list());
-    pybind11::getattr(exception, "__notes__").attr("append")(note);
+    pybind11::object notes = pybind11::getattr(exception, detail::notes_name(), pybind11::none());
+    if (notes.is_none()) {
+        notes = pybind11::list();
+        pybind11::setattr(exception, detail::notes_name(), notes);
+    }
+    if (PyList_Append(notes.ptr(), pybind11::str(note).ptr()) != 0) throw pybind11::error_already_set();
 }
 
 /// Adds `note` to the Python error in flight, as a frame it passes through: what that frame was doing.
