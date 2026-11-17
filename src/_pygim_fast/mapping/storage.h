@@ -27,8 +27,8 @@ concept storage =
     requires(S s, const S cs, const typename S::key_type& k, typename S::mapped_type v) {
         { cs.find(k) } -> std::same_as<const typename S::mapped_type*>;
         { s.find(k) } -> std::same_as<typename S::mapped_type*>;
-        { cs.contains(k) } -> std::convertible_to<bool>;               // no pointer compared: a constexpr table's
-        { cs.value_or(k, v) } -> std::same_as<typename S::mapped_type>;  // answers in a sanitizer build too (#287)
+        { cs.contains(k) } -> std::convertible_to<bool>;               // by index, not a pointer compared with
+        { cs.value_or(k, v) } -> std::same_as<typename S::mapped_type>;  // nullptr, which GCC 15's UBSan won't fold
         { s.insert(k, std::move(v)) };            // insert-or-assign semantics
         { s.erase(k) } -> std::same_as<bool>;     // true when something was removed
         { cs.size() } -> std::convertible_to<std::size_t>;
