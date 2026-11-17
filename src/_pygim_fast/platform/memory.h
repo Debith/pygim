@@ -1,9 +1,9 @@
 #pragma once
 // platform/memory.h — the process's memory as the system keeps it: how much of it is resident
-// now and at most. Infrastructure behind the platform boundary (docs/design/platform_boundary.md,
-// D77): utils/memory.h says what the numbers mean, and never asks which system it runs on.
+// now and at most. Infrastructure behind the platform boundary (docs/design/platform_boundary.md):
+// utils/memory.h says what the numbers mean, and never asks which system it runs on.
 //
-// One class per system, each in a file of its own that asks nothing (D106): linux/memory.h,
+// One class per system, each in a file of its own that asks nothing: linux/memory.h,
 // macos/memory.h, windows/memory.h. This header states what every one of them answers and picks
 // the running system's, once:
 //
@@ -14,8 +14,8 @@
 // inside a measured loop must not change what it measures), and peak >= current.
 //
 // Only Linux puts logic above its calls — statm's second field times the page size, a peak in
-// kilobytes, the larger of peak and present — so only Linux's class is a template on its calls
-// (D138), basic_linux_memory here, proven over fake calls on every system
+// kilobytes, the larger of peak and present — so only Linux's class is a template on its calls,
+// basic_linux_memory here, proven over fake calls on every system
 // (tests/static/platform_proofs.cpp). macOS's and Windows' classes hand the system's reading on as it
 // is, so a fake would prove only itself: they are their calls, proven by CI on their own systems.
 //

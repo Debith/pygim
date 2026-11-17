@@ -260,8 +260,8 @@ def test_a_timer_dropped_unfinished_still_reports(time):
 
 
 def test_the_lap_calls_have_one_name_each():
-    """start_sub_timer and stop_sub_timer became start_lap and stop_lap (D62, 2026-10-30), with no
-    alias: pygim is below 1.0, and a rename there needs no deprecation (Debith, 2026-10-31)."""
+    """start_sub_timer and stop_sub_timer became start_lap and stop_lap (Debith, 2026-10-30), with
+    no alias: pygim is below 1.0, and a rename there needs no deprecation (Debith, 2026-10-31)."""
     assert [name for name in dir(pygim.QuickTimer) if "sub_timer" in name] == []
 
 

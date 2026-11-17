@@ -1,8 +1,8 @@
 #pragma once
 // platform/files.h — a path's text as the system takes it. Infrastructure behind the platform
-// boundary (docs/design/platform_boundary.md, D77): pathlike's files (pathlike/core.h) call these
+// boundary (docs/design/platform_boundary.md): pathlike's files (pathlike/core.h) call these
 // and never ask which system they run on. One class per system, each in a file of its own that asks
-// nothing (D106): posix/files.h keeps the system's own bytes, windows/files.h UTF-8 from the wide
+// nothing: posix/files.h keeps the system's own bytes, windows/files.h UTF-8 from the wide
 // native form. Both use the standard library alone, so both are compiled and proven on every system,
 // and the family chooses one here, once.
 //

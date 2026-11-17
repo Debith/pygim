@@ -1,7 +1,7 @@
 #pragma once
 // platform/macos/memory.h — the process's memory as macOS keeps it, behind platform/memory.h's
 // process_memory. Only that header includes it, and only on macOS: nothing here asks which system
-// it runs on (D106).
+// it runs on.
 //
 // Cost: one Mach call for the current reading, one getrusage for the peak.
 //

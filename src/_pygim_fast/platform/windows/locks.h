@@ -1,7 +1,7 @@
 #pragma once
 // platform/windows/locks.h — the calls a Windows file lock makes, one thin wrapper each: _wsopen_s,
 // LockFileEx and UnlockFileEx through the descriptor's own handle, _close. Only platform/locks.h
-// includes this, and only on Windows: nothing here asks which system it runs on (D106).
+// includes this, and only on Windows: nothing here asks which system it runs on.
 //
 // CORE layer: pybind-free.
 

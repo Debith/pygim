@@ -1,7 +1,7 @@
 #pragma once
 // platform/windows/clocks.h — the calling thread's CPU time on Windows, behind platform/clocks.h's
 // thread_clocks. Only that header includes it, and only on Windows: nothing here asks which system
-// it runs on (D106).
+// it runs on.
 //
 // Windows counts a thread's CPU time in scheduler ticks (GetThreadTimes, about 15 ms), too coarse for
 // one task's share, so this class reads the measuring clock instead: a thread here looks as if it

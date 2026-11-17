@@ -1,6 +1,6 @@
 #pragma once
 // platform/locks.h — a file locked across processes: open it, take it exclusively, release it, close
-// it. Infrastructure behind the platform boundary (docs/design/platform_boundary.md, D77): a writer
+// it. Infrastructure behind the platform boundary (docs/design/platform_boundary.md): a writer
 // that must be the only one at a time, such as a file store's commit lock, takes it around each write
 // and never asks which system it runs on.
 //
@@ -8,11 +8,11 @@
 //     native_lock_calls::lock(fd);                    // false when the lock cannot be taken
 //     native_lock_calls::unlock(fd); native_lock_calls::close(fd);
 //
-// The calls are one thin wrapper each, in a file of the system's own that asks nothing (D106):
+// The calls are one thin wrapper each, in a file of the system's own that asks nothing:
 // posix/locks.h (open, flock, close) and windows/locks.h (_wsopen_s, LockFileEx through the
 // descriptor's handle, _close). Both answer for an int descriptor, so a lock above them holds one
 // type on every system. Nothing here is logic above the calls, so there is nothing to prove over
-// fakes (D138); tests/static/platform_proofs.cpp includes this header so that every build compiles
+// fakes; tests/static/platform_proofs.cpp includes this header so that every build compiles
 // the running system's calls against the concept below.
 //
 // CORE layer: pybind-free.

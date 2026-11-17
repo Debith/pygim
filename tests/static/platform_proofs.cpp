@@ -1,4 +1,4 @@
-// Compile-time proofs for the logic the platform boundary puts above the system's calls (D138): a
+// Compile-time proofs for the logic the platform boundary puts above the system's calls: a
 // class with such logic is a template on its calls, so the logic is proven here on every system,
 // with the calls answered by constexpr fakes. The calls themselves are proven by CI on their own
 // system; the join of the two, once per system, by the suite there.
