@@ -1,7 +1,7 @@
 #pragma once
 // errors/table.h — the C table pygim.errors publishes: the exception classes every pygim
 // extension raises, made once, in pygim.errors, and reached by every other extension through this
-// table, never through pygim's Python. Only plain C data crosses (docs/design/content.md, D114):
+// table, never through pygim's Python. Only plain C data crosses (docs/design/errors.md):
 // the table's version and the classes, as the interpreter's own objects.
 //
 // ADAPTER layer: the Python C API, no pybind11, so the module that publishes the table and the

@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """pygim.errors: every exception pygim raises, made once, in C++, each a GimError and the Python
-exception its contract needs (docs/design/exception_boundaries.md)."""
+exception its contract needs (docs/design/errors.md)."""
 
 import pickle
 import subprocess
