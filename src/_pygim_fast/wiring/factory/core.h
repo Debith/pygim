@@ -6,8 +6,11 @@
 #include <vector>
 
 #include "../registry/core.h"
+#include "../../errors/core.h"
 
 namespace pygim::core {
+
+namespace errors = pygim::errors;
 
 /*
  * NoValidation is the default product validator policy.
@@ -97,7 +100,9 @@ public:
         if (auto* creator = m_registry.try_get_const(name)) {
             return *creator;
         }
-        throw std::runtime_error("Unknown creator: " + name);
+        std::vector<std::string> names;
+        for (const Key& each : registered_names()) names.push_back(errors::key_text(each));
+        throw errors::missing_key(errors::key_text(name), std::move(names));
     }
 
     /**
@@ -113,8 +118,8 @@ public:
     [[nodiscard]] Product create(const Key& name, InvokeFn&& invoke) const {
         Creator creator = get_creator(name);
         Product product = std::forward<InvokeFn>(invoke)(creator);
-        if (!m_validator(product)) {
-            throw std::runtime_error("Created object does not implement required interface/protocol");
+        if (!m_validator(product)) {   // a validator with Python raises its own error first
+            throw errors::invalid_value("the factory's validator refused the object its creator made");
         }
         return product;
     }

@@ -38,12 +38,33 @@ inline const table* loaded = nullptr;
 /// The classes load() took.
 [[nodiscard]] inline const table& classes() noexcept { return *detail::loaded; }
 
+/// Adds `note` to a Python exception, as its add_note() does (PEP 678); written out, as 3.10 has no
+/// add_note and keeps __notes__ only.
+inline void add_note(pybind11::handle exception, const std::string& note) {
+    const pybind11::object notes = pybind11::getattr(exception, "__notes__", pybind11::none());
+    if (notes.is_none()) pybind11::setattr(exception, "__notes__", pybind11::list());
+    pybind11::getattr(exception, "__notes__").attr("append")(note);
+}
+
+/// Adds `note` to the Python error in flight, as a frame it passes through: what that frame was doing.
+inline void add_note(pybind11::error_already_set& in_flight, const std::string& note) {
+    add_note(in_flight.value(), note);
+}
+
+/// Sets, as the Python error, the table's class `which` made from `args` as Python calls it, with
+/// `notes` as its __notes__.
+template <class... Args>
+void set_noted(std::span<const std::string> notes, PyObject* table::*which, Args&&... args) {
+    const pybind11::handle cls = classes().*which;
+    const pybind11::object error = cls(std::forward<Args>(args)...);
+    for (const std::string& note : notes) add_note(error, note);
+    pybind11::set_error(cls, error);
+}
+
 /// Sets, as the Python error, the table's class `which` made from `args` as Python calls it.
 template <class... Args>
 void set(PyObject* table::*which, Args&&... args) {
-    const pybind11::handle cls = classes().*which;
-    const pybind11::object error = cls(std::forward<Args>(args)...);
-    pybind11::set_error(cls, error);
+    set_noted({}, which, std::forward<Args>(args)...);
 }
 
 namespace detail {
@@ -113,13 +134,13 @@ inline void translate(std::exception_ptr thrown) {
     try {
         std::rethrow_exception(thrown);
     } catch (const missing_key& e) {
-        set(&table::missing_key_error, e.key(), strings(e.keys()));
+        set_noted(e.notes(), &table::missing_key_error, e.key(), strings(e.keys()));
     } catch (const option_error& e) {
-        set(&table::option_error, e.value(), strings(e.options()));
+        set_noted(e.notes(), &table::option_error, e.value(), strings(e.options()));
     } catch (const file_error& e) {
-        set(class_of_errno(e.number()), e.number(), e.reason(), e.file());
+        set_noted(e.notes(), class_of_errno(e.number()), e.number(), e.reason(), e.file());
     } catch (const error& e) {
-        set(kind_classes[static_cast<std::size_t>(e.meaning())].cls, e.what());
+        set_noted(e.notes(), kind_classes[static_cast<std::size_t>(e.meaning())].cls, e.what());
     }
 }
 

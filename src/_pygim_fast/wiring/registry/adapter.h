@@ -9,6 +9,7 @@
 
 #include "../../utils/hash.h"
 #include "core.h"
+#include "../../errors/adapter.h"
 
 namespace pygim {
 
@@ -157,7 +158,7 @@ class Registry {
 
         if (py::isinstance<py::tuple>(key)) {
             if (py::len(key) != 2) {
-                throw py::type_error("Registry key tuple must be (thing_or_id, name|None)");
+                throw pygim::errors::argument_error("Registry key tuple must be (thing_or_id, name|None)");
             }
             py::tuple tuple_key = py::reinterpret_borrow<py::tuple>(key);
             first = tuple_key[0];
@@ -170,7 +171,7 @@ class Registry {
         std::string name;
         if (!second.is_none()) {
             if (!py::isinstance<py::str>(second)) {
-                throw py::type_error("name must be str or None");
+                pygim::errors::raise(&pygim::errors::table::unrecognized_type_error, second, py::make_tuple(py::handle(reinterpret_cast<PyObject*>(&PyUnicode_Type)), py::none()), "name");
             }
             name = second.cast<std::string>();
         }
@@ -183,7 +184,8 @@ class Registry {
             return QualnameKeyPolicy::make_from_python(first, std::move(name));
         } else {
             if (py::isinstance<py::str>(first)) {
-                throw py::type_error("Identity policy requires a Python object as first element");
+                pygim::errors::raise(&pygim::errors::table::unrecognized_type_error, first,
+                                     "a Python object other than a str (the identity policy)", "key");
             }
             return PyIdentityKeyPolicy::make_from_python(first, std::move(name));
         }
@@ -215,9 +217,16 @@ public:
         std::visit(
             [&](auto& reg) {
                 using R = std::decay_t<decltype(reg)>;
-                reg.register_or_override(make_key<R>(key), std::move(value), override_existing);
+                auto made = make_key<R>(key);
+                if (override_existing && reg.try_get_const(made) == nullptr) raise_missing(key);   // nothing to override
+                reg.register_or_override(made, std::move(value), override_existing);
             },
             m_var);
+    }
+
+    /// MissingKeyError(key, this registry): the key as Python gave it, and where it looked.
+    [[noreturn]] void raise_missing(const py::object& key) const {
+        pygim::errors::raise(&pygim::errors::table::missing_key_error, key, py::cast(this, py::return_value_policy::reference));
     }
 
     [[nodiscard]] py::object get(py::object key) {
@@ -227,7 +236,7 @@ public:
                 if (auto* found = reg.try_get(make_key<R>(key))) {
                     return *found;
                 }
-                throw std::runtime_error("Unknown registry key");
+                raise_missing(key);
             },
             m_var);
     }
@@ -298,7 +307,7 @@ public:
 
     [[nodiscard]] py::object find_id(py::object id, py::object name = py::none()) const {
         if (m_policy != KeyPolicyKind::Qualname) {
-            throw std::runtime_error("find_id is only available for qualname policy");
+            throw pygim::errors::invalid_state("find_id is only available for qualname policy");
         }
         if (!py::isinstance<py::str>(id)) {
             return py::none();
@@ -308,7 +317,7 @@ public:
         std::string variant_name;
         if (!name.is_none()) {
             if (!py::isinstance<py::str>(name)) {
-                throw py::type_error("name must be str or None");
+                pygim::errors::raise(&pygim::errors::table::unrecognized_type_error, name, py::make_tuple(py::handle(reinterpret_cast<PyObject*>(&PyUnicode_Type)), py::none()), "name");
             }
             variant_name = name.cast<std::string>();
         }

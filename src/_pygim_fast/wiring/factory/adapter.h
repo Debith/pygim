@@ -37,7 +37,8 @@ struct PyObjectValidator {
         if (!interface) {
             return true;
         }
-        return wiring::detail::is_instance_of(obj, *interface);
+        wiring::detail::ensure_instance_matches_interface(obj, *interface, "created object");
+        return true;
     }
 };
 

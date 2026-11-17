@@ -7,6 +7,7 @@
 
 #include "../../mapping/hash_storage.h"
 #include "../../mapping/storage.h"
+#include "../../errors/core.h"
 
 namespace pygim::core {
 
@@ -192,7 +193,7 @@ public:
         value_type* existing = m_store.find(key);
         if (existing != nullptr) {
             if (!override_existing) {
-                throw std::runtime_error("Duplicate key registration (use override=True)");
+                throw pygim::errors::duplicate_key("Duplicate key registration (use override=True)");
             }
             m_hooks.run_register(key, value);
             *existing = std::move(value);
@@ -200,7 +201,7 @@ public:
         }
 
         if (override_existing) {
-            throw std::runtime_error("override=True requires existing key");
+            throw pygim::errors::missing_key(pygim::errors::key_text(key));   // override=True, and nothing to override
         }
 
         register_value(key, std::move(value));

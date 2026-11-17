@@ -23,6 +23,7 @@ This example demonstrates:
 """
 
 from pygim.registry import Registry, KeyPolicyKind
+from pygim.errors import DuplicateKeyError
 
 # ----------------------------------------------------------------------------
 # 1. Create a registry with hooks and pre-reserved capacity
@@ -58,7 +59,7 @@ try:
     def process_conflict(x: int) -> int:
         return x
 
-except RuntimeError:
+except DuplicateKeyError:                          # a ValueError too
     pass
 else:
     raise AssertionError("Expected duplicate decorator registration to raise")

@@ -2,11 +2,13 @@
 #include <pybind11/pybind11.h>
 
 #include "adapter.h"
+#include "../../errors/adapter.h"
 
 namespace pygim {
 namespace py = pybind11;
 
 PYBIND11_MODULE(factory, m) {
+    pygim::errors::load();
     m.doc() = "Factory for creating objects using registered callables, with optional interface enforcement.";
 
     py::class_<Factory>(m, "Factory")

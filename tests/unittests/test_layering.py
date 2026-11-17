@@ -229,7 +229,7 @@ BUILTIN_RAISE_CPP = re.compile(
 BUILTIN_RAISE_PY = re.compile(
     r"^\s*raise\s+(?:KeyError|ValueError|TypeError|IndexError|AttributeError|RuntimeError|NotImplementedError"
     r"|FileNotFoundError|OSError|LookupError|OverflowError)\b", re.M)
-BUILTIN_RAISES_LEFT = 125
+BUILTIN_RAISES_LEFT = 95
 
 
 def builtin_raises():

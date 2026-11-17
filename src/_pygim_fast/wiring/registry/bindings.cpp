@@ -2,10 +2,12 @@
 #include <pybind11/pybind11.h>
 
 #include "adapter.h"
+#include "../../errors/adapter.h"
 
 namespace py = pybind11;
 
 PYBIND11_MODULE(registry, m) {
+    pygim::errors::load();
     py::enum_<pygim::KeyPolicyKind>(m, "KeyPolicyKind")
         .value("qualname", pygim::KeyPolicyKind::Qualname)
         .value("identity", pygim::KeyPolicyKind::Identity)

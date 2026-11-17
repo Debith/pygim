@@ -18,6 +18,7 @@ This example demonstrates:
 """
 
 from pygim.ioc import Container
+from pygim.errors import UnrecognizedTypeError
 
 # A container can reserve space upfront to avoid rehashing while you
 # register services in bulk.
@@ -138,8 +139,8 @@ container.register(Mailer, lambda: object())  # returns the wrong type!
 
 try:
     container.resolve(Mailer)
-except RuntimeError as error:
-    assert "interface" in str(error)
+except UnrecognizedTypeError as error:             # a TypeError too
+    assert "resolved object" in str(error)
 else:
     raise AssertionError("Expected interface validation to fail")
 

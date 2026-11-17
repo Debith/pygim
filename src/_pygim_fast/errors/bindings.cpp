@@ -67,6 +67,26 @@ py::str joined(const char* separator, py::iterable parts) {
 /// `object` as str() says it, in UTF-8.
 std::string said(py::handle object) { return py::str(object).cast<std::string>(); }
 
+/// A key as a message says it: a type by its qualified name (`IService`, not
+/// "<class 'app.IService'>"), anything else as str() says it.
+std::string key_said(py::handle key) {
+    if (PyType_Check(key.ptr())) return said(py::getattr(key, "__qualname__", py::getattr(key, name().name)));
+    if (PyTuple_Check(key.ptr())) {   // a key of parts, such as (interface, name): each said as a key, or by repr
+        std::string parts;
+        for (const py::handle part : py::reinterpret_borrow<py::tuple>(key))
+            parts += (parts.empty() ? "" : ", ") + (PyType_Check(part.ptr()) ? key_said(part) : py::repr(part).cast<std::string>());
+        return "(" + parts + ")";
+    }
+    return said(key);
+}
+
+/// Each key of `keys` as a message says it.
+std::vector<std::string> keys_said(py::handle keys) {
+    std::vector<std::string> made;
+    for (const py::handle key : py::iter(keys)) made.push_back(key_said(key));
+    return made;
+}
+
 /// Each of `parts` as str() says it, in UTF-8.
 std::vector<std::string> each_said(py::handle parts) {
     std::vector<std::string> made;
@@ -125,10 +145,10 @@ void give_missing_key_error_its_place(py::handle missing_key) {
             if (made == nullptr) throw py::error_already_set();
             return py::reinterpret_steal<py::str>(made);
         }
-        const std::string key = said(py::tuple(py::getattr(self, name().args))[0]);
+        const std::string key = key_said(py::tuple(py::getattr(self, name().args))[0]);
         std::vector<std::string> keys;
         try {
-            keys = each_said(within);
+            keys = keys_said(within);
         } catch (const py::error_already_set&) {   // the keys cannot be read: say where it looked
             return py::str(errors::missing_key_message(key, said(py::getattr(py::type::of(within), name().name))));
         }

@@ -1,5 +1,6 @@
 import pytest
 from pygim.factory import Factory
+from pygim.errors import DuplicateKeyError, MissingKeyError, UnrecognizedTypeError
 
 
 @pytest.fixture
@@ -66,7 +67,7 @@ def test_register_duplicate_without_override(factory):
         return x + 1
 
     # registering again without override should fail
-    with pytest.raises(RuntimeError):
+    with pytest.raises(DuplicateKeyError):
         factory.register("foo", bar)
     # but override=True should succeed
     factory.register("foo", bar, override=True)
@@ -88,23 +89,23 @@ def test_interface_enforcement(dummy_interface, dummy_impl):
         return object()
 
     # should raise since object() doesn’t implement DummyInterface
-    with pytest.raises(RuntimeError):
+    with pytest.raises(UnrecognizedTypeError):
         f.create("bad", 1)
 
 
 def test_missing(factory):
     # creating a non‐existent entry should raise
-    with pytest.raises(RuntimeError):
+    with pytest.raises(MissingKeyError):
         factory.create("nope")
 
 
 def test_getitem_missing_raises(factory):
-    with pytest.raises(RuntimeError):
+    with pytest.raises(MissingKeyError):
         _ = factory["missing"]
 
 
 def test_override_missing_raises(factory):
-    with pytest.raises(RuntimeError):
+    with pytest.raises(MissingKeyError):
         factory.register("missing", lambda: 1, override=True)
 
 

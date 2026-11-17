@@ -22,6 +22,7 @@ This example demonstrates:
 """
 
 from pygim.ioc import Container
+from pygim.errors import DuplicateKeyError, MissingKeyError
 
 
 # ----------------------------------------------------------------------------
@@ -98,7 +99,7 @@ assert container.resolve(EmailGateway).sent == ["welcome bob"]
 # (a) Re-registering without override=True is always an error...
 try:
     container.register(EmailGateway, SmtpGateway)
-except RuntimeError as error:
+except DuplicateKeyError as error:                 # a ValueError too
     assert "override" in str(error)
 else:
     raise AssertionError("Expected duplicate registration to raise")
@@ -112,8 +113,8 @@ class PushGateway(EmailGateway):
 
 try:
     container.register(PushGateway, PushGateway, override=True)
-except RuntimeError as error:
-    assert "existing" in str(error)
+except MissingKeyError as error:                   # nothing to override: a lookup that found nothing
+    assert error.args == (PushGateway,)
 else:
     raise AssertionError("Expected override of a missing key to raise")
 

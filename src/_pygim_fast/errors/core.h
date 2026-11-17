@@ -19,6 +19,7 @@
 #include <string>
 #include <string_view>
 #include <system_error>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -164,16 +165,30 @@ enum class kind : unsigned char {
 inline constexpr std::size_t kinds = static_cast<std::size_t>(kind::missing_attribute) + 1;
 
 /// Everything pygim's C++ throws; its Python counterpart is GimError, or the class its kind names.
+/// A frame the error passes through may add a note, as Python's add_note does (PEP 678): what it was
+/// doing, such as which key it was resolving. The notes reach Python as the exception's __notes__,
+/// shown under its message in a traceback, and leave the message itself as the class says it.
 class error : public std::exception {
 public:
     explicit error(std::string message, kind meaning = kind::error) : m_message(std::move(message)), m_kind(meaning) {}
     [[nodiscard]] const char* what() const noexcept override { return m_message.c_str(); }
     [[nodiscard]] kind meaning() const noexcept { return m_kind; }
+    void add_note(std::string note) { m_notes.push_back(std::move(note)); }
+    [[nodiscard]] std::span<const std::string> notes() const noexcept { return m_notes; }
 
 private:
     std::string m_message;
     kind m_kind;
+    std::vector<std::string> m_notes;
 };
+
+/// A key as a message says it: its own text where it has one; a core generic over its key, which
+/// cannot say any other, leaves naming it to the adapter that can.
+template <class Key>
+std::string key_text(const Key& key) {
+    if constexpr (std::is_convertible_v<const Key&, std::string_view>) return std::string(std::string_view(key));
+    else return "(a key this core cannot name)";
+}
 
 /// An error whose message is all it carries, of the kind `Meaning`.
 template <kind Meaning>

@@ -18,6 +18,7 @@ This example demonstrates:
 """
 
 from pygim.factory import Factory
+from pygim.errors import UnrecognizedTypeError
 
 
 # ----------------------------------------------------------------------------
@@ -61,7 +62,7 @@ def make_bogus():
 
 try:
     factory.create("bogus")
-except RuntimeError:
+except UnrecognizedTypeError:                      # a TypeError too
     pass
 else:
     raise AssertionError("Expected the interface check to fail")
