@@ -26,7 +26,10 @@ class GimException(Exception):
     DEFAULT_MSG = "Gim Error."
 
     def __init__(self, msg=None, sep="\n"):
-        assert isinstance(msg, (str, list, tuple))
+        # Found 2026-10-31: an assert refused the default, None, so GimException() raised
+        # AssertionError (and, under python -O, did not).
+        if msg is not None and not isinstance(msg, (str, list, tuple)):
+            raise TypeError(type_error_msg(msg, (str, list, tuple)))
         self._msg = msg or self.DEFAULT_MSG
         self._sep = sep
 

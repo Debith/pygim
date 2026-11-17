@@ -3,8 +3,8 @@
 More types to support type annotation.
 """
 
+import os
 from abc import abstractmethod
-from pathlib import Path
 from typing_extensions import TypeAlias, runtime_checkable, Protocol
 from typing import Union, Optional, Iterable, Tuple, Dict, Callable, Text, Type, Any
 
@@ -36,8 +36,8 @@ class SupportsStr(Protocol):
         pass
 
 
-# Object type that can used to turn into path.
-PathLike = Union[Text, Path]
+# What a path is taken as: text, or anything os.fspath takes (pathlib's, pygim's) — the protocol, never one class.
+PathLike = Union[Text, "os.PathLike[str]"]
 MaybePathLike = Optional[PathLike]
 PathLikes = Iterable[PathLike]
 MaybePathLikes = Optional[PathLikes]
