@@ -22,8 +22,8 @@
 // CORE layer: pybind-free, and constexpr except for the operating-system clocks. The OS is read in
 // exactly three places, wall_clock::since_epoch(), monotonic_clock::since_epoch() and
 // thread_cpu_clock::since_epoch() (the last through platform/clocks.h); timing code elsewhere in pygim
-// takes one of these as its clock and never reads a clock itself (#264; utils/logging.h's ScopeLog,
-// the BCP profiler and the fetch benchmark too, which test_layering's
+// takes one of these as its clock and never reads a clock itself (Debith, 2026-10-24;
+// utils/logging.h's ScopeLog, the BCP profiler and the fetch benchmark too, which test_layering's
 // test_time_is_read_in_one_header holds). A timestamp's clock is part of its type, so a wall-clock
 // moment cannot be subtracted from a monotonic one.
 

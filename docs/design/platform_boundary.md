@@ -190,7 +190,7 @@ symbol that is missing, a peak the kernel has not caught up with, procfs absent.
 | Option | What it is | Verdict |
 | --- | --- | --- |
 | **A. a type parameter per class** | `basic_posix_loader<Calls>`, `basic_linux_memory<Calls>`: the calls struct is a type whose static functions inline; the system's file holds only the struct and the alias | **chosen**: no cost at run time, the logic constexpr and proven everywhere, the calls struct an inventory of what pygim asks each system for |
-| B. a table of function pointers swapped at test time | one runtime table per component, a fake installed by a test hook | rejected: an indirect call on every probe, a hook in the library (#133), and the boundary's first decision (2026-10-31) already rejected a runtime interface |
+| B. a table of function pointers swapped at test time | one runtime table per component, a fake installed by a test hook | rejected: an indirect call on every probe, a test hook in the library, which a release never exports (Debith, 2026-10-02), and the boundary's first decision (2026-10-31) already rejected a runtime interface |
 | C. link-time substitution | a fake calls file compiled in place of the system's | rejected: per build, not per test, so the real and the fake cannot be proven in one run |
 
 The line it draws: wrap what only an operating system can answer, never the standard library
@@ -233,7 +233,7 @@ concept rules out.
 
 ## Sequence of work
 
-Each step a refactor under the tests as they are (#36), its own commit, the ratchet lowered with it:
+Each step a refactor under the tests as they are, its own commit, the ratchet lowered with it:
 
 1. This document, the ratchet (`test_the_operating_system_is_asked_only_behind_the_platform_boundary`), and the
    conditionals `main` has, behind the boundary: `native.h`, `files.h` (a path's text), `memory.h`,

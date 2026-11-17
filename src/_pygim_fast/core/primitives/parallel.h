@@ -27,8 +27,8 @@
 // Waiting is on 32-bit atomics, one per slot: libstdc++ on Linux sleeps on a 32-bit atomic's own
 // address (a futex), while a 64-bit one parks its waiters on a small shared table, spins first and
 // wakes all that hash alike — sixteen idle workers then burnt 390 ms of CPU and slowed the consumer
-// 1.8x (#269). That is libstdc++'s on Linux: a library whose native wait is another width (libc++
-// off Linux) takes every 32-bit wait through its table, where the herd remains.
+// 1.8x (measured 2026-10-25). That is libstdc++'s on Linux: a library whose native wait is another
+// width (libc++ off Linux) takes every 32-bit wait through its table, where the herd remains.
 //
 // CORE layer: pybind-free. A task may touch only what belongs to its index; next() is called from
 // one thread at a time.

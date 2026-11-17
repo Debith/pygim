@@ -97,9 +97,9 @@ def test_no_behaviour_branches_on_the_platform_outside_the_boundary():
     assert found == [], "a branch on a platform value outside platform/: give each system its class and let the family choose it once:\n" + "\n".join(found)
 
 
-# Timing code takes its clock (#264): only core/primitives/timestamp.h reads std::chrono's clocks, in
-# wall_clock and monotonic_clock. Everything else that times takes one of those as its clock, so a
-# test can hand it a manual one. Found 2026-10-30:
+# Timing code takes its clock (Debith, 2026-10-24): only core/primitives/timestamp.h reads
+# std::chrono's clocks, in wall_clock and monotonic_clock. Everything else that times takes one of
+# those as its clock, so a test can hand it a manual one. Found 2026-10-30:
 # ScopeLog, the BCP profiler and the fetch benchmark each read steady_clock themselves.
 CLOCK_READ = re.compile(r"std::chrono::(?:steady_clock|system_clock|high_resolution_clock)\b")
 CLOCK_HOME = ("core/primitives/timestamp.h",)
