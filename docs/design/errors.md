@@ -71,6 +71,14 @@ catch and nothing raised.
 - **`GimOptionError(value, options)`** keeps its arguments and its message, written in C.
   `GimException`'s message as a list joined by `sep`, which nothing used, is gone: the classes take
   arguments as Python's own do.
+- **A message is the same in every build** (Debith, 2026-11-17). Rejected: a
+  detail level that made messages vaguer in a release, so that an attacker learns less. Its default
+  would have come from `python -O`, and the application's wiring could set it. What reaches a user
+  is the application's to filter, as Django does with `DEBUG = False`. A vaguer message would also
+  take the detail out of the operator's logs, where an incident is debugged. And few deployments run
+  with `-O`, so the default would seldom have applied. What a message must not say, it never says,
+  in any build: a URL or a connection string may carry a password, so an error names its kind or
+  its host instead of repeating it.
 
 ## Open
 
