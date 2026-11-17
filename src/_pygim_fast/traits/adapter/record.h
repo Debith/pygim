@@ -123,7 +123,7 @@ namespace detail {
 /// with no record. A class made by gim_type will carry its record as a member instead; this table is
 /// for every other class.
 ///
-/// A RegistryCore over the hashed engine (#131), keyed by the class's address. Allocated once and never
+/// A RegistryCore over the hashed engine, keyed by the class's address. Allocated once and never
 /// destroyed: its weak references must not be released after Python has finalised. Every call holds
 /// the GIL.
 class RecordStore {

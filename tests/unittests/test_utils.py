@@ -9,9 +9,9 @@ from pygim import utils
 from traits_cases import IS_DUNDER, Raises
 
 
-# The cases are traits_cases.IS_DUNDER, one row per call (global #118). Python's own rule for a
-# dunder name is the one its enum machinery applies, enum._is_dunder (global #113): every row's
-# expected result is checked against it as well as against pygim's answer.
+# The cases are traits_cases.IS_DUNDER, one row per call. Python's own rule for a dunder name is the
+# one its enum machinery applies, enum._is_dunder: every row's expected result is checked against it
+# as well as against pygim's answer.
 @pytest.mark.parametrize("case", IS_DUNDER.cases())
 def test_is_dunder(case):
     expected = case["expected_result"]

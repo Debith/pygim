@@ -2,12 +2,12 @@
 // Python's enum machinery (enum._is_dunder), the private-name rule of its compiler (_Py_Mangle), and
 // the move of a name and a qualified name from one owner class to another.
 //
-// Each function is proven by a case table (case_table.h, global #118): one row per call, the
-// arguments first, the expected result after them, a case id last; within a table a baseline row
-// comes first and each group below it changes one argument. The expected results are Python's own
-// (_Py_Mangle, enum._is_dunder), written out by hand. The laws after the tables hold for every row
-// of their own small products. The Python side of the dunder rule is proven against
-// enum._is_dunder itself in tests/unittests/test_utils.py.
+// Each function is proven by a case table (case_table.h): one row per call, the arguments first,
+// the expected result after them, a case id last; within a table a baseline row comes first and
+// each group below it changes one argument. The expected results are Python's own (_Py_Mangle,
+// enum._is_dunder), written out by hand. The laws after the tables hold for every row of their own
+// small products. The Python side of the dunder rule is proven against enum._is_dunder itself in
+// tests/unittests/test_utils.py.
 //
 // This TU is part of the pygim.utils extension's sources (ext.utils.toml): every build compiles it,
 // so a violated row cannot produce a binary, and the diagnostic names the row's index. It

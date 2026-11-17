@@ -7,8 +7,8 @@ class never stored. The builder rewrites those names — and the qualified name 
 in the code and in every code object nested in it.
 
 The cases are ``traits_cases.CODE_BUILDER``: one row per call, argument columns then expected
-columns (global #118). Each row is checked against its literal expectations, and — where it applies
-— against Python's own compiler, compiling the same method inside a class named like the target.
+columns. Each row is checked against its literal expectations, and — where it applies — against
+Python's own compiler, compiling the same method inside a class named like the target.
 """
 
 import inspect

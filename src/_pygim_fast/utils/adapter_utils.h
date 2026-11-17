@@ -32,7 +32,7 @@ struct literal {
 static_assert(std::string_view{literal{"co_names"}.text} == "co_names");
 
 /// `Text` as an interned str: made on first use, inside a call and so under the GIL — never while the
-/// extension loads, when Windows holds no GIL (project #254) — and kept for the life of the process.
+/// extension loads, when Windows holds no GIL — and kept for the life of the process.
 /// One function, and so one str, per spelling; a failed first use throws and the next retries.
 /// Example: interned<"co_names">() is the str 'co_names', the same object on every call.
 template <literal Text>

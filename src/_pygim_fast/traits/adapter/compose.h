@@ -20,9 +20,10 @@
 // is not (every class inherits object.__lt__), and composing over it is what defining it would do.
 //
 // The kinds of member are classes, each with its own behaviour, held by Member (a std::variant,
-// pygim's #134): a kind says whether it is one, how it is rewritten and which code object says where
-// it was defined. A member no kind takes is refused by name — unless it is a dunder, which is the
-// trait class's own machinery (__module__, __doc__, __dict__) and stays behind.
+// chosen by type, never by an if-chain): a kind says whether it is one, how it is rewritten and
+// which code object says where it was defined. A member no kind takes is refused by name — unless
+// it is a dunder, which is the trait class's own machinery (__module__, __doc__, __dict__) and
+// stays behind.
 //
 // Composing a class that was itself composed into carries its record along: each member keeps the
 // trait it first came from and where that trait defined it; only `composed` names the new call. A

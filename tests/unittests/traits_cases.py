@@ -7,8 +7,8 @@ Two kinds of case, kept apart:
   (``callspace.py``; the models in ``python_names_callspace.py`` and ``traits_callspace.py``), with
   expectations from Python itself. This is the coverage.
 - **authored** — the tables below: hand-picked seed and edge rows, one per behaviour a reader asks
-  about, with expectations written out by hand from the contracts (global #118). They stay as
-  regression rows and as the page's worked examples; they are not the coverage.
+  about, with expectations written out by hand from the contracts. They stay as regression rows and
+  as the page's worked examples; they are not the coverage.
 
 The page docs/design/traits_cases.md is rendered from both — the generated cases' one-input
 comparisons and counts, then the authored rows — by ``python tests/unittests/traits_cases.py``;

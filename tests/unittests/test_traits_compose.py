@@ -8,7 +8,7 @@ it behaves as if written there: its private names, its qualified name and its ``
 the target already has is refused unless ``override=True``, and a refusal writes nothing.
 
 The cases are ``traits_cases.COMPOSE``, ``COMPOSED_MEMBERS`` and ``TRAITS_OF``: one row per call,
-argument columns then expected columns and effects (global #118).
+argument columns then expected columns and effects.
 """
 
 import re

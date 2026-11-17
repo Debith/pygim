@@ -1,8 +1,8 @@
 // tests/static/case_table.h — compile-time proofs written as case tables.
 //
 // A table is an array of rows; a row is one call — its arguments, then its expected result, then
-// a case id (global #118: argument columns, expected outcomes last). first_failing_row(rows, holds)
-// answers the index of the first row whose call does not give its expected result, so one
+// a case id (argument columns, expected outcomes last). first_failing_row(rows, holds) answers the
+// index of the first row whose call does not give its expected result, so one
 //
 //     static_assert(first_failing_row(mangled_rows, ...) == every_row_holds);
 //

@@ -172,9 +172,9 @@ def coverage(out_dir, gcov):
 
 
 def without_examples(header_text):
-    """The header without its own examples — the namespace-scope static_asserts under each function
-    (project #252). A mutant must compile for the probe and the every-build proof to be shown catching
-    it; whether the examples alone refuse it is reported apart (examples_refuse)."""
+    """The header without its own examples — the namespace-scope static_asserts under each function.
+    A mutant must compile for the probe and the every-build proof to be shown catching it; whether
+    the examples alone refuse it is reported apart (examples_refuse)."""
     kept, lines, index = [], header_text.splitlines(keepends=True), 0
     while index < len(lines):
         if not lines[index].startswith("static_assert("):

@@ -1,7 +1,7 @@
 // utils/python_names.h — Python's naming conventions: what kind of name a name is, and how Python
 // spells a private name inside a class. Dependency-free, pybind-free and constexpr: a base header.
 //
-// One family of rules, each matched to the place Python itself applies it (global #113):
+// One family of rules, each matched to the place Python itself applies it:
 //   is_dunder        enum._is_dunder — the rule Python's enum machinery uses
 //   is_private_name  the compiler's _Py_Mangle: which names it mangles inside a class body
 //   mangled          _Py_Mangle: `__secret` inside `class Trait:` is `_Trait__secret`

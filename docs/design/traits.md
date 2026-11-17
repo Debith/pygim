@@ -101,7 +101,7 @@ The kinds of member, and what composing does with each:
 | a function written in C++ | the callable, wrapped so it binds as a method | nothing: it has no Python code |
 | anything else (a constant, a nested class) | refused in the first iteration | — |
 
-The kinds are a pack of descriptors, one per kind, never an if-chain on the member's type (#134):
+The kinds are a pack of descriptors, one per kind, never an if-chain on the member's type:
 adding a kind is adding a descriptor, and the build proves the pack covers every kind.
 
 ## The code builder (built)
@@ -257,10 +257,10 @@ name truthfully. No test pins a wrong-answer case; it is left as the open choice
 
 Python's naming rules are not trait-specific, so they are not traits' (decided the same day): the
 dunder rule and the private-name rule live in `utils/python_names.h`, a dependency-free base header,
-each matched to where Python applies it — `enum._is_dunder`, the compiler's `_Py_Mangle` (global
-#113). Rejected: keeping them in a traits core (the rules belong to one family that `each`,
-`pygim.utils` and four hand-written Python call sites on `core/memory` already use), and folding them
-into `core_utils.h` (one more subject in a header of joining, units and rates).
+each matched to where Python applies it — `enum._is_dunder`, the compiler's `_Py_Mangle`. Rejected:
+keeping them in a traits core (the rules belong to one family that `each`, `pygim.utils` and four
+hand-written Python call sites on `core/memory` already use), and folding them into `core_utils.h`
+(one more subject in a header of joining, units and rates).
 
 ## Decided (2026-10-19) — the record, kept off the class
 
@@ -269,7 +269,7 @@ trait it came from, where the trait defined it, and where it was composed.
 
 | | Decision | Rejected, and why |
 |---|---|---|
-| R1 | For any class `compose()` accepts, the record lives in a side table in C++ (`traits/adapter/compose.h`, `RecordStore`): a `RegistryCore` over the hashed engine (#131), keyed by the class's address, each entry holding a weak reference to its class whose callback removes the entry while the class is destroyed, before its memory is freed. A class made by `gim_type` will carry its record as a private member instead, beside the unique id it is to have (open, below) | **the class attribute `__pygim_traits__`:** visible, so a trait member or the class's own attribute of that name collided with it (F2 crashed the interpreter, F6 broke `compose()`), and guarding the name only refused the collision; **a private slot on every class:** CPython gives a class none — its layout is its metaclass's, and a metaclass cannot gain a field from Python (measured: `nonempty __slots__ not supported for subtype of 'type'`); **a `WeakKeyDictionary`,** functools.singledispatch's table: it hashes and compares the class, so a metaclass whose `__hash__`/`__eq__` lie merges two classes' records (the test asks and is never answered); **no eviction:** CPython reuses a freed class's address almost every time (200 of 200 measured), so a dead class's record would be read as the new class's own (the test sees the reuse and fails when the callback does nothing) |
+| R1 | For any class `compose()` accepts, the record lives in a side table in C++ (`traits/adapter/compose.h`, `RecordStore`): a `RegistryCore` over the hashed engine (pygim's base for every keyed store), keyed by the class's address, each entry holding a weak reference to its class whose callback removes the entry while the class is destroyed, before its memory is freed. A class made by `gim_type` will carry its record as a private member instead, beside the unique id it is to have (open, below) | **the class attribute `__pygim_traits__`:** visible, so a trait member or the class's own attribute of that name collided with it (F2 crashed the interpreter, F6 broke `compose()`), and guarding the name only refused the collision; **a private slot on every class:** CPython gives a class none — its layout is its metaclass's, and a metaclass cannot gain a field from Python (measured: `nonempty __slots__ not supported for subtype of 'type'`); **a `WeakKeyDictionary`,** functools.singledispatch's table: it hashes and compares the class, so a metaclass whose `__hash__`/`__eq__` lie merges two classes' records (the test asks and is never answered); **no eviction:** CPython reuses a freed class's address almost every time (200 of 200 measured), so a dead class's record would be read as the new class's own (the test sees the reuse and fails when the callback does nothing) |
 | R2 | Composing a class that has a record carries the record along: in `compose(class1, class2)`, where `class2` was composed from traits, each member is attributed to the trait it first came from and where that trait defined it, and composed at the new call; `class2`'s own members are attributed to `class2` | attributing every member to `class2`: `class1` would forget the traits behind it, so `class1 << class2` would lose what `class2 << trait1 << trait2` knew |
 | R4 | The record is accurate (Debith, 2026-10-19: "A, accurately"): each entry keeps the object `compose()` left in the class — read from its own namespace after the writes, so a metaclass hook that stores something else is still followed — and `traits_of(cls)` lists only the members `cls` still holds as that object. A member replaced or deleted since is the class's own; R2 carries an entry only while the composed class still holds it, so `class1 << class2` attributes a member `class2` replaced to `class2` | **a log of what `compose()` once wrote:** after `Middle.greet = custom`, `traits_of(Middle)` still named the trait, and R2 carried that into every class composed from `Middle`, crediting `custom` to the trait and its line (found 2026-10-19, reproduced); **marking a replaced entry instead of dropping it:** a record that lists what is no longer there is the inaccuracy, kept |
 | R3 | No name is reserved: a member named `__pygim_traits__`, or a class's own attribute of that name, is an ordinary one; the guards that refused them (F2, F6) are removed | keeping them: with the record off the class the collision cannot happen, so they would refuse a legitimate name for nothing |
@@ -329,8 +329,8 @@ reject `price + tax`.
 | C. a base with class keywords, no decorator | `class Money(Quantity, magnitude=…, unit=…)` | typed; caught by the rebuild above |
 
 With it, the names: the module is `pygim.traits`; the decorator `quantified_value_object` (the
-owner's name) or `quantity` (Fowler's, *Analysis Patterns*) — global #105 asks for the domain's
-word.
+owner's name) or `quantity` (Fowler's, *Analysis Patterns*) — a domain type takes the domain's word,
+not the mechanism's.
 
 ## Decided by the evidence
 
@@ -340,11 +340,11 @@ What changes, each from a measurement or a rule:
 
 | The archive | Here | Why |
 |---|---|---|
-| rebuilt `types.CodeType` from a hand-kept table of arguments for Python 3.7–3.12 | `code.replace(...)` | the language's own since 3.8, so no table breaks on the next release (global #111) |
+| rebuilt `types.CodeType` from a hand-kept table of arguments for Python 3.7–3.12 | `code.replace(...)` | the language's own since 3.8, so no table breaks on the next release |
 | rewrote the names of the top-level code only | every nested code object as well | measured: a lambda inside a trait method still read `_Trait__secret` and raised `AttributeError` |
 | copied the closure as it was | the `__class__` cell rebound to the target | measured: `super()` raised `TypeError` |
 | functions only | a pack of member kinds | properties and class methods are members a trait needs |
-| provenance recorded only under `__debug__` | always, in a `TraitRecord` (a `RegistryCore` over the flat engine), kept off the class and dropped when the class is collected (2026-10-19, below) | `python -O` silently dropped it; every keyed store is a `RegistryCore` (#131) |
+| provenance recorded only under `__debug__` | always, in a `TraitRecord` (a `RegistryCore` over the flat engine), kept off the class and dropped when the class is collected (2026-10-19, below) | `python -O` silently dropped it; every keyed store is a `RegistryCore` |
 | Python | C++ core and adapter | the definition of done: behaviour lives in C++ |
 
 ## Open
@@ -362,11 +362,11 @@ What changes, each from a measurement or a rule:
   a trailing underscore escaping a name), `_inventory.py` (a public module) and `test_layering.py`
   (an internal name) each write a rule by hand. Once this branch is in, they use `pygim.utils`, with
   the internal and the escaped name added to `python_names.h` beside the dunder and the private name.
-- **The uninitialised-instance guard.** `pygim::adapter::refuse_uninitialised(m)` (`utils/initialised.h`,
-  pygim #150) turns a method called on an instance made by `Cls.__new__(Cls)` into a `TypeError`
-  instead of a crash. It is on `core/pathlike-markdown` (PR #37), not on `main`; whichever of that PR
-  and this one lands second adds it as the last statement of `traits/bindings.cpp`, and #37's
-  `test_uninitialised_instances.py` enforces it.
+- **The uninitialised-instance guard.** `pygim::adapter::refuse_uninitialised(m)`
+  (`utils/initialised.h`) turns a method called on an instance made by `Cls.__new__(Cls)` into a
+  `TypeError` instead of a crash. It is on `core/pathlike-markdown` (PR #37), not on `main`;
+  whichever of that PR and this one lands second adds it as the last statement of
+  `traits/bindings.cpp`, and #37's `test_uninitialised_instances.py` enforces it.
 - **Static types.** Composed methods are invisible to type checkers, as anything added at run time
   is. `pygim stubs` writes pygim's own stubs; whether it should also write stubs for a user's
   composed classes, or a typing construct should declare them, is open.

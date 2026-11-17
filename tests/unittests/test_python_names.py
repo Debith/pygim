@@ -5,7 +5,7 @@ Every build proves the rules at compile time: tests/static/python_names_proofs.c
 tests/static/python_names_callspace_proofs.cpp, rendered from the model in python_names_callspace.py
 with Python's answers. These check that the rendered proof is still the model's, and that the rule
 Python can call, pygim.utils.is_dunder, answers as Python's own rule, enum._is_dunder, does
-(global #113) over the model's whole name domain.
+over the model's whole name domain.
 """
 
 import enum

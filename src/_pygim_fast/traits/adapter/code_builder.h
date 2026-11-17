@@ -169,7 +169,7 @@ private:
     };
 
     py::object m_code;
-    python_names::Reowning m_rules;  // each nested builder gets a copy: a few names, once per class at import (#255)
+    python_names::Reowning m_rules;  // each nested builder gets a copy: a few names, once per class at import
 };
 
 }  // namespace pygim::traits

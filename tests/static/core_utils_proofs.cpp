@@ -2,10 +2,10 @@
 // library allows. Text formatting stays at run time, because std::format is not constexpr; the
 // numbers it formats are computed by constexpr functions and proven here.
 //
-// Each function is proven by a case table (case_table.h, global #118): one row per call, the
-// arguments first, the expected result after them, a case id last; a baseline row first, then
-// groups that change one argument. The expected values are the units' definitions (1 KiB = 1024
-// bytes, 8 bits = 1 byte, 1 ms = 1/1000 s), written out by hand.
+// Each function is proven by a case table (case_table.h): one row per call, the arguments first,
+// the expected result after them, a case id last; a baseline row first, then groups that change one
+// argument. The expected values are the units' definitions (1 KiB = 1024 bytes, 8 bits = 1 byte,
+// 1 ms = 1/1000 s), written out by hand.
 //
 // This TU is part of the pygim.utils extension's sources (ext.utils.toml): every build compiles it,
 // so a violated row cannot produce a binary, and the diagnostic names the row's index. It
