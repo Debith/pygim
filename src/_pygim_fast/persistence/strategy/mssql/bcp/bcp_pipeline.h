@@ -18,6 +18,7 @@
 
 #include <arrow/table.h>
 #include <arrow/table_builder.h>
+#include "../../../../core/arrow/bridge.h"
 #include "../../../../core/primitives/parallel/for_each.h"
 #include "../../../../core/primitives/quick_timer.h"
 #include "../../../../errors/core.h"
@@ -409,9 +410,7 @@ inline void finalize_bcp(BcpContext& ctx) {
         std::shared_ptr<arrow::RecordBatch> batch;
         {
             BCP_PROF_SCOPE(prof, reader_next);
-            auto st = reader->ReadNext(&batch);
-            if (!st.ok())
-                throw pygim::errors::backend_error("Failed reading Arrow batch: " + st.ToString());
+            arrow_bridge::check(reader->ReadNext(&batch), "reading an Arrow batch");
         }
         if (!batch) break;
 
@@ -534,9 +533,7 @@ inline void finalize_bcp(BcpContext& ctx) {
                     std::shared_ptr<arrow::RecordBatch> batch;
                     {
                         BCP_PROF_SCOPE(prof, reader_next);
-                        auto st = reader->ReadNext(&batch);
-                        if (!st.ok())
-                            throw pygim::errors::backend_error("Failed reading Arrow batch: " + st.ToString());
+                        arrow_bridge::check(reader->ReadNext(&batch), "reading an Arrow batch");
                     }
                     if (!batch) break;
 

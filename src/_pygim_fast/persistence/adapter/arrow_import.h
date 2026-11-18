@@ -14,7 +14,7 @@
 #include <arrow/table.h>
 #include <pybind11/pybind11.h>
 #include <memory>
-#include <stdexcept>
+#include "../../core/arrow/bridge.h"
 #include "../../errors/adapter.h"
 
 namespace pygim::adapter {
@@ -31,15 +31,12 @@ import_record_batch_reader(py::object obj, int depth = 0) {
     // 1. PyCapsule protocol (ArrowArrayStream) — modern standard
     if (py::hasattr(obj, "__arrow_c_stream__")) {
         auto capsule = obj.attr("__arrow_c_stream__")();
-        auto* c_stream = reinterpret_cast<ArrowArrayStream*>(
-            PyCapsule_GetPointer(capsule.ptr(), "arrow_array_stream"));
-        if (!c_stream)
-            throw pygim::errors::backend_error("Arrow PyCapsule returned null stream pointer");
-
-        auto result = arrow::ImportRecordBatchReader(c_stream);
-        if (!result.ok())
-            throw pygim::errors::backend_error("Failed to import Arrow stream: " + result.status().ToString());
-        return *result;
+        auto* c_stream = static_cast<ArrowArrayStream*>(PyCapsule_GetPointer(capsule.ptr(), "arrow_array_stream"));
+        if (c_stream == nullptr) {   // Python said why: the capsule's name, or no capsule
+            const py::error_already_set cause;
+            pygim::errors::raise_from(cause, &pygim::errors::table::backend_error, "__arrow_c_stream__ gave no Arrow stream");
+        }
+        return arrow_bridge::value_of(arrow::ImportRecordBatchReader(c_stream), "importing an Arrow stream");
     }
 
     // 2. PyArrow RecordBatchReader._export_to_c — legacy fallback
@@ -48,10 +45,7 @@ import_record_batch_reader(py::object obj, int depth = 0) {
         auto addr = reinterpret_cast<uintptr_t>(&c_stream);
         obj.attr("_export_to_c")(addr);
 
-        auto result = arrow::ImportRecordBatchReader(&c_stream);
-        if (!result.ok())
-            throw pygim::errors::backend_error("Failed to import via _export_to_c: " + result.status().ToString());
-        return *result;
+        return arrow_bridge::value_of(arrow::ImportRecordBatchReader(&c_stream), "importing an Arrow stream by _export_to_c");
     }
 
     // 3. Polars DataFrame — convert via to_arrow() (max 1 level of recursion)
@@ -73,10 +67,7 @@ import_record_batch_reader(py::object obj, int depth = 0) {
 inline std::shared_ptr<arrow::Table>
 import_table(py::object obj) {
     auto reader = import_record_batch_reader(std::move(obj));
-    auto result = reader->ToTable();
-    if (!result.ok())
-        throw pygim::errors::backend_error("Failed to materialize Arrow Table: " + result.status().ToString());
-    return *result;
+    return arrow_bridge::value_of(reader->ToTable(), "reading the Arrow stream into a table");
 }
 
 } // namespace pygim::adapter

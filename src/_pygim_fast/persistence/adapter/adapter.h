@@ -28,47 +28,25 @@
 #include <utility>
 #include <vector>
 #include "../../errors/core.h"
+#include "../core/format.h"
 
 namespace pygim::adapter {
 
 namespace py = pybind11;
-
-// ── Format enum ─────────────────────────────────────────────────
-
-/// Output format for edge conversion (Arrow ↔ Python DataFrame).
-/// Runtime member on RepositoryAdapter, not a template parameter.
-enum class Format { Polars, Pandas };
-
-/// Convert format string from Python boundary to enum.
-/// Throws py::value_error on unknown format (prevents constexpr evaluation for invalid inputs).
-constexpr Format parse_format(std::string_view fmt) {
-    if (fmt == "polars") return Format::Polars;
-    if (fmt == "pandas") return Format::Pandas;
-    throw pygim::errors::option_error(std::string(fmt), {"polars", "pandas"});
-}
-
-/// Human-readable format label for logging/repr.
-constexpr const char* format_name(Format f) {
-    switch (f) {
-        case Format::Polars: return "polars";
-        case Format::Pandas: return "pandas";
-    }
-    std::unreachable();
-}
 
 // ── RepositoryAdapter ───────────────────────────────────────────
 
 /// RepositoryAdapter<Backend> — Python-facing repository with format + transforms.
 ///
 /// Template on Backend only (one instantiation per DB engine).
-/// Format is a runtime enum member selected at construction.
+/// core::Format is a runtime enum member selected at construction.
 /// Pre/post transforms are py::function hooks run at the Python boundary.
 ///
 /// Mirrors Registry/Factory adapter: owns core, handles Python boundary.
 template <core::BackendPolicy Backend>
 class RepositoryAdapter {
     core::Repository<Backend>  m_repo;
-    Format                     m_format;
+    core::Format                     m_format;
     int64_t                    m_batch_size;
     int64_t                    m_block_size;
     int                        m_packet_size;
@@ -79,7 +57,7 @@ class RepositoryAdapter {
 
 public:
     RepositoryAdapter(std::shared_ptr<core::ConnectionPool<Backend>> pool,
-                      Format format,
+                      core::Format format,
                       int64_t batch_size = 100000,
                       const std::string& table_hint = "TABLOCK",
                       int bcp_workers = 1,
@@ -94,14 +72,14 @@ public:
         , m_bcp_workers(bcp_workers)
     {
         PYGIM_LOG_FMT("[RepositoryAdapter<%s>] created (format=%s, batch_size=%lld, hint=%s, workers=%d)\n",
-                      Backend::name(), format_name(m_format),
+                      Backend::name(), core::format_name(m_format),
                       static_cast<long long>(m_batch_size),
                       m_table_hint.c_str(), m_bcp_workers);
     }
 
     [[nodiscard]]
     static RepositoryAdapter create(std::string_view conn_str,
-                                    Format format,
+                                    core::Format format,
                                     std::size_t pool_size = 4,
                                     int64_t batch_size = 100000,
                                     const std::string& table_hint = "TABLOCK",
@@ -213,7 +191,7 @@ public:
 
         // Export Arrow Table → Python DataFrame (GIL held)
         auto df = export_table(std::move(result.table),
-                               m_format == Format::Polars);
+                               m_format == core::Format::Polars);
 
         run_transforms("post_load", m_post_transforms);
         return df;
@@ -232,7 +210,7 @@ public:
         }();
 
         auto df = export_table(std::move(result.table),
-                               m_format == Format::Polars);
+                               m_format == core::Format::Polars);
 
         run_transforms("post_load", m_post_transforms);
         return df;
@@ -240,11 +218,11 @@ public:
 
     // ── Introspection ────────────────────────────────────────
 
-    [[nodiscard]] Format format() const { return m_format; }
+    [[nodiscard]] core::Format format() const { return m_format; }
 
     [[nodiscard]] std::string repr() const {
         return std::format("DataStore(backend={}, format={}, transforms={}/{})",
-                           Backend::name(), format_name(m_format),
+                           Backend::name(), core::format_name(m_format),
                            m_pre_transforms.size(), m_post_transforms.size());
     }
 

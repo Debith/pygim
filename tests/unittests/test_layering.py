@@ -22,6 +22,8 @@ CORE = sorted(ROOT.glob("mapping/*.h")) + sorted(ROOT.glob("platform/**/*.h")) +
     ROOT / "pathlike" / "path_table.h",
     ROOT / "pathlike" / "engine_list.h",
     ROOT / "errors" / "core.h",
+    ROOT / "core" / "arrow" / "bridge.h",
+    ROOT / "persistence" / "core" / "format.h",
 ]
 PYBIND = re.compile(r'#\s*include\s*[<"]pybind11/')
 

@@ -386,13 +386,7 @@ inline core::LoadResult execute_parallel(
     } else if (tables.size() == 1) {
         combined = std::move(tables[0]);
     } else {
-        auto concat_result = arrow::ConcatenateTables(tables);
-        if (!concat_result.ok()) {
-            throw pygim::errors::backend_error(
-                std::string("parallel_load: ConcatenateTables failed: ") +
-                concat_result.status().ToString());
-        }
-        combined = std::move(*concat_result);
+        combined = arrow_bridge::value_of(arrow::ConcatenateTables(tables), "parallel_load: concatenating the tables");
     }
     metrics.concat_seconds = pygim::primitives::seconds_of(timer.stop_lap(LoadPhase::concat));
 

@@ -13,9 +13,8 @@
 #include <arrow/record_batch.h>
 #include <arrow/table.h>
 #include <pybind11/pybind11.h>
-#include <cstring>
 #include <memory>
-#include <stdexcept>
+#include "../../core/arrow/bridge.h"
 #include "../../errors/core.h"
 
 namespace pygim::adapter {
@@ -34,20 +33,7 @@ inline py::object export_table(std::shared_ptr<arrow::Table> table,
     // Wrap Table in a TableBatchReader (no copy — reads existing chunks)
     auto reader = std::make_shared<arrow::TableBatchReader>(*table);
 
-    // RAII wrapper: releases the stream (if still active) then frees the struct.
-    auto stream_deleter = [](ArrowArrayStream* s) {
-        if (s->release) s->release(s);
-        delete s;
-    };
-    std::unique_ptr<ArrowArrayStream, decltype(stream_deleter)> c_stream(
-        new ArrowArrayStream, stream_deleter);
-    std::memset(c_stream.get(), 0, sizeof(ArrowArrayStream));
-
-    auto status = arrow::ExportRecordBatchReader(reader, c_stream.get());
-    if (!status.ok()) [[unlikely]] {
-        throw pygim::errors::backend_error("export_table: ExportRecordBatchReader failed: "
-                                 + status.ToString());
-    }
+    arrow_bridge::exported_stream c_stream(reader);
 
     // Import into PyArrow via C Data Interface address.
     // _import_from_c consumes the stream (sets release to nullptr).
@@ -55,9 +41,7 @@ inline py::object export_table(std::shared_ptr<arrow::Table> table,
     auto addr = py::int_(reinterpret_cast<uintptr_t>(c_stream.get()));
     auto reader_obj = pa.attr("RecordBatchReader").attr("_import_from_c")(addr);
 
-    // _import_from_c consumed the stream — release is now nullptr.
-    // unique_ptr destructor will call delete (release guard is a no-op).
-    c_stream.reset();
+    // _import_from_c consumed the stream, so its release is null; c_stream frees only the struct.
 
     auto pa_table = reader_obj.attr("read_all")();
 

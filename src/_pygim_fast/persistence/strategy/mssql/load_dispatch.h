@@ -41,8 +41,6 @@ struct ColumnDispatch {
 
 namespace detail {
 
-using core::detail::check_arrow;
-
 // ── Fixed-width types ───────────────────────────────────────────
 // Each calls the typed arrow::ArrayBuilder directly via builder_at(col),
 // bypassing ArrowBuilder's internal switch.
@@ -50,7 +48,7 @@ using core::detail::check_arrow;
 inline void append_block_int8(core::ArrowBuilder& b, std::size_t c,
                               const FetchBuffer& buf, int64_t n, const uint8_t* v) {
     auto* builder = static_cast<arrow::Int8Builder*>(b.builder_at(c));
-    check_arrow(builder->AppendValues(
+    arrow_bridge::check(builder->AppendValues(
         reinterpret_cast<const int8_t*>(buf.data.data()), n, v), "int8");
     b.track_rows(c);
 }
@@ -58,7 +56,7 @@ inline void append_block_int8(core::ArrowBuilder& b, std::size_t c,
 inline void append_block_int16(core::ArrowBuilder& b, std::size_t c,
                                const FetchBuffer& buf, int64_t n, const uint8_t* v) {
     auto* builder = static_cast<arrow::Int16Builder*>(b.builder_at(c));
-    check_arrow(builder->AppendValues(
+    arrow_bridge::check(builder->AppendValues(
         reinterpret_cast<const int16_t*>(buf.data.data()), n, v), "int16");
     b.track_rows(c);
 }
@@ -66,7 +64,7 @@ inline void append_block_int16(core::ArrowBuilder& b, std::size_t c,
 inline void append_block_int32(core::ArrowBuilder& b, std::size_t c,
                                const FetchBuffer& buf, int64_t n, const uint8_t* v) {
     auto* builder = static_cast<arrow::Int32Builder*>(b.builder_at(c));
-    check_arrow(builder->AppendValues(
+    arrow_bridge::check(builder->AppendValues(
         reinterpret_cast<const int32_t*>(buf.data.data()), n, v), "int32");
     b.track_rows(c);
 }
@@ -74,7 +72,7 @@ inline void append_block_int32(core::ArrowBuilder& b, std::size_t c,
 inline void append_block_int64(core::ArrowBuilder& b, std::size_t c,
                                const FetchBuffer& buf, int64_t n, const uint8_t* v) {
     auto* builder = static_cast<arrow::Int64Builder*>(b.builder_at(c));
-    check_arrow(builder->AppendValues(
+    arrow_bridge::check(builder->AppendValues(
         reinterpret_cast<const int64_t*>(buf.data.data()), n, v), "int64");
     b.track_rows(c);
 }
@@ -82,7 +80,7 @@ inline void append_block_int64(core::ArrowBuilder& b, std::size_t c,
 inline void append_block_float(core::ArrowBuilder& b, std::size_t c,
                                const FetchBuffer& buf, int64_t n, const uint8_t* v) {
     auto* builder = static_cast<arrow::FloatBuilder*>(b.builder_at(c));
-    check_arrow(builder->AppendValues(
+    arrow_bridge::check(builder->AppendValues(
         reinterpret_cast<const float*>(buf.data.data()), n, v), "float");
     b.track_rows(c);
 }
@@ -90,7 +88,7 @@ inline void append_block_float(core::ArrowBuilder& b, std::size_t c,
 inline void append_block_double(core::ArrowBuilder& b, std::size_t c,
                                 const FetchBuffer& buf, int64_t n, const uint8_t* v) {
     auto* builder = static_cast<arrow::DoubleBuilder*>(b.builder_at(c));
-    check_arrow(builder->AppendValues(
+    arrow_bridge::check(builder->AppendValues(
         reinterpret_cast<const double*>(buf.data.data()), n, v), "double");
     b.track_rows(c);
 }
@@ -98,7 +96,7 @@ inline void append_block_double(core::ArrowBuilder& b, std::size_t c,
 inline void append_block_fixed_binary(core::ArrowBuilder& b, std::size_t c,
                                       const FetchBuffer& buf, int64_t n, const uint8_t* v) {
     auto* builder = static_cast<arrow::FixedSizeBinaryBuilder*>(b.builder_at(c));
-    check_arrow(builder->AppendValues(buf.data.data(), n, v), "fixed_binary");
+    arrow_bridge::check(builder->AppendValues(buf.data.data(), n, v), "fixed_binary");
     b.track_rows(c);
 }
 

@@ -17,6 +17,7 @@
 #include <stdexcept>
 #include <string>
 #include <vector>
+#include "../../core/arrow/bridge.h"
 #include "../../errors/core.h"
 
 namespace pygim::core {
@@ -26,12 +27,6 @@ namespace pygim::core {
 // ────────────────────────────────────────────────────────────────
 
 namespace detail {
-
-/// Throw on non-OK Arrow status.  Keeps call-sites terse.
-inline void check_arrow(const arrow::Status& s, const char* context) {
-    if (!s.ok()) [[unlikely]]
-        throw pygim::errors::backend_error(std::string(context) + ": " + s.ToString());
-}
 
 /// Howard Hinnant's civil_from_days — days since Unix epoch from y/m/d.
 /// Public domain algorithm: https://howardhinnant.github.io/date_algorithms.html
@@ -97,7 +92,7 @@ public:
         m_builders.reserve(static_cast<std::size_t>(m_schema->num_fields()));
         for (int i = 0; i < m_schema->num_fields(); ++i) {
             auto result = arrow::MakeBuilder(m_schema->field(i)->type(), pool);
-            detail::check_arrow(result.status(), "ArrowBuilder::ctor MakeBuilder");
+            arrow_bridge::check(result.status(), "ArrowBuilder::ctor MakeBuilder");
             m_builders.push_back(std::move(result).ValueUnsafe());
         }
     }
@@ -118,7 +113,7 @@ public:
     {
         auto* b = static_cast<arrow::BooleanBuilder*>(m_builders[col].get());
         // Reserve once, then use Unsafe appends to avoid per-element capacity checks.
-        detail::check_arrow(b->Reserve(count), "append_bool Reserve");
+        arrow_bridge::check(b->Reserve(count), "append_bool Reserve");
         for (int64_t i = 0; i < count; ++i) {
             if (valid_bytes && !valid_bytes[i]) {
                 b->UnsafeAppendNull();
@@ -139,13 +134,13 @@ public:
                         int64_t count, int64_t stride)
     {
         auto* b = static_cast<arrow::StringBuilder*>(m_builders[col].get());
-        detail::check_arrow(b->Reserve(count), "append_strings Reserve");
+        arrow_bridge::check(b->Reserve(count), "append_strings Reserve");
         for (int64_t i = 0; i < count; ++i) {
             if (indicators[i] < 0) {
                 b->UnsafeAppendNull();
             } else {
                 // Append copies into the builder's buffer — safe even if stride > length.
-                detail::check_arrow(
+                arrow_bridge::check(
                     b->Append(data + i * stride, static_cast<int32_t>(indicators[i])),
                     "append_strings Append");
             }
@@ -161,12 +156,12 @@ public:
                        int64_t count, int64_t stride)
     {
         auto* b = static_cast<arrow::BinaryBuilder*>(m_builders[col].get());
-        detail::check_arrow(b->Reserve(count), "append_binary Reserve");
+        arrow_bridge::check(b->Reserve(count), "append_binary Reserve");
         for (int64_t i = 0; i < count; ++i) {
             if (indicators[i] < 0) {
                 b->UnsafeAppendNull();
             } else {
-                detail::check_arrow(
+                arrow_bridge::check(
                     b->Append(data + i * stride, static_cast<int32_t>(indicators[i])),
                     "append_binary Append");
             }
@@ -189,7 +184,7 @@ public:
             m_scratch_i32[static_cast<std::size_t>(i)] = detail::days_from_civil(
                 ds[i].year, ds[i].month, ds[i].day);
         }
-        detail::check_arrow(
+        arrow_bridge::check(
             b->AppendValues(m_scratch_i32.data(), count, valid_bytes),
             "append_dates AppendValues");
 
@@ -216,7 +211,7 @@ public:
                             + static_cast<int64_t>(ts[i].fraction) / 1000;
             m_scratch_i64[static_cast<std::size_t>(i)] = day_us + time_us;
         }
-        detail::check_arrow(
+        arrow_bridge::check(
             b->AppendValues(m_scratch_i64.data(), count, valid_bytes),
             "append_timestamps AppendValues");
 
@@ -242,7 +237,7 @@ public:
                 + static_cast<int64_t>(tms[i].second)   *     1'000'000LL
                 + static_cast<int64_t>(tms[i].fraction) / 10;  // 100ns → µs
         }
-        detail::check_arrow(
+        arrow_bridge::check(
             b->AppendValues(m_scratch_i64.data(), count, valid_bytes),
             "append_times_ext AppendValues");
 
@@ -259,7 +254,7 @@ public:
 
         for (auto& builder : m_builders) {
             auto result = builder->Finish();
-            detail::check_arrow(result.status(), "ArrowBuilder::finish");
+            arrow_bridge::check(result.status(), "ArrowBuilder::finish");
             columns.push_back(std::move(result).ValueUnsafe());
         }
 
