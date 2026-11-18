@@ -80,8 +80,34 @@ class as it reaches Python:
 | `pygim::errors::option_error(value, options)` | `GimOptionError(value, options)` |
 | `pygim::errors::error(message)` | `GimError(message)` |
 
-Code that holds the Python values raises the Python class directly (`errors::raise`), so the
-caller's own key object, not a C++ copy of it, is the error's `args[0]`.
+Adapter code raises every failure that reaches Python with `errors::raise`, so the caller's own
+objects, not C++ copies of them, are the error's arguments. It throws no core class: one thrown there
+is a rule that is not Python's, sitting in the adapter, and it moves to the core, where it can run
+with the GIL released once the adapter has read its arguments into C++ values. `test_layering`
+refuses a core class thrown in adapter code; the known ones are pathlike's parsing, its conversion
+to Python and its UTF-8 checks, which move to `pygim.content` (`docs/design/content.md`).
+
+| | Before | Now |
+|---|---|---|
+| `Duration(parsecs=1)` | the adapter looked the unit up and listed the units | `time_unit::called()` in the core; the adapter reads the name and the amount |
+| `each([1, 2]).nope` | `throw missing_attribute(...)` in the adapter | `raise(&table::missing_attribute_error, ..., name, obj)` |
+| an Arrow status not OK | nine hand-written conversions | `arrow_bridge::check()` and `value_of()` (`core/arrow/bridge.h`) |
+
+## An error that replaces another keeps it
+
+An error raised because another one happened keeps that one as its `__cause__`, as Python's
+`raise X from e` does, so the reason Python or a library gave stays in the traceback:
+
+- adapter code: `errors::raise_from(e, &table::signature_error, "...")`, with `e` the
+  `error_already_set` it caught (autowire's `inspect.signature` and `get_type_hints`, gimdict's sum
+  strategy, a capsule with no Arrow stream);
+- core code: `std::throw_with_nested(pygim::errors::parse_error(...))` inside the handler, the
+  standard library's own form; the translator turns each nested exception into the next
+  `__cause__` (YAML's parse error in a file nests the line-level one its callback threw).
+
+A missing attribute names the attribute and the object asked, as Python's own `AttributeError`
+does (`name=`, `obj=`), so a traceback suggests the name meant: `each([1, 2]).reel` says
+`'int' object has no attribute 'reel'` and "Did you mean: 'real'?".
 
 The messages are made once, in `errors/core.h`: `what()` says them in C++, and the Python classes'
 `__str__` call the same functions, so the two cannot drift apart. A missing key lists up to ten
@@ -148,6 +174,23 @@ catch and nothing raised.
   truth. A pickled one drops `within`, as a pickled `AttributeError` drops `obj`.
 - **Every raise site converted** (Debith: "all"): each of pygim's raises becomes a class of
   `pygim.errors`, so `except GimError` holds for all of them.
+
+## Decided and rejected (2026-11-18)
+
+- **A failure that reaches Python from adapter code goes through `errors::raise`** (Debith: "if the
+  exception is propagated to Python, it should go to raise"), and the adapter code that threw core
+  classes was split: 22 checks on the Python call raise, 12 rules moved to the core (durations,
+  datagen's arguments, the Arrow conversions, persistence's format name). Rejected: `raise()` only
+  for an error that carries a Python object, checked at compile time, with core classes thrown
+  everywhere else, which kept core rules in the adapter and mixed both calls in one file for a
+  reason no reader sees.
+- **Python values become C++ values where they enter, and the GIL is released for the rest**
+  ("direct conversion to c++ types from python types should be preferable and then c++ do rest of
+  the parsing outside the GIL"): datagen reads its schema, then generates with the GIL released.
+  Not for work of a few operations, where taking the GIL back can wait a switch interval (5 ms).
+- **The cause is kept in both layers** ("my intention was to replicate this even in c++ exception
+  level"). Rejected: clearing Python's error and raising pygim's text alone.
+- **A missing attribute carries `name` and `obj`** ("this improves traceability").
 
 ## Open
 
