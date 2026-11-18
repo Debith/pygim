@@ -82,7 +82,8 @@ public:
      * \param[in] name Lookup key for the creator.
      * \param[in] creator Callable object used to create a product.
      * \param[in] override_existing When `false`, duplicate keys throw; when `true`, missing keys throw.
-     * \throws std::runtime_error On invalid override state.
+     * \throws pygim::errors::duplicate_key on a duplicate without override; pygim::errors::missing_key
+     *         on override with nothing to override.
      * \note Exists to centralize creator lifecycle and preserve strict override semantics.
      */
     void register_creator(const Key& name, Creator creator, bool override_existing = false) {
@@ -93,7 +94,7 @@ public:
      * \brief Retrieve a previously registered creator by key.
      * \param[in] name Creator key.
      * \return Stored creator callable.
-     * \throws std::runtime_error If key is unknown.
+     * \throws pygim::errors::missing_key if key is unknown.
      * \note Exists so call sites can separate "lookup" from "invoke" where needed.
      */
     [[nodiscard]] Creator get_creator(const Key& name) const {
@@ -111,7 +112,7 @@ public:
      * \param[in] name Creator key.
      * \param[in] invoke Invocation strategy used to execute the creator.
      * \return Created and validated product.
-     * \throws std::runtime_error If key is unknown or validation fails.
+     * \throws pygim::errors::missing_key if key is unknown; pygim::errors::invalid_value if validation fails.
      * \note Exists to keep invocation policy decoupled from storage and validation policy.
      */
     template<class InvokeFn>

@@ -185,7 +185,7 @@ public:
      * \param[in] value Value to store.
      * \param[in] override_existing `false` forbids duplicates, `true` requires prior existence.
      * \return void.
-     * \throws std::runtime_error On duplicate insert or missing override target.
+     * \throws pygim::errors::duplicate_key on duplicate insert; pygim::errors::missing_key on a missing override target.
      * \note Exists to enforce deterministic override behavior used by Python API contracts —
      *       and, in constant evaluation, to turn a duplicate into a build error.
      */

@@ -10,6 +10,7 @@
 #include "../../utils/hash.h"
 #include "core.h"
 #include "../../errors/adapter.h"
+#include "../common/adapter_validation.h"
 
 namespace pygim {
 
@@ -148,33 +149,14 @@ class Registry {
      * \tparam R Concrete registry instantiation selected by variant.
      * \param[in] key Python key in object form or `(thing_or_id, name)` tuple form.
      * \return Concrete policy key.
-     * \throws py::type_error On malformed tuple, invalid name type, or policy-key mismatch.
+     * \throws ArgumentError on a malformed tuple; UnrecognizedTypeError on a name that is no str, or a key the policy does not take.
      * \note Exists to centralize Python parsing rules and keep core key handling pure C++.
      */
     template<class R>
     static typename R::key_type make_key(py::object key) {
-        py::object first;
-        py::object second;
-
-        if (py::isinstance<py::tuple>(key)) {
-            if (py::len(key) != 2) {
-                throw pygim::errors::argument_error("Registry key tuple must be (thing_or_id, name|None)");
-            }
-            py::tuple tuple_key = py::reinterpret_borrow<py::tuple>(key);
-            first = tuple_key[0];
-            second = tuple_key[1];
-        } else {
-            first = key;
-            second = py::none();
-        }
-
-        std::string name;
-        if (!second.is_none()) {
-            if (!py::isinstance<py::str>(second)) {
-                pygim::errors::raise(&pygim::errors::table::unrecognized_type_error, second, py::make_tuple(py::handle(reinterpret_cast<PyObject*>(&PyUnicode_Type)), py::none()), "name");
-            }
-            name = second.cast<std::string>();
-        }
+        const wiring::detail::python_key parts(key, "Registry", "(thing_or_id, name|None)");
+        const py::object& first = parts.thing();
+        std::string name = parts.name().value_or("");
 
         using key_type = typename R::key_type;
         if constexpr (std::is_same_v<key_type, QualnameKeyPolicy::key_type>) {
@@ -307,7 +289,7 @@ public:
 
     [[nodiscard]] py::object find_id(py::object id, py::object name = py::none()) const {
         if (m_policy != KeyPolicyKind::Qualname) {
-            throw pygim::errors::invalid_state("find_id is only available for qualname policy");
+            pygim::errors::raise(&pygim::errors::table::invalid_state_error, "find_id is only available for qualname policy");
         }
         if (!py::isinstance<py::str>(id)) {
             return py::none();

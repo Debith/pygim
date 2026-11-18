@@ -147,7 +147,7 @@ public:
     template <one_of<timer_started, lap_started, lap_stopped, timer_finished> E>
     void add_hook(py::function callback) {
         auto* callbacks = std::get_if<timer_hooks>(&m_kind);
-        if (callbacks == nullptr) throw pygim::errors::argument_error("only a Report.hooks() report takes hooks");
+        if (callbacks == nullptr) pygim::errors::raise(&pygim::errors::table::argument_error, "only a Report.hooks() report takes hooks");
         callbacks->add<E>(calling(E{}, std::move(callback)));
     }
 

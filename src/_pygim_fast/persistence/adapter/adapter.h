@@ -120,7 +120,7 @@ public:
     /// @param bcp_workers   Override worker count; -1 uses the instance default.
     /// @return py::dict with timing metrics (total/connect/bind/row_loop/
     ///         batch_flush_seconds) and row counts.
-    /// @throws std::runtime_error on zero rows, ODBC errors, or unsupported types.
+    /// @throws InvalidValueError on zero rows, BackendError on an ODBC error, UnsupportedColumnTypeError on an unsupported type.
     py::dict save(py::object data, std::string_view table_name, int bcp_workers = -1) {
         PYGIM_TIMED_SCOPE("RepositoryAdapter::save");
         run_transforms("pre_save", m_pre_transforms);

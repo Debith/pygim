@@ -181,7 +181,8 @@ template <Engine... Es>
     return out;
 }
 
-// None or "" -> auto (nullptr); a known selector -> its engine; else ValueError.
+// None or "" -> auto (nullptr); a known selector -> its engine; another str, GimOptionError naming
+// every engine; anything else, UnrecognizedTypeError.
 template <Engine... Es>
 [[nodiscard]] const engine_entry* engine_from_arg(engine_list<Es...>, py::handle name) {
     using L = engine_list<Es...>;
@@ -267,18 +268,18 @@ py::class_<pathview> bind_path(engine_list<Es...> es, py::module_& m, const path
             if (PyUnicode_CompareWithASCIIString(key, "store") == 0) store = value;
             else if (PyUnicode_CompareWithASCIIString(key, "engine") == 0) engine = value;
             else if (PyUnicode_CompareWithASCIIString(key, "path") == 0) text = value;
-            else throw pygim::errors::argument_error("path() got an unexpected keyword argument '" + py::str(key).cast<std::string>() + "'");
+            else pygim::errors::raise(&pygim::errors::table::argument_error, "path() got an unexpected keyword argument '" + py::str(key).cast<std::string>() + "'");
         }
         const std::size_t n = args.size();
         if (n >= 1) text = args[0];
-        if (!text) throw pygim::errors::argument_error("path() missing the 'path' argument");
+        if (!text) pygim::errors::raise(&pygim::errors::table::argument_error, "path() missing the 'path' argument");
         const engine_entry* pin = nullptr;
         if (is_base) {
             if (n >= 2) engine = args[1];
-            if (n > 2) throw pygim::errors::argument_error("path() takes at most 2 positional arguments");
+            if (n > 2) pygim::errors::raise(&pygim::errors::table::argument_error, "path() takes at most 2 positional arguments");
             pin = engine ? engine_from_arg(es, engine) : nullptr;
         } else {
-            if (n > 1 || engine) throw pygim::errors::argument_error("a typed path pins its own engine");
+            if (n > 1 || engine) pygim::errors::raise(&pygim::errors::table::argument_error, "a typed path pins its own engine");
             pin = typed->second;
         }
         return wrap(es, make_view(text, pin, store ? store : py::handle(py::none().ptr())));

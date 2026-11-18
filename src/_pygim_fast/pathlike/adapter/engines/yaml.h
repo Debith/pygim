@@ -34,8 +34,8 @@ namespace pygim::pathlike::detail {
     return s.len ? std::string_view(s.str, s.len) : std::string_view{};
 }
 
-// rapidyaml calls this instead of aborting; rethrow as a std::exception so pybind11
-// converts it to a Python RuntimeError.
+// rapidyaml calls this instead of aborting: a ParseError with the line, which load_yaml(), the frame
+// that knows the file, nests in one that names it.
 [[noreturn]] inline void throw_on_error(const char* msg, size_t len, ryml::Location loc,
                                         void* /*user_data*/) {
     std::string where;
@@ -139,7 +139,7 @@ inline void py_to_node(ryml::Tree& tree, ryml::NodeRef node, py::handle obj, boo
         const double d = obj.cast<double>();
         if (std::isinf(d) || std::isnan(d)) {
             if (json_mode) {
-                throw pygim::errors::invalid_value("json cannot represent non-finite floats");
+                pygim::errors::raise(&pygim::errors::table::invalid_value_error, "json cannot represent non-finite floats");
             }
             node.set_val(std::isnan(d) ? ryml::csubstr(".nan") :
                          d > 0 ? ryml::csubstr(".inf") : ryml::csubstr("-.inf"));

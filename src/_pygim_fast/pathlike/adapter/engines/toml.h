@@ -102,15 +102,14 @@ inline void py_to_toml_value(py::handle obj, Insert&& ins) {
     static py::object datetime_cls = py::module_::import("datetime").attr("datetime");
 
     if (obj.is_none()) {
-        throw pygim::errors::invalid_value("toml cannot represent None (TOML has no null)");
+        pygim::errors::raise(&pygim::errors::table::invalid_value_error, "toml cannot represent None (TOML has no null)");
     }
     if (py::isinstance<py::bool_>(obj)) return ins(obj.cast<bool>());   // before int
     if (py::isinstance<py::int_>(obj)) {
         try {
             return ins(obj.cast<int64_t>());
         } catch (const py::cast_error&) {
-            throw pygim::errors::invalid_value("toml integers are 64-bit; value out of range: " +
-                                        py::str(obj).cast<std::string>());
+            pygim::errors::raise(&pygim::errors::table::invalid_value_error, "toml integers are 64-bit; value out of range: " + py::str(obj).cast<std::string>());
         }
     }
     if (py::isinstance<py::float_>(obj)) return ins(obj.cast<double>());

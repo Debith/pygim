@@ -41,7 +41,7 @@ namespace pygim::strategy::mssql::odbc {
     return result;
 }
 
-/// Throw a descriptive std::runtime_error when an ODBC call fails.
+/// Throw a descriptive pygim::errors::backend_error when an ODBC call fails.
 /// No-op if ret indicates success.
 /// Collects all available diagnostic records (up to 10).
 inline void raise_if_error(SQLRETURN ret, SQLSMALLINT type,

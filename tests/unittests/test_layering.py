@@ -259,3 +259,47 @@ def test_the_builtin_raise_check_finds_what_it_is_for(tmp_path):
 def test_pygim_raises_only_its_own_classes():
     found = builtin_raises()
     assert found == [], "a builtin raise; raise a class of pygim.errors:\n" + "\n".join(found)
+
+
+# Adapter code raises every failure that reaches Python through pygim::errors::raise(); a core class
+# thrown there is a rule that is not Python's, in the wrong layer, and belongs in the core. The known
+# ones are pathlike's parsing, its conversion to Python and its UTF-8 checks, which move to
+# pygim.content, where the parse happens in the core (docs/design/content.md). Each count may only
+# shrink.
+CORE_THROW = re.compile(r"\b(?:throw\s+|throw_with_nested\(\s*)(?:pygim::)?errors::\w+")
+MOVES_WITH_CONTENT = {
+    "pathlike/adapter/common.h": 2,
+    "pathlike/adapter/engines/json.h": 2,
+    "pathlike/adapter/engines/jsonl.h": 3,
+    "pathlike/adapter/engines/toml.h": 2,
+    "pathlike/adapter/engines/yaml.h": 2,
+    "pathlike/adapter/pathset.h": 1,
+}
+
+
+def core_throws_in_adapters():
+    """Each throw of a core class in adapter code, as "file:line"."""
+    found = []
+    for file in sorted([*ROOT.rglob("*.h"), *ROOT.rglob("*.cpp")]):
+        relative = file.relative_to(ROOT).as_posix()
+        if "third_party" in file.parts or relative.startswith("errors/"):
+            continue
+        if "/adapter/" in f"/{relative}" or "adapter" in file.stem or file.stem.endswith("bindings"):
+            text = _code(file)
+            found += [f"{relative}:{text.count(chr(10), 0, m.start()) + 1}" for m in CORE_THROW.finditer(text)]
+    return found
+
+
+def test_the_core_throw_check_finds_what_it_is_for():
+    assert CORE_THROW.search('throw pygim::errors::argument_error("x");') and CORE_THROW.search("throw errors::overflow(why);")
+    assert CORE_THROW.search("std::throw_with_nested(pygim::errors::parse_error(why));")
+    assert not CORE_THROW.search("pygim::errors::raise(&pygim::errors::table::argument_error, why);")
+
+
+def test_adapter_code_raises_and_throws_no_core_class():
+    found = core_throws_in_adapters()
+    counts = {}
+    for site in found:
+        counts[site.rsplit(":", 1)[0]] = counts.get(site.rsplit(":", 1)[0], 0) + 1
+    assert counts == MOVES_WITH_CONTENT, "a core class thrown in adapter code; raise it, or move the rule to the core:\n" + "\n".join(
+        site for site in found if counts.get(site.rsplit(":", 1)[0]) != MOVES_WITH_CONTENT.get(site.rsplit(":", 1)[0]))

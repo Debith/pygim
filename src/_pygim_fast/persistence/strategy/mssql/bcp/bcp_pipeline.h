@@ -376,7 +376,7 @@ inline void finalize_bcp(BcpContext& ctx) {
 /// @param batch_size   Rows between bcp_batch() commits; ≤0 defaults to 100K.
 /// @param table_hint   BCP hint string (e.g. "TABLOCK"); empty to skip.
 /// @return BcpMetrics with wall-clock timings and row counts.
-/// @throws std::runtime_error on zero rows or ODBC error.
+/// @throws pygim::errors::invalid_value on zero rows; pygim::errors::backend_error on an ODBC error.
 [[nodiscard]] inline BcpMetrics bulk_insert(
     SQLHDBC dbc,
     const std::shared_ptr<arrow::Table>& table_data,
@@ -447,7 +447,7 @@ inline void finalize_bcp(BcpContext& ctx) {
 /// @param num_workers  Desired worker count; ≤0 auto-selects min(4, hw_concurrency).
 ///                     Falls back to single-connection if only 1 worker needed.
 /// @return BcpMetrics  (row_loop/batch_flush = max across workers; counts = sum).
-/// @throws std::runtime_error on zero rows or first worker error.
+/// @throws pygim::errors::invalid_value on zero rows; otherwise the first worker's error, as it was thrown.
 [[nodiscard]] inline BcpMetrics bulk_insert_parallel(
     const std::string& conn_str,
     const std::shared_ptr<arrow::Table>& table_data,

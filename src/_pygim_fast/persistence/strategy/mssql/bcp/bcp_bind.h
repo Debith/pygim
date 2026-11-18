@@ -12,7 +12,7 @@ namespace pygim::strategy::mssql::bcp {
 // ── Column dispatcher ───────────────────────────────────────────────────────
 /// Bind all columns in a RecordBatch to BCP.
 /// Uses a compile-time dispatch table for O(1) type → bind-function lookup.
-/// @throws std::runtime_error for unsupported Arrow types.
+/// @throws pygim::errors::unsupported_column_type for unsupported Arrow types.
 inline std::vector<ColumnBinding> bind_columns(
     const BcpApi& bcp, SQLHDBC dbc,
     const std::shared_ptr<arrow::RecordBatch>& batch)

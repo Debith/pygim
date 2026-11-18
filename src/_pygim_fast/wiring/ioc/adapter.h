@@ -43,16 +43,6 @@ struct InterfaceKeyPolicy {
     }
 };
 
-inline std::optional<std::string> normalize_name(const py::object& name) {
-    if (name.is_none()) {
-        return std::nullopt;
-    }
-    if (!py::isinstance<py::str>(name)) {
-        pygim::errors::raise(&pygim::errors::table::unrecognized_type_error, name, py::make_tuple(py::handle(reinterpret_cast<PyObject*>(&PyUnicode_Type)), py::none()), "name");
-    }
-    return name.cast<std::string>();
-}
-
 namespace detail {
 
 inline py::tuple to_py_tuple(const InterfaceKeyPolicy::key_type& key) {
@@ -65,7 +55,7 @@ inline py::tuple to_py_tuple(const InterfaceKeyPolicy::key_type& key) {
 
 inline void ensure_autowire_provider(const py::object& provider, bool autowire) {
     if (autowire && !py::isinstance<py::type>(provider)) {
-        throw pygim::errors::argument_error("autowire=True requires a class provider");
+        pygim::errors::raise(&pygim::errors::table::argument_error, "autowire=True requires a class provider");
     }
 }
 
@@ -113,7 +103,7 @@ public:
         wiring::detail::ensure_callables(decorators, "decorator");
         detail::ensure_autowire_provider(provider, autowire);
 
-        auto normalized_name = normalize_name(name);
+        auto normalized_name = wiring::detail::key_name(name);
         auto key = InterfaceKeyPolicy::make_from_python(interface, normalized_name);
         if (override_existing && !m_core.contains(key)) raise_missing(key);   // override=True, and nothing to override
         try {
@@ -292,23 +282,11 @@ private:
     }
 
     static InterfaceKeyPolicy::key_type make_key(const py::object& key) {
-        py::object interface = key;
-        py::object name = py::none();
-
-        if (py::isinstance<py::tuple>(key)) {
-            py::tuple tuple_key = py::reinterpret_borrow<py::tuple>(key);
-            if (tuple_key.size() != 2) {
-                throw pygim::errors::argument_error("Container key tuple must be (interface, name|None)");
-            }
-            interface = tuple_key[0];
-            name = tuple_key[1];
+        const wiring::detail::python_key parts(key, "Container", "(interface, name|None)");
+        if (parts.thing().is_none()) {
+            pygim::errors::raise(&pygim::errors::table::unrecognized_type_error, parts.thing(), "a Python object", "interface");
         }
-
-        if (interface.is_none()) {
-            pygim::errors::raise(&pygim::errors::table::unrecognized_type_error, interface, "a Python object", "interface");
-        }
-
-        return InterfaceKeyPolicy::make_from_python(interface, normalize_name(name));
+        return InterfaceKeyPolicy::make_from_python(parts.thing(), parts.name());
     }
 
     /// MissingKeyError(the key, the keys registered), with `notes`: the key as Python gave it, the

@@ -21,7 +21,7 @@ inline constexpr std::size_t kInitialStringBufSize = 256;
 /// @param data    Raw data pointer from Arrow array (e.g. Int32Array::raw_values()).
 /// @param stride  Byte width per element (sizeof the C type).
 /// @param bcp_type  BCP type token from sql_type:: namespace.
-/// @throws std::runtime_error if bcp_bind fails.
+/// @throws pygim::errors::backend_error if bcp_bind fails.
 inline ColumnBinding make_fixed_binding(
     const BcpApi& bcp, SQLHDBC dbc,
     const void* data, size_t stride, int bcp_type,

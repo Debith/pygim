@@ -78,7 +78,7 @@ public:
     }
 
     /// The next result in index order: run here when nobody has started it, else waited for. A
-    /// task's exception is rethrown here, at its place in the order; std::out_of_range once every
+    /// task's exception is rethrown here, at its place in the order; pygim::errors::invalid_state once every
     /// result has been handed out.
     [[nodiscard]] result_type next() {
         const std::size_t j = m_out.load(std::memory_order_relaxed);

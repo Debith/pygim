@@ -361,8 +361,8 @@ struct engine_list {
     }
 
     // ── resolution (run time, as the caller's row) ────────────────────────
-    // The engine an engine= selector names. Throws std::invalid_argument
-    // (Python ValueError) with the derived inventory rather than guessing.
+    // The engine an engine= selector names. Throws pygim::errors::option_error
+    // (GimOptionError) naming every engine rather than guessing.
     template <class Row>
     [[nodiscard]] static typename Row::value named(std::string_view name) {
         if (const auto e = from_name_at_runtime<Row>(name)) return e;

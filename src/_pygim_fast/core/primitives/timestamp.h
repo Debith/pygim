@@ -83,7 +83,7 @@ class manual_time {
 public:
     /// Time that stands `start` after its epoch: at the epoch unless given.
     constexpr explicit manual_time(duration start = {}) noexcept : m_since_epoch(start) {}
-    /// Moves time by `by` (negative moves it back); std::overflow_error past 64 bits, and then
+    /// Moves time by `by` (negative moves it back); pygim::errors::overflow past 64 bits, and then
     /// time has not moved.
     constexpr void advance(duration by) { m_since_epoch = sum_exactly(m_since_epoch, by); }
     [[nodiscard]] constexpr duration since_epoch() const noexcept { return m_since_epoch; }

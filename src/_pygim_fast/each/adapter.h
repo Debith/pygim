@@ -94,7 +94,7 @@ public:
     /** __call__(*args, **kwargs) – broadcast previously cached method */
     py::list call(py::args args, py::kwargs kwargs) {
         if (!m_funcName) {
-            throw pygim::errors::argument_error("Proxy object is not in callable mode (missing attribute access)");
+            pygim::errors::raise(&pygim::errors::table::argument_error, "Proxy object is not in callable mode (missing attribute access)");
         }
 
         py::list results;
@@ -135,8 +135,7 @@ public:
     // ---------- Each::getattr (factory mode path only) ------------------------
     py::object getattr(const std::string &name) {
         if (m_iterable.is_none()) {
-            throw pygim::errors::invalid_state(
-                "Direct use: call each(iterable).attr");
+            pygim::errors::raise(&pygim::errors::table::invalid_state_error, "Direct use: call each(iterable).attr");
         }
         if (is_dunder(name))
             pygim::errors::raise(&pygim::errors::table::missing_attribute_error, "Cannot access dunder attributes with `each`",

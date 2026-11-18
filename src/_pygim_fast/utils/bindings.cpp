@@ -356,7 +356,7 @@ PYBIND11_MODULE(utils, m) {
         .def("now", &primitives::manual_time::since_epoch, "The Duration since this time started: Duration() at first.")
         .def("advance",
              [](primitives::manual_time& time, std::optional<primitives::duration> by, const py::kwargs& units) {
-                 if (by && units.size() != 0) throw pygim::errors::argument_error("advance() takes a Duration or units, not both");
+                 if (by && units.size() != 0) pygim::errors::raise(&pygim::errors::table::argument_error, "advance() takes a Duration or units, not both");
                  time.advance(by ? *by : duration_of_units(units));
              },
              py::arg("by") = py::none(),

@@ -179,7 +179,7 @@ concept unset_policy = requires(std::size_t cores) {
 };
 
 /// The width a `threads=` argument names on a machine of `cores`: none, what `Unset` says; a
-/// number, that many threads. 0 is std::invalid_argument naming `who` (in Python, a ValueError).
+/// number, that many threads. 0 is pygim::errors::invalid_value naming `who` (in Python, an InvalidValueError).
 /// One reading of the argument for every operation that takes it.
 ///
 ///     width_for(std::nullopt, "read_each", 16).at_start()            -> 1, growing up to elastic_cap(16)

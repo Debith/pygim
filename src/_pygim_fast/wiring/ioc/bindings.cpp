@@ -23,7 +23,7 @@ PYBIND11_MODULE(ioc, m) {
                      std::move(interface),
                      std::move(provider),
                      pygim::core::parse_lifecycle(lifecycle),
-                     pygim::normalize_name(name),
+                     pygim::wiring::detail::key_name(name),
                      std::move(decorators),
                      autowire};
              }),

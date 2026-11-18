@@ -428,7 +428,7 @@ public:
         return parse_or_problem(scratch, text);
     }
 
-    // Assign path text or a file URI to `u`; throws std::invalid_argument (ValueError) when rejected.
+    // Assign path text or a file URI to `u`; throws pygim::errors::invalid_value (InvalidValueError) when rejected.
     static constexpr void assign_text(uri& u, std::string_view text) {
         const std::string why = parse_or_problem(u, text);
         if (!why.empty()) throw pygim::errors::invalid_value(why);
