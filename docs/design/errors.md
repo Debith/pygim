@@ -107,7 +107,9 @@ An error raised because another one happened keeps that one as its `__cause__`, 
 
 A missing attribute names the attribute and the object asked, as Python's own `AttributeError`
 does (`name=`, `obj=`), so a traceback suggests the name meant: `each([1, 2]).reel` says
-`'int' object has no attribute 'reel'` and "Did you mean: 'real'?".
+`'int' object has no attribute 'reel'` and "Did you mean: 'real'?". Python offers it from 3.12, in
+the traceback module (pytest, IPython, `logging.exception`), and from 3.13 in the interpreter's own
+printer as well; before 3.12 CPython suggests only for `AttributeError` itself, never a subclass.
 
 The messages are made once, in `errors/core.h`: `what()` says them in C++, and the Python classes'
 `__str__` call the same functions, so the two cannot drift apart. A missing key lists up to ten

@@ -5,6 +5,7 @@ also the builtin its meaning needs, so `except TypeError` and the like keep work
 pygim's class, which is the stronger claim."""
 
 import math
+import sys
 import traceback
 
 import pytest
@@ -129,6 +130,8 @@ def test_a_missing_attribute_names_it_and_the_object_asked(call, name, asked):
         assert raised.value.obj is asked
 
 
+@pytest.mark.skipif(sys.version_info < (3, 12), reason="before 3.12 CPython suggests a name only for AttributeError "
+                    "itself, never a subclass, and only in its own excepthook")
 def test_a_missing_attribute_gets_python_s_suggestion():
     with pytest.raises(MissingAttributeError) as raised:
         each([1, 2]).reel
