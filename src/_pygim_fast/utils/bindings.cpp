@@ -254,43 +254,33 @@ private:
 
 namespace primitives = pygim::primitives;   // time and timing (core/primitives/), given a Python face here
 
-// One keyword amount of one unit, as Python writes it: an integer exactly — an int, or anything
-// with __index__ (numpy's integers); any other real number (float, Fraction, Decimal) through its
-// float, rounded exactly by the core. A bool is no amount of time.
-primitives::duration amount_of(const primitives::time_unit& unit, py::handle amount) {
-    if (PyBool_Check(amount.ptr())) pygim::errors::raise(&pygim::errors::table::unrecognized_type_error, amount, "a real number", unit.name());
-    if (PyLong_Check(amount.ptr()) || PyIndex_Check(amount.ptr())) {
+// One keyword amount, read as the core reads it: an integer exactly — an int, or anything with
+// __index__ (numpy's integers) — and any other real number (float, Fraction, Decimal) through its
+// float. A bool is no amount of time. The core converts it and refuses what no unit holds.
+primitives::time_unit::amount amount_of(py::handle amount, std::string_view unit) {
+    const bool whole = PyIndex_Check(amount.ptr());
+    if (PyBool_Check(amount.ptr()) || !(whole || PyNumber_Check(amount.ptr())))
+        pygim::errors::raise(&pygim::errors::table::unrecognized_type_error, amount, "a real number", unit);
+    if (whole) {
         const py::object integer = py::reinterpret_steal<py::object>(PyNumber_Index(amount.ptr()));
         if (!integer) throw py::error_already_set();
         int overflow = 0;
-        const long long whole = PyLong_AsLongLongAndOverflow(integer.ptr(), &overflow);
-        if (overflow != 0) throw pygim::errors::overflow("a duration past 64 bits of nanoseconds (about 292 years)");
-        if (whole == -1 && PyErr_Occurred()) throw py::error_already_set();
-        return unit.of(static_cast<std::int64_t>(whole));
-    }
-    if (!PyNumber_Check(amount.ptr())) {
-        pygim::errors::raise(&pygim::errors::table::unrecognized_type_error, amount, "a real number", unit.name());
+        const long long n = PyLong_AsLongLongAndOverflow(integer.ptr(), &overflow);
+        if (n == -1 && PyErr_Occurred()) throw py::error_already_set();
+        if (overflow != 0) return primitives::whole_past_64_bits{};
+        return std::int64_t{n};
     }
     const double real = PyFloat_AsDouble(amount.ptr());
     if (real == -1.0 && PyErr_Occurred()) throw py::error_already_set();
-    return unit.of(real);
+    return real;
 }
 
-// The duration that **units name: each amount converted, then added exactly.
+// The duration that **units name: the core finds each unit, converts its amount and adds them exactly.
 primitives::duration duration_of_units(const py::kwargs& units) {
     primitives::duration total(0);
     for (const auto& [name, amount] : units) {
-        const std::string unit_name = py::str(name);
-        const auto unit = primitives::time_unit::named(unit_name);
-        if (!unit) {
-            std::string known;
-            for (std::size_t i = 0; i < primitives::time_units.size(); ++i) {
-                known += i == 0 ? "" : i + 1 == primitives::time_units.size() ? " and " : ", ";
-                known += primitives::time_units[i].name();
-            }
-            throw pygim::errors::argument_error("unknown unit '" + unit_name + "'; the units are " + known);
-        }
-        total = primitives::sum_exactly(total, amount_of(*unit, amount));
+        const auto unit = primitives::time_unit::called(py::str(name).cast<std::string>());
+        total = primitives::sum_exactly(total, unit.of(amount_of(amount, unit.name())));
     }
     return total;
 }
