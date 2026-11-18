@@ -231,9 +231,9 @@ private:
                         return py::reinterpret_borrow<py::object>(rhs);
                   case MergeStrategy::Sum: {
                         PyObject* out = PyNumber_Add(lhs.ptr(), rhs.ptr());
-                        if (out == nullptr) {
-                              PyErr_Clear();   // Python's own TypeError for the operands, said in ours
-                              throw pygim::errors::argument_error("sum strategy failed for incompatible values");
+                        if (out == nullptr) {   // Python's own TypeError for the operands becomes the cause
+                              const py::error_already_set cause;
+                              pygim::errors::raise_from(cause, &pygim::errors::table::argument_error, "sum strategy failed for incompatible values");
                         }
                         return py::reinterpret_steal<py::object>(out);
                   }

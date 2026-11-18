@@ -248,16 +248,16 @@ private:
         py::object signature;
         try {
             signature = inspect.attr("signature")(provider);
-        } catch (const py::error_already_set&) {
-            throw pygim::errors::signature_error("autowire requires an inspectable class provider");
+        } catch (const py::error_already_set& e) {
+            pygim::errors::raise_from(e, &pygim::errors::table::signature_error, "autowire requires an inspectable class provider");
         }
 
         py::dict type_hints;
         try {
             py::module_ typing = py::module_::import("typing");
             type_hints = typing.attr("get_type_hints")(provider.attr("__init__")).cast<py::dict>();
-        } catch (const py::error_already_set&) {
-            throw pygim::errors::signature_error("autowire could not resolve constructor type hints");
+        } catch (const py::error_already_set& e) {
+            pygim::errors::raise_from(e, &pygim::errors::table::signature_error, "autowire could not resolve constructor type hints");
         }
 
         auto specs = std::make_shared<ParamSpecs>();
@@ -316,8 +316,7 @@ private:
     [[noreturn]] void raise_missing(const InterfaceKeyPolicy::key_type& key, std::span<const std::string> notes = {}) const {
         py::list registered;
         for (const auto& each : m_core.keys()) registered.append(key_object(each));
-        pygim::errors::set_noted(notes, &pygim::errors::table::missing_key_error, key_object(key), registered);
-        throw py::error_already_set();
+        pygim::errors::raise_noted(notes, &pygim::errors::table::missing_key_error, key_object(key), registered);
     }
 
     /// The key as Python gave it: the interface, or (interface, name).

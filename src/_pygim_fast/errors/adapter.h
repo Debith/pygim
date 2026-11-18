@@ -6,6 +6,9 @@
 // translator, local to the extension, that turns pygim's own C++ errors (errors/core.h), thrown by
 // code with no Python, into their pygim.errors classes as they reach Python.
 //
+// Adapter code raises every failure that reaches Python here; core code throws errors/core.h's classes,
+// and std::throw_with_nested keeps the error it replaces as the Python exception's __cause__.
+//
 // ADAPTER layer.
 //
 //     PYBIND11_MODULE(utils, m) {
@@ -69,21 +72,20 @@ inline void add_note(pybind11::error_already_set& in_flight, const std::string& 
     add_note(in_flight.value(), note);
 }
 
-/// Sets, as the Python error, the table's class `which` made from `args` as Python calls it, with
-/// `notes` as its __notes__.
+namespace detail {
+
+/// The table's class `which`, made from `args` as Python calls it, with `notes` as its __notes__.
 template <class... Args>
-void set_noted(std::span<const std::string> notes, PyObject* table::*which, Args&&... args) {
-    const pybind11::handle cls = classes().*which;
-    const pybind11::object error = cls(std::forward<Args>(args)...);
+[[nodiscard]] pybind11::object made(std::span<const std::string> notes, PyObject* table::*which, Args&&... args) {
+    pybind11::object error = pybind11::handle(classes().*which)(std::forward<Args>(args)...);
     for (const std::string& note : notes) add_note(error, note);
-    pybind11::set_error(cls, error);
+    return error;
 }
 
-/// Sets, as the Python error, the table's class `which` made from `args` as Python calls it.
-template <class... Args>
-void set(PyObject* table::*which, Args&&... args) {
-    set_noted({}, which, std::forward<Args>(args)...);
-}
+/// Sets `error`, a Python exception, as the error in flight.
+inline void set_error(const pybind11::object& error) { pybind11::set_error(pybind11::type::handle_of(error), error); }
+
+}  // namespace detail
 
 namespace detail {
 
@@ -146,19 +148,48 @@ constexpr PyObject* table::*class_of_errno(int number) {
     return &table::os_error;
 }
 
-/// Turns each of pygim's C++ errors (errors/core.h) into its pygim.errors class; anything else it
-/// rethrows, which hands it to the next translator, as pybind11 expects of one.
-inline void translate(std::exception_ptr thrown) {
+inline pybind11::object python_error(const std::exception_ptr& thrown);
+
+/// `error`, with the exception `thrown` nests (std::throw_with_nested) as its __cause__, when it
+/// nests one: C++'s `raise error from cause`.
+inline pybind11::object caused(pybind11::object error, const std::exception& thrown) {
+    const auto* nesting = dynamic_cast<const std::nested_exception*>(&thrown);
+    if (nesting == nullptr || nesting->nested_ptr() == nullptr) return error;
+    if (pybind11::object cause = python_error(nesting->nested_ptr())) PyException_SetCause(error.ptr(), cause.release().ptr());
+    return error;
+}
+
+/// The Python exception `thrown` becomes: each of pygim's C++ errors (errors/core.h) its
+/// pygim.errors class; a Python error that a frame passed on, itself; any other std::exception the
+/// RuntimeError pybind11 makes of one; anything else nothing.
+inline pybind11::object python_error(const std::exception_ptr& thrown) {
     try {
         std::rethrow_exception(thrown);
     } catch (const missing_key& e) {
-        set_noted(e.notes(), &table::missing_key_error, e.key(), strings(e.keys()));
+        return caused(made(e.notes(), &table::missing_key_error, e.key(), strings(e.keys())), e);
     } catch (const option_error& e) {
-        set_noted(e.notes(), &table::option_error, e.value(), strings(e.options()));
+        return caused(made(e.notes(), &table::option_error, e.value(), strings(e.options())), e);
     } catch (const file_error& e) {
-        set_noted(e.notes(), class_of_errno(e.number()), e.number(), e.reason(), e.file());
+        return caused(made(e.notes(), class_of_errno(e.number()), e.number(), e.reason(), e.file()), e);
     } catch (const error& e) {
-        set_noted(e.notes(), kind_classes[static_cast<std::size_t>(e.meaning())].cls, e.what());
+        return caused(made(e.notes(), kind_classes[static_cast<std::size_t>(e.meaning())].cls, e.what()), e);
+    } catch (const pybind11::error_already_set& e) {
+        return e.value();
+    } catch (const std::exception& e) {
+        return caused(pybind11::handle(PyExc_RuntimeError)(e.what()), e);
+    } catch (...) {
+        return {};
+    }
+}
+
+/// Turns each of pygim's C++ errors into its pygim.errors class, its nested exceptions into the
+/// chain of __cause__; anything else it rethrows, which hands it to the next translator, as
+/// pybind11 expects of one.
+inline void translate(std::exception_ptr thrown) {
+    try {
+        std::rethrow_exception(thrown);
+    } catch (const error&) {
+        set_error(python_error(thrown));
     }
 }
 
@@ -182,10 +213,28 @@ inline void load() {
 }
 
 /// Raises the table's class `which`, made from `args` as Python calls it:
-/// `raise(&table::option_error, value, options)` raises GimOptionError(value, options).
+/// `raise(&table::option_error, value, options)` raises GimOptionError(value, options). Keyword
+/// arguments pass as pybind11 writes them: `pybind11::arg("name") = name`.
 template <class... Args>
 [[noreturn]] void raise(PyObject* table::*which, Args&&... args) {
-    set(which, std::forward<Args>(args)...);
+    detail::set_error(detail::made({}, which, std::forward<Args>(args)...));
+    throw pybind11::error_already_set();
+}
+
+/// raise(), with `notes` as the exception's __notes__.
+template <class... Args>
+[[noreturn]] void raise_noted(std::span<const std::string> notes, PyObject* table::*which, Args&&... args) {
+    detail::set_error(detail::made(notes, which, std::forward<Args>(args)...));
+    throw pybind11::error_already_set();
+}
+
+/// raise(), with `cause`, the Python error that led to it, as its __cause__: Python's
+/// `raise X from cause`.
+template <class... Args>
+[[noreturn]] void raise_from(const pybind11::error_already_set& cause, PyObject* table::*which, Args&&... args) {
+    const pybind11::object error = detail::made({}, which, std::forward<Args>(args)...);
+    PyException_SetCause(error.ptr(), cause.value().inc_ref().ptr());
+    detail::set_error(error);
     throw pybind11::error_already_set();
 }
 

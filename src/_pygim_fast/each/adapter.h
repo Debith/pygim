@@ -71,11 +71,10 @@ public:
         std::vector<py::object> collected;
 
         for (const py::handle &item : m_iterable) {
-            if (!py::hasattr(item, name.c_str())) {
-                std::ostringstream msg;
-                msg << '\'' << py::str(py::type::of(item)).cast<std::string>()
-                    << "' object has no attribute '" << name << '\'';
-                throw pygim::errors::missing_attribute(msg.str());
+            if (!py::hasattr(item, name.c_str())) {   // Python's own words, and its name and obj for a suggestion
+                pygim::errors::raise(&pygim::errors::table::missing_attribute_error,
+                                     std::string("'") + Py_TYPE(item.ptr())->tp_name + "' object has no attribute '" + name + "'",
+                                     py::arg("name") = name, py::arg("obj") = item);
             }
 
             py::object attr = item.attr(name.c_str());
@@ -140,7 +139,8 @@ public:
                 "Direct use: call each(iterable).attr");
         }
         if (is_dunder(name))
-            throw pygim::errors::missing_attribute("Cannot access dunder attributes with `each`");
+            pygim::errors::raise(&pygim::errors::table::missing_attribute_error, "Cannot access dunder attributes with `each`",
+                                 py::arg("name") = name, py::arg("obj") = py::cast(this, py::return_value_policy::reference));
 
         // Allocate the proxy on the heap so its lifetime is managed by Python.
         auto proxy_sp = std::make_shared<Proxy>(m_iterable);

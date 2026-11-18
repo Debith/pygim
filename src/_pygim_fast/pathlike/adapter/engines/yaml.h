@@ -16,6 +16,7 @@
 
 #include <cmath>
 #include <array>
+#include <exception>
 #include <string>
 #include <string_view>
 
@@ -99,8 +100,8 @@ inline py::object node_to_py(ryml::ConstNodeRef node, KeyCache& keys) {
         try {   // the callbacks throw parse_error; this frame knows the file
             tree = ryml::parse_in_arena(ryml::csubstr(bytes.data(), bytes.size()));
             tree.resolve();                         // expand anchors / *aliases
-        } catch (const pygim::errors::parse_error& e) {
-            throw pygim::errors::parse_error(std::string(e.what()) + " in " + f.fspath());
+        } catch (const pygim::errors::parse_error& e) {   // the callback's error, without the file, is the cause
+            std::throw_with_nested(pygim::errors::parse_error(std::string(e.what()) + " in " + f.fspath()));
         }
     }
     return node_to_py(tree.crootref(), keys);
