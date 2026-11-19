@@ -213,7 +213,13 @@ catch and nothing raised.
   registration no longer swallows a duplicate key. Rejected: keeping the bases for convenience, as
   many libraries do (pydantic's `ValidationError` is a `ValueError`), which makes `except
   ValueError` catch a pygim error that has nothing to do with a bad value.
-
-## Open
-
-- What replaces `type_error_msg` and `file_error_msg` for assertions.
+- **No helper for an assertion's message** (Debith: "yes"): an assertion gives the class as its
+  message, `assert isinstance(x, str), UnrecognizedTypeError(x, str)`, which says what
+  `type_error_msg(x, str)` said, word for word (checked on 15 cases). Rejected: keeping
+  `type_error_msg`, a second way to make the same text; `file_error_msg`, which nothing called, has
+  no replacement: `GimFileNotFoundError(errno, strerror, filename)` says it as Python does.
+- **pybind11's own `TypeError` for arguments it cannot convert stays** (Debith: "Yes"): a call
+  whose arguments match no signature of a bound function raises `TypeError: incompatible function
+  arguments`, listing the signatures, before any of pygim's code runs. It is Python's own contract
+  for a call that does not fit, as a builtin function's is. Rejected: wrapping every bound function
+  to raise `ArgumentError` instead, a layer on every call for an error Python already names.
