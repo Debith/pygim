@@ -31,7 +31,7 @@ struct table {
     PyObject* gim_error;           ///< GimError(GimException): everything pygim raises
     PyObject* missing_key_error;   ///< MissingKeyError(GimError, KeyError): a lookup found nothing
     PyObject* option_error;        ///< GimOptionError(GimError, ValueError): a value none of its options
-    PyObject* dispatch_error;      ///< DispatchError(GimError): a call could not be dispatched
+    PyObject* dispatch_error;      ///< DispatchError(GimError, TypeError): no implementation takes the call
     PyObject* unrecognized_type_error;   ///< UnrecognizedTypeError(GimError, TypeError): none of the types expected
     // Version 2:
     PyObject* argument_error;            ///< ArgumentError(GimError, TypeError): a call pygim cannot take as given

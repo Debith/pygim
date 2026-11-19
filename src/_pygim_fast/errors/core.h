@@ -147,6 +147,7 @@ enum class kind : unsigned char {
     error,                     ///< GimError
     missing_key,               ///< MissingKeyError, also a KeyError
     option,                    ///< GimOptionError, also a ValueError
+    dispatch,                  ///< DispatchError, also a TypeError
     argument,                  ///< ArgumentError, also a TypeError
     signature,                 ///< SignatureError, also a TypeError
     invalid_value,             ///< InvalidValueError, also a ValueError
@@ -206,6 +207,7 @@ public:
     PYGIM_ERRORS_CONSTEXPR explicit error_of(std::string message) : error(std::move(message), Meaning) {}
 };
 
+using dispatch_error = error_of<kind::dispatch>;                   ///< a call none of its implementations takes
 using argument_error = error_of<kind::argument>;                   ///< a call pygim cannot take as given
 using signature_error = error_of<kind::signature>;                 ///< a callable whose signature pygim cannot use
 using invalid_value = error_of<kind::invalid_value>;               ///< the right type, outside what is accepted

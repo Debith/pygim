@@ -108,6 +108,7 @@ inline constexpr std::array<kind_class, kinds> kind_classes{{
     {kind::error, &table::gim_error},
     {kind::missing_key, &table::missing_key_error},
     {kind::option, &table::option_error},
+    {kind::dispatch, &table::dispatch_error},
     {kind::argument, &table::argument_error},
     {kind::signature, &table::signature_error},
     {kind::invalid_value, &table::invalid_value_error},

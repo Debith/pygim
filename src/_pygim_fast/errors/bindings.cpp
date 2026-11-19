@@ -223,7 +223,10 @@ std::vector<made_class> every_class() {
          "GimOptionError(value, options): a value none of its options. A ValueError too, as Python raises\n"
          "for a bad value; `value` and `options` say which.",
          &T::gim_error, PyExc_ValueError},
-        {&T::dispatch_error, "DispatchError", "A call could not be dispatched.", &T::gim_error, nullptr},
+        {&T::dispatch_error, "DispatchError",
+         "A call none of its implementations takes: none is registered for its arguments' types. A\n"
+         "TypeError too, as Python raises when no implementation of an operator takes its operands.",
+         &T::gim_error, PyExc_TypeError},
         {&T::unrecognized_type_error, "UnrecognizedTypeError",
          "UnrecognizedTypeError(given_type, expected_types, subject=None): a value, or a type, that is none of\n"
          "the types expected. A TypeError too, as Python raises for a value of the wrong type.",

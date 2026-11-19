@@ -44,7 +44,7 @@ alone.
 | `GimOverflowError` | `OverflowError` | a quantity past what its type holds |
 | `IndexOutOfRangeError` | `IndexError` | a position past the end |
 | `MissingAttributeError` | `AttributeError` | an attribute that is not there |
-| `DispatchError` | | a call could not be dispatched; nothing raises it since `UnrecognizedTypeError` left it |
+| `DispatchError` | `TypeError` | a call none of its implementations takes; kept for pygim's dispatch, nothing raises it yet |
 
 A class with arguments keeps them as its `args`, so a pickled error is made again the same way.
 `test_layering` refuses a raise of a builtin anywhere in pygim's C++ or Python: 151 on 2026-11-17,
@@ -193,8 +193,10 @@ catch and nothing raised.
 - **The cause is kept in both layers** ("my intention was to replicate this even in c++ exception
   level"). Rejected: clearing Python's error and raising pygim's text alone.
 - **A missing attribute carries `name` and `obj`** ("this improves traceability").
+- **`DispatchError` stays, a `TypeError` too** ("Keep it, just ensure it follow the pattern. We will
+  have use for this"): it is for pygim's dispatch, which C++ can throw as `errors::dispatch_error`;
+  nothing raises it yet. Rejected: removing it.
 
 ## Open
 
-- `DispatchError` is left with no subclass and nothing that raises it.
 - What replaces `type_error_msg` and `file_error_msg` for assertions.
