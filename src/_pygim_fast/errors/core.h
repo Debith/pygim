@@ -147,16 +147,16 @@ enum class kind : unsigned char {
     error,                     ///< GimError
     missing_key,               ///< MissingKeyError, also a KeyError
     option,                    ///< GimOptionError, also a ValueError
-    dispatch,                  ///< DispatchError, also a TypeError
+    dispatch,                  ///< DispatchError
     argument,                  ///< ArgumentError, also a TypeError
-    signature,                 ///< SignatureError, also a TypeError
+    signature,                 ///< SignatureError
     invalid_value,             ///< InvalidValueError, also a ValueError
     parse,                     ///< ParseError, also a ValueError
-    invalid_state,             ///< InvalidStateError, also a RuntimeError
-    duplicate_key,             ///< DuplicateKeyError, also a ValueError
-    circular_dependency,       ///< CircularDependencyError, also a ValueError
-    unsupported_column_type,   ///< UnsupportedColumnTypeError, also a TypeError
-    backend,                   ///< BackendError, also a RuntimeError
+    invalid_state,             ///< InvalidStateError
+    duplicate_key,             ///< DuplicateKeyError
+    circular_dependency,       ///< CircularDependencyError
+    unsupported_column_type,   ///< UnsupportedColumnTypeError
+    backend,                   ///< BackendError
     file,                      ///< GimOSError, or the one of its family the errno names
     overflow,                  ///< GimOverflowError, also an OverflowError
     index_out_of_range,        ///< IndexOutOfRangeError, also an IndexError

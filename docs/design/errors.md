@@ -32,19 +32,19 @@ alone.
 | `GimOptionError(value, options)` | `ValueError` | a value none of its options; `value` and `options` say which |
 | `UnrecognizedTypeError(given_type, expected_types, subject=None)` | `TypeError` | a value, or a type, that is none of the types expected, said by type or in words |
 | `ArgumentError` | `TypeError` | a call pygim cannot take: an unknown keyword, an argument missing or too many |
-| `SignatureError` | `TypeError` | a callable whose signature pygim cannot use (autowire, `get_schema`) |
-| `UnsupportedColumnTypeError` | `TypeError` | an Arrow or SQL column type pygim cannot map |
 | `InvalidValueError` | `ValueError` | the right type, outside what is accepted |
 | `ParseError` | `ValueError` | text that is not its format, or bytes that are not UTF-8, naming the file and line |
-| `DuplicateKeyError` | `ValueError` | a key registered twice; not a `KeyError`, which `get()` would swallow |
-| `CircularDependencyError` | `ValueError` | wiring that depends on itself, as `graphlib.CycleError` |
-| `InvalidStateError` | `RuntimeError` | an operation the object's state does not allow, and pygim's own "cannot happen" |
-| `BackendError` | `RuntimeError` | ODBC, BCP, Arrow or a command pygim runs reported a failure |
 | `GimOSError(errno, strerror, filename)` and `GimFileNotFoundError`, `GimFileExistsError`, `GimNotADirectoryError`, `GimPermissionError` | `OSError` and the one errno names | the system refused an operation on a file, as pathlib raises it, or on a socket |
 | `GimOverflowError` | `OverflowError` | a quantity past what its type holds |
 | `IndexOutOfRangeError` | `IndexError` | a position past the end |
 | `MissingAttributeError` | `AttributeError` | an attribute that is not there |
-| `DispatchError` | `TypeError` | a call none of its implementations takes; kept for pygim's dispatch, nothing raises it yet |
+| `SignatureError` | | a callable whose signature pygim cannot use (autowire, `get_schema`) |
+| `UnsupportedColumnTypeError` | | an Arrow or SQL column type pygim cannot map |
+| `DuplicateKeyError` | | a key registered twice; not a `KeyError`, which `get()` would swallow |
+| `CircularDependencyError` | | wiring that depends on itself |
+| `InvalidStateError` | | an operation the object's state does not allow, and pygim's own "cannot happen" |
+| `BackendError` | | ODBC, BCP, Arrow or a command pygim runs reported a failure |
+| `DispatchError` | | a call none of its implementations takes; kept for pygim's dispatch, nothing raises it yet |
 
 A class with arguments keeps them as its `args`, so a pickled error is made again the same way.
 `test_layering` refuses a raise of a builtin anywhere in pygim's C++ or Python: 151 on 2026-11-17,
@@ -193,15 +193,26 @@ catch and nothing raised.
 - **The cause is kept in both layers** ("my intention was to replicate this even in c++ exception
   level"). Rejected: clearing Python's error and raising pygim's text alone.
 - **A missing attribute carries `name` and `obj`** ("this improves traceability").
-- **`DispatchError` stays, a `TypeError` too** ("Keep it, just ensure it follow the pattern. We will
-  have use for this"): it is for pygim's dispatch, which C++ can throw as `errors::dispatch_error`;
-  nothing raises it yet. Rejected: removing it.
+- **`DispatchError` stays** ("Keep it, just ensure it follow the pattern. We will have use for
+  this"): it is for pygim's dispatch, which C++ can throw as `errors::dispatch_error`; nothing raises
+  it yet. Rejected: removing it.
 - **Every error pygim raises is a `GimError`, made in `pygim.errors`** ("Pygim errors must be GimError at
   the very least. We should aim for explicit errors that identify situation, but not too unique errors.
   They don't need to be necessarily linked to python errors, unless we are replicating python's own
   behavior/contract, such as gimdict is doing"): `oo docs serve`'s own `ServeError`, a `RuntimeError`,
   became `GimOSError` for a port or host it cannot bind and `BackendError` for a failed rebuild
   command. `test_layering` refuses an exception class made anywhere else, in C++ or Python.
+
+## Decided and rejected (2026-11-19)
+
+- **A builtin base only for a Python contract the class replicates**: asked whether the seven
+  classes that replicate none drop their builtin while `pygim.errors` is unreleased, Debith said
+  "Yes". `DispatchError`, `SignatureError` and `UnsupportedColumnTypeError` are no longer
+  `TypeError`s, `DuplicateKeyError` and `CircularDependencyError` no longer `ValueError`s, and
+  `InvalidStateError` and `BackendError` no longer `RuntimeError`s: `except ValueError` around a
+  registration no longer swallows a duplicate key. Rejected: keeping the bases for convenience, as
+  many libraries do (pydantic's `ValidationError` is a `ValueError`), which makes `except
+  ValueError` catch a pygim error that has nothing to do with a bad value.
 
 ## Open
 

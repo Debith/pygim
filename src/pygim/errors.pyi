@@ -58,9 +58,8 @@ class GimOptionError(GimError, ValueError):
     def __init__(self, value: Any, options: Iterable[Any]) -> None: ...
 
 
-class DispatchError(GimError, TypeError):
-    """A call none of its implementations takes: none is registered for its arguments' types. A
-    TypeError too, as Python raises when no implementation of an operator takes its operands."""
+class DispatchError(GimError):
+    """A call none of its implementations takes: none is registered for its arguments' types."""
 
 
 class UnrecognizedTypeError(GimError, TypeError):
@@ -77,9 +76,9 @@ class ArgumentError(GimError, TypeError):
     exclude each other. A TypeError too, as Python raises for a call that does not fit."""
 
 
-class SignatureError(GimError, TypeError):
+class SignatureError(GimError):
     """A callable whose signature pygim cannot use: a positional-only parameter, an annotation missing,
-    type hints that do not resolve. A TypeError too."""
+    type hints that do not resolve."""
 
 
 class InvalidValueError(GimError, ValueError):
@@ -92,26 +91,26 @@ class ParseError(GimError, ValueError):
     A ValueError too, as json.JSONDecodeError is."""
 
 
-class InvalidStateError(GimError, RuntimeError):
-    """An operation the object's state does not allow: a lap on a finished timer. A RuntimeError too."""
+class InvalidStateError(GimError):
+    """An operation the object's state does not allow: a lap on a finished timer."""
 
 
-class DuplicateKeyError(GimError, ValueError):
-    """A key registered twice without override. A ValueError, not a KeyError: Mapping.get() and `in`
-    catch a KeyError, and must not swallow this."""
+class DuplicateKeyError(GimError):
+    """A key registered twice without override. Not a KeyError: Mapping.get() and `in` catch a
+    KeyError, and must not swallow this."""
 
 
-class CircularDependencyError(GimError, ValueError):
-    """Wiring that depends on itself. A ValueError too, as graphlib.CycleError is."""
+class CircularDependencyError(GimError):
+    """Wiring that depends on itself."""
 
 
-class UnsupportedColumnTypeError(GimError, TypeError):
-    """A column whose Arrow or SQL type pygim cannot map. A TypeError too."""
+class UnsupportedColumnTypeError(GimError):
+    """A column whose Arrow or SQL type pygim cannot map."""
 
 
-class BackendError(GimError, RuntimeError):
+class BackendError(GimError):
     """A library, driver or command pygim calls (ODBC, BCP, Arrow, a rebuild command) reported a
-    failure; the message carries what it said. A RuntimeError too."""
+    failure; the message carries what it said."""
 
 
 class GimOSError(GimError, OSError):

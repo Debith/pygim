@@ -224,9 +224,8 @@ std::vector<made_class> every_class() {
          "for a bad value; `value` and `options` say which.",
          &T::gim_error, PyExc_ValueError},
         {&T::dispatch_error, "DispatchError",
-         "A call none of its implementations takes: none is registered for its arguments' types. A\n"
-         "TypeError too, as Python raises when no implementation of an operator takes its operands.",
-         &T::gim_error, PyExc_TypeError},
+         "A call none of its implementations takes: none is registered for its arguments' types.",
+         &T::gim_error, nullptr},
         {&T::unrecognized_type_error, "UnrecognizedTypeError",
          "UnrecognizedTypeError(given_type, expected_types, subject=None): a value, or a type, that is none of\n"
          "the types expected. A TypeError too, as Python raises for a value of the wrong type.",
@@ -237,8 +236,8 @@ std::vector<made_class> every_class() {
          &T::gim_error, PyExc_TypeError},
         {&T::signature_error, "SignatureError",
          "A callable whose signature pygim cannot use: a positional-only parameter, an annotation missing,\n"
-         "type hints that do not resolve. A TypeError too.",
-         &T::gim_error, PyExc_TypeError},
+         "type hints that do not resolve.",
+         &T::gim_error, nullptr},
         {&T::invalid_value_error, "InvalidValueError",
          "A value of the right type, outside what is accepted: a count below one, an empty name. A\n"
          "ValueError too.",
@@ -248,21 +247,20 @@ std::vector<made_class> every_class() {
          "A ValueError too, as json.JSONDecodeError is.",
          &T::gim_error, PyExc_ValueError},
         {&T::invalid_state_error, "InvalidStateError",
-         "An operation the object's state does not allow: a lap on a finished timer. A RuntimeError too.",
-         &T::gim_error, PyExc_RuntimeError},
+         "An operation the object's state does not allow: a lap on a finished timer.",
+         &T::gim_error, nullptr},
         {&T::duplicate_key_error, "DuplicateKeyError",
-         "A key registered twice without override. A ValueError, not a KeyError: Mapping.get() and `in`\n"
-         "catch a KeyError, and must not swallow this.",
-         &T::gim_error, PyExc_ValueError},
+         "A key registered twice without override. Not a KeyError: Mapping.get() and `in` catch a\n"
+         "KeyError, and must not swallow this.",
+         &T::gim_error, nullptr},
         {&T::circular_dependency_error, "CircularDependencyError",
-         "Wiring that depends on itself. A ValueError too, as graphlib.CycleError is.",
-         &T::gim_error, PyExc_ValueError},
+         "Wiring that depends on itself.", &T::gim_error, nullptr},
         {&T::unsupported_column_type_error, "UnsupportedColumnTypeError",
-         "A column whose Arrow or SQL type pygim cannot map. A TypeError too.", &T::gim_error, PyExc_TypeError},
+         "A column whose Arrow or SQL type pygim cannot map.", &T::gim_error, nullptr},
         {&T::backend_error, "BackendError",
          "A library, driver or command pygim calls (ODBC, BCP, Arrow, a rebuild command) reported a\n"
-         "failure; the message carries what it said. A RuntimeError too.",
-         &T::gim_error, PyExc_RuntimeError},
+         "failure; the message carries what it said.",
+         &T::gim_error, nullptr},
         {&T::os_error, "GimOSError",
          "GimOSError(errno, strerror, filename=None): the system refused an operation on a file, as\n"
          "pathlib raises it, or on a socket. An OSError too; the errnos Python names have a class of\n"

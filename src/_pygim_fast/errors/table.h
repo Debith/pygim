@@ -31,18 +31,18 @@ struct table {
     PyObject* gim_error;           ///< GimError(GimException): everything pygim raises
     PyObject* missing_key_error;   ///< MissingKeyError(GimError, KeyError): a lookup found nothing
     PyObject* option_error;        ///< GimOptionError(GimError, ValueError): a value none of its options
-    PyObject* dispatch_error;      ///< DispatchError(GimError, TypeError): no implementation takes the call
+    PyObject* dispatch_error;      ///< DispatchError(GimError): no implementation takes the call
     PyObject* unrecognized_type_error;   ///< UnrecognizedTypeError(GimError, TypeError): none of the types expected
     // Version 2:
     PyObject* argument_error;            ///< ArgumentError(GimError, TypeError): a call pygim cannot take as given
-    PyObject* signature_error;           ///< SignatureError(GimError, TypeError): a callable whose signature pygim cannot use
+    PyObject* signature_error;           ///< SignatureError(GimError): a callable whose signature pygim cannot use
     PyObject* invalid_value_error;       ///< InvalidValueError(GimError, ValueError): the right type, outside what is accepted
     PyObject* parse_error;               ///< ParseError(GimError, ValueError): text that is not its format
-    PyObject* invalid_state_error;       ///< InvalidStateError(GimError, RuntimeError): not allowed in the object's state
-    PyObject* duplicate_key_error;       ///< DuplicateKeyError(GimError, ValueError): a key registered twice
-    PyObject* circular_dependency_error; ///< CircularDependencyError(GimError, ValueError): wiring that depends on itself
-    PyObject* unsupported_column_type_error;   ///< UnsupportedColumnTypeError(GimError, TypeError): a column type pygim cannot map
-    PyObject* backend_error;             ///< BackendError(GimError, RuntimeError): a library or driver pygim calls failed
+    PyObject* invalid_state_error;       ///< InvalidStateError(GimError): not allowed in the object's state
+    PyObject* duplicate_key_error;       ///< DuplicateKeyError(GimError): a key registered twice
+    PyObject* circular_dependency_error; ///< CircularDependencyError(GimError): wiring that depends on itself
+    PyObject* unsupported_column_type_error;   ///< UnsupportedColumnTypeError(GimError): a column type pygim cannot map
+    PyObject* backend_error;             ///< BackendError(GimError): a library or driver pygim calls failed
     PyObject* os_error;                  ///< GimOSError(GimError, OSError): the system refused a file operation
     PyObject* file_not_found_error;      ///< GimFileNotFoundError(GimOSError, FileNotFoundError)
     PyObject* file_exists_error;         ///< GimFileExistsError(GimOSError, FileExistsError)
