@@ -232,21 +232,27 @@ BUILTIN_RAISE_PY = re.compile(
     r"|FileNotFoundError|OSError|LookupError|OverflowError)\b", re.M)
 
 
-def builtin_raises():
-    """Each builtin raise in pygim's own code, as "file:line"."""
+def matches_in_pygim(cpp, python, exempt=()):
+    """Each match of `cpp` in pygim's C++ and of `python` in its Python, outside third_party/ and the
+    `exempt` files (relative to src/_pygim_fast/), as "file:line"."""
     found = []
     for file in sorted([*ROOT.rglob("*.h"), *ROOT.rglob("*.cpp")]):
-        if "third_party" in file.parts:
+        if "third_party" in file.parts or file.relative_to(ROOT).as_posix() in exempt:
             continue
         text = _code(file)
         found += [f"{file.relative_to(ROOT).as_posix()}:{text.count(chr(10), 0, m.start()) + 1}"
-                  for m in BUILTIN_RAISE_CPP.finditer(text)]
+                  for m in cpp.finditer(text)]
     for package in (ROOT.parent / "pygim", ROOT.parent / "_pygim"):
         for file in sorted(package.rglob("*.py")):
             text = file.read_text(encoding="utf-8")
             found += [f"{file.relative_to(ROOT.parent).as_posix()}:{text.count(chr(10), 0, m.start()) + 1}"
-                      for m in BUILTIN_RAISE_PY.finditer(text)]
+                      for m in python.finditer(text)]
     return found
+
+
+def builtin_raises():
+    """Each builtin raise in pygim's own code, as "file:line"."""
+    return matches_in_pygim(BUILTIN_RAISE_CPP, BUILTIN_RAISE_PY)
 
 
 def test_the_builtin_raise_check_finds_what_it_is_for(tmp_path):
