@@ -260,12 +260,13 @@ std::vector<made_class> every_class() {
         {&T::unsupported_column_type_error, "UnsupportedColumnTypeError",
          "A column whose Arrow or SQL type pygim cannot map. A TypeError too.", &T::gim_error, PyExc_TypeError},
         {&T::backend_error, "BackendError",
-         "A library or driver pygim calls (ODBC, BCP, Arrow) reported a failure; the message carries what\n"
-         "it said. A RuntimeError too.",
+         "A library, driver or command pygim calls (ODBC, BCP, Arrow, a rebuild command) reported a\n"
+         "failure; the message carries what it said. A RuntimeError too.",
          &T::gim_error, PyExc_RuntimeError},
         {&T::os_error, "GimOSError",
-         "GimOSError(errno, strerror, filename): the system refused a file operation, as pathlib raises it.\n"
-         "An OSError too; the errnos Python names have a class of their own below it.",
+         "GimOSError(errno, strerror, filename=None): the system refused an operation on a file, as\n"
+         "pathlib raises it, or on a socket. An OSError too; the errnos Python names have a class of\n"
+         "their own below it.",
          &T::gim_error, PyExc_OSError},
         {&T::file_not_found_error, "GimFileNotFoundError", "No such file or directory. A FileNotFoundError too.",
          &T::os_error, PyExc_FileNotFoundError},

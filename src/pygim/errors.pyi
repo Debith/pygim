@@ -110,13 +110,14 @@ class UnsupportedColumnTypeError(GimError, TypeError):
 
 
 class BackendError(GimError, RuntimeError):
-    """A library or driver pygim calls (ODBC, BCP, Arrow) reported a failure; the message carries what
-    it said. A RuntimeError too."""
+    """A library, driver or command pygim calls (ODBC, BCP, Arrow, a rebuild command) reported a
+    failure; the message carries what it said. A RuntimeError too."""
 
 
 class GimOSError(GimError, OSError):
-    """GimOSError(errno, strerror, filename): the system refused a file operation, as pathlib raises it.
-    An OSError too; the errnos Python names have a class of their own below it."""
+    """GimOSError(errno, strerror, filename=None): the system refused an operation on a file, as
+    pathlib raises it, or on a socket. An OSError too; the errnos Python names have a class of
+    their own below it."""
 
 
 class GimFileNotFoundError(GimOSError, FileNotFoundError):

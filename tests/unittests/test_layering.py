@@ -267,6 +267,28 @@ def test_pygim_raises_only_its_own_classes():
     assert found == [], "a builtin raise; raise a class of pygim.errors:\n" + "\n".join(found)
 
 
+# Every class pygim raises is made once, in pygim.errors; core C++ throws its counterparts from
+# errors/core.h. A class made anywhere else, from a builtin or from one of pygim's own, is one
+# `except GimError` may miss, and one more class beside the catalogue.
+EXCEPTION_CLASS_CPP = re.compile(
+    r"\b(?:class|struct)\s+\w+(?:\s+final)?\s*:\s*(?:(?:public|protected|private)\s+)?"
+    r"(?:std::(?:[a-z_]+_error|invalid_argument|out_of_range|exception|bad_[a-z_]+)|(?:pygim::)?errors::\w+)\b")
+EXCEPTION_CLASS_PY = re.compile(r"^\s*class\s+\w+\s*\([^)]*\b(?:BaseException|\w*Exception|\w*Error)\b", re.M)
+
+
+def test_the_exception_class_check_finds_what_it_is_for():
+    assert EXCEPTION_CLASS_CPP.search("class engine_error : public std::runtime_error {")
+    assert EXCEPTION_CLASS_CPP.search("struct refused final : pygim::errors::error {")
+    assert not EXCEPTION_CLASS_CPP.search("class reader : public std::enable_shared_from_this<reader> {")
+    assert EXCEPTION_CLASS_PY.search("class ServeError(RuntimeError):") and EXCEPTION_CLASS_PY.search("class Mine(GimError):")
+    assert not EXCEPTION_CLASS_PY.search("class Handler(http.server.SimpleHTTPRequestHandler):")
+
+
+def test_every_exception_class_is_made_in_pygim_errors():
+    found = matches_in_pygim(EXCEPTION_CLASS_CPP, EXCEPTION_CLASS_PY, exempt=("errors/core.h",))
+    assert found == [], "an exception class made outside pygim.errors; raise one of its classes:\n" + "\n".join(found)
+
+
 # Adapter code raises every failure that reaches Python through pygim::errors::raise(); a core class
 # thrown there is a rule that is not Python's, in the wrong layer, and belongs in the core. The known
 # ones are pathlike's parsing, its conversion to Python and its UTF-8 checks, which move to

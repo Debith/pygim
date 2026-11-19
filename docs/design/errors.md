@@ -39,8 +39,8 @@ alone.
 | `DuplicateKeyError` | `ValueError` | a key registered twice; not a `KeyError`, which `get()` would swallow |
 | `CircularDependencyError` | `ValueError` | wiring that depends on itself, as `graphlib.CycleError` |
 | `InvalidStateError` | `RuntimeError` | an operation the object's state does not allow, and pygim's own "cannot happen" |
-| `BackendError` | `RuntimeError` | ODBC, BCP or Arrow reported a failure |
-| `GimOSError(errno, strerror, filename)` and `GimFileNotFoundError`, `GimFileExistsError`, `GimNotADirectoryError`, `GimPermissionError` | `OSError` and the one errno names | the system refused a file operation, as pathlib raises it |
+| `BackendError` | `RuntimeError` | ODBC, BCP, Arrow or a command pygim runs reported a failure |
+| `GimOSError(errno, strerror, filename)` and `GimFileNotFoundError`, `GimFileExistsError`, `GimNotADirectoryError`, `GimPermissionError` | `OSError` and the one errno names | the system refused an operation on a file, as pathlib raises it, or on a socket |
 | `GimOverflowError` | `OverflowError` | a quantity past what its type holds |
 | `IndexOutOfRangeError` | `IndexError` | a position past the end |
 | `MissingAttributeError` | `AttributeError` | an attribute that is not there |
@@ -196,6 +196,12 @@ catch and nothing raised.
 - **`DispatchError` stays, a `TypeError` too** ("Keep it, just ensure it follow the pattern. We will
   have use for this"): it is for pygim's dispatch, which C++ can throw as `errors::dispatch_error`;
   nothing raises it yet. Rejected: removing it.
+- **Every error pygim raises is a `GimError`, made in `pygim.errors`** ("Pygim errors must be GimError at
+  the very least. We should aim for explicit errors that identify situation, but not too unique errors.
+  They don't need to be necessarily linked to python errors, unless we are replicating python's own
+  behavior/contract, such as gimdict is doing"): `oo docs serve`'s own `ServeError`, a `RuntimeError`,
+  became `GimOSError` for a port or host it cannot bind and `BackendError` for a failed rebuild
+  command. `test_layering` refuses an exception class made anywhere else, in C++ or Python.
 
 ## Open
 
