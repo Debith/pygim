@@ -1,10 +1,12 @@
 #include <pybind11/pybind11.h>
 
 #include "adapter.h"
+#include "../../errors/adapter.h"
 
 namespace py = pybind11;
 
 PYBIND11_MODULE(ioc, m) {
+    pygim::errors::load();
     using Descriptor = pygim::Container::DescriptorType;
 
     m.doc() = "IoC container for provider registration and resolution.";
@@ -21,7 +23,7 @@ PYBIND11_MODULE(ioc, m) {
                      std::move(interface),
                      std::move(provider),
                      pygim::core::parse_lifecycle(lifecycle),
-                     pygim::normalize_name(name),
+                     pygim::wiring::detail::key_name(name),
                      std::move(decorators),
                      autowire};
              }),

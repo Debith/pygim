@@ -16,6 +16,7 @@
 
 #include <cmath>
 #include <array>
+#include <exception>
 #include <string>
 #include <string_view>
 
@@ -33,13 +34,13 @@ namespace pygim::pathlike::detail {
     return s.len ? std::string_view(s.str, s.len) : std::string_view{};
 }
 
-// rapidyaml calls this instead of aborting; rethrow as a std::exception so pybind11
-// converts it to a Python RuntimeError.
+// rapidyaml calls this instead of aborting: a ParseError with the line, which load_yaml(), the frame
+// that knows the file, nests in one that names it.
 [[noreturn]] inline void throw_on_error(const char* msg, size_t len, ryml::Location loc,
                                         void* /*user_data*/) {
     std::string where;
     if (loc.line) where = " (line " + std::to_string(loc.line) + ")";
-    throw std::runtime_error("YAML parse error" + where + ": " + std::string(msg, len));
+    throw pygim::errors::parse_error("YAML parse error" + where + ": " + std::string(msg, len));
 }
 
 // Install the throwing error callback exactly once, process-wide.
@@ -96,12 +97,12 @@ inline py::object node_to_py(ryml::ConstNodeRef node, KeyCache& keys) {
         ensure_throwing_callbacks();
         const std::string bytes = f.read_bytes();
         require_utf8(bytes, f.fspath());
-        try {
+        try {   // the callbacks throw parse_error; this frame knows the file
             tree = ryml::parse_in_arena(ryml::csubstr(bytes.data(), bytes.size()));
-        } catch (const std::runtime_error& e) {
-            throw std::runtime_error(std::string(e.what()) + " in " + f.fspath());
+            tree.resolve();                         // expand anchors / *aliases
+        } catch (const pygim::errors::parse_error& e) {   // the callback's error, without the file, is the cause
+            std::throw_with_nested(pygim::errors::parse_error(std::string(e.what()) + " in " + f.fspath()));
         }
-        tree.resolve();                             // expand anchors / *aliases
     }
     return node_to_py(tree.crootref(), keys);
 }
@@ -138,7 +139,7 @@ inline void py_to_node(ryml::Tree& tree, ryml::NodeRef node, py::handle obj, boo
         const double d = obj.cast<double>();
         if (std::isinf(d) || std::isnan(d)) {
             if (json_mode) {
-                throw std::invalid_argument("json cannot represent non-finite floats");
+                pygim::errors::raise(&pygim::errors::table::invalid_value_error, "json cannot represent non-finite floats");
             }
             node.set_val(std::isnan(d) ? ryml::csubstr(".nan") :
                          d > 0 ? ryml::csubstr(".inf") : ryml::csubstr("-.inf"));
@@ -156,8 +157,7 @@ inline void py_to_node(ryml::Tree& tree, ryml::NodeRef node, py::handle obj, boo
         node |= ryml::MAP;
         for (auto item : obj.cast<py::dict>()) {
             if (!py::isinstance<py::str>(item.first)) {
-                throw std::invalid_argument("write: mapping keys must be str, got " +
-                                            py::str(py::type::of(item.first)).cast<std::string>());
+                pygim::errors::raise(&pygim::errors::table::unrecognized_type_error, item.first, py::handle(reinterpret_cast<PyObject*>(&PyUnicode_Type)), "a mapping's key");
             }
             const std::string k = item.first.cast<std::string>();
             ryml::NodeRef child = node.append_child();
@@ -177,8 +177,7 @@ inline void py_to_node(ryml::Tree& tree, ryml::NodeRef node, py::handle obj, boo
         }
         return;
     }
-    throw std::invalid_argument("write: unsupported type " +
-                                py::str(py::type::of(obj)).cast<std::string>());
+    pygim::errors::raise(&pygim::errors::table::unrecognized_type_error, obj, "a value the format holds: a str, number, bool, None, list or mapping", "the value written");
 }
 
 // The document model is built under the GIL (it reads Python objects); emit

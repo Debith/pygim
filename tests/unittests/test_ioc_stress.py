@@ -11,6 +11,7 @@ import gc
 import pytest
 
 from pygim.ioc import Container
+from pygim.errors import CircularDependencyError, MissingKeyError, UnrecognizedTypeError
 
 
 @pytest.fixture
@@ -140,7 +141,7 @@ def test_decorator_returning_none_fails_validation(container):
 
     container.register(IService, Service, decorators=[lambda instance: None])
 
-    with pytest.raises(RuntimeError, match="interface"):
+    with pytest.raises(UnrecognizedTypeError, match="resolved object"):
         container.resolve(IService)
 
 
@@ -201,7 +202,7 @@ def test_decorator_resolving_same_key_detects_cycle(container):
 
     container.register(IService, Service, decorators=[greedy])
 
-    with pytest.raises(RuntimeError, match="Circular dependency"):
+    with pytest.raises(CircularDependencyError, match="Circular dependency"):
         container.resolve(IService)
 
 
@@ -243,7 +244,7 @@ def test_autowire_self_dependency_detects_cycle(container):
     """
     container.register(_Selfish, _Selfish, autowire=True)
 
-    with pytest.raises(RuntimeError, match="Circular dependency"):
+    with pytest.raises(CircularDependencyError, match="Circular dependency"):
         container.resolve(_Selfish)
 
 
@@ -293,7 +294,7 @@ def test_unicode_registration_names(container):
     container.register(IService, Service, name="サービス-🎁")
 
     assert isinstance(container.resolve((IService, "サービス-🎁")), IService)
-    with pytest.raises(RuntimeError, match="No provider"):
+    with pytest.raises(MissingKeyError, match="サービス"):
         container.resolve((IService, "サービス"))
 
 
@@ -375,7 +376,7 @@ def test_missing_key_error_with_non_class_key(container):
     for arbitrary objects (here an int instance) instead of raising a
     secondary error while formatting the primary one.
     """
-    with pytest.raises(RuntimeError, match="No provider for key.*42"):
+    with pytest.raises(MissingKeyError, match="Key ``42``"):
         container.resolve(42)
 
 
@@ -409,7 +410,7 @@ def test_runtime_checkable_protocol_as_interface(container):
     assert container.resolve(Sender).send("x") == "sent x"
 
     container.register(Sender, Broken, override=True)
-    with pytest.raises(RuntimeError, match="interface"):
+    with pytest.raises(UnrecognizedTypeError, match="resolved object"):
         container.resolve(Sender)
 
 
@@ -544,7 +545,8 @@ def test_autowire_optional_annotation_falls_back_to_default(container):
 def test_error_chain_names_dependency_and_resolving_frame(container):
     """Failure messages identify both the missing parameter and the outer key.
 
-    Each resolve frame appends its key to errors bubbling through it, so a
+    Each resolve frame adds a note naming its key to errors bubbling through
+    it (PEP 678's __notes__, shown under the message in a traceback), so a
     failed autowired dependency reads as a chain: the parameter that could
     not be satisfied ('repo') and the service being resolved ('Service').
     Without both, diagnosing wiring mistakes in a deep graph means guesswork.
@@ -558,10 +560,11 @@ def test_error_chain_names_dependency_and_resolving_frame(container):
 
     container.register(Service, Service, autowire=True)
 
-    with pytest.raises(RuntimeError) as excinfo:
+    with pytest.raises(MissingKeyError) as excinfo:
         container.resolve(Service)
 
-    message = str(excinfo.value)
+    message = "\n".join([str(excinfo.value), *excinfo.value.__notes__])
+    assert excinfo.value.args == (Repo,)  # the key with no provider
     assert "repo" in message  # the failing dependency parameter
     assert "Service" in message  # the frame being resolved
 

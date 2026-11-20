@@ -1,5 +1,6 @@
 import inspect
 import typing as t
+from pygim.errors import SignatureError
 
 
 ###############################################################################
@@ -46,7 +47,7 @@ def get_schema(func: t.Callable[..., t.Any]) -> t.Dict[str, t.Any]:
             required.append(p.name)
 
     if issues:
-        raise TypeError(
+        raise SignatureError(
             "\n • ".join([f"{func.__name__} — schema generation failed:"] + issues)
         )
 

@@ -14,6 +14,7 @@
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 #include <pybind11/functional.h>
+#include "../../errors/adapter.h"
 
 namespace py = pybind11;
 using namespace pygim;
@@ -21,10 +22,8 @@ using namespace pygim;
 using MssqlRepo = adapter::RepositoryAdapter<strategy::mssql::MssqlBackend>;
 
 PYBIND11_MODULE(_persistence_test, m) {
+    pygim::errors::load();
     m.doc() = "Test-only bindings for persistence internals";
-
-    // Bridge C++ std::runtime_error to GimError (RuntimeError subclass).
-    static auto gim_error = py::exception<std::runtime_error>(m, "GimError", PyExc_RuntimeError);
 
     // Query builder — needed for testing structured queries
     py::class_<core::Query>(m, "Query", py::module_local())
@@ -62,9 +61,9 @@ PYBIND11_MODULE(_persistence_test, m) {
              py::arg("name"));
 
     // Format enum (module-local to avoid conflict with production _persistence)
-    py::enum_<adapter::Format>(m, "Format", py::module_local())
-        .value("polars", adapter::Format::Polars)
-        .value("pandas", adapter::Format::Pandas)
+    py::enum_<core::Format>(m, "Format", py::module_local())
+        .value("polars", core::Format::Polars)
+        .value("pandas", core::Format::Pandas)
         .export_values();
 
     // RepositoryAdapter — module-local to avoid conflict with production _persistence
@@ -73,7 +72,7 @@ PYBIND11_MODULE(_persistence_test, m) {
                          std::size_t pool_size, int64_t batch_size,
                          const std::string& table_hint, int bcp_workers,
                          int64_t block_size, int packet_size) {
-            auto fmt = adapter::parse_format(format);
+            auto fmt = core::parse_format(format);
             return MssqlRepo::create(conn_str, fmt, pool_size,
                                      batch_size, table_hint, bcp_workers,
                                      block_size, packet_size);

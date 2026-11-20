@@ -8,6 +8,7 @@ import time as time_module   # `time` is the manual clock's fixture here
 import pytest
 
 import pygim
+from pygim.errors import InvalidStateError, MissingKeyError
 
 
 def ms(n):
@@ -91,7 +92,7 @@ def test_a_raising_block_still_finishes_and_the_exception_passes(time):
 def test_a_lap_cannot_start_after_the_finish(time):
     timer = pygim.QuickTimer("job", clock=time, report=pygim.Report.silent())
     timer.finish()
-    with pytest.raises(RuntimeError, match="finished"):
+    with pytest.raises(InvalidStateError, match="finished"):
         timer.start_lap("late")
 
 
@@ -103,7 +104,7 @@ def test_laps_refused_after_the_finish_leave_nothing_behind(time):
     timer = pygim.QuickTimer("job", clock=time, report=pygim.Report.silent())
     timer.finish()
     for i in range(20):
-        with pytest.raises(RuntimeError, match="finished"):
+        with pytest.raises(InvalidStateError, match="finished"):
             timer.start_lap(f"late {i}")
     assert timer.snapshot().laps == {}
 
@@ -222,11 +223,12 @@ def test_the_monotonic_clock_is_the_default():
 
 def test_stopping_no_lap_or_an_unknown_one_is_refused(time):
     timer = pygim.QuickTimer("job", clock=time, report=pygim.Report.silent())
-    with pytest.raises(RuntimeError, match="no lap is running"):
+    with pytest.raises(InvalidStateError, match="no lap is running"):
         timer.stop_lap()
     timer.start_lap("a")
-    with pytest.raises(IndexError, match="no lap of that name"):
+    with pytest.raises(MissingKeyError) as unknown:     # a lookup by name: a KeyError, naming the laps there are
         timer.stop_lap("b")
+    assert str(unknown.value) == "Key ``b`` not among: a"
     timer.stop_lap("a")                                   # the refusals left the lap as it was
     assert list(timer.snapshot().laps) == ["a"]
 

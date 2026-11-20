@@ -19,6 +19,7 @@ import tempfile
 from pathlib import Path
 
 import pygim
+from pygim.errors import InvalidValueError, UnrecognizedTypeError
 
 tmp = tempfile.TemporaryDirectory()
 root = Path(tmp.name)
@@ -49,7 +50,7 @@ assert json.loads((root / "data.json").read_text()) == {"rows": [{"id": 1}, {"id
 
 try:
     jout.write({"v": math.inf})
-except ValueError as e:
+except InvalidValueError as e:                      # a ValueError too
     assert "non-finite" in str(e)
 else:
     raise AssertionError("Expected JSON write to reject infinity")
@@ -72,7 +73,7 @@ assert tml.read() == {"title": "svc", "port": 8080, "day": datetime.date(2024, 1
 
 try:
     tml.write([1, 2])
-except ValueError as e:
+except UnrecognizedTypeError as e:                  # a TypeError, as json.dumps raises for a type it cannot hold
     assert "mapping" in str(e)
 else:
     raise AssertionError("Expected TOML write to require a mapping root")

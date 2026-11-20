@@ -19,6 +19,7 @@ This example demonstrates:
 """
 
 from pygim.ioc import Container
+from pygim.errors import MissingKeyError, SignatureError
 
 container = Container()
 
@@ -101,7 +102,7 @@ container.register(Unannotated, Unannotated, autowire=True)
 
 try:
     container.resolve(Unannotated)
-except RuntimeError as error:
+except SignatureError as error:                    # a TypeError too
     assert "type annotation" in str(error)
 else:
     raise AssertionError("Expected missing annotation to fail resolution")
@@ -122,8 +123,8 @@ container.register(NeedsDatabase, NeedsDatabase, autowire=True)
 
 try:
     container.resolve(NeedsDatabase)
-except RuntimeError as error:
-    assert "No provider" in str(error)
+except MissingKeyError as error:                   # a KeyError too: the key is the annotation
+    assert error.args == (Database,)
 else:
     raise AssertionError("Expected unresolvable dependency to fail resolution")
 

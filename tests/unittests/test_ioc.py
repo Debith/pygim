@@ -2,6 +2,7 @@ import pytest
 
 from pygim import Container as TopLevelContainer
 from pygim.ioc import Container
+from pygim.errors import CircularDependencyError, DuplicateKeyError, GimOptionError, MissingKeyError, SignatureError, UnrecognizedTypeError
 
 
 @pytest.fixture
@@ -151,7 +152,7 @@ def test_duplicate_without_override_raises(container):
 
     container.register(IService, First)
 
-    with pytest.raises(RuntimeError):
+    with pytest.raises(DuplicateKeyError):
         container.register(IService, Second)
 
 
@@ -162,7 +163,7 @@ def test_override_missing_raises(container):
     class Service(IService):
         pass
 
-    with pytest.raises(RuntimeError):
+    with pytest.raises(MissingKeyError):
         container.register(IService, Service, override=True)
 
 
@@ -200,7 +201,7 @@ def test_invalid_inputs_raise(container):
     with pytest.raises(TypeError):
         container.register(IService, lambda: object(), autowire=True)
 
-    with pytest.raises(RuntimeError):
+    with pytest.raises(GimOptionError):
         container.register(IService, lambda: object(), lifecycle="scoped")
 
 
@@ -211,7 +212,7 @@ def test_autowire_requires_annotations_when_no_default(container):
 
     container.register(Service, Service, autowire=True)
 
-    with pytest.raises(RuntimeError):
+    with pytest.raises(SignatureError):
         container.resolve(Service)
 
 
@@ -221,7 +222,7 @@ def test_resolve_enforces_interface_after_provider(container):
 
     container.register(IService, lambda: object())
 
-    with pytest.raises(RuntimeError):
+    with pytest.raises(UnrecognizedTypeError):
         container.resolve(IService)
 
 
@@ -237,7 +238,7 @@ def test_resolve_enforces_interface_after_decorators(container):
 
     container.register(IService, Service, decorators=[break_interface])
 
-    with pytest.raises(RuntimeError):
+    with pytest.raises(UnrecognizedTypeError):
         container.resolve(IService)
 
 
@@ -298,7 +299,7 @@ def test_circular_autowire_is_detected(container):
     container.register(_CycleA, _CycleA, autowire=True)
     container.register(_CycleB, _CycleB, autowire=True)
 
-    with pytest.raises(RuntimeError, match="Circular dependency"):
+    with pytest.raises(CircularDependencyError, match="Circular dependency"):
         container.resolve(_CycleA)
 
 
@@ -337,7 +338,7 @@ def test_resolve_missing_key_error_names_key(container):
     class IService:
         pass
 
-    with pytest.raises(RuntimeError, match="No provider for key.*IService"):
+    with pytest.raises(MissingKeyError, match=r"Key ``.*IService``"):
         container.resolve(IService)
 
 
@@ -345,7 +346,7 @@ def test_describe_missing_key_error_names_key(container):
     class IService:
         pass
 
-    with pytest.raises(RuntimeError, match="No provider for key.*IService"):
+    with pytest.raises(MissingKeyError, match=r"Key ``.*IService``"):
         container.describe(IService)
 
 
@@ -355,8 +356,9 @@ def test_duplicate_error_names_key(container):
 
     container.register(IService, lambda: IService())
 
-    with pytest.raises(RuntimeError, match="Duplicate.*IService"):
+    with pytest.raises(DuplicateKeyError, match="Duplicate") as raised:
         container.register(IService, lambda: IService())
+    assert any("IService" in note for note in raised.value.__notes__)   # the key, noted by the frame
 
 
 def test_autowire_missing_typed_dependency_raises(container):
@@ -369,8 +371,10 @@ def test_autowire_missing_typed_dependency_raises(container):
 
     container.register(NeedsDatabase, NeedsDatabase, autowire=True)
 
-    with pytest.raises(RuntimeError, match="No provider registered for autowired dependency 'database'"):
+    with pytest.raises(MissingKeyError, match=r"Key ``.*Database``") as raised:
         container.resolve(NeedsDatabase)
+    assert raised.value.args == (Database,)                                   # the key with no provider
+    assert "autowired parameter 'database'" in "\n".join(raised.value.__notes__)
 
 
 def test_autowire_skips_varargs_and_kwargs(container):
@@ -398,14 +402,14 @@ def test_autowire_rejects_positional_only(container):
     container.register(Dep, Dep)
     container.register(Service, Service, autowire=True)
 
-    with pytest.raises(RuntimeError, match="positional-only parameter 'dep'"):
+    with pytest.raises(SignatureError, match="positional-only parameter 'dep'"):
         container.resolve(Service)
 
 
 def test_autowire_unresolvable_hint_raises(container):
     container.register(_BadHint, _BadHint, autowire=True)
 
-    with pytest.raises(RuntimeError, match="could not resolve constructor type hints"):
+    with pytest.raises(SignatureError, match="could not resolve constructor type hints"):
         container.resolve(_BadHint)
 
 
@@ -602,10 +606,10 @@ def test_describe_returns_read_only_snapshot(container):
 
 
 def test_register_rejects_non_class_interface(container):
-    with pytest.raises(TypeError, match="interface must be a class"):
+    with pytest.raises(UnrecognizedTypeError, match="interface: Expected a class or protocol"):
         container.register(42, lambda: 42)
 
-    with pytest.raises(TypeError, match="interface must be a class"):
+    with pytest.raises(UnrecognizedTypeError, match="interface: Expected a class or protocol"):
         container.register(None, lambda: None)
 
 
@@ -614,7 +618,7 @@ def test_autowire_uninspectable_class_raises(container):
     # for it, which exercises the "uninspectable provider" branch.
     container.register(super, super, autowire=True)
 
-    with pytest.raises(RuntimeError, match="inspectable class provider"):
+    with pytest.raises(SignatureError, match="inspectable class provider"):
         container.resolve(super)
 
 

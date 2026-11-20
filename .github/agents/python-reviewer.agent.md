@@ -15,7 +15,7 @@ Python in this project should be **minimal glue**. If you see Python reimplement
 ### Convention Adherence
 - [ ] Public modules import from `pygim.*`, internals from `_pygim.*`
 - [ ] No `_core` internals leaked into public `__all__`
-- [ ] Exceptions use `pygim.core.explib` classes (`GimError`, `DispatchError`), not bare `Exception`
+- [ ] Exceptions use `pygim.errors` classes (`GimError`, `MissingKeyError`, `GimOptionError`), not bare `Exception`
 - [ ] `snake_case` for functions/variables, `PascalCase` for classes
 - [ ] Tests in `tests/unittests/test_*.py` using black-box imports from `pygim.*`
 

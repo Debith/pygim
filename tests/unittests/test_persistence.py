@@ -9,6 +9,7 @@ import pytest
 # (tests/conftest.py preloads Arrow so the raw extension resolves libarrow.)
 from pygim import _persistence_test
 from pygim import persistence as _persistence_module
+from pygim.errors import BackendError, GimOptionError
 
 LocalDataStore = _persistence_test.DataStore
 Query = _persistence_test.Query
@@ -91,24 +92,24 @@ def test_save_requires_arrow_data(repo):
 
 def test_load_fails_without_odbc(repo):
     """load() fails at ODBC connect with fake connection string."""
-    with pytest.raises(RuntimeError, match="SQLDriverConnect"):
+    with pytest.raises(BackendError, match="SQLDriverConnect"):
         repo.load("table_name", load_workers=1)
 
 
 def test_load_raw_sql_string_fails_without_odbc(repo):
     """load() with raw SQL fails at ODBC connect."""
-    with pytest.raises(RuntimeError, match="SQLDriverConnect"):
+    with pytest.raises(BackendError, match="SQLDriverConnect"):
         repo.load("SELECT * FROM foo", load_workers=1)
 
 
 def test_load_with_query_fails_without_odbc(repo):
     q = Query().select("id").from_table("users").where("id > 5").limit(10)
-    with pytest.raises(RuntimeError, match="SQLDriverConnect"):
+    with pytest.raises(BackendError, match="SQLDriverConnect"):
         repo.load(q, load_workers=1)
 
 
 def test_invalid_format():
-    with pytest.raises(ValueError, match="Unknown format"):
+    with pytest.raises(GimOptionError, match="Given input ``arrow`` not among: polars, pandas"):
         LocalDataStore("conn", format="arrow", pool_size=1)
 
 
@@ -128,7 +129,7 @@ def test_transform_execution(repo):
     log = []
     repo.add_pre_transform(lambda: log.append("pre"))
     repo.add_post_transform(lambda: log.append("post"))
-    with pytest.raises(RuntimeError, match="SQLDriverConnect"):
+    with pytest.raises(BackendError, match="SQLDriverConnect"):
         repo.load("t", load_workers=1)
     assert log == ["pre"]  # post not reached due to ODBC failure
 
@@ -138,7 +139,7 @@ def test_transform_execution_order(repo):
     log = []
     repo.add_pre_transform(lambda: log.append("pre1"))
     repo.add_pre_transform(lambda: log.append("pre2"))
-    with pytest.raises(RuntimeError, match="SQLDriverConnect"):
+    with pytest.raises(BackendError, match="SQLDriverConnect"):
         repo.load("t", load_workers=1)
     assert log == ["pre1", "pre2"]
 
@@ -157,7 +158,7 @@ def test_multiple_transforms(repo):
     repo.add_pre_transform(lambda: log.append("pre2"))
     repo.add_post_transform(lambda: log.append("post1"))
     assert "transforms=2/1" in repr(repo)
-    with pytest.raises(RuntimeError, match="SQLDriverConnect"):
+    with pytest.raises(BackendError, match="SQLDriverConnect"):
         repo.load("t", load_workers=1)
     assert log == ["pre1", "pre2"]  # post not reached
 
@@ -293,13 +294,13 @@ def test_acquire_datastore_save_load(fmt):
     # save requires Arrow data, load requires ODBC
     with pytest.raises(TypeError, match="Arrow-compatible"):
         store.save("not_arrow", "table", bcp_workers=1)
-    with pytest.raises(RuntimeError, match="SQLDriverConnect"):
+    with pytest.raises(BackendError, match="SQLDriverConnect"):
         store.load("table", load_workers=1)
     assert store.format.name == fmt
 
 
 def test_acquire_datastore_invalid_format():
-    with pytest.raises(ValueError, match="Unknown format"):
+    with pytest.raises(GimOptionError, match="Given input ``arrow`` not among: polars, pandas"):
         acquire_datastore("conn", format="arrow")
 
 

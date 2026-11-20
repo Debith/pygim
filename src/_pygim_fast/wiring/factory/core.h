@@ -6,8 +6,11 @@
 #include <vector>
 
 #include "../registry/core.h"
+#include "../../errors/core.h"
 
 namespace pygim::core {
+
+namespace errors = pygim::errors;
 
 /*
  * NoValidation is the default product validator policy.
@@ -79,7 +82,8 @@ public:
      * \param[in] name Lookup key for the creator.
      * \param[in] creator Callable object used to create a product.
      * \param[in] override_existing When `false`, duplicate keys throw; when `true`, missing keys throw.
-     * \throws std::runtime_error On invalid override state.
+     * \throws pygim::errors::duplicate_key on a duplicate without override; pygim::errors::missing_key
+     *         on override with nothing to override.
      * \note Exists to centralize creator lifecycle and preserve strict override semantics.
      */
     void register_creator(const Key& name, Creator creator, bool override_existing = false) {
@@ -90,14 +94,16 @@ public:
      * \brief Retrieve a previously registered creator by key.
      * \param[in] name Creator key.
      * \return Stored creator callable.
-     * \throws std::runtime_error If key is unknown.
+     * \throws pygim::errors::missing_key if key is unknown.
      * \note Exists so call sites can separate "lookup" from "invoke" where needed.
      */
     [[nodiscard]] Creator get_creator(const Key& name) const {
         if (auto* creator = m_registry.try_get_const(name)) {
             return *creator;
         }
-        throw std::runtime_error("Unknown creator: " + name);
+        std::vector<std::string> names;
+        for (const Key& each : registered_names()) names.push_back(errors::key_text(each));
+        throw errors::missing_key(errors::key_text(name), std::move(names));
     }
 
     /**
@@ -106,15 +112,15 @@ public:
      * \param[in] name Creator key.
      * \param[in] invoke Invocation strategy used to execute the creator.
      * \return Created and validated product.
-     * \throws std::runtime_error If key is unknown or validation fails.
+     * \throws pygim::errors::missing_key if key is unknown; pygim::errors::invalid_value if validation fails.
      * \note Exists to keep invocation policy decoupled from storage and validation policy.
      */
     template<class InvokeFn>
     [[nodiscard]] Product create(const Key& name, InvokeFn&& invoke) const {
         Creator creator = get_creator(name);
         Product product = std::forward<InvokeFn>(invoke)(creator);
-        if (!m_validator(product)) {
-            throw std::runtime_error("Created object does not implement required interface/protocol");
+        if (!m_validator(product)) {   // a validator with Python raises its own error first
+            throw errors::invalid_value("the factory's validator refused the object its creator made");
         }
         return product;
     }

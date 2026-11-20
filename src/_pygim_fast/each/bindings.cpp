@@ -6,10 +6,12 @@
 
 #include <pybind11/pybind11.h>
 #include "adapter.h"
+#include "../errors/adapter.h"
 
 namespace py = pybind11;
 
 PYBIND11_MODULE(each, m) {
+    pygim::errors::load();
     m.doc() = "Broadcast attribute access / method calls over an iterable";
 
     // ---------------------- Bind Proxy ---------------------- //

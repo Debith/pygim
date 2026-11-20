@@ -12,6 +12,7 @@ current, so a new engine cannot land with a stale stub.
 from __future__ import annotations
 
 from pathlib import Path
+from pygim.errors import ParseError
 
 __all__ = ["BEGIN", "END", "engine_block", "render", "stub_path", "update"]
 
@@ -51,7 +52,7 @@ def _split(text: str) -> tuple[str, str, str]:
     """(head, generated block, tail) of a stub; raises if the markers are missing."""
     start, end = text.find(BEGIN), text.find(END)
     if start < 0 or end < 0 or end < start:
-        raise ValueError(f"stub is missing the {BEGIN!r} / {END!r} markers")
+        raise ParseError(f"stub is missing the {BEGIN!r} / {END!r} markers")
     end += len(END) + 1  # the marker's own newline
     return text[:start], text[start:end], text[end:]
 

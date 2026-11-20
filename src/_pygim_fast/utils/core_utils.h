@@ -12,6 +12,7 @@
 #include <stdexcept>
 #include <cctype>
 #include "../core/primitives/quick_timer.h"
+#include "../errors/core.h"
 
 [[nodiscard]] inline std::string to_csv(std::vector<std::string> strings, bool sorted = false) {
     if (sorted) {
@@ -91,7 +92,7 @@
     if (unit == "pbit" || unit == "pbits" || unit == "petabit" || unit == "petabits") {
         return quantity * std::pow(kStep, 5) / 8.0;
     }
-    throw std::invalid_argument("Unsupported data unit: " + unit_raw);
+    throw pygim::errors::option_error(unit_raw, {"b", "kb", "mb", "gb", "tb", "pb", "kbit", "mbit", "gbit", "tbit", "pbit"});
 }
 
 [[nodiscard]] inline double to_seconds(double duration, const std::string &unit_raw) {
@@ -114,7 +115,7 @@
     if (unit == "h" || unit == "hr" || unit == "hrs" || unit == "hour" || unit == "hours") {
         return duration * 3'600.0;
     }
-    throw std::invalid_argument("Unsupported duration unit: " + unit_raw);
+    throw pygim::errors::option_error(unit_raw, {"ns", "us", "ms", "s", "min", "h"});
 }
 
 template <std::size_t N>
@@ -143,7 +144,7 @@ template <std::size_t N>
                                   const std::string &duration_unit,
                                   int precision = 2) {
     if (duration <= 0.0) {
-        throw std::invalid_argument("duration must be positive");
+        throw pygim::errors::invalid_value("duration must be positive");
     }
     double bytes = to_bytes(quantity, quantity_unit);
     double seconds = to_seconds(duration, duration_unit);

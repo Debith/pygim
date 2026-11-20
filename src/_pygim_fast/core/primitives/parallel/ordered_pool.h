@@ -22,6 +22,7 @@
 #include "meter.h"
 #include "width.h"
 #include "window.h"
+#include "../../../errors/core.h"
 
 namespace pygim::primitives::parallel {
 
@@ -54,7 +55,7 @@ public:
     /// whatever they weigh. std::system_error when not one worker can start. Call it once, before
     /// any next().
     void run_all(std::function<void()> finished) {
-        if (m_slots.size() < m_n) throw std::logic_error("run_all needs a window that holds every result");
+        if (m_slots.size() < m_n) throw pygim::errors::invalid_state("run_all needs a window that holds every result");
         m_limits = window_limits::whole(m_n);   // a byte limit would hold back the results nobody takes yet
         m_caller_works = false;
         m_finished = std::move(finished);   // before any worker exists: none can finish unheard
@@ -77,11 +78,11 @@ public:
     }
 
     /// The next result in index order: run here when nobody has started it, else waited for. A
-    /// task's exception is rethrown here, at its place in the order; std::out_of_range once every
+    /// task's exception is rethrown here, at its place in the order; pygim::errors::invalid_state once every
     /// result has been handed out.
     [[nodiscard]] result_type next() {
         const std::size_t j = m_out.load(std::memory_order_relaxed);
-        if (j >= m_n) throw std::out_of_range("ordered_pool: every result was handed out");
+        if (j >= m_n) throw pygim::errors::invalid_state("ordered_pool: every result was handed out");
         if (!m_started) {   // the workers start with the first result asked for, not with the pool
             m_started = true;
             grow_to(m_width.at_start());   // the consumer works, whatever starts beside it

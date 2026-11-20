@@ -3,6 +3,7 @@
 #include <pybind11/functional.h>
 #include <pybind11/operators.h>
 #include <pybind11/stl.h>
+#include <array>
 #include <cstdint>
 #include <optional>
 #include <string>
@@ -13,6 +14,7 @@
 #include "../core/primitives/duration.h"
 #include "../core/primitives/timestamp.h"
 #include "quick_timer_adapter.h"
+#include "../errors/adapter.h"
 #include "../mapping/dynamic_merge_map.h"
 
 namespace py = pybind11;
@@ -21,12 +23,24 @@ namespace {
 
 using MergeStrategy = pygim::mapping::MergeStrategy;
 
+std::string merge_strategy_name(MergeStrategy strategy);
+
+/// Every strategy a name can choose, in the order an unknown name's error lists them.
+constexpr std::array all_strategies{MergeStrategy::Sum, MergeStrategy::Max, MergeStrategy::Min, MergeStrategy::Replace};
+
+/// The names a strategy is chosen by, in the order an unknown name's error lists them.
+py::list strategy_names() {
+      py::list names;
+      for (const MergeStrategy strategy : all_strategies) names.append(merge_strategy_name(strategy));
+      return names;
+}
+
+/// The strategy `value` names; GimOptionError(value, the names) when it names none.
 MergeStrategy parse_merge_strategy(const std::string& value) {
-      if (value == "sum") return MergeStrategy::Sum;
-      if (value == "max") return MergeStrategy::Max;
-      if (value == "min") return MergeStrategy::Min;
-      if (value == "replace") return MergeStrategy::Replace;
-      throw py::value_error("invalid merge strategy: " + value);
+      for (const MergeStrategy strategy : all_strategies) {
+            if (value == merge_strategy_name(strategy)) return strategy;
+      }
+      pygim::errors::raise(&pygim::errors::table::option_error, value, strategy_names());
 }
 
 std::string merge_strategy_name(MergeStrategy strategy) {
@@ -50,7 +64,7 @@ MergeStrategy parse_merge_strategy_obj(py::handle obj) {
       if (py::hasattr(obj, "__name__")) {
             return parse_merge_strategy(py::str(obj.attr("__name__")).cast<std::string>());
       }
-      throw py::value_error("invalid merge strategy object");
+      pygim::errors::raise(&pygim::errors::table::option_error, obj, strategy_names());
 }
 
 std::string py_type_name(py::handle obj) {
@@ -74,7 +88,7 @@ public:
 
             if (!initial.is_none()) {
                   if (!PyMapping_Check(initial.ptr())) {
-                        throw py::type_error("gimdict initializer must be a mapping");
+                        pygim::errors::raise(&pygim::errors::table::unrecognized_type_error, initial, "a mapping", "gimdict's initial");
                   }
                   py::dict d(initial);
                   for (const auto& item : d) {
@@ -91,9 +105,15 @@ public:
             return m_values.contains(key);
       }
 
+      /// MissingKeyError(key, this gimdict): the key and where it was looked for, said as
+      /// "Key ``hots`` not among: host, port". The gimdict is the Python object this one already is.
+      [[noreturn]] void raise_missing(py::handle key) const {
+            pygim::errors::raise(&pygim::errors::table::missing_key_error, key, py::cast(this, py::return_value_policy::reference));
+      }
+
       py::object getitem(py::handle key) const {
             if (!m_values.contains(key)) {
-                  throw py::key_error("key not found");
+                  raise_missing(key);
             }
             return py::reinterpret_borrow<py::object>(m_values[key]);
       }
@@ -104,7 +124,7 @@ public:
 
       void delitem(py::handle key) {
             if (!m_values.contains(key)) {
-                  throw py::key_error("key not found");
+                  raise_missing(key);
             }
             m_values.attr("pop")(key);
       }
@@ -114,7 +134,7 @@ public:
                   return py::reinterpret_borrow<py::object>(m_values[key]);
             }
             if (default_value.is_none()) {
-                  throw py::key_error("key not found");
+                  raise_missing(key);
             }
             return default_value;
       }
@@ -211,8 +231,9 @@ private:
                         return py::reinterpret_borrow<py::object>(rhs);
                   case MergeStrategy::Sum: {
                         PyObject* out = PyNumber_Add(lhs.ptr(), rhs.ptr());
-                        if (out == nullptr) {
-                              throw py::type_error("sum strategy failed for incompatible values");
+                        if (out == nullptr) {   // Python's own TypeError for the operands becomes the cause
+                              const py::error_already_set cause;
+                              pygim::errors::raise_from(cause, &pygim::errors::table::argument_error, "sum strategy failed for incompatible values");
                         }
                         return py::reinterpret_steal<py::object>(out);
                   }
@@ -233,43 +254,33 @@ private:
 
 namespace primitives = pygim::primitives;   // time and timing (core/primitives/), given a Python face here
 
-// One keyword amount of one unit, as Python writes it: an integer exactly — an int, or anything
-// with __index__ (numpy's integers); any other real number (float, Fraction, Decimal) through its
-// float, rounded exactly by the core. A bool is no amount of time.
-primitives::duration amount_of(const primitives::time_unit& unit, py::handle amount) {
-    if (PyBool_Check(amount.ptr())) throw py::type_error(std::string(unit.name()) + " must be a real number, not bool");
-    if (PyLong_Check(amount.ptr()) || PyIndex_Check(amount.ptr())) {
+// One keyword amount, read as the core reads it: an integer exactly — an int, or anything with
+// __index__ (numpy's integers) — and any other real number (float, Fraction, Decimal) through its
+// float. A bool is no amount of time. The core converts it and refuses what no unit holds.
+primitives::time_unit::amount amount_of(py::handle amount, std::string_view unit) {
+    const bool whole = PyIndex_Check(amount.ptr());
+    if (PyBool_Check(amount.ptr()) || !(whole || PyNumber_Check(amount.ptr())))
+        pygim::errors::raise(&pygim::errors::table::unrecognized_type_error, amount, "a real number", unit);
+    if (whole) {
         const py::object integer = py::reinterpret_steal<py::object>(PyNumber_Index(amount.ptr()));
         if (!integer) throw py::error_already_set();
         int overflow = 0;
-        const long long whole = PyLong_AsLongLongAndOverflow(integer.ptr(), &overflow);
-        if (overflow != 0) throw std::overflow_error("a duration past 64 bits of nanoseconds (about 292 years)");
-        if (whole == -1 && PyErr_Occurred()) throw py::error_already_set();
-        return unit.of(static_cast<std::int64_t>(whole));
-    }
-    if (!PyNumber_Check(amount.ptr())) {
-        throw py::type_error(std::string(unit.name()) + " must be a real number, not " + Py_TYPE(amount.ptr())->tp_name);
+        const long long n = PyLong_AsLongLongAndOverflow(integer.ptr(), &overflow);
+        if (n == -1 && PyErr_Occurred()) throw py::error_already_set();
+        if (overflow != 0) return primitives::whole_past_64_bits{};
+        return std::int64_t{n};
     }
     const double real = PyFloat_AsDouble(amount.ptr());
     if (real == -1.0 && PyErr_Occurred()) throw py::error_already_set();
-    return unit.of(real);
+    return real;
 }
 
-// The duration that **units name: each amount converted, then added exactly.
+// The duration that **units name: the core finds each unit, converts its amount and adds them exactly.
 primitives::duration duration_of_units(const py::kwargs& units) {
     primitives::duration total(0);
     for (const auto& [name, amount] : units) {
-        const std::string unit_name = py::str(name);
-        const auto unit = primitives::time_unit::named(unit_name);
-        if (!unit) {
-            std::string known;
-            for (std::size_t i = 0; i < primitives::time_units.size(); ++i) {
-                known += i == 0 ? "" : i + 1 == primitives::time_units.size() ? " and " : ", ";
-                known += primitives::time_units[i].name();
-            }
-            throw py::type_error("unknown unit '" + unit_name + "'; the units are " + known);
-        }
-        total = primitives::sum_exactly(total, amount_of(*unit, amount));
+        const auto unit = primitives::time_unit::called(py::str(name).cast<std::string>());
+        total = primitives::sum_exactly(total, unit.of(amount_of(amount, unit.name())));
     }
     return total;
 }
@@ -288,6 +299,7 @@ std::string duration_repr(primitives::duration d) {
 } // namespace
 
 PYBIND11_MODULE(utils, m) {
+    pygim::errors::load();
     m.doc() = "Utilities for Python.";
     m.def("is_dunder",
           py::overload_cast<const std::string &>(&is_dunder),
@@ -344,7 +356,7 @@ PYBIND11_MODULE(utils, m) {
         .def("now", &primitives::manual_time::since_epoch, "The Duration since this time started: Duration() at first.")
         .def("advance",
              [](primitives::manual_time& time, std::optional<primitives::duration> by, const py::kwargs& units) {
-                 if (by && units.size() != 0) throw py::type_error("advance() takes a Duration or units, not both");
+                 if (by && units.size() != 0) pygim::errors::raise(&pygim::errors::table::argument_error, "advance() takes a Duration or units, not both");
                  time.advance(by ? *by : duration_of_units(units));
              },
              py::arg("by") = py::none(),

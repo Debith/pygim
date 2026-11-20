@@ -68,7 +68,7 @@ namespace pygim::pathlike::detail {
     if (const auto* v = n.as_date())           return toml_date_to_py(v->get());
     if (const auto* v = n.as_time())           return toml_time_to_py(v->get());
     if (const auto* v = n.as_date_time())      return toml_datetime_to_py(v->get());
-    throw std::runtime_error("toml: unhandled node type");
+    throw pygim::errors::invalid_state("toml: unhandled node type");
 }
 
 [[nodiscard]] inline py::object load_toml(const file& f, KeyCache& keys) {
@@ -79,7 +79,7 @@ namespace pygim::pathlike::detail {
     }();
     if (!result) {
         const auto& err = result.error();
-        throw std::runtime_error("TOML parse error (" + f.fspath() + ", line " +
+        throw pygim::errors::parse_error("TOML parse error (" + f.fspath() + ", line " +
                                  std::to_string(err.source().begin.line) +
                                  "): " + std::string(err.description()));
     }
@@ -102,15 +102,14 @@ inline void py_to_toml_value(py::handle obj, Insert&& ins) {
     static py::object datetime_cls = py::module_::import("datetime").attr("datetime");
 
     if (obj.is_none()) {
-        throw std::invalid_argument("toml cannot represent None (TOML has no null)");
+        pygim::errors::raise(&pygim::errors::table::invalid_value_error, "toml cannot represent None (TOML has no null)");
     }
     if (py::isinstance<py::bool_>(obj)) return ins(obj.cast<bool>());   // before int
     if (py::isinstance<py::int_>(obj)) {
         try {
             return ins(obj.cast<int64_t>());
         } catch (const py::cast_error&) {
-            throw std::invalid_argument("toml integers are 64-bit; value out of range: " +
-                                        py::str(obj).cast<std::string>());
+            pygim::errors::raise(&pygim::errors::table::invalid_value_error, "toml integers are 64-bit; value out of range: " + py::str(obj).cast<std::string>());
         }
     }
     if (py::isinstance<py::float_>(obj)) return ins(obj.cast<double>());
@@ -144,8 +143,7 @@ inline void py_to_toml_value(py::handle obj, Insert&& ins) {
     if (py::isinstance<py::list>(obj) || py::isinstance<py::tuple>(obj)) {
         return ins(py_to_toml_array(obj));
     }
-    throw std::invalid_argument("toml write: unsupported type " +
-                                py::str(py::type::of(obj)).cast<std::string>());
+    pygim::errors::raise(&pygim::errors::table::unrecognized_type_error, obj, "a value TOML holds: a str, number, bool, date, time, list or mapping", "toml's value");
 }
 
 [[nodiscard]] inline toml::array py_to_toml_array(py::handle obj) {
@@ -160,8 +158,7 @@ inline void py_to_toml_value(py::handle obj, Insert&& ins) {
     toml::table out;
     for (auto item : obj.cast<py::dict>()) {
         if (!py::isinstance<py::str>(item.first)) {
-            throw std::invalid_argument("write: mapping keys must be str, got " +
-                                        py::str(py::type::of(item.first)).cast<std::string>());
+            pygim::errors::raise(&pygim::errors::table::unrecognized_type_error, item.first, py::handle(reinterpret_cast<PyObject*>(&PyUnicode_Type)), "a mapping's key");
         }
         const std::string key = item.first.cast<std::string>();
         py_to_toml_value(item.second, [&out, &key](auto&& v) {
@@ -173,8 +170,7 @@ inline void py_to_toml_value(py::handle obj, Insert&& ins) {
 
 inline void write_toml(const file& f, py::handle obj) {
     if (!py::isinstance<py::dict>(obj)) {
-        throw std::invalid_argument(
-            "toml write: content must be a mapping (TOML documents are tables)");
+        pygim::errors::raise(&pygim::errors::table::unrecognized_type_error, obj, "a mapping: a TOML document is a table", "toml's content");
     }
     toml::table root = py_to_toml_table(obj);
     py::gil_scoped_release nogil;

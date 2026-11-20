@@ -7,6 +7,7 @@
 #include <string>
 
 #include "../../odbc_headers.h"
+#include "../../../errors/core.h"
 // ODBC headers may define BOOL/INT macros that collide with C++ identifiers.
 #ifdef BOOL
 #  undef BOOL
@@ -40,7 +41,7 @@ namespace pygim::strategy::mssql::odbc {
     return result;
 }
 
-/// Throw a descriptive std::runtime_error when an ODBC call fails.
+/// Throw a descriptive pygim::errors::backend_error when an ODBC call fails.
 /// No-op if ret indicates success.
 /// Collects all available diagnostic records (up to 10).
 inline void raise_if_error(SQLRETURN ret, SQLSMALLINT type,
@@ -49,7 +50,7 @@ inline void raise_if_error(SQLRETURN ret, SQLSMALLINT type,
 
     auto diag = collect_diagnostics(type, handle);
     if (!diag.empty()) {
-        throw std::runtime_error(std::format("{} failed: {}", what, diag));
+        throw pygim::errors::backend_error(std::format("{} failed: {}", what, diag));
     }
 
     const char* code_hint = "";
@@ -58,7 +59,7 @@ inline void raise_if_error(SQLRETURN ret, SQLSMALLINT type,
     else if (ret == SQL_NO_DATA)        code_hint = " (SQL_NO_DATA)";
     else if (ret == SQL_NEED_DATA)      code_hint = " (SQL_NEED_DATA)";
 
-    throw std::runtime_error(
+    throw pygim::errors::backend_error(
         std::format("{} failed (no diagnostics{})", what, code_hint));
 }
 

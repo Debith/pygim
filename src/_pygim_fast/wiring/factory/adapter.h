@@ -37,7 +37,8 @@ struct PyObjectValidator {
         if (!interface) {
             return true;
         }
-        return wiring::detail::is_instance_of(obj, *interface);
+        wiring::detail::ensure_instance_matches_interface(obj, *interface, "created object");
+        return true;
     }
 };
 
@@ -69,7 +70,7 @@ public:
      * \param[in] func Python callable used as creator.
      * \param[in] override_existing When `false`, duplicate keys throw; when `true`, missing keys throw.
      * \return void.
-     * \throws std::runtime_error On invalid override state.
+     * \throws DuplicateKeyError on a duplicate without override; MissingKeyError on override with nothing to override.
      * \note Uses `py::function` intentionally because this class is the pybind adapter boundary.
      *       For pybind-independent templating, use `core::FactoryCore<Key, Product, Creator, Validator>`.
      */
@@ -81,7 +82,7 @@ public:
      * \brief Retrieve a registered Python creator by name.
      * \param[in] name Registry key.
      * \return Stored Python callable.
-     * \throws std::runtime_error If key is not registered.
+     * \throws MissingKeyError if key is not registered.
      * \note Exists to support direct callable inspection/access from Python API.
      */
     py::function getitem(const std::string& name) const {
@@ -94,7 +95,7 @@ public:
      * \param[in] args Positional arguments forwarded to creator.
      * \param[in] kwargs Keyword arguments forwarded to creator.
      * \return Created Python object.
-     * \throws std::runtime_error If creator is missing or validation fails.
+     * \throws MissingKeyError if creator is missing; InvalidValueError if validation fails.
      * \note Exists to isolate `args/kwargs` forwarding mechanics in adapter layer.
      */
     py::object create(const std::string& name, py::args args, py::kwargs kwargs) const {

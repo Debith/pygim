@@ -35,6 +35,7 @@
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 #include "../utils/adapter_utils.h"
+#include "../errors/adapter.h"
 
 namespace py = pybind11;
 
@@ -70,11 +71,10 @@ public:
         std::vector<py::object> collected;
 
         for (const py::handle &item : m_iterable) {
-            if (!py::hasattr(item, name.c_str())) {
-                std::ostringstream msg;
-                msg << '\'' << py::str(py::type::of(item)).cast<std::string>()
-                    << "' object has no attribute '" << name << '\'';
-                throw py::attribute_error(msg.str());
+            if (!py::hasattr(item, name.c_str())) {   // Python's own words, and its name and obj for a suggestion
+                pygim::errors::raise(&pygim::errors::table::missing_attribute_error,
+                                     std::string("'") + Py_TYPE(item.ptr())->tp_name + "' object has no attribute '" + name + "'",
+                                     py::arg("name") = name, py::arg("obj") = item);
             }
 
             py::object attr = item.attr(name.c_str());
@@ -94,7 +94,7 @@ public:
     /** __call__(*args, **kwargs) – broadcast previously cached method */
     py::list call(py::args args, py::kwargs kwargs) {
         if (!m_funcName) {
-            throw py::type_error("Proxy object is not in callable mode (missing attribute access)");
+            pygim::errors::raise(&pygim::errors::table::argument_error, "Proxy object is not in callable mode (missing attribute access)");
         }
 
         py::list results;
@@ -135,11 +135,11 @@ public:
     // ---------- Each::getattr (factory mode path only) ------------------------
     py::object getattr(const std::string &name) {
         if (m_iterable.is_none()) {
-            throw std::runtime_error(
-                "Direct use: call each(iterable).attr");
+            pygim::errors::raise(&pygim::errors::table::invalid_state_error, "Direct use: call each(iterable).attr");
         }
         if (is_dunder(name))
-            throw py::attribute_error("Cannot access dunder attributes with `each`");
+            pygim::errors::raise(&pygim::errors::table::missing_attribute_error, "Cannot access dunder attributes with `each`",
+                                 py::arg("name") = name, py::arg("obj") = py::cast(this, py::return_value_policy::reference));
 
         // Allocate the proxy on the heap so its lifetime is managed by Python.
         auto proxy_sp = std::make_shared<Proxy>(m_iterable);
@@ -153,7 +153,7 @@ public:
         // metaclass is, so isinstance<py::iterable>(owner) would reject
         // every ordinary class.
         if (!py::hasattr(owner, "__iter__")) {
-            throw py::type_error("`each` can only be placed on iterable classes");
+            pygim::errors::raise(&pygim::errors::table::unrecognized_type_error, owner, "an iterable class", "each");
         }
         m_name = name;
     }
@@ -171,7 +171,7 @@ public:
             return py::cast(this);  // accessed via class, return descriptor
         }
         if (!py::isinstance<py::iterable>(instance)) {
-            throw py::type_error("`each` can only be used on iterable instances");
+            pygim::errors::raise(&pygim::errors::table::unrecognized_type_error, instance, "an iterable", "each");
         }
         if (is_generator(instance)) {
             // NOTE: We deliberately reject **generator objects** here.
@@ -195,7 +195,7 @@ public:
             // inconsistent behaviour, we raise an explicit error and document that
             // the helper expects a *re-iterable* container such as a list, tuple,
             // set, or any custom class that can be traversed repeatedly.
-            throw py::type_error("`each` cannot be used on generator instances");
+            pygim::errors::raise(&pygim::errors::table::unrecognized_type_error, instance, "an iterable that is not a generator", "each");
         }
 
         // m_weakDict.get(instance) or None

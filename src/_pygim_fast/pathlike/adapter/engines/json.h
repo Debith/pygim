@@ -48,7 +48,7 @@ namespace pygim::pathlike::detail {
         case element_type::BOOL:   return py::bool_(bool(el));
         case element_type::NULL_VALUE: return py::none();
     }
-    throw std::runtime_error("json: unhandled element type");
+    throw pygim::errors::invalid_state("json: unhandled element type");
 }
 
 [[nodiscard]] inline py::object load_json(const file& f, KeyCache& keys) {
@@ -63,7 +63,7 @@ namespace pygim::pathlike::detail {
         try {
             doc = parser.parse(simdjson::padded_string(bytes));
         } catch (const simdjson::simdjson_error& e) {
-            throw std::runtime_error("JSON parse error (" + f.fspath() + "): " + e.what());
+            throw pygim::errors::parse_error("JSON parse error (" + f.fspath() + "): " + e.what());
         }
     }
     return json_to_py(doc, keys);

@@ -1,6 +1,8 @@
 # -*- coding: utf-8 -*-
 """pygim \u2014 Lightweight, high-performance Python utilities backed by C++ extensions."""
 
+import sys
+
 # Top-level names resolve LAZILY (PEP 562): importing ``pygim`` — or one clean
 # submodule like ``pygim.utils`` — must not drag in every compiled extension.
 # A submodule that fails to load (missing build, toolchain/libstdc++ mismatch)
@@ -32,7 +34,9 @@ def __getattr__(name):
     try:
         module_name, attr = _LAZY_EXPORTS[name]
     except KeyError:
-        raise AttributeError(f"module {__name__!r} has no attribute {name!r}") from None
+        from pygim.errors import MissingAttributeError   # here, so importing pygim loads no extension
+
+        raise MissingAttributeError(f"module {__name__!r} has no attribute {name!r}", name=name, obj=sys.modules[__name__]) from None
     import importlib
 
     value = getattr(importlib.import_module(module_name), attr)

@@ -15,6 +15,7 @@ This example demonstrates:
 """
 
 from pygim.factory import Factory
+from pygim.errors import DuplicateKeyError, MissingKeyError
 
 factory = Factory()
 
@@ -65,7 +66,8 @@ for shape_name, argument in [("circle", 1), ("square", 2)]:
 # Asking for an unknown name fails loudly.
 try:
     factory.create("triangle")
-except RuntimeError:
+except MissingKeyError as error:                   # a KeyError too
+    assert error.args == ("triangle",) and set(error.within) == {"square", "circle"}   # the names it has, in its own order
     pass
 else:
     raise AssertionError("Expected unknown name to raise")
@@ -77,7 +79,7 @@ else:
 # override=True, and override=True requires an existing entry.
 try:
     factory.register("circle", lambda radius: None)
-except RuntimeError:
+except DuplicateKeyError:                          # a ValueError too
     pass
 else:
     raise AssertionError("Expected duplicate registration to raise")
@@ -88,7 +90,7 @@ try:
     #                                         │  so this raises
     #                                         ▼
     factory.register("hexagon", lambda: None, override=True)
-except RuntimeError:
+except MissingKeyError:                            # nothing to override
     pass
 else:
     raise AssertionError("Expected override of a missing entry to raise")

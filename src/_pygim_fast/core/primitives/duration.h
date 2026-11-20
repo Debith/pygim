@@ -17,7 +17,8 @@
 // the unit, rounded to the nearest nanosecond, ties to even. That is computed from the float's bits
 // with integer arithmetic, because a year is 55 bits of nanoseconds and a float product would miss
 // by one (yr=0.286 rounds to ...272000000 instead of ...271999999). Past 64 bits is
-// std::overflow_error and a non-finite amount std::domain_error: never a wrapped or invented value.
+// pygim::errors::overflow and a non-finite amount pygim::errors::invalid_value: never a wrapped or
+// invented value.
 //
 // CORE layer: pybind-free and constexpr.
 
@@ -30,10 +31,12 @@
 #include <cstdint>
 #include <limits>
 #include <optional>
-#include <stdexcept>
+#include <string>
 #include <string_view>
 #include <type_traits>
 #include <utility>
+#include <variant>
+#include "../../errors/core.h"
 
 namespace pygim::primitives {
 
@@ -90,14 +93,19 @@ static_assert(duration(3) + duration(4) == duration(7) && duration(10) / duratio
 [[nodiscard]] constexpr double seconds_of(duration d) noexcept { return static_cast<double>(d.nanoseconds()) / 1e9; }
 static_assert(seconds_of(duration(2'500)) == 2.5e-6);
 
-/// a + b, or std::overflow_error: the class's own + wraps past 64 bits, as an integer's does.
+namespace detail {
+/// The one way a duration overflows, for every operation that can: past 64 bits of nanoseconds.
+[[noreturn]] inline void throw_past_64_bits() {
+    throw pygim::errors::overflow("a duration past 64 bits of nanoseconds (about 292 years)");
+}
+}  // namespace detail
+
+/// a + b, or pygim::errors::overflow: the class's own + wraps past 64 bits, as an integer's does.
 [[nodiscard]] constexpr duration sum_exactly(duration a, duration b) {
     constexpr auto max = std::numeric_limits<duration::rep>::max();
     constexpr auto min = std::numeric_limits<duration::rep>::min();
     const auto x = a.nanoseconds(), y = b.nanoseconds();
-    if ((y > 0 && x > max - y) || (y < 0 && x < min - y)) {
-        throw std::overflow_error("a duration past 64 bits of nanoseconds (about 292 years)");
-    }
+    if ((y > 0 && x > max - y) || (y < 0 && x < min - y)) detail::throw_past_64_bits();
     return a + b;
 }
 static_assert(sum_exactly(duration(1), duration(2)) == duration(3));
@@ -163,46 +171,62 @@ static_assert(wide_product(std::uint64_t{1} << 63, 4).over_power_of_two(64) == 2
 
 }  // namespace detail
 
+/// A whole amount too wide for 64 bits, as a caller reading unbounded integers (Python's int) finds
+/// one: no unit holds it.
+class whole_past_64_bits {};
+
 /// A unit of time — its name and its length — and the conversion of an amount of it into a duration.
 class time_unit {
 public:
+    /// An amount as a caller reads it: whole, real, or whole past 64 bits.
+    using amount = std::variant<std::int64_t, double, whole_past_64_bits>;
+
     constexpr time_unit(std::string_view name, duration length) noexcept : m_name(name), m_length(length) {}
 
     [[nodiscard]] constexpr std::string_view name() const noexcept { return m_name; }
     [[nodiscard]] constexpr duration length() const noexcept { return m_length; }
 
-    /// A whole `amount` of this unit, exactly; std::overflow_error past 64 bits.
+    /// A whole `amount` of this unit, exactly; pygim::errors::overflow past 64 bits.
     template <std::integral Whole>
     [[nodiscard]] constexpr duration of(Whole amount) const {
         if constexpr (std::is_unsigned_v<Whole>) {
-            if (amount > static_cast<std::make_unsigned_t<duration::rep>>(std::numeric_limits<duration::rep>::max())) throw_past_64_bits();
+            if (amount > static_cast<std::make_unsigned_t<duration::rep>>(std::numeric_limits<duration::rep>::max())) detail::throw_past_64_bits();
         }
         return of_count(static_cast<std::int64_t>(amount));
     }
 
     /// A fractional `amount` of this unit: its exact value rounded to the nearest nanosecond, ties
-    /// to even; std::domain_error for a NaN or an infinity, std::overflow_error past 64 bits.
+    /// to even; pygim::errors::invalid_value for a NaN or an infinity, pygim::errors::overflow past
+    /// 64 bits.
     template <std::floating_point Real>
     [[nodiscard]] constexpr duration of(Real amount) const {
         return of_real(static_cast<double>(amount));
     }
 
-    /// The unit spelt `name` ("y" ... "ns"), or nothing.
+    /// `given` of this unit, each kind converted as above; pygim::errors::overflow for a whole past
+    /// 64 bits.
+    [[nodiscard]] constexpr duration of(const amount& given) const {
+        return std::visit([this]<class Given>(Given a) -> duration {
+            if constexpr (std::is_same_v<Given, whole_past_64_bits>) detail::throw_past_64_bits();
+            else return of(a);
+        }, given);
+    }
+
+    /// The unit spelt `name` ("yr" ... "ns"), or nothing.
     [[nodiscard]] static constexpr std::optional<time_unit> named(std::string_view name) noexcept;
+
+    /// The unit spelt `name`; pygim::errors::argument_error naming every unit for any other name.
+    [[nodiscard]] static constexpr time_unit called(std::string_view name);
 
 private:
     std::string_view m_name;
     duration m_length;
 
-    [[noreturn]] static void throw_past_64_bits() {
-        throw std::overflow_error("a duration past 64 bits of nanoseconds (about 292 years)");
-    }
-
     [[nodiscard]] constexpr duration of_count(std::int64_t amount) const {
         constexpr auto max = std::numeric_limits<duration::rep>::max();
         constexpr auto min = std::numeric_limits<duration::rep>::min();
         const auto unit = m_length.nanoseconds();
-        if (amount > max / unit || amount < min / unit) throw_past_64_bits();
+        if (amount > max / unit || amount < min / unit) detail::throw_past_64_bits();
         return duration(amount * unit);
     }
 
@@ -210,7 +234,7 @@ private:
         const auto bits = std::bit_cast<std::uint64_t>(amount);
         const bool negative = (bits >> 63) != 0;
         const int biased = static_cast<int>((bits >> 52) & 0x7ffu);
-        if (biased == 0x7ff) throw std::domain_error("a duration of a NaN or an infinity");
+        if (biased == 0x7ff) throw pygim::errors::invalid_value("a duration of a NaN or an infinity");
         const std::uint64_t fraction = bits & ((std::uint64_t{1} << 52) - 1);
         const std::uint64_t mantissa = biased == 0 ? fraction : fraction | (std::uint64_t{1} << 52);
         const int exponent = (biased == 0 ? 1 : biased) - 1075;   // amount = ±mantissa × 2^exponent
@@ -218,13 +242,13 @@ private:
         const auto magnitude = detail::wide_product(mantissa, static_cast<std::uint64_t>(m_length.nanoseconds()))
                                    .over_power_of_two(-exponent);
         constexpr auto limit = static_cast<std::uint64_t>(std::numeric_limits<duration::rep>::max());
-        if (!magnitude || *magnitude > limit + (negative ? 1 : 0)) throw_past_64_bits();
+        if (!magnitude || *magnitude > limit + (negative ? 1 : 0)) detail::throw_past_64_bits();
         const auto ns = negative ? static_cast<duration::rep>(0 - *magnitude) : static_cast<duration::rep>(*magnitude);
         return duration(ns);
     }
 
     [[nodiscard]] constexpr duration of_whole(double amount) const {
-        if (amount >= 0x1p63 || amount < -0x1p63) throw_past_64_bits();
+        if (amount >= 0x1p63 || amount < -0x1p63) detail::throw_past_64_bits();
         return of_count(static_cast<std::int64_t>(amount));
     }
 };
@@ -251,7 +275,17 @@ constexpr std::optional<time_unit> time_unit::named(std::string_view name) noexc
     return std::nullopt;
 }
 
+constexpr time_unit time_unit::called(std::string_view name) {
+    if (const auto unit = named(name)) return *unit;
+    std::string known;
+    for (std::size_t i = 0; i < time_units.size(); ++i)
+        (known += i == 0 ? "" : i + 1 == time_units.size() ? " and " : ", ") += time_units[i].name();
+    throw pygim::errors::argument_error("unknown unit '" + std::string(name) + "'; the units are " + known);
+}
+
 static_assert(time_unit::named("yr")->length() == duration(31'556'952'000'000'000));
+static_assert(time_unit::called("min").of(time_unit::amount(std::int64_t{2})) == duration(120'000'000'000) &&
+              time_unit::called("ms").of(time_unit::amount(0.5)) == duration(500'000));
 static_assert(!time_unit::named("months") && !time_unit::named("m"));
 static_assert(time_unit::named("min")->of(1) + time_unit::named("s")->of(90) == duration(150'000'000'000));
 static_assert(time_unit::named("ns")->of(2.5) == duration(2) && time_unit::named("ns")->of(-1.5) == duration(-2));

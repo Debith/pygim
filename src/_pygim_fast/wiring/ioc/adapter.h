@@ -14,6 +14,7 @@
 #include "../../utils/hash.h"
 #include "../common/adapter_validation.h"
 #include "core.h"
+#include "../../errors/adapter.h"
 
 namespace pygim {
 
@@ -42,16 +43,6 @@ struct InterfaceKeyPolicy {
     }
 };
 
-inline std::optional<std::string> normalize_name(const py::object& name) {
-    if (name.is_none()) {
-        return std::nullopt;
-    }
-    if (!py::isinstance<py::str>(name)) {
-        throw py::type_error("name must be str or None");
-    }
-    return name.cast<std::string>();
-}
-
 namespace detail {
 
 inline py::tuple to_py_tuple(const InterfaceKeyPolicy::key_type& key) {
@@ -64,7 +55,7 @@ inline py::tuple to_py_tuple(const InterfaceKeyPolicy::key_type& key) {
 
 inline void ensure_autowire_provider(const py::object& provider, bool autowire) {
     if (autowire && !py::isinstance<py::type>(provider)) {
-        throw py::type_error("autowire=True requires a class provider");
+        pygim::errors::raise(&pygim::errors::table::argument_error, "autowire=True requires a class provider");
     }
 }
 
@@ -106,14 +97,15 @@ public:
         bool autowire = false,
         bool override_existing = false) {
         if (!py::isinstance<py::type>(interface)) {
-            throw py::type_error("interface must be a class or protocol");
+            pygim::errors::raise(&pygim::errors::table::unrecognized_type_error, interface, "a class or protocol", "interface");
         }
         wiring::detail::ensure_callable(provider, "provider");
         wiring::detail::ensure_callables(decorators, "decorator");
         detail::ensure_autowire_provider(provider, autowire);
 
-        auto normalized_name = normalize_name(name);
+        auto normalized_name = wiring::detail::key_name(name);
         auto key = InterfaceKeyPolicy::make_from_python(interface, normalized_name);
+        if (override_existing && !m_core.contains(key)) raise_missing(key);   // override=True, and nothing to override
         try {
             m_core.register_or_override(
                 key,
@@ -125,8 +117,9 @@ public:
                     std::move(decorators),
                     autowire},
                 override_existing);
-        } catch (const std::runtime_error& error) {
-            throw std::runtime_error(std::string(error.what()) + key_suffix(key));
+        } catch (pygim::errors::error& error) {
+            error.add_note("while registering " + key_label(key));
+            throw;
         }
     }
 
@@ -159,7 +152,7 @@ public:
         if (const auto* descriptor = m_core.try_descriptor(resolved_key)) {
             return *descriptor;
         }
-        throw std::runtime_error("No provider for key" + key_suffix(resolved_key));
+        raise_missing(resolved_key);
     }
 
     [[nodiscard]] std::string repr() const {
@@ -168,6 +161,7 @@ public:
 
 private:
     [[nodiscard]] py::object resolve_key(const InterfaceKeyPolicy::key_type& key) {
+        if (!m_core.contains(key)) raise_missing(key);
         try {
             return m_core.resolve(
                 key,
@@ -178,14 +172,16 @@ private:
                 [](const py::object& instance, const py::object& interface) {
                     wiring::detail::ensure_instance_matches_interface(instance, interface);
                 });
-        } catch (const py::error_already_set&) {
-            throw;  // live Python exceptions pass through untouched
+        } catch (py::error_already_set& error) {
+            // Each frame notes the key it was resolving; nested resolves have noted theirs first, so
+            // the notes read as the resolution chain, innermost first.
+            pygim::errors::add_note(error, "while resolving " + key_label(key));
+            throw;
         } catch (const py::builtin_exception&) {
             throw;  // pybind-raised Python exceptions keep their type
-        } catch (const std::runtime_error& error) {
-            // Append this frame's key; nested resolves have already appended
-            // theirs, so the message reads as the resolution chain.
-            throw std::runtime_error(std::string(error.what()) + key_suffix(key));
+        } catch (pygim::errors::error& error) {
+            error.add_note("while resolving " + key_label(key));
+            throw;
         }
     }
 
@@ -208,9 +204,18 @@ private:
             }
         }
 
-        auto injections = core::plan_autowiring(*specs, [this](const py::object& annotation) {
-            return m_core.contains(InterfaceKeyPolicy::make_from_python(annotation, std::nullopt));
-        });
+        std::vector<core::PlannedInjection<py::object>> injections;
+        try {
+            injections = core::plan_autowiring(*specs, [this](const py::object& annotation) {
+                return m_core.contains(InterfaceKeyPolicy::make_from_python(annotation, std::nullopt));
+            });
+        } catch (const pygim::errors::missing_key& missing) {   // the core names the parameter; the key is its annotation
+            for (const auto& spec : *specs) {
+                if (spec.name == missing.key() && spec.annotation)
+                    raise_missing(InterfaceKeyPolicy::make_from_python(*spec.annotation, std::nullopt), missing.notes());
+            }
+            throw;
+        }
         if (injections.empty()) {
             return descriptor.provider();
         }
@@ -233,16 +238,16 @@ private:
         py::object signature;
         try {
             signature = inspect.attr("signature")(provider);
-        } catch (const py::error_already_set&) {
-            throw std::runtime_error("autowire requires an inspectable class provider");
+        } catch (const py::error_already_set& e) {
+            pygim::errors::raise_from(e, &pygim::errors::table::signature_error, "autowire requires an inspectable class provider");
         }
 
         py::dict type_hints;
         try {
             py::module_ typing = py::module_::import("typing");
             type_hints = typing.attr("get_type_hints")(provider.attr("__init__")).cast<py::dict>();
-        } catch (const py::error_already_set&) {
-            throw std::runtime_error("autowire could not resolve constructor type hints");
+        } catch (const py::error_already_set& e) {
+            pygim::errors::raise_from(e, &pygim::errors::table::signature_error, "autowire could not resolve constructor type hints");
         }
 
         auto specs = std::make_shared<ParamSpecs>();
@@ -277,26 +282,28 @@ private:
     }
 
     static InterfaceKeyPolicy::key_type make_key(const py::object& key) {
-        py::object interface = key;
-        py::object name = py::none();
-
-        if (py::isinstance<py::tuple>(key)) {
-            py::tuple tuple_key = py::reinterpret_borrow<py::tuple>(key);
-            if (tuple_key.size() != 2) {
-                throw py::type_error("Container key tuple must be (interface, name|None)");
-            }
-            interface = tuple_key[0];
-            name = tuple_key[1];
+        const wiring::detail::python_key parts(key, "Container", "(interface, name|None)");
+        if (parts.thing().is_none()) {
+            pygim::errors::raise(&pygim::errors::table::unrecognized_type_error, parts.thing(), "a Python object", "interface");
         }
-
-        if (interface.is_none()) {
-            throw py::type_error("interface must be a Python object");
-        }
-
-        return InterfaceKeyPolicy::make_from_python(interface, normalize_name(name));
+        return InterfaceKeyPolicy::make_from_python(parts.thing(), parts.name());
     }
 
-    [[nodiscard]] static std::string key_suffix(const InterfaceKeyPolicy::key_type& key) {
+    /// MissingKeyError(the key, the keys registered), with `notes`: the key as Python gave it, the
+    /// interface or (interface, name).
+    [[noreturn]] void raise_missing(const InterfaceKeyPolicy::key_type& key, std::span<const std::string> notes = {}) const {
+        py::list registered;
+        for (const auto& each : m_core.keys()) registered.append(key_object(each));
+        pygim::errors::raise_noted(notes, &pygim::errors::table::missing_key_error, key_object(key), registered);
+    }
+
+    /// The key as Python gave it: the interface, or (interface, name).
+    [[nodiscard]] static py::object key_object(const InterfaceKeyPolicy::key_type& key) {
+        py::object interface = py::reinterpret_borrow<py::object>(key.ptr);
+        return key.name ? py::object(py::make_tuple(interface, *key.name)) : interface;
+    }
+
+    [[nodiscard]] static std::string key_label(const InterfaceKeyPolicy::key_type& key) {
         std::string label;
         try {
             py::handle interface(key.ptr);
@@ -311,7 +318,7 @@ private:
         if (key.name) {
             label += ", name='" + *key.name + "'";
         }
-        return " [key: " + label + "]";
+        return label;
     }
 
     CoreType m_core;

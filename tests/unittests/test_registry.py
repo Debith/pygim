@@ -1,6 +1,7 @@
 import re
 import pytest
 from pygim.registry import Registry, KeyPolicyKind
+from pygim.errors import DuplicateKeyError, InvalidStateError, MissingKeyError
 
 
 @pytest.fixture(params=[False, True], ids=["no_hooks", "hooks"])
@@ -59,7 +60,7 @@ def test_register_duplicate_without_override(registry):
 
     registry.register("foo", foo)
     # duplicate without override should fail
-    with pytest.raises(RuntimeError):
+    with pytest.raises(DuplicateKeyError):
         registry.register("foo", bar)
     # override=True should succeed
     registry.register("foo", bar, override=True)
@@ -74,7 +75,7 @@ def test_decorator_usage(registry):
     assert registry["foo"]() == "bar"
 
     # decorator duplicate without override should fail
-    with pytest.raises(RuntimeError):
+    with pytest.raises(DuplicateKeyError):
 
         @registry.register("foo")
         def foo2():
@@ -89,7 +90,7 @@ def test_decorator_usage(registry):
 
 
 def test_missing_key_raises(registry):
-    with pytest.raises(RuntimeError):
+    with pytest.raises(MissingKeyError):
         _ = registry["missing"]
 
 
@@ -185,7 +186,7 @@ def test_identity_override_missing(identity_registry):
     def f():
         return 1
 
-    with pytest.raises(RuntimeError):
+    with pytest.raises(MissingKeyError):
         identity_registry.register(f, f, override=True)  # cannot override missing
 
 
@@ -197,7 +198,7 @@ def test_identity_duplicate_without_override(identity_registry):
         return 2
 
     identity_registry.register(f, f)
-    with pytest.raises(RuntimeError):
+    with pytest.raises(DuplicateKeyError):
         identity_registry.register(f, g)
     identity_registry.register(f, g, override=True)
     assert identity_registry[f]() == 2
@@ -230,7 +231,7 @@ def test_qualname_string_id_duplicate(registry):
     # Build a synthetic id
     id_str = f.__module__ + "." + f.__qualname__
     registry.register(id_str, f)
-    with pytest.raises(RuntimeError):
+    with pytest.raises(DuplicateKeyError):
         registry.register(id_str, lambda: 2)
     registry.register(id_str, lambda: 3, override=True)
     assert registry[id_str]() == 3
@@ -269,7 +270,7 @@ def test_find_id_variant_fallback_to_empty_variant():
 
 
 def test_find_id_wrong_policy(identity_registry):
-    with pytest.raises(RuntimeError):
+    with pytest.raises(InvalidStateError):
         identity_registry.find_id("some.id")
 
 

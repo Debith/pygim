@@ -7,6 +7,7 @@
 #include <ranges>
 #include <stdexcept>
 #include <string>
+#include "../../../errors/core.h"
 
 namespace pygim::strategy::mssql::sql {
 
@@ -36,7 +37,7 @@ namespace pygim::strategy::mssql::sql {
             && is_valid_identifier(s.substr(dot + 1));
     };
     if (!ok(table))
-        throw std::runtime_error("Invalid table identifier: " + table);
+        throw pygim::errors::invalid_value("Invalid table identifier: " + table);
     return (table.find('.') == std::string::npos) ? std::format("dbo.{}", table) : table;
 }
 

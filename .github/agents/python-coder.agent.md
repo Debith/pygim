@@ -13,7 +13,7 @@ Write minimal, correct Python code that serves as ergonomic glue over C++ extens
 
 1. **Thin wrappers only** — Python modules in `src/pygim/` re-export C++ extension symbols and add light convenience (decorators, default args, docstrings). Never reimplement C++ logic in Python.
 2. **Internal vs public** — Internal modules go in `src/_pygim/` prefixed with `_`. Public API lives in `src/pygim/`. Never leak `_core` internals into public `__all__`.
-3. **Exceptions** — Use `pygim.core.explib` exception classes (`GimError`, `DispatchError`), never bare `Exception`.
+3. **Exceptions** — Use `pygim.errors` exception classes (`GimError`, `MissingKeyError`, `GimOptionError`), never bare `Exception`.
 4. **Tests** — Place under `tests/unittests/test_*.py`. Black-box test the compiled modules via `import pygim.*`. Parametrize over relevant axes (e.g., policy x hooks for registry).
 5. **CLI** — Add commands by writing a method on `GimmicksCliApp` in `_pygim/_cli/_cli_app.py`, then expose via `@cli.command()` in `pygim/__main__.py`.
 

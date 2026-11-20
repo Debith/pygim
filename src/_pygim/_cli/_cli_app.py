@@ -12,6 +12,8 @@ from dataclasses import dataclass
 from importlib import import_module
 import click
 
+from pygim.errors import BackendError, GimOSError
+
 __all__ = ["GimmicksCliApp", "flag_opt"]
 
 
@@ -88,7 +90,7 @@ class GimmicksCliApp:
                 click.echo(f"rebuilt: {len(added)} page(s) added, {len(removed)} removed"
                            + "".join(f"\n  + {p}" for p in added) + "".join(f"\n  - {p}" for p in removed))
             _docs_serve.serve(doc_root, port=port, host=host, index=index, store=store)
-        except (FileNotFoundError, _docs_serve.ServeError) as exc:
+        except (FileNotFoundError, GimOSError, BackendError) as exc:
             raise click.ClickException(str(exc)) from exc
 
     def stubs(self, *, check: bool = False) -> None:

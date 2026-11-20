@@ -15,6 +15,7 @@ import tempfile
 from pathlib import Path
 
 import pygim
+from pygim.errors import ParseError
 
 tmp = tempfile.TemporaryDirectory()
 root = Path(tmp.name)
@@ -31,7 +32,7 @@ sloppy = root / "sloppy.json"
 sloppy.write_text("{key: 1}")
 try:
     pygim.path(sloppy).read()
-except RuntimeError as e:
+except ParseError as e:                             # a ValueError too, as json's own is
     assert "sloppy.json" in str(e)
 else:
     raise AssertionError("Expected strict JSON to reject a YAML-ism")

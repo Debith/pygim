@@ -5,13 +5,14 @@
 
 #include "bcp_bind_dispatch.h"
 #include "bcp_rebind_dispatch.h"
+#include "../../../../errors/core.h"
 
 namespace pygim::strategy::mssql::bcp {
 
 // ── Column dispatcher ───────────────────────────────────────────────────────
 /// Bind all columns in a RecordBatch to BCP.
 /// Uses a compile-time dispatch table for O(1) type → bind-function lookup.
-/// @throws std::runtime_error for unsupported Arrow types.
+/// @throws pygim::errors::unsupported_column_type for unsupported Arrow types.
 inline std::vector<ColumnBinding> bind_columns(
     const BcpApi& bcp, SQLHDBC dbc,
     const std::shared_ptr<arrow::RecordBatch>& batch)
@@ -28,7 +29,7 @@ inline std::vector<ColumnBinding> bind_columns(
 
         auto fn = (id < arrow::Type::MAX_ID) ? bind_dispatch[id] : nullptr;
         if (!fn) [[unlikely]]
-            throw std::runtime_error("Unsupported Arrow type: " + field->type()->ToString());
+            throw pygim::errors::unsupported_column_type("Unsupported Arrow type: " + field->type()->ToString());
 
         bindings.push_back(fn(bcp, dbc, array, ordinal));
     }

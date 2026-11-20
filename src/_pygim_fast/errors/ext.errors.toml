@@ -1,0 +1,5 @@
+[extension]
+module = "errors"
+# Every exception class pygim raises, made once; the other extensions take them through its C
+# table (table.h), and it imports nothing of pygim.
+sources = ["bindings.cpp"]

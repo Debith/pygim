@@ -12,6 +12,7 @@ import pytest
 from click.testing import CliRunner
 
 from _pygim._cli import _commenter, _docs_serve
+from pygim.errors import BackendError, GimOSError
 from pygim.pathlike import PathStore, default_store
 from _pygim._cli._cli_app import GimmicksCliApp
 from pygim.__main__ import cli_oo
@@ -280,14 +281,14 @@ class TestMakeServer:
         try:
             port = first.server_address[1]
             _docs_serve.socketserver.TCPServer.allow_reuse_address = False
-            with pytest.raises(_docs_serve.ServeError) as info:
+            with pytest.raises(GimOSError) as info:
                 _docs_serve.make_server(site, port=port, host="127.0.0.1")
             assert f"--port {port + 1}" in str(info.value)
         finally:
             first.server_close()
 
     def test_unresolvable_host_hint(self, site):
-        with pytest.raises(_docs_serve.ServeError) as info:
+        with pytest.raises(GimOSError) as info:
             _docs_serve.make_server(site, port=0, host="no.such.host.invalid")
         assert "--host 127.0.0.1" in str(info.value)
 
@@ -306,7 +307,7 @@ class TestRebuild:
         assert added == ["/new.html"] and removed == ["/page.html"]
 
     def test_rebuild_failure_names_the_exit_code(self, site):
-        with pytest.raises(_docs_serve.ServeError, match="exit 3"):
+        with pytest.raises(BackendError, match="exit 3"):
             _docs_serve.rebuild(site, "exit 3")
 
 

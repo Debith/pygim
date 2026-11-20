@@ -538,7 +538,7 @@ void bind_pathset(engine_list<Es...> es, py::module_& m, py::class_<pathview>& p
         .def("__getitem__", [es](const PathSet& ps, py::ssize_t i) {
             const auto n = static_cast<py::ssize_t>(ps.size());
             if (i < 0) i += n;
-            if (i < 0 || i >= n) throw py::index_error("PathSet index " + std::to_string(i) + " out of range for " + std::to_string(n) + " members");
+            if (i < 0 || i >= n) pygim::errors::raise(&pygim::errors::table::index_out_of_range_error, "PathSet index " + std::to_string(i) + " out of range for " + std::to_string(n) + " members");
             return wrap(es, ps.view(static_cast<std::size_t>(i)));
         })
         .def("filter_suffix", [](const PathSet& ps, std::string_view s) { return ps.filter_suffix(s); }, py::arg("suffix"),
@@ -570,7 +570,7 @@ void bind_pathset(engine_list<Es...> es, py::module_& m, py::class_<pathview>& p
                      PyObject* text = PyUnicode_DecodeUTF8(bytes.data(), static_cast<py::ssize_t>(bytes.size()), nullptr);
                      if (!text) {
                          PyErr_Clear();
-                         throw py::value_error("read_all_files: " + f.fspath() + " is not valid UTF-8");
+                         throw pygim::errors::parse_error("read_all_files: " + f.fspath() + " is not valid UTF-8");
                      }
                      out.append(py::reinterpret_steal<py::object>(text));
                  }

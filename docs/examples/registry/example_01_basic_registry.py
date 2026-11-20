@@ -22,6 +22,7 @@ This example demonstrates:
 """
 
 from pygim.registry import Registry, KeyPolicyKind
+from pygim.errors import DuplicateKeyError
 
 # ----------------------------------------------------------------------------
 # 1. Create a registry
@@ -75,7 +76,7 @@ assert reg[qual_id](4, 5) == 20
 # double-registration into an immediate, debuggable error.
 try:
     reg.register("math.add", lambda a, b: a - b)
-except RuntimeError as error:
+except DuplicateKeyError as error:                 # a ValueError too
     assert "Duplicate" in str(error)
 else:
     raise AssertionError("Expected duplicate registration to raise")

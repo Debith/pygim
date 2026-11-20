@@ -46,7 +46,7 @@ namespace pygim::pathlike::detail {
         // parse_many() skips a UTF-8 BOM and yields zero documents for empty
         // input (both documented), so there is nothing to special-case here.
         if (auto err = parser.parse_many(padded).get(docs); err) {
-            throw std::runtime_error("JSONL parse error (" + f.fspath() + "): " +
+            throw pygim::errors::parse_error("JSONL parse error (" + f.fspath() + "): " +
                                      simdjson::error_message(err));
         }
     }
@@ -55,7 +55,7 @@ namespace pygim::pathlike::detail {
     for (auto it = docs.begin(); it != docs.end(); ++it) {
         simdjson::dom::element el;
         if (auto err = (*it).get(el); err) {
-            throw std::runtime_error("JSONL parse error (" + f.fspath() + ", line " +
+            throw pygim::errors::parse_error("JSONL parse error (" + f.fspath() + ", line " +
                                      std::to_string(line_of(source, it.current_index())) + "): " +
                                      simdjson::error_message(err));
         }
@@ -68,8 +68,7 @@ namespace pygim::pathlike::detail {
 // *is* a sequence — and each item may be any JSON value.
 inline void write_jsonl(const file& f, py::handle obj) {
     if (!py::isinstance<py::list>(obj) && !py::isinstance<py::tuple>(obj)) {
-        throw std::invalid_argument("jsonl: the root must be a list or tuple (one document per line), got " +
-                                    py::str(py::type::of(obj)).cast<std::string>());
+        pygim::errors::raise(&pygim::errors::table::unrecognized_type_error, obj, "a list or tuple, one document per line", "jsonl's content");
     }
     std::string text;
     for (auto item : obj.cast<py::sequence>()) {
@@ -78,7 +77,7 @@ inline void write_jsonl(const file& f, py::handle obj) {
         std::string line;
         ryml::emitrs_json(tree, tree.root_id(), &line);
         if (line.find('\n') != std::string::npos) {
-            throw std::runtime_error("jsonl: emitter produced a multi-line document");
+            throw pygim::errors::invalid_state("jsonl: emitter produced a multi-line document");
         }
         text += line;
         text += '\n';

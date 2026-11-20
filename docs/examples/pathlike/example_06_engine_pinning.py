@@ -25,6 +25,7 @@ from pathlib import Path
 
 import pygim
 from pygim import pathlike
+from pygim.errors import GimOptionError
 
 tmp = tempfile.TemporaryDirectory()
 root = Path(tmp.name)
@@ -47,8 +48,8 @@ assert p.read() == {"name": "imported", "version": 3}
 # ----------------------------------------------------------------------------
 try:
     pygim.path(legacy).read()
-except ValueError as e:
-    assert "no engine" in str(e)
+except GimOptionError as e:                         # a ValueError too
+    assert e.value == ".dat" and ".yaml" in e.options    # the extension, and the ones an engine claims
 else:
     raise AssertionError("Expected unpinned .dat to refuse decoding")
 
@@ -100,8 +101,8 @@ assert pygim.path(root / "cfg.YML").engine == "rapidyaml"             # extensio
 # A name is spelt exactly: only extensions fold case.
 try:
     pygim.path(legacy, engine="YAML")
-except ValueError as e:
-    assert "unknown engine: 'YAML'" in str(e)
+except GimOptionError as e:
+    assert e.value == "YAML" and "yaml" in e.options
 else:
     raise AssertionError("Expected engine='YAML' to be unknown")
 

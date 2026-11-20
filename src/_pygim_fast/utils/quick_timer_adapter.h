@@ -26,6 +26,7 @@
 #include "../core/primitives/duration.h"
 #include "../core/primitives/quick_timer.h"
 #include "../core/primitives/timestamp.h"
+#include "../errors/adapter.h"
 
 namespace pygim::adapter {
 
@@ -146,7 +147,7 @@ public:
     template <one_of<timer_started, lap_started, lap_stopped, timer_finished> E>
     void add_hook(py::function callback) {
         auto* callbacks = std::get_if<timer_hooks>(&m_kind);
-        if (callbacks == nullptr) throw py::type_error("only a Report.hooks() report takes hooks");
+        if (callbacks == nullptr) pygim::errors::raise(&pygim::errors::table::argument_error, "only a Report.hooks() report takes hooks");
         callbacks->add<E>(calling(E{}, std::move(callback)));
     }
 
@@ -250,12 +251,14 @@ private:
     }
     [[nodiscard]] static python_clock clock_of(const py::object& clock) {
         if (clock.is_none()) return python_clock();
-        if (!py::isinstance<manual_time>(clock)) throw py::type_error("clock must be a ManualTime, or None for the monotonic clock");
+        if (!py::isinstance<manual_time>(clock))
+            pygim::errors::raise(&pygim::errors::table::unrecognized_type_error, clock, "a ManualTime, or None for the monotonic clock", "clock");
         return python_clock(py::cast<const manual_time&>(clock));
     }
     [[nodiscard]] static python_report_handle report_of(const py::object& report) {
         if (report.is_none()) return python_report_handle(std::make_shared<python_report>(python_report::stderr_text(true, true, true)));
-        if (!py::isinstance<python_report>(report)) throw py::type_error("report must be a Report, or None for Report.stderr()");
+        if (!py::isinstance<python_report>(report))
+            pygim::errors::raise(&pygim::errors::table::unrecognized_type_error, report, "a Report, or None for Report.stderr()", "report");
         return python_report_handle(py::cast<std::shared_ptr<python_report>>(report));
     }
     // The kept string's view of a lap already named `text`, if one is.
@@ -334,7 +337,8 @@ inline void bind_quick_timer(py::module_& m) {
         .def_static("both", [](const py::args& parts) {
                         report_parts all;
                         for (const py::handle part : parts) {
-                            if (!py::isinstance<python_report>(part)) throw py::type_error("Report.both takes Reports only");
+                            if (!py::isinstance<python_report>(part))
+                                pygim::errors::raise(&pygim::errors::table::unrecognized_type_error, part, "a Report", "Report.both");
                             all.push_back(py::cast<std::shared_ptr<python_report>>(part));
                         }
                         return std::make_shared<python_report>(python_report::all_of(std::move(all)));

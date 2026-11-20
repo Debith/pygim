@@ -11,6 +11,7 @@
 #include <unordered_map>
 #include <utility>
 #include <vector>
+#include "../../errors/core.h"
 
 namespace pygim::core {
 
@@ -27,7 +28,7 @@ enum class Lifecycle { Transient = 0, Singleton = 1 };
     if (lifecycle == "singleton") {
         return Lifecycle::Singleton;
     }
-    throw std::runtime_error("lifecycle must be 'transient' or 'singleton'");
+    throw pygim::errors::option_error(std::string(lifecycle), {"transient", "singleton"});
 }
 
 static_assert(parse_lifecycle("transient") == Lifecycle::Transient);
@@ -74,22 +75,25 @@ template<class Key, class ContainsFn>
             continue;
         }
         if (param.kind == ParamKind::PositionalOnly) {
-            throw std::runtime_error(
+            throw pygim::errors::signature_error(
                 "autowire does not support positional-only parameter '" + param.name + "'");
         }
         if (!param.annotation) {
             if (param.has_default) {
                 continue;
             }
-            throw std::runtime_error(
+            throw pygim::errors::signature_error(
                 "autowire requires a type annotation for parameter '" + param.name + "'");
         }
         if (!contains(*param.annotation)) {
             if (param.has_default) {
                 continue;
             }
-            throw std::runtime_error(
-                "No provider registered for autowired dependency '" + param.name + "'");
+            // The core cannot name an annotation: the key is the parameter, and the adapter, which
+            // can name it, raises the annotation as the key instead.
+            pygim::errors::missing_key missing(param.name);
+            missing.add_note("no provider registered for autowired parameter '" + param.name + "'");
+            throw missing;
         }
         injections.push_back({param.name, *param.annotation});
     }
@@ -182,7 +186,7 @@ public:
         bool exists = it != m_index_map.end();
         if (exists) {
             if (!override_existing) {
-                throw std::runtime_error("Duplicate service registration (use override=True)");
+                throw pygim::errors::duplicate_key("Duplicate service registration (use override=True)");
             }
             m_registry[it->second] = std::move(descriptor);
             m_singletons.erase(it->second);
@@ -191,7 +195,7 @@ public:
         }
 
         if (override_existing) {
-            throw std::runtime_error("override=True requires existing service");
+            throw pygim::errors::missing_key(pygim::errors::key_text(key));   // override=True, and nothing to override
         }
 
         std::size_t index = m_registry.size();
@@ -220,7 +224,7 @@ public:
             InstanceValidator&& validate_instance) {
         auto it = m_index_map.find(key);
         if (it == m_index_map.end()) {
-            throw std::runtime_error("No provider for key");
+            throw pygim::errors::missing_key(pygim::errors::key_text(key));
         }
         const std::size_t index = it->second;
 
@@ -233,7 +237,7 @@ public:
 
         if (std::find(m_resolution_stack.begin(), m_resolution_stack.end(), index)
                 != m_resolution_stack.end()) {
-            throw std::runtime_error("Circular dependency detected");
+            throw pygim::errors::circular_dependency("Circular dependency detected");
         }
         m_resolution_stack.push_back(index);
         ResolutionGuard guard{m_resolution_stack};

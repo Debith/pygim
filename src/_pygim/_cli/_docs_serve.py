@@ -45,8 +45,9 @@ import urllib.parse
 import pygim
 from pygim.pathlike import PathStore
 from _pygim._cli import _commenter
+from pygim.errors import BackendError, GimFileNotFoundError, GimOSError, ParseError
 
-__all__ = ["ServeError", "make_server", "rebuild", "serve", "site_pages"]
+__all__ = ["make_server", "rebuild", "serve", "site_pages"]
 
 SEG_RE = re.compile(r"^[a-z0-9][a-z0-9 ._-]*$", re.IGNORECASE)  # one path segment, no traversal (spaces ok)
 EXT_OK = (".jpg", ".jpeg", ".png", ".webp", ".gif")
@@ -67,10 +68,6 @@ INDEX_CANDIDATES = (
 )
 
 HOST_ENV = "PYGIM_HOST"
-
-
-class ServeError(RuntimeError):
-    """The server could not start — the message carries the user-facing hint block."""
 
 
 def _now() -> str:
@@ -167,7 +164,7 @@ def _make_handler(root, index: str | None):
             if page.suffix.lower() == ".html" and page.is_file():
                 try:
                     text = page.read_bytes().decode("utf-8")
-                except (RuntimeError, UnicodeDecodeError):
+                except (GimOSError, UnicodeDecodeError):
                     super().do_GET()
                     return
                 body = _commenter.inject(text).encode("utf-8")
@@ -184,7 +181,7 @@ def _make_handler(root, index: str | None):
             """Run *action*; a comments-file decode error becomes a 500 that names the file and line."""
             try:
                 action()
-            except RuntimeError as exc:
+            except ParseError as exc:
                 self.send_error(500, str(exc))
 
         def _send_json(self, obj, status=200):
@@ -297,14 +294,14 @@ def rebuild(doc_root, command: str, *, store=None):
     """Run *command* in *doc_root* and report what it changed: the root-relative
     URLs of pages added and pages removed, as two sorted lists (a set
     difference over the site's pages before and after). Raises
-    :class:`ServeError` with the exit code when the command fails."""
+    :class:`~pygim.errors.BackendError` with the exit code when the command fails."""
     import subprocess
 
     root = pygim.path(doc_root, store=store or PathStore()).resolve()
     before = site_pages(root)
     rc = subprocess.run(command, shell=True, cwd=os.fspath(root), check=False).returncode
     if rc:
-        raise ServeError(f"rebuild command failed (exit {rc}): {command}")
+        raise BackendError(f"rebuild command failed (exit {rc}): {command}")
     after = site_pages(root)
     added = sorted(_relative(root, p) for p in after - before)
     removed = sorted(_relative(root, p) for p in before - after)
@@ -317,11 +314,12 @@ def make_server(doc_root, *, port: int = 8000, host: str | None = None,
 
     *store* is the PathStore every path the server makes lives in (default: a
     fresh one, so the module's default store never sees request traffic).
-    Raises :class:`ServeError` if it cannot bind, and ``FileNotFoundError`` if
-    *doc_root* is not a directory. ``port=0`` picks a free port (tests)."""
+    Raises :class:`~pygim.errors.GimOSError`, with the system's errno and a hint, if
+    it cannot bind, and :class:`~pygim.errors.GimFileNotFoundError` if *doc_root*
+    is not a directory. ``port=0`` picks a free port (tests)."""
     root = pygim.path(doc_root, store=store or PathStore()).resolve()
     if not root.is_dir():
-        raise FileNotFoundError(f"doc root not found: {root}")
+        raise GimFileNotFoundError(errno.ENOENT, "doc root not found", str(root))
 
     # Bind all interfaces by default so the page is reachable via the WSL IP even
     # when Windows→WSL localhost forwarding hiccups (a common "can't connect").
@@ -336,7 +334,7 @@ def make_server(doc_root, *, port: int = 8000, host: str | None = None,
     try:
         return socketserver.TCPServer((host, port), handler)
     except OSError as e:
-        lines = [f"Could NOT start on {host}:{port} — {e}", ""]
+        lines = [f"Could NOT start on {host}:{port}: {e.strerror}", ""]
         if getattr(e, "errno", None) == errno.EADDRINUSE:
             lines += [
                 "That port is already in use. Either:",
@@ -350,7 +348,7 @@ def make_server(doc_root, *, port: int = 8000, host: str | None = None,
                 f"  oo docs serve --host 0.0.0.0 --port {port}      # all interfaces (localhost + LAN IP)",
                 f"  oo docs serve --host 127.0.0.1 --port {port}    # localhost only",
             ]
-        raise ServeError("\n".join(lines)) from e
+        raise GimOSError(e.errno, "\n".join(lines)) from e
 
 
 def serve(doc_root, *, port: int = 8000, host: str | None = None,

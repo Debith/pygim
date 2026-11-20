@@ -21,28 +21,13 @@
 #include <cstdio>
 #include <cstring>
 #include <memory>
-#include <stdexcept>
 #include <string>
 #include <utility>  // std::unreachable (C++23)
 #include <vector>
+#include "../core/arrow/bridge.h"
+#include "../errors/core.h"
 
 namespace pygim::datagen {
-
-// ── Error-handling helpers ──────────────────────────────────────────────────
-
-#define DATAGEN_THROW_NOT_OK(expr)                          \
-    do {                                                    \
-        auto _s = (expr);                                   \
-        if (!_s.ok()) throw std::runtime_error(_s.ToString()); \
-    } while (0)
-
-#define DATAGEN_FINISH(builder, out)                        \
-    do {                                                    \
-        auto _r = (builder).Finish();                       \
-        if (!_r.ok())                                       \
-            throw std::runtime_error(_r.status().ToString()); \
-        (out) = std::move(*_r);                             \
-    } while (0)
 
 // ── Fast PRNG (xorshift64*) ────────────────────────────────────────────────
 
@@ -130,10 +115,9 @@ inline ColType parse_type(const std::string& s) {
     if (t == "serial" || t == "sequence" || t == "identity")
                                                              return ColType::Serial;
 
-    throw std::invalid_argument(
-        "Unknown column type: '" + s + "'.  Supported: "
-        "int8, int16, int32, int64, uint8–uint64, bool, float32, float64, "
-        "string, date, time, timestamp, duration, binary, uuid, serial");
+    throw pygim::errors::option_error(s, {"int8", "int16", "int32", "int64", "uint8", "uint16", "uint32", "uint64", "bool",
+                                          "float32", "float64", "string", "date", "time", "timestamp", "duration",
+                                          "binary", "uuid", "serial"});
 }
 
 /// Map ColType → Arrow DataType.
@@ -171,18 +155,18 @@ std::shared_ptr<arrow::Array> gen_int(
     int64_t rows, Xorshift64& rng, double null_frac, T lo, T hi)
 {
     BuilderT b;
-    DATAGEN_THROW_NOT_OK(b.Reserve(rows));
+    arrow_bridge::check(b.Reserve(rows), "generating a column");
     auto span = static_cast<uint64_t>(hi) - static_cast<uint64_t>(lo) + 1;
     for (int64_t i = 0; i < rows; ++i) {
         if (null_frac > 0.0 && rng.coin(null_frac)) {
-            DATAGEN_THROW_NOT_OK(b.AppendNull());
+            arrow_bridge::check(b.AppendNull(), "generating a column");
         } else {
             auto val = static_cast<T>(static_cast<uint64_t>(lo) + rng.next() % span);
-            DATAGEN_THROW_NOT_OK(b.Append(val));
+            arrow_bridge::check(b.Append(val), "generating a column");
         }
     }
     std::shared_ptr<arrow::Array> out;
-    DATAGEN_FINISH(b, out);
+    out = arrow_bridge::value_of(b.Finish(), "generating a column");
     return out;
 }
 
@@ -190,12 +174,12 @@ std::shared_ptr<arrow::Array> gen_int(
 template <typename BuilderT, typename T>
 std::shared_ptr<arrow::Array> gen_sequential(int64_t rows) {
     BuilderT b;
-    DATAGEN_THROW_NOT_OK(b.Reserve(rows));
+    arrow_bridge::check(b.Reserve(rows), "generating a column");
     for (int64_t i = 0; i < rows; ++i) {
-        DATAGEN_THROW_NOT_OK(b.Append(static_cast<T>(i + 1)));
+        arrow_bridge::check(b.Append(static_cast<T>(i + 1)), "generating a column");
     }
     std::shared_ptr<arrow::Array> out;
-    DATAGEN_FINISH(b, out);
+    out = arrow_bridge::value_of(b.Finish(), "generating a column");
     return out;
 }
 
@@ -203,15 +187,15 @@ inline std::shared_ptr<arrow::Array> gen_bool(
     int64_t rows, Xorshift64& rng, double null_frac)
 {
     arrow::BooleanBuilder b;
-    DATAGEN_THROW_NOT_OK(b.Reserve(rows));
+    arrow_bridge::check(b.Reserve(rows), "generating a column");
     for (int64_t i = 0; i < rows; ++i) {
         if (null_frac > 0.0 && rng.coin(null_frac))
-            DATAGEN_THROW_NOT_OK(b.AppendNull());
+            arrow_bridge::check(b.AppendNull(), "generating a column");
         else
-            DATAGEN_THROW_NOT_OK(b.Append(static_cast<bool>(rng.next() & 1)));
+            arrow_bridge::check(b.Append(static_cast<bool>(rng.next() & 1)), "generating a column");
     }
     std::shared_ptr<arrow::Array> out;
-    DATAGEN_FINISH(b, out);
+    out = arrow_bridge::value_of(b.Finish(), "generating a column");
     return out;
 }
 
@@ -220,15 +204,15 @@ std::shared_ptr<arrow::Array> gen_float(
     int64_t rows, Xorshift64& rng, double null_frac)
 {
     BuilderT b;
-    DATAGEN_THROW_NOT_OK(b.Reserve(rows));
+    arrow_bridge::check(b.Reserve(rows), "generating a column");
     for (int64_t i = 0; i < rows; ++i) {
         if (null_frac > 0.0 && rng.coin(null_frac))
-            DATAGEN_THROW_NOT_OK(b.AppendNull());
+            arrow_bridge::check(b.AppendNull(), "generating a column");
         else
-            DATAGEN_THROW_NOT_OK(b.Append(static_cast<T>(i) * T(1.23456789)));
+            arrow_bridge::check(b.Append(static_cast<T>(i) * T(1.23456789)), "generating a column");
     }
     std::shared_ptr<arrow::Array> out;
-    DATAGEN_FINISH(b, out);
+    out = arrow_bridge::value_of(b.Finish(), "generating a column");
     return out;
 }
 
@@ -237,22 +221,22 @@ inline std::shared_ptr<arrow::Array> gen_string(
 {
     arrow::StringBuilder b;
     auto avg_len = static_cast<int64_t>(col_name.size()) + 9;  // "prefix_0000001"
-    DATAGEN_THROW_NOT_OK(b.Reserve(rows));
-    DATAGEN_THROW_NOT_OK(b.ReserveData(rows * avg_len));
+    arrow_bridge::check(b.Reserve(rows), "generating a column");
+    arrow_bridge::check(b.ReserveData(rows * avg_len), "generating a column");
 
     char buf[128];
     for (int64_t i = 0; i < rows; ++i) {
         if (null_frac > 0.0 && rng.coin(null_frac)) {
-            DATAGEN_THROW_NOT_OK(b.AppendNull());
+            arrow_bridge::check(b.AppendNull(), "generating a column");
         } else {
             int len = std::snprintf(buf, sizeof(buf), "%s_%07lld",
                                     col_name.c_str(),
                                     static_cast<long long>(i));
-            DATAGEN_THROW_NOT_OK(b.Append(buf, len));
+            arrow_bridge::check(b.Append(buf, len), "generating a column");
         }
     }
     std::shared_ptr<arrow::Array> out;
-    DATAGEN_FINISH(b, out);
+    out = arrow_bridge::value_of(b.Finish(), "generating a column");
     return out;
 }
 
@@ -261,15 +245,15 @@ inline std::shared_ptr<arrow::Array> gen_date32(
     int64_t rows, Xorshift64& rng, double null_frac)
 {
     arrow::Date32Builder b;
-    DATAGEN_THROW_NOT_OK(b.Reserve(rows));
+    arrow_bridge::check(b.Reserve(rows), "generating a column");
     for (int64_t i = 0; i < rows; ++i) {
         if (null_frac > 0.0 && rng.coin(null_frac))
-            DATAGEN_THROW_NOT_OK(b.AppendNull());
+            arrow_bridge::check(b.AppendNull(), "generating a column");
         else
-            DATAGEN_THROW_NOT_OK(b.Append(static_cast<int32_t>(i % 10'000)));
+            arrow_bridge::check(b.Append(static_cast<int32_t>(i % 10'000)), "generating a column");
     }
     std::shared_ptr<arrow::Array> out;
-    DATAGEN_FINISH(b, out);
+    out = arrow_bridge::value_of(b.Finish(), "generating a column");
     return out;
 }
 
@@ -279,10 +263,10 @@ inline std::shared_ptr<arrow::Array> gen_time64(
 {
     arrow::Time64Builder b(arrow::time64(arrow::TimeUnit::NANO),
                           arrow::default_memory_pool());
-    DATAGEN_THROW_NOT_OK(b.Reserve(rows));
+    arrow_bridge::check(b.Reserve(rows), "generating a column");
     for (int64_t i = 0; i < rows; ++i) {
         if (null_frac > 0.0 && rng.coin(null_frac)) {
-            DATAGEN_THROW_NOT_OK(b.AppendNull());
+            arrow_bridge::check(b.AppendNull(), "generating a column");
         } else {
             int64_t h  = i % 24;
             int64_t m  = (i * 7) % 60;
@@ -290,11 +274,11 @@ inline std::shared_ptr<arrow::Array> gen_time64(
             int64_t ns = h * 3'600'000'000'000LL
                        + m * 60'000'000'000LL
                        + s * 1'000'000'000LL;
-            DATAGEN_THROW_NOT_OK(b.Append(ns));
+            arrow_bridge::check(b.Append(ns), "generating a column");
         }
     }
     std::shared_ptr<arrow::Array> out;
-    DATAGEN_FINISH(b, out);
+    out = arrow_bridge::value_of(b.Finish(), "generating a column");
     return out;
 }
 
@@ -304,17 +288,17 @@ inline std::shared_ptr<arrow::Array> gen_timestamp(
 {
     arrow::TimestampBuilder b(arrow::timestamp(arrow::TimeUnit::MICRO),
                               arrow::default_memory_pool());
-    DATAGEN_THROW_NOT_OK(b.Reserve(rows));
+    arrow_bridge::check(b.Reserve(rows), "generating a column");
     // 2020-01-01T00:00:00Z in µs since epoch
     constexpr int64_t base_us = 1'577'836'800'000'000LL;
     for (int64_t i = 0; i < rows; ++i) {
         if (null_frac > 0.0 && rng.coin(null_frac))
-            DATAGEN_THROW_NOT_OK(b.AppendNull());
+            arrow_bridge::check(b.AppendNull(), "generating a column");
         else
-            DATAGEN_THROW_NOT_OK(b.Append(base_us + i * 1'000'003LL));
+            arrow_bridge::check(b.Append(base_us + i * 1'000'003LL), "generating a column");
     }
     std::shared_ptr<arrow::Array> out;
-    DATAGEN_FINISH(b, out);
+    out = arrow_bridge::value_of(b.Finish(), "generating a column");
     return out;
 }
 
@@ -324,15 +308,15 @@ inline std::shared_ptr<arrow::Array> gen_duration(
 {
     arrow::DurationBuilder b(arrow::duration(arrow::TimeUnit::MICRO),
                              arrow::default_memory_pool());
-    DATAGEN_THROW_NOT_OK(b.Reserve(rows));
+    arrow_bridge::check(b.Reserve(rows), "generating a column");
     for (int64_t i = 0; i < rows; ++i) {
         if (null_frac > 0.0 && rng.coin(null_frac))
-            DATAGEN_THROW_NOT_OK(b.AppendNull());
+            arrow_bridge::check(b.AppendNull(), "generating a column");
         else
-            DATAGEN_THROW_NOT_OK(b.Append(i * 1'000LL));
+            arrow_bridge::check(b.Append(i * 1'000LL), "generating a column");
     }
     std::shared_ptr<arrow::Array> out;
-    DATAGEN_FINISH(b, out);
+    out = arrow_bridge::value_of(b.Finish(), "generating a column");
     return out;
 }
 
@@ -341,21 +325,21 @@ inline std::shared_ptr<arrow::Array> gen_binary(
     int64_t rows, Xorshift64& rng, double null_frac)
 {
     arrow::BinaryBuilder b;
-    DATAGEN_THROW_NOT_OK(b.Reserve(rows));
-    DATAGEN_THROW_NOT_OK(b.ReserveData(rows * 10));
+    arrow_bridge::check(b.Reserve(rows), "generating a column");
+    arrow_bridge::check(b.ReserveData(rows * 10), "generating a column");
     uint8_t buf[32];
     for (int64_t i = 0; i < rows; ++i) {
         if (null_frac > 0.0 && rng.coin(null_frac)) {
-            DATAGEN_THROW_NOT_OK(b.AppendNull());
+            arrow_bridge::check(b.AppendNull(), "generating a column");
         } else {
             int len = 1 + static_cast<int>(i % 16);
             for (int j = 0; j < len; ++j)
                 buf[j] = static_cast<uint8_t>(rng.next());
-            DATAGEN_THROW_NOT_OK(b.Append(buf, len));
+            arrow_bridge::check(b.Append(buf, len), "generating a column");
         }
     }
     std::shared_ptr<arrow::Array> out;
-    DATAGEN_FINISH(b, out);
+    out = arrow_bridge::value_of(b.Finish(), "generating a column");
     return out;
 }
 
@@ -366,13 +350,13 @@ inline std::shared_ptr<arrow::Array> gen_uuid(
     int64_t rows, Xorshift64& rng, double null_frac)
 {
     arrow::FixedSizeBinaryBuilder b(arrow::fixed_size_binary(16));
-    DATAGEN_THROW_NOT_OK(b.Reserve(rows));
+    arrow_bridge::check(b.Reserve(rows), "generating a column");
 
     uint8_t guid[16];
 
     for (int64_t i = 0; i < rows; ++i) {
         if (null_frac > 0.0 && rng.coin(null_frac)) {
-            DATAGEN_THROW_NOT_OK(b.AppendNull());
+            arrow_bridge::check(b.AppendNull(), "generating a column");
         } else {
             uint64_t a = rng.next();
             uint64_t c = rng.next();
@@ -381,11 +365,11 @@ inline std::shared_ptr<arrow::Array> gen_uuid(
             // SQLGUID layout on LE: Data3 high byte is guid[7]
             guid[7] = (guid[7] & 0x0F) | 0x40;  // version 4
             guid[8] = (guid[8] & 0x3F) | 0x80;  // variant 1
-            DATAGEN_THROW_NOT_OK(b.Append(guid));
+            arrow_bridge::check(b.Append(guid), "generating a column");
         }
     }
     std::shared_ptr<arrow::Array> out;
-    DATAGEN_FINISH(b, out);
+    out = arrow_bridge::value_of(b.Finish(), "generating a column");
     return out;
 }
 
@@ -443,13 +427,17 @@ inline std::shared_ptr<arrow::Array> generate_column(
     std::unreachable();
 }
 
-/// Build a complete Arrow RecordBatch from column specifications.
+/// Build a complete Arrow RecordBatch from column specifications; pygim::errors::invalid_value for
+/// no rows, no columns, or a null fraction outside [0, 1].
 inline std::shared_ptr<arrow::RecordBatch> generate_batch(
     const std::vector<ColumnSpec>& columns,
     int64_t rows,
     uint64_t seed,
     double null_fraction)
 {
+    if (rows <= 0) throw pygim::errors::invalid_value("rows must be positive");
+    if (null_fraction < 0.0 || null_fraction > 1.0) throw pygim::errors::invalid_value("null_fraction must be in [0.0, 1.0]");
+    if (columns.empty()) throw pygim::errors::invalid_value("schema must have at least one column");
     Xorshift64 rng(seed);
 
     std::vector<std::shared_ptr<arrow::Field>>  fields;

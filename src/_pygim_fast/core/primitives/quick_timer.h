@@ -46,6 +46,7 @@
 #include "duration.h"
 #include "hooks.h"
 #include "timestamp.h"
+#include "../../errors/core.h"
 
 namespace pygim::primitives {
 
@@ -86,12 +87,14 @@ public:
     [[nodiscard]] constexpr double total_seconds() const noexcept { return seconds_of(m_total); }
     [[nodiscard]] constexpr const std::vector<lap_time>& laps() const noexcept { return m_laps; }
 
-    /// The lap named `name`; std::out_of_range when there is none.
+    /// The lap named `name`; pygim::errors::missing_key, naming the laps there are, when there is none.
     [[nodiscard]] constexpr duration lap(std::string_view name) const {
         for (const lap_time& l : m_laps) {
             if (l.name() == name) return l.took();
         }
-        throw std::out_of_range("no lap of that name in the snapshot");
+        std::vector<std::string> names;
+        for (const lap_time& l : m_laps) names.emplace_back(l.name());
+        throw pygim::errors::missing_key(std::string(name), std::move(names));
     }
     /// The lap of phase `phase` (enum mode: one lap per value of the enum).
     template <class Phase> requires std::is_enum_v<Phase>
@@ -348,7 +351,7 @@ public:
     [[nodiscard]] constexpr lap_id lap_id_of(std::string_view name) requires (!by_phase) {
         if (const std::optional<std::size_t> found = find_lap(name)) return *found;
         if (m_lap_count >= MaxLaps) [[unlikely]] {
-            throw std::out_of_range("no room for another lap");
+            throw pygim::errors::index_out_of_range("no room for another lap");
         }
         const lap_id id = m_lap_count++;
         m_laps[id].name = name;
@@ -411,7 +414,7 @@ public:
 
 private:
     constexpr void refuse_after_finish() const {
-        if (finished()) [[unlikely]] throw std::logic_error("the timer has finished; a lap cannot start after it");
+        if (finished()) [[unlikely]] throw pygim::errors::invalid_state("the timer has finished; a lap cannot start after it");
     }
 
     [[nodiscard]] constexpr moment end() const { return finished() ? m_finished_at : moment::now(m_clock); }
@@ -425,7 +428,7 @@ private:
     [[nodiscard]] constexpr std::size_t checked_index(lap_id id) const {
         const auto index = to_index(id);
         if constexpr (!by_phase) {
-            if (index >= m_lap_count) [[unlikely]] throw std::out_of_range("lap id out of range");
+            if (index >= m_lap_count) [[unlikely]] throw pygim::errors::index_out_of_range("lap id out of range");
         }
         return index;
     }
@@ -442,7 +445,7 @@ private:
 
     [[nodiscard]] constexpr std::size_t lap_index_of(std::string_view name) const requires (!by_phase) {
         if (!name.empty()) return named_lap(name);
-        if (m_running == no_lap) [[unlikely]] throw std::runtime_error("no lap is running");
+        if (m_running == no_lap) [[unlikely]] throw pygim::errors::invalid_state("no lap is running");
         return m_running;
     }
 
@@ -454,10 +457,12 @@ private:
         return std::nullopt;
     }
 
-    // The lap named `name`; std::out_of_range when there is none.
+    // The lap named `name`; pygim::errors::missing_key, naming the laps there are, when there is none.
     [[nodiscard]] constexpr std::size_t named_lap(std::string_view name) const requires (!by_phase) {
         if (const std::optional<std::size_t> found = find_lap(name)) return *found;
-        throw std::out_of_range("no lap of that name");
+        std::vector<std::string> names;
+        for (std::size_t i = 0; i < m_lap_count; ++i) names.emplace_back(m_laps[i].name);
+        throw pygim::errors::missing_key(std::string(name), std::move(names));
     }
 
     std::string_view m_name;

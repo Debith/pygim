@@ -21,6 +21,9 @@ CORE = sorted(ROOT.glob("mapping/*.h")) + sorted(ROOT.glob("platform/**/*.h")) +
     ROOT / "pathlike" / "uri.h",
     ROOT / "pathlike" / "path_table.h",
     ROOT / "pathlike" / "engine_list.h",
+    ROOT / "errors" / "core.h",
+    ROOT / "core" / "arrow" / "bridge.h",
+    ROOT / "persistence" / "core" / "format.h",
 ]
 PYBIND = re.compile(r'#\s*include\s*[<"]pybind11/')
 
@@ -191,3 +194,140 @@ def test_every_package_that_ships_holds_something():
             if not init.read_text(encoding="utf-8").strip() and not others:
                 empty.append(init.parent.relative_to(src).as_posix())
     assert empty == [], "a package holding nothing: give it its code, or remove it"
+
+
+# pygim's C++ never imports a pygim module by name (docs/design/errors.md): an extension that
+# imported pygim's Python as it loaded closed a loop with any of that Python which imported the
+# extension back, and the loop failed in one import order only (`import pygim.core.explib` first:
+# "ImportError: initialization failed", 2026-11-16). An extension reaches another through the C
+# table it publishes: pygim.errors' classes through errors/adapter.h, which imports pygim.errors,
+# the one module that imports nothing of pygim, by its table's constant. pygim's Python imports the
+# extensions.
+PYGIM_IMPORT = re.compile(r'(?:module_::import|PyImport_ImportModule\w*)\s*\(\s*"_?pygim\b')
+
+
+def test_the_pygim_import_check_finds_what_it_is_for(tmp_path):
+    (tmp_path / "a.cpp").write_text(
+        'auto e = py::module_::import("pygim.core.explib");\n'
+        'auto s = py::module_::import("sys");\n'
+        'PyImport_ImportModule("_pygim._core");\n'
+        'auto t = PyCapsule_Import("pygim.errors._C_API", 0);\n'
+    )
+    assert matches_outside(tmp_path, PYGIM_IMPORT) == ["a.cpp:1", "a.cpp:3"]
+
+
+def test_no_extension_imports_a_pygim_module():
+    assert matches_outside(ROOT, PYGIM_IMPORT) == []
+
+
+# Every failure pygim raises is a class of pygim.errors (docs/design/errors.md). A raise of a builtin
+# (py::type_error, std::runtime_error, Python's `raise ValueError`) escapes `except GimError`: there
+# is none (151 on 2026-11-17, before the conversion). An extension that refuses to load raises
+# ImportError, which Python's import machinery catches: not counted.
+BUILTIN_RAISE_CPP = re.compile(
+    r"\bthrow\s+(?:py::(?:key|value|type|index|attribute|stop_iteration|buffer|cast)_error"
+    r"|std::(?:[a-z_]+_error|invalid_argument|out_of_range|exception|bad_[a-z_]+))\b")
+BUILTIN_RAISE_PY = re.compile(
+    r"^\s*raise\s+(?:KeyError|ValueError|TypeError|IndexError|AttributeError|RuntimeError|NotImplementedError"
+    r"|FileNotFoundError|OSError|LookupError|OverflowError)\b", re.M)
+
+
+def matches_in_pygim(cpp, python, exempt=()):
+    """Each match of `cpp` in pygim's C++ and of `python` in its Python, outside third_party/ and the
+    `exempt` files (relative to src/_pygim_fast/), as "file:line"."""
+    found = []
+    for file in sorted([*ROOT.rglob("*.h"), *ROOT.rglob("*.cpp")]):
+        if "third_party" in file.parts or file.relative_to(ROOT).as_posix() in exempt:
+            continue
+        text = _code(file)
+        found += [f"{file.relative_to(ROOT).as_posix()}:{text.count(chr(10), 0, m.start()) + 1}"
+                  for m in cpp.finditer(text)]
+    for package in (ROOT.parent / "pygim", ROOT.parent / "_pygim"):
+        for file in sorted(package.rglob("*.py")):
+            text = file.read_text(encoding="utf-8")
+            found += [f"{file.relative_to(ROOT.parent).as_posix()}:{text.count(chr(10), 0, m.start()) + 1}"
+                      for m in python.finditer(text)]
+    return found
+
+
+def builtin_raises():
+    """Each builtin raise in pygim's own code, as "file:line"."""
+    return matches_in_pygim(BUILTIN_RAISE_CPP, BUILTIN_RAISE_PY)
+
+
+def test_the_builtin_raise_check_finds_what_it_is_for(tmp_path):
+    assert BUILTIN_RAISE_CPP.search('throw py::type_error("x");') and BUILTIN_RAISE_CPP.search("throw std::runtime_error(why);")
+    assert BUILTIN_RAISE_CPP.search('throw std::out_of_range("x");') and BUILTIN_RAISE_CPP.search('throw std::invalid_argument("x");')
+    assert not BUILTIN_RAISE_CPP.search("throw py::error_already_set();")
+    assert BUILTIN_RAISE_PY.search("    raise ValueError('x')") and not BUILTIN_RAISE_PY.search("    raise GimError('x')")
+
+
+def test_pygim_raises_only_its_own_classes():
+    found = builtin_raises()
+    assert found == [], "a builtin raise; raise a class of pygim.errors:\n" + "\n".join(found)
+
+
+# Every class pygim raises is made once, in pygim.errors; core C++ throws its counterparts from
+# errors/core.h. A class made anywhere else, from a builtin or from one of pygim's own, is one
+# `except GimError` may miss, and one more class beside the catalogue.
+EXCEPTION_CLASS_CPP = re.compile(
+    r"\b(?:class|struct)\s+\w+(?:\s+final)?\s*:\s*(?:(?:public|protected|private)\s+)?"
+    r"(?:std::(?:[a-z_]+_error|invalid_argument|out_of_range|exception|bad_[a-z_]+)|(?:pygim::)?errors::\w+)\b")
+EXCEPTION_CLASS_PY = re.compile(r"^\s*class\s+\w+\s*\([^)]*\b(?:BaseException|\w*Exception|\w*Error)\b", re.M)
+
+
+def test_the_exception_class_check_finds_what_it_is_for():
+    assert EXCEPTION_CLASS_CPP.search("class engine_error : public std::runtime_error {")
+    assert EXCEPTION_CLASS_CPP.search("struct refused final : pygim::errors::error {")
+    assert not EXCEPTION_CLASS_CPP.search("class reader : public std::enable_shared_from_this<reader> {")
+    assert EXCEPTION_CLASS_PY.search("class ServeError(RuntimeError):") and EXCEPTION_CLASS_PY.search("class Mine(GimError):")
+    assert not EXCEPTION_CLASS_PY.search("class Handler(http.server.SimpleHTTPRequestHandler):")
+
+
+def test_every_exception_class_is_made_in_pygim_errors():
+    found = matches_in_pygim(EXCEPTION_CLASS_CPP, EXCEPTION_CLASS_PY, exempt=("errors/core.h",))
+    assert found == [], "an exception class made outside pygim.errors; raise one of its classes:\n" + "\n".join(found)
+
+
+# Adapter code raises every failure that reaches Python through pygim::errors::raise(); a core class
+# thrown there is a rule that is not Python's, in the wrong layer, and belongs in the core. The known
+# ones are pathlike's parsing, its conversion to Python and its UTF-8 checks, which move to
+# pygim.content, where the parse happens in the core (docs/design/content.md). Each count may only
+# shrink.
+CORE_THROW = re.compile(r"\b(?:throw\s+|throw_with_nested\(\s*)(?:pygim::)?errors::\w+")
+MOVES_WITH_CONTENT = {
+    "pathlike/adapter/common.h": 2,
+    "pathlike/adapter/engines/json.h": 2,
+    "pathlike/adapter/engines/jsonl.h": 3,
+    "pathlike/adapter/engines/toml.h": 2,
+    "pathlike/adapter/engines/yaml.h": 2,
+    "pathlike/adapter/pathset.h": 1,
+}
+
+
+def core_throws_in_adapters():
+    """Each throw of a core class in adapter code, as "file:line"."""
+    found = []
+    for file in sorted([*ROOT.rglob("*.h"), *ROOT.rglob("*.cpp")]):
+        relative = file.relative_to(ROOT).as_posix()
+        if "third_party" in file.parts or relative.startswith("errors/"):
+            continue
+        if "/adapter/" in f"/{relative}" or "adapter" in file.stem or file.stem.endswith("bindings"):
+            text = _code(file)
+            found += [f"{relative}:{text.count(chr(10), 0, m.start()) + 1}" for m in CORE_THROW.finditer(text)]
+    return found
+
+
+def test_the_core_throw_check_finds_what_it_is_for():
+    assert CORE_THROW.search('throw pygim::errors::argument_error("x");') and CORE_THROW.search("throw errors::overflow(why);")
+    assert CORE_THROW.search("std::throw_with_nested(pygim::errors::parse_error(why));")
+    assert not CORE_THROW.search("pygim::errors::raise(&pygim::errors::table::argument_error, why);")
+
+
+def test_adapter_code_raises_and_throws_no_core_class():
+    found = core_throws_in_adapters()
+    counts = {}
+    for site in found:
+        counts[site.rsplit(":", 1)[0]] = counts.get(site.rsplit(":", 1)[0], 0) + 1
+    assert counts == MOVES_WITH_CONTENT, "a core class thrown in adapter code; raise it, or move the rule to the core:\n" + "\n".join(
+        site for site in found if counts.get(site.rsplit(":", 1)[0]) != MOVES_WITH_CONTENT.get(site.rsplit(":", 1)[0]))

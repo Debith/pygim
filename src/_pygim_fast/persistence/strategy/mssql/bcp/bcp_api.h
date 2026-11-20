@@ -42,6 +42,7 @@ using LPCBYTE = const BYTE*;
 #endif
 
 #include "../../../odbc_compat.h"
+#include "../../../../errors/core.h"
 
 // ODBC headers may define BOOL/INT macros that collide with C++ identifiers.
 #ifdef BOOL
@@ -142,7 +143,7 @@ struct BcpApi {
     }();
 
     if (!api.loaded()) [[unlikely]] {
-        throw std::runtime_error(
+        throw pygim::errors::backend_error(
             "BCP functions not available. SQL Server ODBC Driver 17/18+ required.\n"
             "Linux: sudo ACCEPT_EULA=Y apt-get install -y msodbcsql18\n"
             "Windows: install the Microsoft ODBC Driver 17/18 for SQL Server");

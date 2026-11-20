@@ -173,7 +173,7 @@ bool ordered() {
     bool refused_past_the_end = false;
     try {
         (void)pool.next();
-    } catch (const std::out_of_range&) {
+    } catch (const pygim::errors::invalid_state&) {
         refused_past_the_end = true;
     }
     // run_all with a byte limit smaller than one result: the window holds every result anyway

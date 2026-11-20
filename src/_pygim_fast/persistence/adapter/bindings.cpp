@@ -14,6 +14,7 @@
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 #include <pybind11/functional.h>
+#include "../../errors/adapter.h"
 
 namespace py = pybind11;
 using namespace pygim;
@@ -31,24 +32,20 @@ static py::object acquire_datastore(const std::string& conn_str,
                                int bcp_workers,
                                int64_t block_size,
                                int packet_size) {
-    auto fmt = adapter::parse_format(format);
+    auto fmt = core::parse_format(format);
     return py::cast(MssqlRepo::create(conn_str, fmt, pool_size,
                                       batch_size, table_hint, bcp_workers,
                                       block_size, packet_size));
 }
 
 PYBIND11_MODULE(_persistence, m) {
+    pygim::errors::load();
     m.doc() = "DataStore — database access with Arrow core and format conversion";
 
-    // Bridge C++ std::runtime_error to GimError (RuntimeError subclass).
-    // This aligns with the project's GimError exception hierarchy while
-    // maintaining backward compatibility with existing except RuntimeError catches.
-    static auto gim_error = py::exception<std::runtime_error>(m, "GimError", PyExc_RuntimeError);
-
     // Format enum exposed to Python
-    py::enum_<adapter::Format>(m, "Format")
-        .value("polars", adapter::Format::Polars)
-        .value("pandas", adapter::Format::Pandas)
+    py::enum_<core::Format>(m, "Format")
+        .value("polars", core::Format::Polars)
+        .value("pandas", core::Format::Pandas)
         .export_values();
 
     // ONE class, not two
